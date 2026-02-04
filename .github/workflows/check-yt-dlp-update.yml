@@ -1,0 +1,74 @@
+name: Check yt-dlp Update
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get current yt-dlp version from Dockerfile
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(grep "ARG YT_DLP_VERSION=" backstage/src/main/docker/buildx/Dockerfile | cut -d'=' -f2)
+          echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          echo "Current version: ${CURRENT_VERSION}"
+
+      - name: Get latest yt-dlp version
+        id: latest_version
+        run: |
+          LATEST_VERSION=$(curl -s "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+          echo "Latest version: ${LATEST_VERSION}"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          CURRENT="${{ steps.current_version.outputs.version }}"
+          LATEST="${{ steps.latest_version.outputs.version }}"
+          
+          if [ "$CURRENT" != "$LATEST" ]; then
+            echo "New version available: ${LATEST}"
+            echo "has_update=true" >> $GITHUB_OUTPUT
+            echo "new_version=${LATEST}" >> $GITHUB_OUTPUT
+          else
+            echo "Already up to date"
+            echo "has_update=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Dockerfile with new version
+        if: steps.compare.outputs.has_update == 'true'
+        run: |
+          NEW_VERSION="${{ steps.compare.outputs.new_version }}"
+          sed -i "s/ARG YT_DLP_VERSION=.*/ARG YT_DLP_VERSION=${NEW_VERSION}/" backstage/src/main/docker/buildx/Dockerfile
+          echo "Updated Dockerfile to version ${NEW_VERSION}"
+
+      - name: Commit and push changes
+        if: steps.compare.outputs.has_update == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add backstage/src/main/docker/buildx/Dockerfile
+          git commit -m "chore: update yt-dlp to ${{ steps.compare.outputs.new_version }}"
+          git push
+
+      - name: Trigger docker-image workflow
+        if: steps.compare.outputs.has_update == 'true'
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: yt-dlp-update
+          client-payload: |
+            {
+              "image_tag": "nightly",
+              "create_release": "false"
+            }
