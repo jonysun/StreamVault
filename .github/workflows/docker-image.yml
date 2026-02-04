@@ -19,6 +19,8 @@ on:
         options:
           - 'true'
           - 'false'
+  repository_dispatch:
+    types: [yt-dlp-update]
 
 permissions:
   contents: write

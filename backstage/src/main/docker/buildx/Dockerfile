@@ -1,8 +1,7 @@
 FROM eclipse-temurin:17-jre
 
 ENV TZ=Asia/Shanghai
-ARG BUILD_VERSION=2025.12.08
-ENV YT_DLP_VERSION=$BUILD_VERSION
+ARG YT_DLP_VERSION=2025.12.08
 
 # 安装系统依赖（包括 ffmpeg, python3, pip, venv 等）
 RUN apt-get update && \
