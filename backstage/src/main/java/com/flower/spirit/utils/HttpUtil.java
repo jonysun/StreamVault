@@ -909,6 +909,7 @@ public class HttpUtil {
 						long startTime = System.currentTimeMillis();
 						long lastProgressTime = startTime;
 						long lastBytesRead = 0;
+						boolean downloadSuccess = false;
 						try (BufferedInputStream bis = new BufferedInputStream(response.body().byteStream());
 								BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(tmpFile))) {
 							byte[] buffer = new byte[16 * 1024];
@@ -939,10 +940,13 @@ public class HttpUtil {
 								logger.info("文件下载不完整");
 								needRetry = true;
 							}else {
-								Files.move(tmpFile.toPath(), finalFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-								logger.info("文件下载完成: {}", fileName);
-								return "0";
+								downloadSuccess = true;
 							}
+						}
+						if (downloadSuccess) {
+							Files.move(tmpFile.toPath(), finalFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+							logger.info("文件下载完成: {}", fileName);
+							return "0";
 						}
 					}
 
