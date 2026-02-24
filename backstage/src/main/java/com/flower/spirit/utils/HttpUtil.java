@@ -580,6 +580,15 @@ public class HttpUtil {
 			throw new IllegalArgumentException("urlStr, fileName, savePath 不能为空");
 		}
 
+		/**
+		 * 此处代码保留 观测后期是否决定启用
+		 * 
+		 * */
+//		File saveDir = new File(savePath);
+//	    File tmpFile = new File(saveDir, fileName + ".downloading");
+//	    if (tmpFile.exists()) {
+//	        tmpFile.delete(); 
+//	    }
 		int maxRetries = 3;
 		int retryCount = 0;
 		long retryDelay = 5000;

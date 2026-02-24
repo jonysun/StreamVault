@@ -488,6 +488,76 @@ public class BiliUtil {
 			return replace;
 		}
 	}
+	
+	
+	public static String buildInterfaceWbiAddress(String aid, String cid, String token, String quality) {
+		String qn;
+		String fnver;
+		String fourk;
+		String fnval;
+		String bilibitstream = Global.bilibitstream;
+		if (quality.equals("0")) {
+			logger.info("视频没有2k以上进行画质降级");
+			bilibitstream = "80";
+		}
+		if (null != token && !token.equals("")) {
+			if (!bilibitstream.equals("64")) {
+				// vip
+				if (Integer.valueOf(bilibitstream) >= 120) {
+					qn ="0";
+				} else {
+					qn=bilibitstream;
+				}
+			} else {
+				qn ="80";
+			}
+		} else {
+			qn ="64";
+		}
+		fnver ="0";
+		switch (bilibitstream) {
+			case "80":
+				fourk ="1";
+				fnval = Integer.toString(16 | 128);
+				break;
+			case "112":
+				fourk ="1";
+				fnval = Integer.toString(16 | 128);
+				break;
+			case "116":
+				fourk ="1";
+				fnval = Integer.toString(16 | 128);
+				break;
+			case "120":
+				fourk ="1";
+				fnval = Integer.toString(16 | 128);
+				break;
+			case "125":
+				fourk ="1";
+				fnval = Integer.toString(16 | 64);
+				break;
+			case "126":
+				fourk ="1";
+				fnval = Integer.toString(16 | 512);
+				break;
+			case "127":
+				fourk ="1";
+				fnval = Integer.toString(16 | 1024);
+				break;
+			default:
+				fourk ="0";
+				fnval = "1";
+				break;
+		}
+		TreeMap<String, Object> params = new TreeMap<>();
+		params.put("qn", qn);
+		params.put("fnver", fnver);
+		params.put("fourk", fourk);
+		params.put("fnval", fnval);
+		String wbiUrl = WbiUtil.buildWbiUrl(params);
+		return  "https://api.bilibili.com/x/player/wbi/playurl?" + wbiUrl;
+	}
+	
 
 	public static String buildInterfaceAddress(String aid, String cid, String token, String quality) {
 		String bilibitstream = Global.bilibitstream;
@@ -899,11 +969,54 @@ public class BiliUtil {
 		}
     }
     
-    public static void main(String[] args) {
-    	String correspondPath = getCorrespondPath(String.format("refresh_%d", System.currentTimeMillis()));
-    	System.out.println(correspondPath);
-    	String httpGetBili = HttpUtil.httpGetBili("https://www.bilibili.com/correspond/1/"+correspondPath,"UTF-8", Global.bilicookies);
-    	System.out.println(httpGetBili);
+
+    public  String choiceMediaAddr(JSONArray data,int mediatype,boolean isdash,boolean cdnsort) {
+		if (!cdnsort) {
+			if (isdash) {
+				JSONObject mediaItem = data.getJSONObject(0);
+				return mediaItem.getString("base_url");
+			} else {
+				JSONObject durlItem = data.getJSONObject(0);
+				return durlItem.getString("url");
+			}
+		}
+		
+		if (isdash) {
+			JSONObject mediaItem = data.getJSONObject(0);
+			String baseUrl = mediaItem.getString("base_url");
+			List<String> urls = new ArrayList<>();
+			urls.add(baseUrl);
+			
+			if (mediaItem.containsKey("backup_url")) {
+				JSONArray backupUrls = mediaItem.getJSONArray("backup_url");
+				for (int i = 0; i < backupUrls.size(); i++) {
+					urls.add(backupUrls.getString(i));
+				}
+			}
+			
+			urls.sort((u1, u2) -> {
+				int priority1 = getCdnPriority(u1);
+				int priority2 = getCdnPriority(u2);
+				return Integer.compare(priority1, priority2);
+			});
+			
+			return urls.get(0);
+		} else {
+			JSONObject durlItem = data.getJSONObject(0);
+			return durlItem.getString("url");
+		}
+	}
+	
+	private int getCdnPriority(String url) {
+		if (url.contains("upos-")) {
+			return 0;
+		} else if (url.contains("cn-")) {
+			return 1;
+		} else if (url.contains("mcdn")) {
+			return 2;
+		} else {
+			return 3;
+		}
 	}
 
 }
