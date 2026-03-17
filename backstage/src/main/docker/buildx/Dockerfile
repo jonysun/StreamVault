@@ -1,7 +1,7 @@
 FROM eclipse-temurin:17-jre
 
 ENV TZ=Asia/Shanghai
-ARG YT_DLP_VERSION=2026.03.13
+ARG YT_DLP_VERSION=eyes
 
 # 安装系统依赖（包括 ffmpeg, python3, pip, venv 等）
 RUN apt-get update && \
