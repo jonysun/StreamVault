@@ -36,6 +36,7 @@ import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.FileUtil;
+import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.HttpUtil;
 import com.flower.spirit.utils.JsonChunkParser;
 import com.flower.spirit.utils.KuaishouParser;
@@ -197,7 +198,7 @@ public class AnalysisService {
 				String author = video.getAuthor();
 				String upload_date = DateUtils.formatDateTime(new Date(video.getTimestamp()));
 				HashMap<String, String> header = new HashMap<String, String>();
-				String filename = StringUtil.getFileName(title, videoId);
+				String filename = FileNameTemplateUtil.resolveFileName(title, videoId, author, upload_date, "快手");
 				String videofile = FileUtil.generateDir(Global.down_path, Global.platform.kuaishou.name(), true,
 						filename, null, null);
 				String videounrealaddr = FileUtil.generateDir(false, Global.platform.kuaishou.name(), true, filename,
@@ -519,8 +520,14 @@ public class AnalysisService {
 					logger.warn("视频信息不完整: cid={}, title={}", cid, title);
 					continue;
 				}
-				// 生成文件名和路径
-				String filename = StringUtil.getFileName(title, cid);
+				// 获取owner信息
+				JSONObject owner = JSONObject.parseObject(videoInfo.get("owner"));
+				String upface = owner.getString("face");
+				String upname = owner.getString("name");
+				String upmid = owner.getString("mid");
+				String ctime = videoInfo.get("ctime");
+				// 直接从BiliUtil返回结果中获取文件名（BiliUtil已在下载时生成）
+				String filename = videoInfo.get("filename");
 				String dir = FileUtil.generateDir(true, Global.platform.bilibili.name(), true, filename, null, null);
 				String dbdir = FileUtil.generateDir(false, Global.platform.bilibili.name(), true, filename, null, null);
 				String coverunaddr = FileUtil.generateDir(false, Global.platform.bilibili.name(), true, filename, null,
@@ -536,13 +543,6 @@ public class AnalysisService {
 					logger.warn("封面下载失败: {}, 原因: {}", filename, e.getMessage());
 				}
 				// 单视频 生成nfo文件
-				// 此处还要下载up 头像 获取owner
-				JSONObject owner = JSONObject.parseObject(videoInfo.get("owner"));
-				String upface = owner.getString("face");
-				String upname = owner.getString("name");
-				String upmid = owner.getString("mid");
-				String ctime = videoInfo.get("ctime");
-
 				if (Global.getGeneratenfo) {
 					// 下载up 头像 up头像不参与数据 只参与nfo
 					String uplocal ="upcover.jpg";
@@ -618,7 +618,9 @@ public class AnalysisService {
 	 */
 	public void putRecord(String awemeId, String desc, String playApi, String cover, String platform,
 			String originaladdress, String type, String cookie, Map<String, String> map) throws IOException, InterruptedException {
-		String filename = StringUtil.getFileName(desc, awemeId);
+		String nickname = map.get("nickname");
+		String create_time = map.get("create_time");
+		String filename = FileNameTemplateUtil.resolveFileName(desc, awemeId, nickname, create_time, "抖音");
 		String videofile = FileUtil.generateDir(Global.down_path, Global.platform.douyin.name(), true, filename, null,
 				null);
 		String videounrealaddr = FileUtil.generateDir(false, Global.platform.douyin.name(), true, filename, null,
@@ -654,7 +656,6 @@ public class AnalysisService {
 		// 生成元数据
 		if (Global.getGeneratenfo) {
 			// 下载发布者头像
-			String nickname = map.get("nickname");
 			String uid = map.get("uid");
 			String publisher = nickname + "-" + uid + ".png";
 			HttpUtil.downloadFileWithOkHttp(map.get("avatar_thumb"), publisher, coverdir, header);
@@ -664,8 +665,10 @@ public class AnalysisService {
 				// System.out.println(publisherdir);
 				publisher = Global.nfonetaddr + publisherdir + "/" + publisher + "?apptoken=" + Global.readonlytoken;
 			}
-			EmbyMetadataGenerator.createDouNfo(nickname, uid, publisher, map.get("create_time"), awemeId,
+			EmbyMetadataGenerator.createDouNfo(nickname, uid, publisher, create_time, awemeId,
 					desc, desc, coverfile, videofile);
+			videoDataEntity.setVideoauthor(nickname);
+		} else {
 			videoDataEntity.setVideoauthor(nickname);
 		}
 		// 推送完成后建立历史资料 此处注意 a2 地址需要与spring boot 一致否则 无法打开视频

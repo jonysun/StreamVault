@@ -28,6 +28,7 @@ import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.FileUtil;
+import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.HttpUtil;
 import com.flower.spirit.utils.StringUtil;
 import com.flower.spirit.utils.sendNotify;
@@ -69,7 +70,7 @@ public class HongShuExecutor {
 		String nickname = note.getJSONObject("user").getString("nickname");
 		JSONArray imageList = note.getJSONArray("imageList");
 		List<String> images = getImages(imageList);
-		String filename = StringUtil.getFileName(title, keyid);
+		String filename = FileNameTemplateUtil.resolveFileName(title, keyid, nickname, time, "小红书");
 		/*markroute  图文用**/
 		String markroute = FileUtil.generateDir(true, Global.platform.rednote.name(), filename, null, null,0); 
 		if(type.equals("normal")) {

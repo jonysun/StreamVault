@@ -24,6 +24,7 @@ import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.ProcessHistoryEntity;
 import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.utils.DouUtil;
+import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.HttpUtil;
 import com.flower.spirit.utils.StringUtil;
@@ -103,7 +104,7 @@ public class WeiBoExecutor {
     		}
     		JSONArray imageList=  new JSONArray();
     		boolean isVideo = mediaInfo.isVideo;
-			String filename = StringUtil.getFileName(text_raw, weiboId);
+			String filename = FileNameTemplateUtil.resolveFileName(text_raw, weiboId, username, null, "微博");
 			String markroute = FileUtil.generateDir(true, Global.platform.weibo.name(), filename, null, null,0);
     		if(isVideo) {
     			//视频类型就一个文件

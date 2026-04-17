@@ -135,6 +135,8 @@ public class Global {
 	public static String frontend = "blank";
 	
 	public static String hiddenplatforms = "";  // 在视频首页隐藏的平台（逗号分隔）
+	
+	public static String filenametemplate = "";  // 自定义文件命名模板
 
 	@Value("${file.save}")
 	public void setSavefile(String value) {

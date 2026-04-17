@@ -98,6 +98,12 @@ public class ConfigService {
 		} else {
 			Global.hiddenplatforms = "";
 		}
+		// 保存自定义文件命名模板
+		if(configEntity.getFilenametemplate() != null) {
+			Global.filenametemplate = configEntity.getFilenametemplate();
+		} else {
+			Global.filenametemplate = "";
+		}
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);
 	}
 

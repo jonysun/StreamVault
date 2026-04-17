@@ -165,6 +165,13 @@
                                                 <input type="hidden" id="hiddenplatforms" name="hiddenplatforms" th:value="${config.hiddenplatforms}">
                                             </div>
                                         </div>
+                                        <div class="col-md-12">
+                                            <div class="form-group">
+                                                <label>文件命名模板 <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="showFileNameTemplateHelp()"></i></label>
+                                                <input class="form-control" type="text" id="filenametemplate" name="filenametemplate" placeholder="留空使用默认命名规则" th:value="${config.filenametemplate}">
+                                                <div id="fileNameTemplatePreview" style="font-size: 12px; color: #888; margin-top: 4px;"></div>
+                                            </div>
+                                        </div>
                                         <div class="col-md-6">
                                             <div class="form-group">
                                                 <label>YT-DLP模式<i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('非内置 未适配 且不支持NFO 暂不接受非内置issues') "></i></label>
@@ -634,6 +641,7 @@
               option['frontend'] = $("#frontend").val();
               option['danmudown'] = $("#danmudown").val();
               option['hiddenplatforms'] = $("#hiddenplatforms").val();
+              option['filenametemplate'] = $("#filenametemplate").val();
               $.post("/admin/api/saveConfig",option,function(data,status){
                   if(data.resCode =="000001"){
                       layer.closeAll();
@@ -796,6 +804,7 @@
             option['frontend'] = $("#frontend").val();
             option['danmudown'] = $("#danmudown").val();
             option['hiddenplatforms'] = $("#hiddenplatforms").val();
+            option['filenametemplate'] = $("#filenametemplate").val();
             $.post("/admin/api/saveConfig",option,function(data,status){
                 if(data.resCode =="000001"){
                     layer.closeAll();
@@ -822,6 +831,64 @@
         $(".qywx-config, .sct-config, .feishu-config").hide();
         $("." + channel + "-config").show();
     }
+
+    // 文件命名模板变量说明（写死在前端）
+    var fileNameTemplateVars = {
+        '{发布日期}': '内容发布日期，格式 yyyyMMdd',
+        '{下载时间}': '当前下载日期，格式 yyyyMMdd',
+        '{作者}': '内容作者昵称',
+        '{标题}': '内容标题',
+        '{视频ID}': '视频/图文唯一标识',
+        '{平台}': '来源平台名称（抖音、哔哩、小红书等）',
+        '{年份}': '发布日期的年份',
+        '{月份}': '发布日期的月份',
+        '{日期}': '发布日期的日'
+    };
+
+    function showFileNameTemplateHelp() {
+        var html = '<div style="padding:10px;line-height:2;">';
+        html += '<p style="margin-bottom:8px;font-weight:bold;">可用变量：</p>';
+        for (var key in fileNameTemplateVars) {
+            html += '<div><code>' + key + '</code> — ' + fileNameTemplateVars[key] + '</div>';
+        }
+        html += '<hr style="margin:8px 0;"/>';
+        html += '<p style="font-size:12px;color:#666;">示例：{发布日期}_{作者}_{标题}_{视频ID}<br/>结果：20240415_张三_视频标题_abc123</p>';
+        html += '<p style="font-size:12px;color:#666;">留空则使用默认命名规则（标题_ID）</p>';
+        html += '</div>';
+        layer.open({type:1, title:'文件命名模板说明', area:['auto','auto'], content:html});
+    }
+
+    // 实时预览模板效果
+    function updateFileNameTemplatePreview() {
+        var template = $('#filenametemplate').val();
+        var $preview = $('#fileNameTemplatePreview');
+        if (!template) {
+            $preview.text('当前使用默认命名规则');
+            return;
+        }
+        var result = template;
+        var sampleData = {
+            '{发布日期}': '20240415',
+            '{下载时间}': '20240415',
+            '{作者}': '张三',
+            '{标题}': '视频标题示例',
+            '{视频ID}': 'abc123',
+            '{平台}': '哔哩',
+            '{年份}': '2024',
+            '{月份}': '04',
+            '{日期}': '15'
+        };
+        for (var key in sampleData) {
+            result = result.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), sampleData[key]);
+        }
+        $preview.text('预览：' + result);
+    }
+
+    // 初始化模板预览
+    $(function() {
+        updateFileNameTemplatePreview();
+        $('#filenametemplate').on('input', updateFileNameTemplatePreview);
+    });
     function detectPlatform() {
         var url = $('#platformUrl').val();
         if(!url) {

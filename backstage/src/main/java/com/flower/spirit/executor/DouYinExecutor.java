@@ -22,6 +22,7 @@ import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.FileUtil;
+import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.HttpUtil;
 import com.flower.spirit.utils.StringUtil;
 import com.flower.spirit.utils.sendNotify;
@@ -81,7 +82,7 @@ public class DouYinExecutor {
 			header.put("Referer", "https://www.douyin.com/");
 			header.put("User-Agent", DouUtil.ua);
 			header.put("cookie", Global.tiktokCookie);
-			String filename = StringUtil.getFileName(desc, post);
+			String filename = FileNameTemplateUtil.resolveFileName(desc, post, nickname, aweme_detail.getString("create_time"), "抖音");
 			String markroute = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,0);
 			for(int i = 0;i<images.size();i++) {
 				JSONObject video = images.getJSONObject(i).getJSONObject("video");
@@ -157,7 +158,7 @@ public class DouYinExecutor {
 			header.put("Referer", "https://www.douyin.com/");
 			header.put("User-Agent", DouUtil.ua);
 			header.put("cookie", Global.tiktokCookie);
-			String filename = StringUtil.getFileName(desc, post);
+			String filename = FileNameTemplateUtil.resolveFileName(desc, post, nickname, aweme_detail.getString("create_time"), "抖音");
 			String markroute = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,0);
 			for(int i = 0;i<images.size();i++) {
 				JSONObject video = images.getJSONObject(i).getJSONObject("video");
