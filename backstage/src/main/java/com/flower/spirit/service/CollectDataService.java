@@ -42,6 +42,7 @@ import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.FileUtil;
+import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.HttpUtil;
 import com.flower.spirit.utils.StringUtil;
 import com.flower.spirit.utils.XbogusUtil;
@@ -295,14 +296,16 @@ public class CollectDataService {
 				Map<String, String> map = videoDataInfo.get(y);
 				String status = "";
 				if (map != null) {
-					String filename = StringUtil.getFileName(map.get("title"), map.get("cid"));
 					String cid = map.get("cid");
 					List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(cid);
 					// 这里判断 视频库 是否存在 存在则不处理
+					String filename = StringUtil.getFileName(map.get("title"), cid);
 					if (findByVideoid.size() == 0) {
 						Map<String, String> findVideoStreaming = BiliUtil.findVideoStreamingNoData(map,
 								Global.bilicookies, map.get("quality"), namepath);
 						if(findVideoStreaming!= null) {
+							// 从BiliUtil返回结果中获取文件名（BiliUtil已在下载时生成），覆盖默认值
+							filename = findVideoStreaming.get("filename");
 							String videounaddr = FileUtil.generateDir(false, Global.platform.bilibili.name(), false,
 									filename, namepath, "mp4");
 							String duration = findVideoStreaming.get("duration"); //视频秒数
@@ -467,7 +470,9 @@ public class CollectDataService {
 
 				List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(awemeId);
 				if (findByVideoid.size() == 0) {
-					String filename = StringUtil.getFileName(desc, awemeId);
+					String dyNickname = aweme_detail.getString("nickname");
+					String dyCreateTime = aweme_detail.getString("create_time");
+					String filename = FileNameTemplateUtil.resolveFileName(desc, awemeId, dyNickname, dyCreateTime, "抖音");
 					String dir = FileUtil.generateDir(Global.down_path, Global.platform.douyin.name(), false, filename,
 							taskname, null);
 					String videofile = FileUtil.generateDir(Global.down_path, Global.platform.douyin.name(), false,
@@ -512,9 +517,8 @@ public class CollectDataService {
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
 					if (Global.getGeneratenfo) {
-						String nickname = aweme_detail.getString("nickname");
 						String uid = aweme_detail.getString("uid");
-						String publisher = nickname + "-" + uid + ".png";
+						String publisher = dyNickname + "-" + uid + ".png";
 						String coverdir = FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename,
 								taskname, null);
 						HttpUtil.downloadFileWithOkHttp(aweme_detail.getString("avatar_thumb"), publisher, coverdir,
@@ -537,7 +541,9 @@ public class CollectDataService {
 						map.put("cid", awemeId);
 						map.put("upface", publisher);
 						EmbyMetadataGenerator.createFavoriteEpisodeDouNfo(map, dir, i + 1, temporaryDirectory);
-						videoDataEntity.setVideoauthor(nickname);
+						videoDataEntity.setVideoauthor(dyNickname);
+					} else {
+						videoDataEntity.setVideoauthor(dyNickname);
 					}
 					videoDataDao.save(videoDataEntity);
 					logger.info("下载流程结束");
@@ -812,7 +818,7 @@ public class CollectDataService {
 				JSONArray arcSearch = BiliUtil.SeasonsSearch(datasp[0],datasp[1], maxc); 
 				if (null != arcSearch && arcSearch.size() > 0) {
 					JSONObject ddd = arcSearch.getJSONObject(0);
-					String namepath = StringUtil.getFileName(ddd.getString("name"),collectDataEntity.getTaskname());
+					String namepath = FileNameTemplateUtil.resolveFileName(ddd.getString("name"), collectDataEntity.getTaskname(), null, null, "哔哩");
 					String description = ddd.getString("description");
 					collectDataEntity.setTaskstatus("已提交待处理");
 					collectDataEntity.setCreatetime(DateUtils.formatDateTime(new Date()));

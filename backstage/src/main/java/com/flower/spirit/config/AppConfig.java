@@ -122,6 +122,12 @@ public class AppConfig {
 		} else {
 			Global.hiddenplatforms = "";
 		}
+		// 加载自定义文件命名模板
+		if(data.getFilenametemplate() != null) {
+			Global.filenametemplate = data.getFilenametemplate();
+		} else {
+			Global.filenametemplate = "";
+		}
 		//清空 ffmpeg 队列
 		ffmpegQueueService.clearTask();
 		logger.info("ffmpeg队列已清空");

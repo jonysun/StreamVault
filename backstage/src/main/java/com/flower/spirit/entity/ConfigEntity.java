@@ -63,6 +63,8 @@ public class ConfigEntity implements Serializable {
 	private String rangenum;
 	
 	private String hiddenplatforms;  // 在视频首页隐藏的平台（逗号分隔）
+	
+	private String filenametemplate;  // 自定义文件命名模板
 
 	public Integer getId() {
 		return id;
@@ -206,6 +208,14 @@ public class ConfigEntity implements Serializable {
 
 	public void setHiddenplatforms(String hiddenplatforms) {
 		this.hiddenplatforms = hiddenplatforms;
+	}
+
+	public String getFilenametemplate() {
+		return filenametemplate;
+	}
+
+	public void setFilenametemplate(String filenametemplate) {
+		this.filenametemplate = filenametemplate;
 	}
 
 	// public String getYtdlpargs() {

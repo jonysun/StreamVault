@@ -88,7 +88,18 @@ public class BiliUtil {
 	    if (code == -404) {
 	        return null; 
 	    }
-		String filename = StringUtil.getFileName(videoDataInfo.get("title"), videoDataInfo.get("cid"));
+		String filename;
+		{
+			String biliAuthor = null;
+			String biliCtime = videoDataInfo.get("ctime");
+			try {
+				JSONObject ownerObj = JSONObject.parseObject(videoDataInfo.get("owner"));
+				if (ownerObj != null) {
+					biliAuthor = ownerObj.getString("name");
+				}
+			} catch (Exception e) {}
+			filename = FileNameTemplateUtil.resolveFileName(videoDataInfo.get("title"), videoDataInfo.get("cid"), biliAuthor, biliCtime, "哔哩");
+		}
 		if ((Integer.valueOf(Global.bilibitstream) >= 80 && quality.equals("1"))
 				|| parseObject.getJSONObject("data").containsKey("dash")) {
 			Map<String, String> processing = processing(parseObject, videoDataInfo, filename, namepath);
@@ -116,6 +127,7 @@ public class BiliUtil {
 		}
 		videoDataInfo.put("video",videodir);
 		videoDataInfo.put("videoname", filename + ".mp4");
+		videoDataInfo.put("filename", filename);
 		// System.out.println(videoDataInfo);
 		return videoDataInfo;
 	}
@@ -156,7 +168,17 @@ public class BiliUtil {
 				}
 
 				// 生成文件名
-				String filename = StringUtil.getFileName(title, cid);
+				String biliAuthor = null;
+				String biliCtime = videoInfo.get("ctime");
+				try {
+					JSONObject ownerObj = JSONObject.parseObject(videoInfo.get("owner"));
+					if (ownerObj != null) {
+						biliAuthor = ownerObj.getString("name");
+					}
+				} catch (Exception e) {
+					// owner可能为空
+				}
+				String filename = FileNameTemplateUtil.resolveFileName(title, cid, biliAuthor, biliCtime, "哔哩");
 
 				// 构建API请求地址
 //				String apiUrl = buildInterfaceAddress(aid, cid, token, quality);
@@ -243,6 +265,7 @@ public class BiliUtil {
 		Map<String, String> result = new HashMap<>(videoInfo);
 		result.put("video", FileUtil.generateDir(true, Global.platform.bilibili.name(), true, filename, null, "mp4"));
 		result.put("videoname", filename + ".mp4");
+		result.put("filename", filename);
 
 		return result;
 	}
@@ -280,6 +303,7 @@ public class BiliUtil {
 		}
 		result.put("video",videodir);
 		result.put("videoname", filename + ".mp4");
+		result.put("filename", filename);
 
 		return result;
 	}
