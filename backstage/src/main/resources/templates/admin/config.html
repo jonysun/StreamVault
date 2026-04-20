@@ -9,42 +9,87 @@
     <link href="../static/css/materialdesignicons.min.css" rel="stylesheet">
     <link href="../static/css/style.min.css" rel="stylesheet">
     <style>
-        .card { margin-bottom: 15px; }
-        .card-header { padding: 10px 15px; }
-        .card-header h4 { margin: 0; font-size: 16px; }
-        .card-body { padding: 15px; }
-        .form-group { margin-bottom: 10px; }
-        .form-control { padding: 6px 8px; height: 32px; }
-        .btn { padding: 5px 15px; }
-        label { margin-bottom: 3px; font-size: 13px; }
-        .container-fluid { padding: 15px; }
-        select.form-control { padding-right: 25px; }
-        
-        /* 修改为flex布局 */
-        .row {
-            display: flex;
-            flex-wrap: wrap;
-            margin-right: -15px;
-            margin-left: -15px;
+        .container-fluid { padding: 20px 24px; background: #f0f2f5; min-height: 100vh; }
+        .container-fluid > h6 { color: #8c8c8c; font-size: 12px; margin-bottom: 16px; font-weight: 400; }
+        .row { display: flex; flex-wrap: wrap; margin-left: -10px; margin-right: -10px; }
+        .col-md-4 { position: relative; width: 33.3333%; padding: 0 10px; margin-bottom: 12px; box-sizing: border-box; }
+        .col-md-6 { position: relative; width: 50%; padding: 0 10px; margin-bottom: 12px; box-sizing: border-box; }
+        .col-md-12 { position: relative; width: 100%; padding: 0 10px; margin-bottom: 12px; box-sizing: border-box; }
+        .section-title {
+            width: 100%; padding: 0 10px; margin-bottom: 14px; box-sizing: border-box;
         }
-        .col-md-6 {
-            position: relative;
-            width: 50%;
-            padding-right: 15px;
-            padding-left: 15px;
-            margin-bottom: 15px;
+        .section-title-inner {
+            display: flex; align-items: center;
+            padding: 12px 16px; height: 20px;
+            font-size: 15px; font-weight: 600; color: #1a1a2e; letter-spacing: 0.5px;
         }
+        .section-title-inner::before {
+            content: ''; display: inline-block; width: 4px; height: 18px;
+            background: #4361ee; border-radius: 2px; margin-right: 10px; flex-shrink: 0;
+        }
+        .section-title-inner i { margin-right: 8px; color: #4361ee; font-size: 18px; }
         .card {
-            height: 100%;
-            margin: 0;
+            background: #fff; border: none; border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            height: 100%; margin: 0; transition: box-shadow 0.2s;
         }
-        
-        /* 响应式处理 */
-        @media (max-width: 768px) {
-            .col-md-6 {
-                width: 100%;
-            }
+        .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .card-header {
+            padding: 14px 18px 10px; border-bottom: 1px solid #f0f0f0; background: transparent;
         }
+        .card-header h4 {
+            margin: 0; font-size: 14px; font-weight: 600; color: #1a1a2e;
+            display: flex; align-items: center;
+        }
+        .card-body { padding: 14px 18px 16px; }
+        .form-group { margin-bottom: 12px; }
+        .form-control {
+            padding: 7px 10px; height: 34px; border: 1px solid #e8e8e8; border-radius: 6px;
+            background: #fafafa; font-size: 13px; color: #333; transition: all 0.2s;
+        }
+        .form-control:focus {
+            border-color: #4361ee; background: #fff;
+            box-shadow: 0 0 0 2px rgba(67,97,238,0.1); outline: none;
+        }
+        select.form-control { padding-right: 28px; }
+        textarea.form-control { height: auto; }
+        label { margin-bottom: 4px; font-size: 12px; font-weight: 500; color: #595959; }
+        .btn { padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; transition: all 0.15s; }
+        .btn-primary { background: #4361ee; color: #fff; }
+        .btn-primary:hover { background: #3a56d4; }
+        .btn-info { background: #4cc9f0; color: #fff; }
+        .btn-info:hover { background: #3ab8dd; }
+        .btn-sm { padding: 3px 10px; font-size: 12px; }
+        .section-action {
+            width: 100%; padding: 10px 10px 2px; text-align: right; box-sizing: border-box;
+        }
+        .section-action .btn-primary {
+            padding: 8px 28px; font-size: 14px; border-radius: 6px;
+            background: linear-gradient(135deg, #4361ee 0%, #3a86ff 100%);
+            box-shadow: 0 2px 6px rgba(67,97,238,0.3);
+        }
+        .section-action .btn-primary:hover {
+            box-shadow: 0 4px 12px rgba(67,97,238,0.4);
+            transform: translateY(-1px);
+        }
+        .platform-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+        .platform-tag {
+            display: inline-flex; align-items: center;
+            padding: 4px 10px; border-radius: 4px; font-size: 12px;
+            background: #f5f5f5; color: #595959; cursor: pointer;
+            border: 1px solid #e8e8e8; transition: all 0.15s; user-select: none;
+        }
+        .platform-tag:hover { border-color: #4361ee; color: #4361ee; }
+        .platform-tag.checked { background: #eef0ff; border-color: #4361ee; color: #4361ee; }
+        .platform-tag input { display: none; }
+        .cookie-item {
+            background: #e6f7ff !important; color: #1890ff !important;
+            padding: 2px 8px !important; border-radius: 4px !important; font-size: 11px;
+        }
+        .help-icon { cursor: pointer; font-size: 12px; color: #bfbfbf; margin-left: 2px; }
+        .help-icon:hover { color: #4361ee; }
+        @media (max-width: 1200px) { .col-md-4 { width: 50%; } }
+        @media (max-width: 768px) { .col-md-4, .col-md-6 { width: 100%; } }
     </style>
 </head>
 
@@ -59,352 +104,328 @@
 
             <div class="container-fluid">
 				<h6>注意:本页面部分配置可能修改后需要重启才可能生效,建议修改配置之后发现无效先重启一次</h6>
+
+                <!-- ==================== 系统配置 ==================== -->
                 <div class="row">
-                    <div class="col-md-6">
+                    <div class="section-title"><div class="section-title-inner"><i class="mdi mdi-cog-outline"></i>系统配置</div></div>
+
+                    <!-- 认证与调度 -->
+                    <div class="col-md-4">
                         <div class="card">
-                            <div class="card-header"><h4>系统常量</h4></div>
+                            <div class="card-header"><h4>认证与调度</h4></div>
                             <div class="card-body">
-
-                                <form action="#" method="post" onsubmit="return false;">
-                                    <input type="hidden" id="appid" class="appid" th:value="${config.id}" />
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>App token <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('此Token用于API接口提交视频地址和查看视频信息,如果是公网环境建议设置复杂口令或定期更换') "></i></label>
-                                                <input class="form-control" type="text" id="apptoken" name="apptoken" placeholder="apptoken" th:value="${config.apptoken}">
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>只读Token <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('此Token用于API获取视频信息并且免登陆播放资源,如果是公网环境建议设置复杂口令或定期更换') "></i></label>
-                                                <input class="form-control" type="text" id="readonlytoken" name="readonlytoken" placeholder="不能提交单链接只能访问" th:value="${config.readonlytoken}">
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>开启提交记录</label>
-                                                <select id="openprocesshistory" class="form-control openprocesshistory" name="openprocesshistory">
-                                                    <option value="0" th:selected="${config.openprocesshistory} eq '0'">否</option>
-                                                    <option value="1" th:selected="${config.openprocesshistory} eq '1'">是</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                       <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>全局cron <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('此处是历史保留,目前新版收藏夹监控每一个任务都支持单独的cron表达式都是独立任务,如果在添加收藏任务时不填对应任务的cron表达式,则会使用这里的全局cron表达式') "></i></label>
-                                                <input class="form-control" type="text" id="taskcron" name="taskcron" placeholder="默认0 0 0/3 * * ?  三小时一次" th:value="${config.taskcron}">
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>nfo元数据生成(测试)</label>
-                                                <select id="generatenfo" class="form-control generatenfo" name="generatenfo">
-                                                    <option value="0" th:selected="${config.generatenfo} eq '0'">否</option>
-                                                    <option value="1" th:selected="${config.generatenfo} eq '1'">是</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>NFO元数据(提供给其他媒体库网络地址)<i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('NFO元数据网络地址用于其他媒体库访问本应用的部分图片资源。目前仅b站 抖音 的up头像做了适配 如果需要在公网访问，请填写可以从公网访问到的地址。例如：http://your-domain.com 或 http://your-ip') "></i></label>
-                                                <input class="form-control" type="text" id="nfonetaddr" name="nfonetaddr" th:value="${config.nfonetaddr}" placeholder="http://127.0.0.1 如需要公网 请填写本应用公网能访问到的地址">
-                                            </div>
-                                        </div>
-										<div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>弹幕下载(测试)</label>
-                                                <select id="danmudown" class="form-control danmudown" name="danmudown">
-                                                    <option value="0" th:selected="${config.danmudown} eq '0'">否</option>
-                                                    <option value="1" th:selected="${config.danmudown} eq '1'">是</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>主页配置&nbsp;<a href="https://bd.kwaie.com" onclick="return confirmRedirect(this);" style="font-size: 12px;" title="该demo非本仓库提供">播放主页DEMO</a></label>
-                                                 <select id="frontend" class="form-control frontend" name="frontend">
-                                                    <option value="blank" th:selected="${config.frontend} eq 'blank'">空白主页</option>
-                                                    <option value="video" th:selected="${config.frontend} eq 'video'">播放主页纯净版(dev版)</option>
-                                                    <option value="video_standard" th:selected="${config.frontend} eq 'video_standard'">播放主页含提交(dev版)</option>
-                                                    <option value="admin" th:selected="${config.frontend} eq 'admin'">后台主页</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-12">
-                                            <div class="form-group">
-                                                <label>隐藏视频平台 <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('在播放主页中隐藏选中的平台视频，不勾选任何平台则显示全部视频')"></i></label>
-                                                <div id="hiddenPlatformsContainer" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="twitter" style="margin-right: 5px;"> Twitter
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="抖音" style="margin-right: 5px;"> 抖音
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="哔哩" style="margin-right: 5px;"> 哔哩哔哩
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="youtube" style="margin-right: 5px;"> YouTube
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="小红书" style="margin-right: 5px;"> 小红书
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="Instagram" style="margin-right: 5px;"> Instagram
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="快手" style="margin-right: 5px;"> 快手
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="TikTok" style="margin-right: 5px;"> TikTok
-                                                    </label>
-                                                    <label style="display: inline-flex; align-items: center; margin-right: 15px;">
-                                                        <input type="checkbox" class="hiddenPlatformCheckbox" value="微博" style="margin-right: 5px;"> 微博
-                                                    </label>
-                                                </div>
-                                                <input type="hidden" id="hiddenplatforms" name="hiddenplatforms" th:value="${config.hiddenplatforms}">
-                                            </div>
-                                        </div>
-                                        <div class="col-md-12">
-                                            <div class="form-group">
-                                                <label>文件命名模板 <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="showFileNameTemplateHelp()"></i></label>
-                                                <input class="form-control" type="text" id="filenametemplate" name="filenametemplate" placeholder="留空使用默认命名规则" th:value="${config.filenametemplate}">
-                                                <div id="fileNameTemplatePreview" style="font-size: 12px; color: #888; margin-top: 4px;"></div>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>YT-DLP模式<i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('非内置 未适配 且不支持NFO 暂不接受非内置issues') "></i></label>
-                                                <select id="ytdlpmode" class="form-control ytdlpmode" name="ytdlpmode">
-                                                    <option value="0" th:selected="${config.ytdlpmode} eq '0'">仅内置平台(youtube,x,twitter,ins)</option>
-                                                    <option value="1" th:selected="${config.ytdlpmode} eq '1'">优先内置备选全量ytdlp支持的地址</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <!-- <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>YT-DLP 参数追加 <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('需要熟悉了解yt-dlp,请不要追加已存在的参数.如不熟悉当前项目 请保持为空<br/>错误的参数追加可能会造成yt-dlp相关平台的下载错误<br/>追加格式为-xxxx vlaue -xxxx value -value') "></i></label>
-                                                <input class="form-control" type="text" id="ytdlpargs" name="ytdlpargs" placeholder="无特殊情况,保持为空" th:value="${config.ytdlpargs}">
-                                            </div>
-                                        </div> -->
-                                        <div class="col-md-6">
-                                            <div class="form-group">
-                                                <label>分片下载 <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.alert('无特殊情况建议默认为1,不分片') "></i></label>
-                                                <input class="form-control" type="text" id="rangenum" name="rangenum" placeholder="默认为1" th:value="${config.rangenum}">
-                                            </div>
-                                        </div>
-                                         <div class="col-md-6">
-                                            <div class="form-group">
-		                                        <label>userAgent</label>
-		                                        <input class="form-control" type="text" id="userAgent" name="userAgent" th:value="${config.useragent}" placeholder="传递给youtube  x 等平台 降低风控可能 不填则不传">
-		                                    </div>
-                                         </div>
-                                    </div>
-                                    
-                         
-                                    
-                                    <div class="form-group">
-                                        <button class="btn btn-primary saveConfig" type="button">保存</button>
-                                    </div>
-                                </form>
-
+                                <input type="hidden" id="appid" class="appid" th:value="${config.id}" />
+                                <div class="form-group">
+                                    <label>App token <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('此Token用于API接口提交视频地址和查看视频信息,如果是公网环境建议设置复杂口令或定期更换')"></i></label>
+                                    <input class="form-control" type="text" id="apptoken" name="apptoken" placeholder="apptoken" th:value="${config.apptoken}">
+                                </div>
+                                <div class="form-group">
+                                    <label>只读Token <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('此Token用于API获取视频信息并且免登陆播放资源,如果是公网环境建议设置复杂口令或定期更换')"></i></label>
+                                    <input class="form-control" type="text" id="readonlytoken" name="readonlytoken" placeholder="不能提交单链接只能访问" th:value="${config.readonlytoken}">
+                                </div>
+                                <div class="form-group">
+                                    <label>开启提交记录</label>
+                                    <select id="openprocesshistory" class="form-control openprocesshistory" name="openprocesshistory">
+                                        <option value="0" th:selected="${config.openprocesshistory} eq '0'">否</option>
+                                        <option value="1" th:selected="${config.openprocesshistory} eq '1'">是</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>全局cron <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('此处是历史保留,目前新版收藏夹监控每一个任务都支持单独的cron表达式都是独立任务,如果在添加收藏任务时不填对应任务的cron表达式,则会使用这里的全局cron表达式')"></i></label>
+                                    <input class="form-control" type="text" id="taskcron" name="taskcron" placeholder="默认0 0 0/3 * * ?  三小时一次" th:value="${config.taskcron}">
+                                </div>
+                                <div class="form-group">
+                                    <label>userAgent</label>
+                                    <input class="form-control" type="text" id="userAgent" name="userAgent" th:value="${config.useragent}" placeholder="传递给youtube  x 等平台 降低风控可能 不填则不传">
+                                </div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- 下载与元数据 -->
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header"><h4>下载与元数据</h4></div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label>YT-DLP模式 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('非内置 未适配 且不支持NFO 暂不接受非内置issues')"></i></label>
+                                    <select id="ytdlpmode" class="form-control ytdlpmode" name="ytdlpmode">
+                                        <option value="0" th:selected="${config.ytdlpmode} eq '0'">仅内置平台(youtube,x,twitter,ins)</option>
+                                        <option value="1" th:selected="${config.ytdlpmode} eq '1'">优先内置备选全量ytdlp支持的地址</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>分片下载 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('无特殊情况建议默认为1,不分片')"></i></label>
+                                    <input class="form-control" type="text" id="rangenum" name="rangenum" placeholder="默认为1" th:value="${config.rangenum}">
+                                </div>
+                                <div class="form-group">
+                                    <label>nfo元数据生成(测试)</label>
+                                    <select id="generatenfo" class="form-control generatenfo" name="generatenfo">
+                                        <option value="0" th:selected="${config.generatenfo} eq '0'">否</option>
+                                        <option value="1" th:selected="${config.generatenfo} eq '1'">是</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>NFO元数据网络地址 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('NFO元数据网络地址用于其他媒体库访问本应用的部分图片资源。目前仅b站 抖音 的up头像做了适配 如果需要在公网访问，请填写可以从公网访问到的地址。例如：http://your-domain.com 或 http://your-ip')"></i></label>
+                                    <input class="form-control" type="text" id="nfonetaddr" name="nfonetaddr" th:value="${config.nfonetaddr}" placeholder="http://127.0.0.1 如需要公网 请填写本应用公网能访问到的地址">
+                                </div>
+                                <div class="form-group">
+                                    <label>弹幕下载(测试)</label>
+                                    <select id="danmudown" class="form-control danmudown" name="danmudown">
+                                        <option value="0" th:selected="${config.danmudown} eq '0'">否</option>
+                                        <option value="1" th:selected="${config.danmudown} eq '1'">是</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 主页与显示 -->
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header"><h4>主页与显示</h4></div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label>主页配置&nbsp;<a href="https://bd.kwaie.com" onclick="return confirmRedirect(this);" style="font-size: 11px; color: #4361ee;" title="该demo非本仓库提供">播放主页DEMO</a></label>
+                                    <select id="frontend" class="form-control frontend" name="frontend">
+                                        <option value="blank" th:selected="${config.frontend} eq 'blank'">空白主页</option>
+                                        <option value="video" th:selected="${config.frontend} eq 'video'">播放主页纯净版(dev版)</option>
+                                        <option value="video_standard" th:selected="${config.frontend} eq 'video_standard'">播放主页含提交(dev版)</option>
+                                        <option value="admin" th:selected="${config.frontend} eq 'admin'">后台主页</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>隐藏视频平台 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('在播放主页中隐藏选中的平台视频，不勾选任何平台则显示全部视频')"></i></label>
+                                    <div id="hiddenPlatformsContainer" class="platform-tags">
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="twitter">Twitter</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="抖音">抖音</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="哔哩">哔哩哔哩</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="youtube">YouTube</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="小红书">小红书</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="Instagram">Instagram</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="快手">快手</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="TikTok">TikTok</label>
+                                        <label class="platform-tag"><input type="checkbox" class="hiddenPlatformCheckbox" value="微博">微博</label>
+                                    </div>
+                                    <input type="hidden" id="hiddenplatforms" name="hiddenplatforms" th:value="${config.hiddenplatforms}">
+                                </div>
+                                <div class="form-group">
+                                    <label>文件命名模板 <i class="mdi mdi-help-circle help-icon" onclick="showFileNameTemplateHelp()"></i></label>
+                                    <input class="form-control" type="text" id="filenametemplate" name="filenametemplate" placeholder="留空使用默认命名规则" th:value="${config.filenametemplate}">
+                                    <div id="fileNameTemplatePreview" style="font-size: 11px; color: #8c8c8c; margin-top: 3px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 系统配置统一保存 -->
+                    <div class="section-action">
+                        <button class="btn btn-primary saveConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 4px;"></i>保存系统配置</button>
+                    </div>
+                </div>
+
+                <!-- ==================== 平台配置 ==================== -->
+                <div class="row">
+                    <div class="section-title"><div class="section-title-inner"><i class="mdi mdi-access-point"></i>平台配置</div></div>
+
+                    <!-- B站配置 -->
                     <div class="col-md-6">
                         <div class="card">
                             <div class="card-header"><h4>B站配置</h4></div>
                             <div class="card-body">
-
                                 <form action="#" method="post" onsubmit="return false;">
                                     <input type="hidden" class="bili" th:value="${bili.id}" />
                                     <div class="form-group">
                                         <label>B站cookie</label>
-                                        <div>
-                                            <input type="type" name="bilicookies"  autocomplete="off" class="form-control bilicookies" th:value="${bili.bilicookies}">
-                                            <br/>
-                                            <button style="display: inline-block; " type="button" class="btn btn-primary scanQR" lay-submit="" >扫码登录</button>
-                                        </div>
+                                        <input type="type" name="bilicookies" autocomplete="off" class="form-control bilicookies" th:value="${bili.bilicookies}">
+                                        <button style="display: inline-block; margin-top: 6px;" type="button" class="btn btn-primary btn-sm scanQR" lay-submit=""><i class="mdi mdi-qrcode" style="margin-right: 3px;"></i>扫码登录</button>
                                     </div>
                                     <div class="form-group">
                                         <label>是否大会员</label>
                                         <select class="ismember form-control" name="ismember">
-                                            <option value="否"  th:selected="${bili.bigmember} eq '否'">否</option>
-                                            <option value="是"  th:selected="${bili.bigmember} eq '是'">是</option>
+                                            <option value="否" th:selected="${bili.bigmember} eq '否'">否</option>
+                                            <option value="是" th:selected="${bili.bigmember} eq '是'">是</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
                                         <label>自定义码流</label>
                                         <select class="bitstream form-control" name="bitstream">
-                                            <option value="64"  th:selected="${bili.bitstream} eq '64'">720P 高清</option>
-                                            <option value="74"  th:selected="${bili.bitstream} eq '74'">720P60 高帧率(需要cookie)</option>
-                                            <option value="80"  th:selected="${bili.bitstream} eq '80'">1080P 高清(需要cookie)</option>
-                                            <option value="112"  th:selected="${bili.bitstream} eq '112'">1080P+ 高码率(需要大会员)</option>
-                                            <option value="116"  th:selected="${bili.bitstream} eq '116'">1080P60 高帧率(需要大会员)</option>
-                                            <option value="120"  th:selected="${bili.bitstream} eq '120'">4K 超清(需要大会员)</option>
-                                            <!-- <option value="125"  th:selected="${bili.bitstream} eq '125'">HDR 真彩色(需要大会员)</option>
-                                                  <option value="126"  th:selected="${bili.bitstream} eq '126'">杜比视界(需要大会员)</option> -->
-                                            <option value="127"  th:selected="${bili.bitstream} eq '127'">8K 超高清(需要大会员)</option>
+                                            <option value="64" th:selected="${bili.bitstream} eq '64'">720P 高清</option>
+                                            <option value="74" th:selected="${bili.bitstream} eq '74'">720P60 高帧率(需要cookie)</option>
+                                            <option value="80" th:selected="${bili.bitstream} eq '80'">1080P 高清(需要cookie)</option>
+                                            <option value="112" th:selected="${bili.bitstream} eq '112'">1080P+ 高码率(需要大会员)</option>
+                                            <option value="116" th:selected="${bili.bitstream} eq '116'">1080P60 高帧率(需要大会员)</option>
+                                            <option value="120" th:selected="${bili.bitstream} eq '120'">4K 超清(需要大会员)</option>
+                                            <!-- <option value="125" th:selected="${bili.bitstream} eq '125'">HDR 真彩色(需要大会员)</option>
+                                                  <option value="126" th:selected="${bili.bitstream} eq '126'">杜比视界(需要大会员)</option> -->
+                                            <option value="127" th:selected="${bili.bitstream} eq '127'">8K 超高清(需要大会员)</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <label>是否在单视频中自动下载弹幕(需要打开弹幕下载)</label>
+                                        <label>单视频自动弹幕(需开启弹幕下载)</label>
                                         <select class="oddmm form-control" name="oddmm">
-                                            <option value="0"  th:selected="${bili.oddmm} eq '0'">否</option>
-                                            <option value="1"  th:selected="${bili.oddmm} eq '1'">是</option>
+                                            <option value="0" th:selected="${bili.oddmm} eq '0'">否</option>
+                                            <option value="1" th:selected="${bili.oddmm} eq '1'">是</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <label>是否在收藏类监控中自动下载弹幕(需要打开弹幕下载)</label>
+                                        <label>收藏监控自动弹幕(需开启弹幕下载)</label>
                                         <select class="collectdmm form-control" name="collectdmm">
-                                            <option value="0"  th:selected="${bili.collectdmm} eq '0'">否</option>
-                                            <option value="1"  th:selected="${bili.collectdmm} eq '1'">是</option>
+                                            <option value="0" th:selected="${bili.collectdmm} eq '0'">否</option>
+                                            <option value="1" th:selected="${bili.collectdmm} eq '1'">是</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <label>多CDN排序(upos>cn>mcdn>other)</label>
+                                        <label>多CDN排序(upos&gt;cn&gt;mcdn&gt;other)</label>
                                         <select class="cdnsort form-control" name="cdnsort">
-                                            <option value="0"  th:selected="${bili.cdnsort} eq '0'">否</option>
-                                            <option value="1"  th:selected="${bili.cdnsort} eq '1'">是</option>
+                                            <option value="0" th:selected="${bili.cdnsort} eq '0'">否</option>
+                                            <option value="1" th:selected="${bili.cdnsort} eq '1'">是</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <button class="btn btn-primary saveBiliConfig" type="button">保存</button>
+                                        <button class="btn btn-primary saveBiliConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
                                     </div>
                                 </form>
-
                             </div>
                         </div>
                     </div>
-                    
-                    
+
+                    <!-- 抖音/快手/红书/微博 Cookie -->
                     <div class="col-md-6">
                         <div class="card">
-                            <div class="card-header"><h4>代理配置<font style="font-size: 12px">(仅在yt-dlp调用时使用)</font></h4></div>
+                            <div class="card-header"><h4>抖音/快手配置 <i class="mdi mdi-help-circle help-icon" onclick="layer.open({type:1,title:'提示',area:['auto','auto'],content:'<div style=&quot;padding:10px;&quot;><a href=&quot;https://cookie-editor.com/&quot;>使用Cookie-Editor导出Header String</a><br/>也可以在抖音主页 F12 网络请求中 过滤get/user 请求 找到cookie 进行复制</div>'})"></i></h4></div>
                             <div class="card-body">
-
-                                <form action="#" method="post" onsubmit="return false;">
-                                    <div class="form-group">
-                                        <label>代理类型</label>
-                                        <input type="type" name="agenttype"  autocomplete="off" class="form-control agenttype" th:value="${config.agenttype}"   placeholder="http/https/socks5">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>代理地址</label>
-                                        <input type="type" name="agentaddress"  autocomplete="off" class="form-control agentaddress" th:value="${config.agentaddress}"   placeholder="127.0.0.1">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>代理端口</label>
-                                        <input type="type" name="agentport"  autocomplete="off" class="form-control agentport" th:value="${config.agentport}"   placeholder="16666">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>账号及密码</label>
-                                        <input type="type" name="agentaccpass"  autocomplete="off" class="form-control agentaccpass" th:value="${config.agentaccpass}"   placeholder="username:pass">
-                                    </div>
-                                    <div class="form-group">
-                                        <button class="btn btn-primary saveAgentConfig" type="button">保存</button>
-                                    </div>
-                                </form>
-
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header"><h4>抖音/快手配置 <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.open({type:1,title:'提示',area:['auto','auto'],content:'<div style=&quot;padding:10px;&quot;><a href=&quot;https://cookie-editor.com/&quot;>使用Cookie-Editor导出Header String</a><br/>也可以在抖音主页 F12 网络请求中 过滤get/user 请求 找到cookie 进行复制</div>'})"></i></h4></div>
-                            <div class="card-body">
-
                                 <form action="#" method="post" onsubmit="return false;">
                                     <input type="hidden" class="tiktok" th:value="${tiktok.id}" />
                                     <div class="form-group">
                                         <label>抖音Cookie(使用抖音必填)</label>
-                                        <input type="text" name="tiktokcookies"  autocomplete="off" class="form-control tiktokcookies" th:value="${tiktok.cookies}">
+                                        <input type="text" name="tiktokcookies" autocomplete="off" class="form-control tiktokcookies" th:value="${tiktok.cookies}">
                                     </div>
                                     <div class="form-group">
-                                        <button class="btn btn-primary saveTikTokConfig" type="button">保存</button>
+                                        <button class="btn btn-primary saveTikTokConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
                                     </div>
                                 </form>
-                                <div class="col-md-6" style="padding-left: 0">
-                                <form action="#" method="post" onsubmit="return false;">
-                                    <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
-                                    <div class="form-group">
-                                        <label>快手Cookie(使用快手必填)</label>
-                                        <input type="text" name="kuaishouCookie"  autocomplete="off" class="form-control kuaishouCookie" th:value="${cookies.kuaishouCookie}">
+                                <div style="display: flex; flex-wrap: wrap; margin: 0 -5px;">
+                                    <div style="flex: 0 0 50%; max-width: 50%; padding: 0 5px; box-sizing: border-box;">
+                                        <form action="#" method="post" onsubmit="return false;">
+                                            <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
+                                            <div class="form-group">
+                                                <label>快手Cookie</label>
+                                                <input type="text" name="kuaishouCookie" autocomplete="off" class="form-control kuaishouCookie" th:value="${cookies.kuaishouCookie}">
+                                            </div>
+                                        </form>
                                     </div>
-                                </form>
-                                </div>
-                                 <div class="col-md-6" style="padding-left: 0">
-                                <form action="#" method="post" onsubmit="return false;">
-                                    <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
-                                    <div class="form-group">
-                                        <label>红书cookie()</label>
-                                        <input type="text" name="rednotecookie"  autocomplete="off" class="form-control rednotecookie" th:value="${cookies.rednotecookie}">
+                                    <div style="flex: 0 0 50%; max-width: 50%; padding: 0 5px; box-sizing: border-box;">
+                                        <form action="#" method="post" onsubmit="return false;">
+                                            <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
+                                            <div class="form-group">
+                                                <label>红书Cookie</label>
+                                                <input type="text" name="rednotecookie" autocomplete="off" class="form-control rednotecookie" th:value="${cookies.rednotecookie}">
+                                            </div>
+                                        </form>
                                     </div>
-                                </form>
-                                </div>
-                                <div class="col-md-6" style="padding-left: 0">
-                                <form action="#" method="post" onsubmit="return false;">
-                                    <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
-                                    <div class="form-group">
-                                        <label>微博Cookie(使用微博必填)</label>
-                                        <input type="text" name="weibocookie"  autocomplete="off" class="form-control weibocookie" th:value="${cookies.weibocookie}">
+                                    <div style="flex: 0 0 50%; max-width: 50%; padding: 0 5px; box-sizing: border-box;">
+                                        <form action="#" method="post" onsubmit="return false;">
+                                            <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
+                                            <div class="form-group">
+                                                <label>微博Cookie</label>
+                                                <input type="text" name="weibocookie" autocomplete="off" class="form-control weibocookie" th:value="${cookies.weibocookie}">
+                                            </div>
+                                        </form>
                                     </div>
-                                   
-                                </form>
-                                </div>
-								<div class="col-md-6" style="padding-left: 0">
-                                <form action="#" method="post" onsubmit="return false;">
-                                    <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
-                                    <div class="form-group">
-                                        <label>CookieCloud 端对端加密密码 <i class="mdi mdi-help" style="cursor: pointer; font-size: 12px;" onclick="layer.open({type:1,title:'提示',area:['auto','auto'],content:'<div style=&quot;padding:30px;&quot;>cookiecloud 中选择上传到服务器<br/>地址填写:http://ip:port/api/cookieCloud<br/>请求Header 填写 application-source:xxxx <br>其中xxxx请使用加密密码和你的用户KEY · UUID拼接streamvalute <br/>如passuuidstreamvalute 然后使用md5加密 得到<br>本应用只接受处理域名如下<br>weibo.com/xiaohongshu.com/douyin.com/kuaishou.com<br/>bili推荐扫码</div>'})"></i></label>
-                                        <input type="text" name="cookiecloud"  autocomplete="off" class="form-control cookiecloud" th:value="${cookies.cookiecloud}">
+                                    <div style="flex: 0 0 50%; max-width: 50%; padding: 0 5px; box-sizing: border-box;">
+                                        <form action="#" method="post" onsubmit="return false;">
+                                            <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
+                                            <div class="form-group">
+                                                <label>CookieCloud密码 <i class="mdi mdi-help-circle help-icon" onclick="layer.open({type:1,title:'提示',area:['auto','auto'],content:'<div style=&quot;padding:30px;&quot;>cookiecloud 中选择上传到服务器<br/>地址填写:http://ip:port/api/cookieCloud<br/>请求Header 填写 application-source:xxxx <br>其中xxxx请使用加密密码和你的用户KEY · UUID拼接streamvalute <br/>如passuuidstreamvalute 然后使用md5加密 得到<br>本应用只接受处理域名如下<br>weibo.com/xiaohongshu.com/douyin.com/kuaishou.com<br/>bili推荐扫码</div>'})"></i></label>
+                                                <input type="text" name="cookiecloud" autocomplete="off" class="form-control cookiecloud" th:value="${cookies.cookiecloud}">
+                                            </div>
+                                        </form>
                                     </div>
-                                </form>
                                 </div>
                                 <div class="form-group">
-                                        <button class="btn btn-primary saveCookieConfig" type="button">保存</button>
+                                    <button class="btn btn-primary saveCookieConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    
-                    
-                    
-                   <div class="col-md-6">
+
+                    <!-- yt-dlp Cookie管理 -->
+                    <div class="col-md-6">
                         <div class="card">
-                            <div class="card-header"><h4 style="margin: 0;">yt-dlp Cookie管理&nbsp;&nbsp;<font style="font-size: 12px"><a href="https://cookie-editor.com/">测试时使用Cookie-Editor</a></font><font style="font-size: 12px;margin-left: 5px">(bili/douyin/kuaishou 不使用此处cookie,这三个平台不通过yt-dlp)</font></h4></div>
-                            <div class="card-body" style="padding: 10px;">
+                            <div class="card-header"><h4>yt-dlp Cookie管理</h4></div>
+                            <div class="card-body">
                                 <form action="#" method="post" onsubmit="return false;">
-                                    <div class="form-group" style="margin-bottom: 8px;">
-                                        <label style="margin-bottom: 2px;">Cookie状态</label>
-                                        <div id="cookie-status" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 2px; font-size: 12px;"></div>
-                                        <button type="button" class="btn btn-info btn-sm" onclick="checkCookies()" style="padding: 2px 8px; margin-top: 2px;">刷新状态</button>
+                                    <div class="form-group">
+                                        <label>Cookie状态</label>
+                                        <div id="cookie-status" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; font-size: 12px;"></div>
+                                        <button type="button" class="btn btn-info btn-sm" onclick="checkCookies()"><i class="mdi mdi-refresh" style="margin-right: 2px;"></i>刷新状态</button>
                                     </div>
                                     <div style="display: flex; gap: 8px; margin-bottom: 8px;">
                                         <div style="flex: 1;">
-                                            <label style="margin-bottom: 2px;">检测新平台</label>
+                                            <label>检测新平台</label>
                                             <div class="input-group">
-                                                <input type="text" class="form-control" id="platformUrl" placeholder="输入平台URL" style="height: 30px; padding: 4px 8px;">
+                                                <input type="text" class="form-control" id="platformUrl" placeholder="输入平台URL">
                                                 <div class="input-group-append">
-                                                    <button class="btn btn-info" type="button" onclick="detectPlatform()" style="height: 30px; padding: 4px 8px;">检测</button>
+                                                    <button class="btn btn-info btn-sm" type="button" onclick="detectPlatform()">检测</button>
                                                 </div>
                                             </div>
                                         </div>
                                         <div style="flex: 1;">
-                                            <label style="margin-bottom: 2px;">导入Cookie</label>
-                                            <select class="form-control" id="cookiePlatform" style="height: 30px; padding: 4px 8px;">
+                                            <label>导入Cookie</label>
+                                            <select class="form-control" id="cookiePlatform">
                                                 <option value="youtube">YouTube</option>
                                                 <option value="twitter">Twitter</option>
                                             </select>
                                         </div>
                                     </div>
-                                    <div class="form-group" style="margin-bottom: 8px;">
-                                        <textarea class="form-control" id="cookieContent" rows="2" placeholder="请输入Netscape格式的Cookie内容,建议使用浏览器隐私模式获取的cookie,不然当你再去浏览对应平台时cookie会异常" style="padding: 4px 8px;"></textarea>
-                                        <button type="button" class="btn btn-primary" onclick="writeCookies()" style="padding: 4px 8px; margin-top: 4px;">保存</button>
+                                    <div class="form-group">
+                                        <textarea class="form-control" id="cookieContent" rows="2" placeholder="请输入Netscape格式的Cookie内容,建议使用浏览器隐私模式获取的cookie"></textarea>
+                                        <button type="button" class="btn btn-primary btn-sm" onclick="writeCookies()" style="margin-top: 4px;"><i class="mdi mdi-content-save-outline" style="margin-right: 2px;"></i>保存</button>
                                     </div>
                                 </form>
+                                <div style="font-size: 11px; color: #8c8c8c; margin-top: 4px;">bili/douyin/kuaishou 不使用此处cookie,这三个平台不通过yt-dlp</div>
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- ==================== 网络与通知 ==================== -->
+                <div class="row">
+                    <div class="section-title"><div class="section-title-inner"><i class="mdi mdi-web"></i>网络与通知</div></div>
+
+                    <!-- 代理配置 -->
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header"><h4>代理配置</h4></div>
+                            <div class="card-body">
+                                <form action="#" method="post" onsubmit="return false;">
+                                    <div class="form-group">
+                                        <label>代理类型</label>
+                                        <input type="type" name="agenttype" autocomplete="off" class="form-control agenttype" th:value="${config.agenttype}" placeholder="http/https/socks5">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>代理地址</label>
+                                        <input type="type" name="agentaddress" autocomplete="off" class="form-control agentaddress" th:value="${config.agentaddress}" placeholder="127.0.0.1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>代理端口</label>
+                                        <input type="type" name="agentport" autocomplete="off" class="form-control agentport" th:value="${config.agentport}" placeholder="16666">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>账号及密码</label>
+                                        <input type="type" name="agentaccpass" autocomplete="off" class="form-control agentaccpass" th:value="${config.agentaccpass}" placeholder="username:pass">
+                                    </div>
+                                    <div class="form-group">
+                                        <button class="btn btn-primary saveAgentConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
+                                    </div>
+                                </form>
+                                <div style="font-size: 11px; color: #8c8c8c; margin-top: 2px;">仅在yt-dlp调用时使用</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- WebHook通知 -->
                     <div class="col-md-6">
                         <div class="card">
                             <div class="card-header"><h4>WebHook通知</h4></div>
@@ -422,24 +443,22 @@
                                         <label>企业微信WebHook Key</label>
                                         <input type="text" class="form-control" id="qywxKey">
                                     </div>
-                      				 <div class="form-group sct-config" style="display:none;">
+                                    <div class="form-group sct-config" style="display:none;">
                                         <label>Server酱 Key</label>
-                                        <input type="text" class="form-control" id="sctkey" >
+                                        <input type="text" class="form-control" id="sctkey">
                                     </div>
                                     <div class="form-group feishu-config" style="display:none;">
                                         <label>飞书WebHook Key</label>
                                         <input type="text" class="form-control" id="feishuKey">
                                     </div>
-                      
-                                    <button type="button" class="btn btn-primary" onclick="saveNotifyConfig()">保存配置</button>
-                                    <div class="form-group" >
-                                    	<br/>该功能正在逐步适配中 目前已经支持单链接提交下载完成之后的推送通知<br/>
-                                    	目前仅测试了企业微信WebHook/飞书 群机器人 其他为测试<br/>
-                                    	后续会添加收藏监控变动情况 cookie存活情况等<br/>
-                                    	本处通知暂时不考虑aria2异步下载器中是否下载成功<br/>
-                                    	本处通知优先适配HTTP下载的通知<br/>
+                                    <div class="form-group">
+                                        <button type="button" class="btn btn-primary" onclick="saveNotifyConfig()"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存配置</button>
                                     </div>
                                 </form>
+                                <div style="font-size: 11px; color: #8c8c8c; line-height: 1.6; margin-top: 6px;">
+                                    目前已支持单链接下载完成后的推送通知(企业微信/飞书已测试)<br/>
+                                    后续将适配收藏监控变动、Cookie存活情况等
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -480,16 +499,22 @@
         var hiddenPlatformsValue = $('#hiddenplatforms').val() || '';
         var hiddenPlatformsArray = hiddenPlatformsValue ? hiddenPlatformsValue.split(',') : [];
         
-        // 根据保存的值设置复选框状态
+        // 根据保存的值设置复选框状态和标签样式
         $('.hiddenPlatformCheckbox').each(function() {
             var checkboxValue = $(this).val();
             if (hiddenPlatformsArray.indexOf(checkboxValue) !== -1) {
                 $(this).prop('checked', true);
+                $(this).closest('.platform-tag').addClass('checked');
             }
         });
         
-        // 监听复选框变化，更新隐藏字段
+        // 监听复选框变化，更新隐藏字段和标签样式
         $('.hiddenPlatformCheckbox').change(function() {
+            if ($(this).prop('checked')) {
+                $(this).closest('.platform-tag').addClass('checked');
+            } else {
+                $(this).closest('.platform-tag').removeClass('checked');
+            }
             updateHiddenPlatformsValue();
         });
     }
