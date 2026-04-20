@@ -68,14 +68,25 @@
 			"style": {
 				"navigationBarTitleText": ""
 			}
+		},
+		{
+			"path": "pages/admin/graphicData",
+			"style": {
+				"navigationBarTitleText": ""
+			}
+		},
+		{
+			"path": "pages/admin/directData",
+			"style": {
+				"navigationBarTitleText": ""
+			}
 		}
     ],
 	"tabBar": {
-		"color": "#333333",
-		"selectedColor": "#00aaff",
+		"color": "#9ca3af",
+		"selectedColor": "#2563eb",
 		"borderStyle": "white",
-		// "navigationBarTextStyle":"write",
-		"backgroundColor": "#f3f3f3",
+		"backgroundColor": "#ffffff",
 		"list": [{
 				"pagePath": "pages/index/index",
 				"iconPath": "static/icon/index.png",
@@ -89,25 +100,18 @@
 				"text": "列表"
 			},
 			{
-				"pagePath": "pages/video/fallsVideo",
-				"iconPath": "/static/icon/xiuxiu.png",
-				"selectedIconPath": "static/icon/xiuxiu.png",
-				"text": "咻咻"
-			},
-			{
 				"pagePath": "pages/admin/admin",
 				"iconPath": "static/icon/admin.png",
 				"selectedIconPath": "static/icon/admin.png",
 				"text": "管理"
 			}
-			
 		]
 	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "uni-app",
-		"navigationBarBackgroundColor": "#F8F8F8",
-		"backgroundColor": "#F8F8F8"
+		"navigationBarTitleText": "StreamVault",
+		"navigationBarBackgroundColor": "#ffffff",
+		"backgroundColor": "#f6f7f8"
 	},
 	"uniIdRouter": {}
 }
