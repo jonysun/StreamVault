@@ -400,9 +400,11 @@
 					normalizedPath = '/' + normalizedPath;
 				}
 				normalizedPath = normalizedPath.replace(/\/+/g, '/');
+				// 对路径段进行URL编码，解决中文路径在真机请求中被后端拒绝的问题
+				const encodedPath = normalizedPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
 				const baseUrl = this.serveraddr + ':' + this.serverport; 
 				const tokenParam = 'apptoken=' + this.servertoken;
-				return `${baseUrl}${normalizedPath}?${tokenParam}`;
+				return `${baseUrl}${encodedPath}?${tokenParam}`;
 			},
 			
 			goBack() {

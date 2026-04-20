@@ -5,15 +5,9 @@
 			<video 
 				:src="encodeURI(videoInfo.videounrealaddr)" 
 				class="video-player"
-				:controls="true"
+				controls
 				:show-center-play-btn="true"
 				:enable-progress-gesture="true"
-				:show-fullscreen-btn="true"
-				:show-play-btn="true"
-				:show-progress="true"
-				:autoplay="true"
-				:poster="videoInfo.videocover"
-				object-fit="contain"
 				@error="handleVideoError"
 			></video>
 		</view>
@@ -23,20 +17,33 @@
 			<view class="info-header">
 				<view class="title-section">
 					<text class="video-title">{{videoInfo.videoname}}</text>
-					<view class="video-stats">
-						<text class="upload-time">{{formatTime(videoInfo.createTime)}}</text>
-					</view>
+				</view>
+				<view class="video-stats">
+					<text class="upload-time">{{formatTime(videoInfo.createTime)}}</text>
 				</view>
 			</view>
 
 			<!-- 操作栏 -->
+			<view class="action-bar">
+				<view class="action-item" @tap="copyVideoLink">
+					<uni-icons type="link" size="20" color="#666"></uni-icons>
+					<text class="action-text">复制链接</text>
+				</view>
+				<button class="action-item share-btn" open-type="share">
+					<uni-icons type="redo" size="20" color="#666"></uni-icons>
+					<text class="action-text">分享</text>
+				</button>
+			</view>
 
-
-			<!-- 操作栏 -->
-			 
 			<!-- 视频描述 -->
 			<view class="video-desc" v-if="videoInfo.videodesc">
 				<text class="desc-text">{{videoInfo.videodesc}}</text>
+			</view>
+
+			<!-- 平台和标签 -->
+			<view class="tags-row" v-if="videoInfo.videoplatform || videoInfo.videotag">
+				<view class="tag platform" v-if="videoInfo.videoplatform">{{videoInfo.videoplatform}}</view>
+				<view class="tag videotype" v-if="videoInfo.videotag">{{videoInfo.videotag}}</view>
 			</view>
 		</view>
 	</view>
@@ -47,11 +54,10 @@
 		data() {
 			return {
 				videoInfo: {},
-				isShare: false  // 是否是分享进入
+				isShare: false
 			}
 		},
 		onLoad(options) {
-			// 处理分享进入的情况
 			if (options.share === 'true') {
 				this.isShare = true;
 				this.videoInfo = {
@@ -61,48 +67,45 @@
 					createTime: decodeURIComponent(options.time || '')
 				};
 			} else if (options.videoInfo) {
-				// 正常进入的情况
 				try {
 					this.videoInfo = JSON.parse(decodeURIComponent(options.videoInfo));
 				} catch (e) {
-					console.error('解析视频信息失败:', e);
-					uni.showToast({
-						title: '视频信息加载失败',
-						icon: 'none'
-					});
+					uni.showToast({ title: '视频信息加载失败', icon: 'none' });
 				}
 			}
 		},
-		// 分享配置
 		onShareAppMessage(res) {
-			const shareInfo = {
+			return {
 				title: this.videoInfo.videoname,
 				path: `/pages/video/videoPlay?share=true&url=${encodeURIComponent(this.videoInfo.videounrealaddr)}&title=${encodeURIComponent(this.videoInfo.videoname)}&desc=${encodeURIComponent(this.videoInfo.videodesc)}&time=${encodeURIComponent(this.videoInfo.createTime)}`,
 				imageUrl: this.videoInfo.videocover
 			};
-			return shareInfo;
 		},
-		// 分享到朋友圈
 		onShareTimeline() {
-			const shareInfo = {
+			return {
 				title: this.videoInfo.videoname,
 				query: `share=true&url=${encodeURIComponent(this.videoInfo.videounrealaddr)}&title=${encodeURIComponent(this.videoInfo.videoname)}&desc=${encodeURIComponent(this.videoInfo.videodesc)}&time=${encodeURIComponent(this.videoInfo.createTime)}`,
 				imageUrl: this.videoInfo.videocover
 			};
-			return shareInfo;
 		},
 		methods: {
 			handleVideoError(err) {
-				console.error('视频播放错误:', err);
-				// uni.showToast({
-				// 	title: '视频加载失败',
-				// 	icon: 'none'
-				// });
+				uni.showToast({ title: '视频加载失败', icon: 'none' });
 			},
 			formatTime(timestamp) {
 				if (!timestamp) return '';
 				const date = new Date(timestamp);
 				return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+			},
+			copyVideoLink() {
+				if (this.videoInfo.videounrealaddr) {
+					uni.setClipboardData({
+						data: this.videoInfo.videounrealaddr,
+						success: () => {
+							uni.showToast({ title: '链接已复制', icon: 'success' });
+						}
+					});
+				}
 			}
 		}
 	}
@@ -116,7 +119,7 @@
 
 .video-section {
 	width: 100%;
-	height: 56.25vw; /* 16:9 比例 */
+	height: 56.25vw;
 	background: #000;
 	position: relative;
 }
@@ -128,7 +131,7 @@
 
 .video-info {
 	background: #fff;
-	padding: 24rpx;
+	padding: 28rpx;
 }
 
 .info-header {
@@ -136,10 +139,11 @@
 }
 
 .video-title {
-	font-size: 32rpx;
-	font-weight: 500;
-	color: #333;
-	line-height: 1.4;
+	font-size: 34rpx;
+	font-weight: 600;
+	color: #1a1a1a;
+	line-height: 1.5;
+	display: block;
 	margin-bottom: 12rpx;
 }
 
@@ -156,10 +160,24 @@
 .action-bar {
 	display: flex;
 	justify-content: flex-end;
-	padding: 16rpx 0;
-	border-top: 1px solid #f5f5f5;
-	border-bottom: 1px solid #f5f5f5;
+	padding: 20rpx 0;
+	border-top: 1rpx solid #f5f5f5;
+	border-bottom: 1rpx solid #f5f5f5;
+	gap: 32rpx;
 }
+
+.action-item {
+	display: flex;
+	align-items: center;
+	gap: 8rpx;
+	background: none;
+	border: none;
+	padding: 8rpx 0;
+	margin: 0;
+	line-height: 1;
+}
+
+.action-item::after { border: none; }
 
 .share-btn {
 	display: flex;
@@ -167,14 +185,14 @@
 	gap: 8rpx;
 	background: none;
 	border: none;
-	padding: 12rpx 24rpx;
+	padding: 8rpx 0;
 	margin: 0;
 	line-height: 1;
+	font-size: 24rpx;
+	color: #666;
 }
 
-.share-btn::after {
-	border: none;
-}
+.share-btn::after { border: none; }
 
 .action-text {
 	font-size: 24rpx;
@@ -187,7 +205,23 @@
 
 .desc-text {
 	font-size: 28rpx;
-	color: #666;
-	line-height: 1.6;
+	color: #555;
+	line-height: 1.8;
 }
+
+.tags-row {
+	display: flex;
+	gap: 12rpx;
+	padding: 16rpx 0 0;
+}
+
+.tag {
+	padding: 6rpx 16rpx;
+	border-radius: 8rpx;
+	font-size: 22rpx;
+	font-weight: 500;
+}
+
+.tag.platform { background: #dbeafe; color: #2563eb; }
+.tag.videotype { background: #fef3c7; color: #d97706; }
 </style>

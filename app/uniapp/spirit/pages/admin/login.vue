@@ -1,14 +1,23 @@
 <template>
 	<view class="container">
 		<view class="login-box">
+			<!-- 顶部装饰 -->
+			<view class="deco-circle c1"></view>
+			<view class="deco-circle c2"></view>
+
 			<view class="header">
-				<view class="logo-emoji">👤</view>
+				<view class="logo-wrap">
+					<text class="logo-emoji">🔐</text>
+				</view>
 				<text class="title">管理员登录</text>
+				<text class="subtitle">StreamVault 管理后台</text>
 			</view>
 			
 			<view class="form">
 				<view class="input-group">
-					<text class="icon">👤</text>
+					<view class="input-icon">
+						<uni-icons type="person" size="20" color="#3b82f6"></uni-icons>
+					</view>
 					<input 
 						class="input" 
 						type="text" 
@@ -19,7 +28,9 @@
 				</view>
 				
 				<view class="input-group">
-					<text class="icon">🔒</text>
+					<view class="input-icon">
+						<uni-icons type="locked" size="20" color="#3b82f6"></uni-icons>
+					</view>
 					<input 
 						class="input" 
 						type="password" 
@@ -29,18 +40,17 @@
 					/>
 				</view>
 
-				<!-- 记住密码复选框 -->
 				<view class="remember-group">
 					<checkbox-group @change="onRememberChange">
 						<label class="remember-label">
-							<checkbox value="remember" :checked="rememberMe" />
+							<checkbox value="remember" :checked="rememberMe" color="#2563eb" />
 							<text class="remember-text">记住密码</text>
 						</label>
 					</checkbox-group>
 				</view>
 				
 				<button class="login-btn" @tap="handleLogin" :disabled="!username || !password">
-					登录
+					登 录
 				</button>
 			</view>
 		</view>
@@ -65,62 +75,39 @@
 					if (savedUsername) this.username = savedUsername;
 					if (savedPassword) this.password = savedPassword;
 					this.rememberMe = true;
-				} else {
 				}
-			} catch (e) {
-			}
+			} catch (e) {}
 		},
-
 		methods: {
 			onRememberChange(e) {
 				const values = e?.detail?.value || [];
 				this.rememberMe = values.includes('remember');
-				console.log('记住密码状态:', this.rememberMe);
 			},
-
 			handleLogin() {
 				if (!this.username || !this.password) {
-					uni.showToast({
-						title: '请输入账号和密码',
-						icon: 'none'
-					});
+					uni.showToast({ title: '请输入账号和密码', icon: 'none' });
 					return;
 				}
-
-				console.log('开始登录，用户名:', this.username);
 				
 				const serveraddr = uni.getStorageSync('serveraddr');
 				const serverport = uni.getStorageSync('serverport');
 				
 				if (!serveraddr || !serverport) {
-					uni.showToast({
-						title: '请先设置服务器地址',
-						icon: 'none'
-					});
+					uni.showToast({ title: '请先设置服务器地址', icon: 'none' });
 					setTimeout(() => {
-						uni.switchTab({
-							url: '../index/index'
-						});
+						uni.switchTab({ url: '../index/index' });
 					}, 1500);
 					return;
 				}
 				
-				uni.showLoading({
-					title: '登录中...'
-				});
+				uni.showLoading({ title: '登录中...' });
 				uni.request({
 					url: `${serveraddr}:${serverport}/admin/api/login`,
 					method: 'POST',
-					header: {
-						'content-type': 'application/x-www-form-urlencoded'
-					},
-					data: {
-						username: this.username,
-						password: this.password
-					},
+					header: { 'content-type': 'application/x-www-form-urlencoded' },
+					data: { username: this.username, password: this.password },
 					success: (res) => {
-						uni.hideLoading()
-						console.log(res);
+						uni.hideLoading();
 						if (res.data.resCode === '000001') {
 							const cookies = res.header['Set-Cookie'] || res.header['set-cookie'];
 							if (cookies) {
@@ -138,35 +125,19 @@
 									uni.removeStorageSync('adminUsername');
 									uni.removeStorageSync('adminPassword');
 								}
-							} catch (e) {
-								console.log('保存本地存储失败', e);
-							}
+							} catch (e) {}
 							
-							uni.showToast({
-								title: '登录成功',
-								icon: 'success'
-							});
+							uni.showToast({ title: '登录成功', icon: 'success' });
 							setTimeout(() => {
-								uni.switchTab({
-									url: '/pages/admin/admin'
-								});
+								uni.switchTab({ url: '/pages/admin/admin' });
 							}, 1500);
 						} else {
-							console.log("else")
-							uni.showToast({
-								title: res.data.message || '登录失败',
-								icon: 'none'
-							});
+							uni.showToast({ title: res.data.message || '登录失败', icon: 'none' });
 						}
 					},
 					fail: () => {
-						uni.showToast({
-							title: '网络错误',
-							icon: 'none'
-						});
-					},
-					complete: () => {
 						uni.hideLoading();
+						uni.showToast({ title: '网络错误', icon: 'none' });
 					}
 				});
 			}
@@ -177,21 +148,39 @@
 <style>
 .container {
 	min-height: 100vh;
-	background: #f6f7f8;
+	background: linear-gradient(160deg, #2563eb, #3b82f6, #60a5fa);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 40rpx;
-	position: relative;
-	top: -10vh;
+	padding: 48rpx;
 }
 
 .login-box {
 	width: 100%;
 	background: #fff;
-	border-radius: 24rpx;
-	padding: 48rpx 40rpx;
-	box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.08);
+	border-radius: 32rpx;
+	padding: 56rpx 40rpx 48rpx;
+	box-shadow: 0 16rpx 48rpx rgba(0, 0, 0, 0.15);
+	position: relative;
+	overflow: hidden;
+}
+
+.deco-circle {
+	position: absolute;
+	border-radius: 50%;
+	opacity: 0.08;
+}
+
+.c1 {
+	width: 240rpx; height: 240rpx;
+	background: #2563eb;
+	top: -80rpx; right: -80rpx;
+}
+
+.c2 {
+	width: 160rpx; height: 160rpx;
+	background: #3b82f6;
+	bottom: -40rpx; left: -40rpx;
 }
 
 .header {
@@ -201,50 +190,62 @@
 	margin-bottom: 48rpx;
 }
 
-.logo-emoji {
-	width: 160rpx;
-	height: 160rpx;
-	border-radius: 80rpx;
-	margin-bottom: 24rpx;
-	background: #f5f5f5;
+.logo-wrap {
+	width: 120rpx;
+	height: 120rpx;
+	border-radius: 32rpx;
+	background: linear-gradient(135deg, #2563eb, #3b82f6);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: 100rpx;
+	margin-bottom: 24rpx;
+	box-shadow: 0 8rpx 24rpx rgba(37, 99, 235, 0.3);
+}
+
+.logo-emoji {
+	font-size: 60rpx;
 }
 
 .title {
-	font-size: 36rpx;
-	font-weight: 600;
-	color: #333;
+	font-size: 38rpx;
+	font-weight: 700;
+	color: #1a1a1a;
+	margin-bottom: 8rpx;
+}
+
+.subtitle {
+	font-size: 24rpx;
+	color: #999;
 }
 
 .form {
 	display: flex;
 	flex-direction: column;
-	gap: 32rpx;
+	gap: 24rpx;
 }
 
 .input-group {
 	display: flex;
 	align-items: center;
-	background: #f8f8f8;
-	border-radius: 12rpx;
-	padding: 24rpx;
+	background: #f8f9fb;
+	border-radius: 16rpx;
+	padding: 0 24rpx;
+	height: 96rpx;
 	gap: 16rpx;
-	transition: all 0.3s ease;
 	border: 2rpx solid transparent;
+	transition: all 0.3s ease;
 }
 
 .input-group:focus-within {
 	background: #fff;
-	border-color: #0284da;
-	box-shadow: 0 0 0 4rpx rgba(2, 132, 218, 0.1);
+	border-color: #2563eb;
+	box-shadow: 0 0 0 4rpx rgba(37, 99, 235, 0.1);
 }
 
-.icon {
-	font-size: 32rpx;
-	color: #999;
+.input-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .input {
@@ -254,49 +255,49 @@
 	color: #333;
 }
 
-.placeholder {
-	color: #999;
+.placeholder { color: #bbb; }
+
+.remember-group {
+	display: flex;
+	align-items: center;
+	padding: 0 8rpx;
+}
+
+.remember-label {
+	display: flex;
+	align-items: center;
+	gap: 10rpx;
+}
+
+.remember-text {
+	font-size: 26rpx;
+	color: #666;
 }
 
 .login-btn {
-	background: #0284da;
-	height: 88rpx;
-	border-radius: 44rpx;
+	background: linear-gradient(135deg, #2563eb, #3b82f6);
+	height: 96rpx;
+	border-radius: 48rpx;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	margin-top: 48rpx;
-	box-shadow: 0 4rpx 12rpx rgba(2, 132, 218, 0.2);
+	margin-top: 16rpx;
+	box-shadow: 0 8rpx 24rpx rgba(37, 99, 235, 0.3);
 	transition: all 0.3s ease;
 	color: #fff;
 	font-size: 32rpx;
-	font-weight: 500;
+	font-weight: 600;
+	letter-spacing: 4rpx;
 }
 
 .login-btn:active {
 	transform: translateY(2rpx);
-	box-shadow: 0 2rpx 6rpx rgba(2, 132, 218, 0.15);
+	box-shadow: 0 4rpx 12rpx rgba(37, 99, 235, 0.2);
 }
 
 .login-btn[disabled] {
-    background: #a8d4e8;
-    box-shadow: none;
-    transform: none;
-}
-
-/* 记住密码样式 */
-.remember-group {
-    display: flex;
-    align-items: center;
-    padding: 0 8rpx;
-}
-.remember-label {
-    display: flex;
-    align-items: center;
-    gap: 12rpx;
-}
-.remember-text {
-    font-size: 28rpx;
-    color: #666;
+	background: #d1d5db;
+	box-shadow: none;
+	transform: none;
 }
 </style>
