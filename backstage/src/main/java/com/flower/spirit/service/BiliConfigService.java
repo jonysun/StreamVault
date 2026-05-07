@@ -128,8 +128,12 @@ public class BiliConfigService {
 	 * 判断是否需要刷新cookie 如何需要则刷新cookie
 	 */
 	public  void isNeedRefreshAndUpdate() {
+		if (Global.bilicookies == null || Global.bilicookies.trim().isEmpty()) {
+			logger.warn("[BiliCheck] skip refresh: bilicookies is null or blank");
+			return;
+		}
 		String biliJctValue = Global.bilicookies.replaceAll("(?s).*bili_jct=([^;]+).*", "$1");
-		if(biliJctValue != null) {
+		if(biliJctValue != null && !biliJctValue.equals(Global.bilicookies)) {
 			String url = "https://passport.bilibili.com/x/passport-login/web/cookie/info?=csrf"+biliJctValue;
 			String checkCookie = HttpUtil.httpGetBili(url, "UTF-8", Global.bilicookies);
 			JSONObject checkCookieObj = JSONObject.parseObject(checkCookie);
@@ -198,6 +202,8 @@ public class BiliConfigService {
 					logger.info("当前bilibili cookie无需刷新");
 				}
 			}
+		} else {
+			logger.warn("[BiliCheck] skip refresh: bili_jct not found in cookie");
 		}
 		return;
 

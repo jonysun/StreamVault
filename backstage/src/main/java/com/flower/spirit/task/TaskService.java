@@ -1,5 +1,7 @@
 package com.flower.spirit.task;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -12,6 +14,8 @@ import com.flower.spirit.service.FfmpegQueueService;
 @Configuration
 @Component
 public class TaskService {
+
+	private static final Logger logger = LoggerFactory.getLogger(TaskService.class);
 	
 	@Autowired
 	private FfmpegQueueService ffmpegQueueService;
@@ -35,8 +39,16 @@ public class TaskService {
 	
 	@Scheduled(cron = "0 0 9 * * ?")
 	public void isNeedRefreshAndUpdate() {
-		biliConfigService.isNeedRefreshAndUpdate();
-		cookiesConfigService.checkCookieStatus();
+		try {
+			biliConfigService.isNeedRefreshAndUpdate();
+		} catch (Exception e) {
+			logger.error("[TaskService] bili refresh task failed", e);
+		}
+		try {
+			cookiesConfigService.checkCookieStatus();
+		} catch (Exception e) {
+			logger.error("[TaskService] cookies check task failed", e);
+		}
 	}
 
 }
