@@ -138,6 +138,10 @@ public class CollectDataService {
 	 * @return
 	 */
 	public AjaxEntity submitCollectData(CollectDataEntity collectDataEntity, String monitor) {
+		logger.info("[CollectTask] submit start id={} name={} platform={} monitorParam={} monitoring={} originaladdress={} taskCron={} maxcur={} omaxcur={}",
+				collectDataEntity.getId(), collectDataEntity.getTaskname(), collectDataEntity.getPlatform(), monitor,
+				collectDataEntity.getMonitoring(), collectDataEntity.getOriginaladdress(), collectDataEntity.getTaskcron(),
+				collectDataEntity.getMaxcur(), collectDataEntity.getOmaxcur());
 		if (null != collectDataEntity.getPlatform() && collectDataEntity.getPlatform().equals("哔哩")) {
 			// 必须授权ck
 			if (null == Global.bilicookies || Global.bilicookies.equals("")) {
@@ -160,12 +164,14 @@ public class CollectDataService {
 		}
 		if (null != collectDataEntity.getPlatform() && collectDataEntity.getPlatform().equals("抖音")) {
 			if (null == Global.tiktokCookie || Global.tiktokCookie.equals("")) {
+				logger.error("[CollectTask] douyin cookie missing id={} name={}", collectDataEntity.getId(), collectDataEntity.getTaskname());
 				return new AjaxEntity(Global.ajax_uri_error, "此功能必须填写ck", null);
 			}
 			if (collectDataEntity.getOriginaladdress().startsWith("post")
 					|| collectDataEntity.getOriginaladdress().startsWith("like")
 					|| collectDataEntity.getOriginaladdress().startsWith("fav-")
 					|| collectDataEntity.getOriginaladdress().startsWith("recommend")) {
+				logger.info("[CollectTask] douyin route matched id={} originaladdress={}", collectDataEntity.getId(), collectDataEntity.getOriginaladdress());
 				try {
 					// 进线程前创建collectDataEntity
 					collectDataEntity.setTaskstatus("已提交待处理");
@@ -189,6 +195,7 @@ public class CollectDataService {
 				}
 
 			} else {
+				logger.warn("[CollectTask] unsupported douyin originaladdress id={} originaladdress={}", collectDataEntity.getId(), collectDataEntity.getOriginaladdress());
 				return new AjaxEntity(Global.ajax_uri_error, "请按页面要求填写地址", null);
 			}
 
@@ -401,6 +408,8 @@ public class CollectDataService {
 	}
 
 	public void createDyData(CollectDataEntity entity, String monitor) throws Exception {
+		logger.info("[CollectTask] createDyData start id={} name={} monitor={} originaladdress={}",
+				entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
 		String taskname = entity.getTaskname(); // 任务名称 作为tvshou.nfo元数据
 		// 生成tvshow.nfo元数据
 		String temporaryDirectory = FileUtil.generateDir(true, Global.platform.douyin.name(), false, null, taskname,
@@ -415,6 +424,12 @@ public class CollectDataService {
 		int graphiccount = 0;
 		logger.info("任务开始" + entity.getOriginaladdress());
 		JSONArray allDYData = this.getDYData(entity, monitor);
+		logger.info("[CollectTask] getDYData result id={} isNull={} size={}", entity.getId(), allDYData == null,
+				allDYData == null ? 0 : allDYData.size());
+		if (allDYData == null) {
+			logger.error("[CollectTask] getDYData returned null id={} name={} originaladdress={}",
+					entity.getId(), entity.getTaskname(), entity.getOriginaladdress());
+		}
 		// System.out.println(allDYData.size());
 		String risk = "0";
 		if (allDYData != null) {
@@ -467,8 +482,12 @@ public class CollectDataService {
 					videoplay = jsonArray.getString(0);
 				}
 				String desc = aweme_detail.getString("desc");
+				logger.info("[CollectTask] item start taskId={} index={} awemeId={} desc={}", entity.getId(), i,
+						awemeId, desc);
 
 				List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(awemeId);
+				logger.info("[CollectTask] item dedup taskId={} awemeId={} exists={}", entity.getId(), awemeId,
+						findByVideoid.size() > 0);
 				if (findByVideoid.size() == 0) {
 					String dyNickname = aweme_detail.getString("nickname");
 					String dyCreateTime = aweme_detail.getString("create_time");
@@ -509,6 +528,8 @@ public class CollectDataService {
 						if (downloadFileWithOkHttp.equals("1")) {
 							logger.info(aweme_detail.toJSONString());
 							risk = "1";
+							logger.error("[CollectTask] risk triggered taskId={} awemeId={} output={}", entity.getId(), awemeId,
+									downloadFileWithOkHttp);
 							break;
 						}
 					}
@@ -588,11 +609,15 @@ public class CollectDataService {
 		collectdDataDao.save(entity);
 		System.gc();
 		logger.info("任务结束" + entity.getOriginaladdress());
+		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} finalStatus={} carriedout={}",
+				entity.getId(), videoaddcount, graphiccount, totalCount, entity.getTaskstatus(), entity.getCarriedout());
 	}
 
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {
 		String taskout = Global.apppath + "lot" + System.getProperty("file.separator") + entity.getId() + "_"
 				+ entity.getTaskname() + ".json";
+		logger.info("[CollectTask] getDYData start id={} name={} originaladdress={} monitor={} tempFile={}",
+				entity.getId(), entity.getTaskname(), entity.getOriginaladdress(), monitor, taskout);
 		String sec_user_id = entity.getOriginaladdress().replaceAll("post", "").replaceAll("like", "");
 		int maxc = 80;
 
@@ -608,21 +633,28 @@ public class CollectDataService {
 		} else {
 			maxc = null != entity.getOmaxcur() ? entity.getOmaxcur() : 80;
 		}
+		logger.info("[CollectTask] getDYData resolved maxc={} existingDetailCount={}", maxc, countByDataid);
 
 		if (entity.getOriginaladdress().startsWith("post")) {
+			logger.info("[CollectTask] getDYData mode=post uid={} maxc={} out={}", sec_user_id, maxc, taskout);
 			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_post_videos", sec_user_id, null,
 					maxc, taskout);
+			logF2Result("post", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
+				logger.info("[CollectTask] getDYData parsed count={} mode=post", jsonFromFile == null ? 0 : jsonFromFile.size());
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
 		}
 		if (entity.getOriginaladdress().startsWith("like")) {
+			logger.info("[CollectTask] getDYData mode=like uid={} maxc={} out={}", sec_user_id, maxc, taskout);
 			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_like_videos", sec_user_id, null,
 					maxc, taskout);
+			logF2Result("like", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
+				logger.info("[CollectTask] getDYData parsed count={} mode=like", jsonFromFile == null ? 0 : jsonFromFile.size());
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
@@ -634,26 +666,54 @@ public class CollectDataService {
 			int endIndex = entity.getOriginaladdress().indexOf(endTag);
 			String content = entity.getOriginaladdress().substring(startIndex, endIndex).trim();
 			sec_user_id = sec_user_id.replaceAll(startTag + content + endTag, "");
+			logger.info("[CollectTask] getDYData mode=fav cid={} maxc={} out={}", content, maxc, taskout);
 			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_collects_videos", null, content,
 					maxc, taskout);
+			logF2Result("fav", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
+				logger.info("[CollectTask] getDYData parsed count={} mode=fav", jsonFromFile == null ? 0 : jsonFromFile.size());
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
 		}
 		if (entity.getOriginaladdress().startsWith("recommend")) {
 			sec_user_id = entity.getOriginaladdress().replaceAll("recommend", "");
+			logger.info("[CollectTask] getDYData mode=recommend uid={} out={}", sec_user_id, taskout);
 			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_feed_videos", sec_user_id, null,
 					maxc, taskout);
+			logF2Result("recommend", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
+				logger.info("[CollectTask] getDYData parsed count={} mode=recommend", jsonFromFile == null ? 0 : jsonFromFile.size());
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
 		}
 		// 删除文件
+		logger.error("[CollectTask] getDYData returning null id={} originaladdress={}", entity.getId(), entity.getOriginaladdress());
 		return null;
+	}
+
+	private void logF2Result(String mode, String f2cmd, String taskout) {
+		boolean success = f2cmd != null && f2cmd.contains("stream-vault-ok");
+		logger.info("[CollectTask] getDYData f2 outputLength={} containsSuccessMarker={}", f2cmd == null ? 0 : f2cmd.length(), success);
+		if (!success) {
+			logger.error("[CollectTask] getDYData f2 failed mode={} outputPreview={}", mode, previewOutput(f2cmd));
+		} else {
+			logger.info("[CollectTask] getDYData output file exists={} path={}", Files.exists(Paths.get(taskout)), taskout);
+		}
+	}
+
+	private String previewOutput(String output) {
+		if (output == null) {
+			return "null";
+		}
+		String normalized = output.replace("\r", "\\r").replace("\n", "\\n");
+		if (normalized.length() > 1000) {
+			return normalized.substring(0, 1000);
+		}
+		return normalized;
 	}
 
 	public JSONArray getAllDYData(CollectDataEntity entity) throws Exception {

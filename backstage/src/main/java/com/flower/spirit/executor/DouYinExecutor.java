@@ -9,6 +9,8 @@ import java.util.Optional;
 
 import jakarta.annotation.PostConstruct;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -34,6 +36,8 @@ import com.flower.spirit.utils.sendNotify;
  */
 @Service
 public class DouYinExecutor {
+
+	private static final Logger logger = LoggerFactory.getLogger(DouYinExecutor.class);
 	
 	@Autowired
 	private GraphicContentDao graphicContentDao;
@@ -58,6 +62,7 @@ public class DouYinExecutor {
 	 * @throws IOException 
 	 */
 	public static void ImageTextExecutor(String originaladdress,String post) throws IOException {
+		logger.info("[DouyinImageText] start originaladdress={} postId={}", originaladdress, post);
 		ProcessHistoryEntity saveProcess = staticprocessHistoryService.saveProcess(null, originaladdress, "抖音");
 		String taskout = Global.apppath + "lot" +System.getProperty("file.separator") + "imageText_"+post + ".json";
 		GraphicContentEntity graphicContentEntity = new GraphicContentEntity();
@@ -69,6 +74,11 @@ public class DouYinExecutor {
 			return;
 		}
 		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, post, "fetch_post_data", null, null, null, taskout);
+		logger.info("[DouyinImageText] fetch_post_data outputLength={} containsSuccessMarker={}",
+				f2cmd == null ? 0 : f2cmd.length(), f2cmd != null && f2cmd.contains("stream-vault-ok"));
+		if (f2cmd == null || !f2cmd.contains("stream-vault-ok")) {
+			logger.error("[DouyinImageText] fetch_post_data failed postId={} outputPreview={}", post, previewOutput(f2cmd));
+		}
 		if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 			String json = FileUtil.readJson(taskout);
 			JSONObject object = JSONObject.parseObject(json);
@@ -77,6 +87,7 @@ public class DouYinExecutor {
 			String desc = aweme_detail.getString("desc");
 			String nickname = aweme_detail.getJSONObject("author").getString("nickname");
 			JSONArray images = aweme_detail.getJSONArray("images");
+			logger.info("[DouyinImageText] parsed postId={} nickname={} imageCount={}", post, nickname, images == null ? 0 : images.size());
 			JSONArray imageList=  new JSONArray();
 			HashMap<String, String> header = new HashMap<String, String>();
 			header.put("Referer", "https://www.douyin.com/");
@@ -87,6 +98,7 @@ public class DouYinExecutor {
 			for(int i = 0;i<images.size();i++) {
 				JSONObject video = images.getJSONObject(i).getJSONObject("video");
 				if(null !=video) {
+					logger.info("[DouyinImageText] item type=video postId={} index={}", post, i);
 					//多
 					String videoplay ="";
 					JSONArray jsonArray = video.getJSONObject("play_addr").getJSONArray("url_list");
@@ -100,6 +112,7 @@ public class DouYinExecutor {
 					imageList.add(cos);
 					HttpUtil.downloadFileWithOkHttp(videoplay, filename+"-index-"+i + ".mp4", storage, header);
 				}else {
+					logger.info("[DouyinImageText] item type=image postId={} index={}", post, i);
 					//普通
 					String picaddr ="";
 					JSONArray piclist = images.getJSONObject(i).getJSONArray("url_list");
@@ -126,6 +139,7 @@ public class DouYinExecutor {
 			Files.deleteIfExists(Paths.get(taskout));
 			sendNotify.sendNotifyData(filename, originaladdress, "抖音");
 			staticprocessHistoryService.saveProcess(saveProcess.getId(), originaladdress, "抖音");
+			logger.info("[DouyinImageText] finish postId={} savedCount={}", post, imageList.size());
 		}
 
 		
@@ -135,6 +149,7 @@ public class DouYinExecutor {
 	
 	
 	public static void ImageTextExecutor(String post,String type,String patch) throws IOException {
+		logger.info("[DouyinImageText] start alt postId={} type={} patch={}", post, type, patch);
 		String taskout = Global.apppath + "lot" +System.getProperty("file.separator") + "imageText_"+post + ".json";
 		GraphicContentEntity graphicContentEntity = new GraphicContentEntity();
 		graphicContentEntity.setVideoid(post);
@@ -145,6 +160,11 @@ public class DouYinExecutor {
 			return;
 		}
 		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, post, "fetch_post_data", null, null, null, taskout);
+		logger.info("[DouyinImageText] fetch_post_data outputLength={} containsSuccessMarker={}",
+				f2cmd == null ? 0 : f2cmd.length(), f2cmd != null && f2cmd.contains("stream-vault-ok"));
+		if (f2cmd == null || !f2cmd.contains("stream-vault-ok")) {
+			logger.error("[DouyinImageText] fetch_post_data failed postId={} outputPreview={}", post, previewOutput(f2cmd));
+		}
 		if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 			String json = FileUtil.readJson(taskout);
 			JSONObject object = JSONObject.parseObject(json);
@@ -153,6 +173,7 @@ public class DouYinExecutor {
 			String desc = aweme_detail.getString("desc");
 			String nickname = aweme_detail.getJSONObject("author").getString("nickname");
 			JSONArray images = aweme_detail.getJSONArray("images");
+			logger.info("[DouyinImageText] parsed postId={} nickname={} imageCount={}", post, nickname, images == null ? 0 : images.size());
 			JSONArray imageList=  new JSONArray();
 			HashMap<String, String> header = new HashMap<String, String>();
 			header.put("Referer", "https://www.douyin.com/");
@@ -163,6 +184,7 @@ public class DouYinExecutor {
 			for(int i = 0;i<images.size();i++) {
 				JSONObject video = images.getJSONObject(i).getJSONObject("video");
 				if(null !=video) {
+					logger.info("[DouyinImageText] item type=video postId={} index={}", post, i);
 					//多
 					String videoplay ="";
 					JSONArray jsonArray = video.getJSONObject("play_addr").getJSONArray("url_list");
@@ -176,6 +198,7 @@ public class DouYinExecutor {
 					imageList.add(cos);
 					HttpUtil.downloadFileWithOkHttp(videoplay, filename+"-index-"+i + ".mp4", storage, header);
 				}else {
+					logger.info("[DouyinImageText] item type=image postId={} index={}", post, i);
 					//普通
 					String picaddr ="";
 					JSONArray piclist = images.getJSONObject(i).getJSONArray("url_list");
@@ -200,11 +223,23 @@ public class DouYinExecutor {
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
+			logger.info("[DouyinImageText] finish postId={} savedCount={}", post, imageList.size());
 		}
 
 		
 		
 		
+	}
+
+	private static String previewOutput(String output) {
+		if (output == null) {
+			return "null";
+		}
+		String normalized = output.replace("\r", "\\r").replace("\n", "\\n");
+		if (normalized.length() > 1000) {
+			return normalized.substring(0, 1000);
+		}
+		return normalized;
 	}
 
 }

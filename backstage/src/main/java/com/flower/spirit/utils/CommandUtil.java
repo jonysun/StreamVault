@@ -135,6 +135,10 @@ public class CommandUtil {
     public static String f2cmd(String cookie, String aid, String fuc, String uid, String cid, Integer maxc,
             String out) {
 
+        logger.info("[F2] start func={} aid={} uid={} cid={} maxc={} out={} cookiePresent={} cookiePreview={}",
+                fuc, aid, uid, cid, maxc, out, cookie != null && !cookie.isBlank(), maskCookie(cookie));
+        logger.info("[F2] runtime pythonPath=/opt/venv/bin/python3 scriptPath=/home/app/script/douyin.py");
+
         List<String> cmdList = new ArrayList<>();
         cmdList.add("/opt/venv/bin/python3");
         cmdList.add("/home/app/script/douyin.py");
@@ -186,6 +190,8 @@ public class CommandUtil {
                 throw new IllegalArgumentException("Unsupported function: " + fuc);
         }
 
+        logger.info("[F2] command={}", buildSafeCommandString(cmdList));
+
         return runCommandList(cmdList);
     }
     
@@ -193,6 +199,7 @@ public class CommandUtil {
         StringBuilder output = new StringBuilder();
         Process process = null;
         try {
+            logger.info("[F2] process launch");
             ProcessBuilder pb = new ProcessBuilder(cmdList);
             pb.redirectErrorStream(true);
             process = pb.start();
@@ -206,16 +213,66 @@ public class CommandUtil {
             }
 
             int exitCode = process.waitFor();
-            logger.info("命令执行完毕，退出码：" + exitCode);
+            logger.info("[F2] process finished exitCode={} outputLength={}", exitCode, output.length());
+            if (output.length() == 0) {
+                logger.warn("[F2] process returned empty output");
+            } else {
+                String preview = previewOutput(output.toString());
+                logger.info("[F2] output preview={}", preview);
+                if (exitCode != 0) {
+                    logger.error("[F2] process failed exitCode={} output={}", exitCode, preview);
+                }
+            }
 
         } catch (IOException | InterruptedException e) {
             logger.error("命令执行异常：" + e.getMessage(), e);
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
         } finally {
             if (process != null) {
                 process.destroy();
             }
         }
         return output.toString().trim();
+    }
+
+    private static String maskCookie(String cookie) {
+        if (cookie == null) {
+            return "null";
+        }
+        String trimmed = cookie.trim();
+        if (trimmed.isEmpty()) {
+            return "empty";
+        }
+        if (trimmed.length() <= 8) {
+            return trimmed;
+        }
+        if (trimmed.length() <= 16) {
+            return trimmed.substring(0, 4) + "***" + trimmed.substring(trimmed.length() - 4);
+        }
+        return trimmed.substring(0, 8) + "***" + trimmed.substring(trimmed.length() - 8);
+    }
+
+    private static String buildSafeCommandString(List<String> cmdList) {
+        List<String> safe = new ArrayList<>(cmdList);
+        for (int i = 0; i < safe.size() - 1; i++) {
+            if ("--cookie".equals(safe.get(i))) {
+                safe.set(i + 1, "***masked***");
+            }
+        }
+        return String.join(" ", safe);
+    }
+
+    private static String previewOutput(String output) {
+        if (output == null) {
+            return "null";
+        }
+        String normalized = output.replace("\r", "\\r").replace("\n", "\\n");
+        if (normalized.length() > 1000) {
+            return normalized.substring(0, 1000);
+        }
+        return normalized;
     }
 
     public static boolean deleteDirectory(String directoryPath) {

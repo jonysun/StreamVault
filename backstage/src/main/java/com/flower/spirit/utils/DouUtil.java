@@ -56,15 +56,18 @@ public class DouUtil {
 	 */
 	public static Map<String, String> downVideo(String url) {
 		try {
+			logger.info("[DouyinSingle] start rawUrl={}", url);
 			// 获取重定向后的真实URL
 			Document document = Jsoup.connect(url).userAgent(ua).get();
 			String baseUri = document.baseUri();
 			logger.info("抖音解析URL: {}", baseUri);
+			logger.info("[DouyinSingle] resolvedUrl={}", baseUri);
 			
 			// 提取视频ID
 			String videoId = extractVideoId(baseUri);
 			if (videoId == null) {
 				String noteId = extractNoteId(baseUri);
+				logger.warn("[DouyinSingle] no videoId extracted, noteId={}", noteId);
 				if(noteId!= null) {
 					DouYinExecutor.ImageTextExecutor(url,noteId);
 				}
@@ -72,6 +75,7 @@ public class DouUtil {
 			}
 			
 			logger.info("抖音视频ID: {}", videoId);
+			logger.info("[DouyinSingle] extracted videoId={}", videoId);
 			
 			// 获取视频数据
 			Map<String, String> data = getBogus(videoId);
@@ -191,10 +195,23 @@ public class DouUtil {
 	public static  Map<String, String> getBogus(String aweme_id) throws HttpException, IOException {
 		 Map<String, String> res = new HashMap<String, String>();
 		 if(null !=Global.tiktokCookie && !"".equals(Global.tiktokCookie) ) {
+			 logger.info("[DouyinSingle] fetch_video start awemeId={}", aweme_id);
 		
 			 String httpget = CommandUtil.f2cmd(Global.tiktokCookie,aweme_id,"fetch_video",null,null,null,null);
+			 logger.info("[DouyinSingle] fetch_video outputLength={}", httpget == null ? 0 : httpget.length());
+			 logger.info("[DouyinSingle] fetch_video preview={}", previewOutput(httpget));
+			 if (httpget == null || httpget.isBlank()) {
+				 logger.error("[DouyinSingle] fetch_video empty output awemeId={}", aweme_id);
+				 return null;
+			 }
 //			 System.out.println(httpget);
 			 JSONObject data = JSONObject.parseObject(httpget);
+			 if (data == null) {
+				 logger.error("[DouyinSingle] fetch_video json parse failed awemeId={}", aweme_id);
+				 return null;
+			 }
+			 logger.info("[DouyinSingle] parsed fields descPresent={} playAddrPresent={} coverPresent={} nicknamePresent={}",
+					data.containsKey("desc"), data.containsKey("video_play_addr"), data.containsKey("cover"), data.containsKey("nickname"));
 			 String coveruri = "";
 			 JSONArray cover = data.getJSONArray("cover");
 			 if(cover.size() >=2) {
@@ -226,6 +243,17 @@ public class DouUtil {
 		 }
 		 return null;
 
+	}
+
+	private static String previewOutput(String output) {
+		if (output == null) {
+			return "null";
+		}
+		String normalized = output.replace("\r", "\\r").replace("\n", "\\n");
+		if (normalized.length() > 1000) {
+			return normalized.substring(0, 1000);
+		}
+		return normalized;
 	}
 	
 	/**
