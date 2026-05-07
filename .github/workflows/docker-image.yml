@@ -89,7 +89,7 @@ jobs:
         run: |
           docker buildx build \
             --platform linux/arm64,linux/amd64 \
-            -t qingfeng2336/stream-vault:${{ steps.params.outputs.image_tag }} \
+            -t jonysun/stream-vault:${{ steps.params.outputs.image_tag }} \
             --push \
             -f ./backstage/src/main/docker/buildx/Dockerfile \
             ./backstage/src/main/docker/buildx

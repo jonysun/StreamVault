@@ -53,7 +53,7 @@ jobs:
         run: |
           docker buildx build \
             --platform linux/amd64 \
-            -t qingfeng2336/stream-vault:${{ github.event.inputs.image_tag }} \
+            -t jonysun/stream-vault:${{ github.event.inputs.image_tag }} \
             --push \
             -f ./backstage/src/main/docker/buildx/Dockerfile.jre17 \
             ./backstage/src/main/docker/buildx

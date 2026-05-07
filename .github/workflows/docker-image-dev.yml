@@ -27,7 +27,7 @@ jobs:
         run: |
           docker buildx build \
             --platform linux/arm64,linux/amd64 \
-            -t qingfeng2336/stream-vault:dev \
+            -t jonysun/stream-vault:dev \
             --push \
             -f ./backstage/src/main/docker/buildx/Dockerfile.dev \
             ./backstage/src/main/docker/buildx
