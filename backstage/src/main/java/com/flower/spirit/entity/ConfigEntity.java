@@ -66,6 +66,12 @@ public class ConfigEntity implements Serializable {
 	
 	private String filenametemplate;  // 自定义文件命名模板
 
+	private String f2logfullonerror; // f2失败时输出完整traceback
+
+	private String f2logmasksensitive; // f2日志敏感信息脱敏
+
+	private String f2logmaxpreview; // f2日志预览最大长度
+
 	public Integer getId() {
 		return id;
 	}
@@ -216,6 +222,30 @@ public class ConfigEntity implements Serializable {
 
 	public void setFilenametemplate(String filenametemplate) {
 		this.filenametemplate = filenametemplate;
+	}
+
+	public String getF2logfullonerror() {
+		return f2logfullonerror;
+	}
+
+	public void setF2logfullonerror(String f2logfullonerror) {
+		this.f2logfullonerror = f2logfullonerror;
+	}
+
+	public String getF2logmasksensitive() {
+		return f2logmasksensitive;
+	}
+
+	public void setF2logmasksensitive(String f2logmasksensitive) {
+		this.f2logmasksensitive = f2logmasksensitive;
+	}
+
+	public String getF2logmaxpreview() {
+		return f2logmaxpreview;
+	}
+
+	public void setF2logmaxpreview(String f2logmaxpreview) {
+		this.f2logmaxpreview = f2logmaxpreview;
 	}
 
 	// public String getYtdlpargs() {

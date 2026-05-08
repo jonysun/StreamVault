@@ -214,6 +214,24 @@
                                     <input class="form-control" type="text" id="filenametemplate" name="filenametemplate" placeholder="留空使用默认命名规则" th:value="${config.filenametemplate}">
                                     <div id="fileNameTemplatePreview" style="font-size: 11px; color: #8c8c8c; margin-top: 3px;"></div>
                                 </div>
+                                <div class="form-group">
+                                    <label>F2失败输出完整Traceback</label>
+                                    <select id="f2logfullonerror" class="form-control" name="f2logfullonerror">
+                                        <option value="1" th:selected="${config.f2logfullonerror} eq '1'">是</option>
+                                        <option value="0" th:selected="${config.f2logfullonerror} eq '0'">否</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>F2日志敏感信息脱敏</label>
+                                    <select id="f2logmasksensitive" class="form-control" name="f2logmasksensitive">
+                                        <option value="1" th:selected="${config.f2logmasksensitive} eq '1'">是</option>
+                                        <option value="0" th:selected="${config.f2logmasksensitive} eq '0'">否</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>F2日志预览最大长度</label>
+                                    <input class="form-control" type="text" id="f2logmaxpreview" name="f2logmaxpreview" placeholder="默认1000" th:value="${config.f2logmaxpreview}">
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -667,6 +685,9 @@
               option['danmudown'] = $("#danmudown").val();
               option['hiddenplatforms'] = $("#hiddenplatforms").val();
               option['filenametemplate'] = $("#filenametemplate").val();
+              option['f2logfullonerror'] = $("#f2logfullonerror").val();
+              option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
+              option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
               $.post("/admin/api/saveConfig",option,function(data,status){
                   if(data.resCode =="000001"){
                       layer.closeAll();
@@ -830,6 +851,9 @@
             option['danmudown'] = $("#danmudown").val();
             option['hiddenplatforms'] = $("#hiddenplatforms").val();
             option['filenametemplate'] = $("#filenametemplate").val();
+            option['f2logfullonerror'] = $("#f2logfullonerror").val();
+            option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
+            option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
             $.post("/admin/api/saveConfig",option,function(data,status){
                 if(data.resCode =="000001"){
                     layer.closeAll();

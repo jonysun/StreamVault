@@ -43,7 +43,17 @@ public class ConfigService {
 
 	public ConfigEntity getData() {
 		List<ConfigEntity> list =  configDao.findAll();
-		return list.get(0);
+		ConfigEntity cfg = list.get(0);
+		if (cfg.getF2logfullonerror() == null || cfg.getF2logfullonerror().trim().isEmpty()) {
+			cfg.setF2logfullonerror("1");
+		}
+		if (cfg.getF2logmasksensitive() == null || cfg.getF2logmasksensitive().trim().isEmpty()) {
+			cfg.setF2logmasksensitive("1");
+		}
+		if (cfg.getF2logmaxpreview() == null || cfg.getF2logmaxpreview().trim().isEmpty()) {
+			cfg.setF2logmaxpreview("1000");
+		}
+		return cfg;
 	}
 
 	public AjaxEntity saveConfig(ConfigEntity configEntity) {
@@ -103,6 +113,23 @@ public class ConfigService {
 			Global.filenametemplate = configEntity.getFilenametemplate();
 		} else {
 			Global.filenametemplate = "";
+		}
+		if ("1".equals(configEntity.getF2logfullonerror())) {
+			Global.f2logfullonerror = true;
+		} else if ("0".equals(configEntity.getF2logfullonerror())) {
+			Global.f2logfullonerror = false;
+		}
+		if ("1".equals(configEntity.getF2logmasksensitive())) {
+			Global.f2logmasksensitive = true;
+		} else if ("0".equals(configEntity.getF2logmasksensitive())) {
+			Global.f2logmasksensitive = false;
+		}
+		if (configEntity.getF2logmaxpreview() != null && !configEntity.getF2logmaxpreview().trim().isEmpty()) {
+			try {
+				Global.f2logmaxpreview = Integer.parseInt(configEntity.getF2logmaxpreview().trim());
+			} catch (NumberFormatException e) {
+				logger.warn("f2logmaxpreview配置非法，保持原值: {}", Global.f2logmaxpreview);
+			}
 		}
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);
 	}

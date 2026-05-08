@@ -21,6 +21,13 @@ public class CommandUtil {
 
     static Pattern pattern = Pattern.compile("\"(.*?)\"");
 
+    private static final Pattern SENSITIVE_COOKIE_PATTERN = Pattern.compile(
+            "(?i)(sessionid(?:_ss)?|msToken|ttwid|odin_tt|passport_csrf_token)=([^;\\s]+)");
+
+    private static final ThreadLocal<Integer> LAST_F2_EXIT_CODE = new ThreadLocal<>();
+
+    private static final ThreadLocal<Long> LAST_F2_DURATION_MS = new ThreadLocal<>();
+
     /**
      * 执行命令并输出结果到控制台
      * @param command 要执行的命令
@@ -192,12 +199,14 @@ public class CommandUtil {
 
         logger.info("[F2] command={}", buildSafeCommandString(cmdList));
 
-        return runCommandList(cmdList);
+        String output = runCommandList(cmdList);
+        return output;
     }
     
     public static String runCommandList(List<String> cmdList) {
         StringBuilder output = new StringBuilder();
         Process process = null;
+        long startMs = System.currentTimeMillis();
         try {
             logger.info("[F2] process launch");
             ProcessBuilder pb = new ProcessBuilder(cmdList);
@@ -213,6 +222,8 @@ public class CommandUtil {
             }
 
             int exitCode = process.waitFor();
+            LAST_F2_EXIT_CODE.set(exitCode);
+            LAST_F2_DURATION_MS.set(System.currentTimeMillis() - startMs);
             logger.info("[F2] process finished exitCode={} outputLength={}", exitCode, output.length());
             if (output.length() == 0) {
                 logger.warn("[F2] process returned empty output");
@@ -221,6 +232,9 @@ public class CommandUtil {
                 logger.info("[F2] output preview={}", preview);
                 if (exitCode != 0) {
                     logger.error("[F2] process failed exitCode={} output={}", exitCode, preview);
+                    if (Global.f2logfullonerror) {
+                        logger.error("[F2][FAIL][OUTPUT_BEGIN]\n{}\n[F2][FAIL][OUTPUT_END]", maskSensitiveOutput(output.toString()));
+                    }
                 }
             }
 
@@ -235,6 +249,14 @@ public class CommandUtil {
             }
         }
         return output.toString().trim();
+    }
+
+    public static Integer getLastF2ExitCode() {
+        return LAST_F2_EXIT_CODE.get();
+    }
+
+    public static Long getLastF2DurationMs() {
+        return LAST_F2_DURATION_MS.get();
     }
 
     private static String maskCookie(String cookie) {
@@ -269,10 +291,31 @@ public class CommandUtil {
             return "null";
         }
         String normalized = output.replace("\r", "\\r").replace("\n", "\\n");
-        if (normalized.length() > 1000) {
-            return normalized.substring(0, 1000);
+        String safe = maskSensitiveOutput(normalized);
+        int maxLen = Global.f2logmaxpreview > 0 ? Global.f2logmaxpreview : 1000;
+        if (safe.length() > maxLen) {
+            return safe.substring(0, maxLen);
         }
-        return normalized;
+        return safe;
+    }
+
+    private static String maskSensitiveOutput(String output) {
+        if (output == null) {
+            return null;
+        }
+        if (!Global.f2logmasksensitive) {
+            return output;
+        }
+        Matcher matcher = SENSITIVE_COOKIE_PATTERN.matcher(output);
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            String value = matcher.group(2);
+            String masked = key + "=" + maskCookie(value);
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(masked));
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
     }
 
     public static boolean deleteDirectory(String directoryPath) {

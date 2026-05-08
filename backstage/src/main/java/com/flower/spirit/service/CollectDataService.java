@@ -697,11 +697,25 @@ public class CollectDataService {
 
 	private void logF2Result(String mode, String f2cmd, String taskout) {
 		boolean success = f2cmd != null && f2cmd.contains("stream-vault-ok");
-		logger.info("[CollectTask] getDYData f2 outputLength={} containsSuccessMarker={}", f2cmd == null ? 0 : f2cmd.length(), success);
+		Integer exitCode = CommandUtil.getLastF2ExitCode();
+		Long durationMs = CommandUtil.getLastF2DurationMs();
+		logger.info("[CollectTask] getDYData f2 outputLength={} containsSuccessMarker={} exitCode={} durationMs={}",
+				f2cmd == null ? 0 : f2cmd.length(), success, exitCode, durationMs);
 		if (!success) {
 			logger.error("[CollectTask] getDYData f2 failed mode={} outputPreview={}", mode, previewOutput(f2cmd));
+			logger.error("[CollectTask] getDYData f2 failed mode={} outPath={} outFileExists={} outFileSize={}",
+					mode, taskout, Files.exists(Paths.get(taskout)),
+					Files.exists(Paths.get(taskout)) ? safeFileSize(taskout) : -1);
 		} else {
 			logger.info("[CollectTask] getDYData output file exists={} path={}", Files.exists(Paths.get(taskout)), taskout);
+		}
+	}
+
+	private long safeFileSize(String path) {
+		try {
+			return Files.size(Paths.get(path));
+		} catch (Exception e) {
+			return -1;
 		}
 	}
 

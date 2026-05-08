@@ -128,6 +128,23 @@ public class AppConfig {
 		} else {
 			Global.filenametemplate = "";
 		}
+		if ("1".equals(data.getF2logfullonerror())) {
+			Global.f2logfullonerror = true;
+		} else if ("0".equals(data.getF2logfullonerror())) {
+			Global.f2logfullonerror = false;
+		}
+		if ("1".equals(data.getF2logmasksensitive())) {
+			Global.f2logmasksensitive = true;
+		} else if ("0".equals(data.getF2logmasksensitive())) {
+			Global.f2logmasksensitive = false;
+		}
+		if (data.getF2logmaxpreview() != null && !data.getF2logmaxpreview().trim().isEmpty()) {
+			try {
+				Global.f2logmaxpreview = Integer.parseInt(data.getF2logmaxpreview().trim());
+			} catch (NumberFormatException e) {
+				logger.warn("f2logmaxpreview配置非法，保持原值: {}", Global.f2logmaxpreview);
+			}
+		}
 		//清空 ffmpeg 队列
 		ffmpegQueueService.clearTask();
 		logger.info("ffmpeg队列已清空");

@@ -198,7 +198,10 @@ public class DouUtil {
 			 logger.info("[DouyinSingle] fetch_video start awemeId={}", aweme_id);
 		
 			 String httpget = CommandUtil.f2cmd(Global.tiktokCookie,aweme_id,"fetch_video",null,null,null,null);
+			 Integer exitCode = CommandUtil.getLastF2ExitCode();
+			 Long durationMs = CommandUtil.getLastF2DurationMs();
 			 logger.info("[DouyinSingle] fetch_video outputLength={}", httpget == null ? 0 : httpget.length());
+			 logger.info("[DouyinSingle] fetch_video exitCode={} durationMs={}", exitCode, durationMs);
 			 logger.info("[DouyinSingle] fetch_video preview={}", previewOutput(httpget));
 			 if (httpget == null || httpget.isBlank()) {
 				 logger.error("[DouyinSingle] fetch_video empty output awemeId={}", aweme_id);

@@ -138,6 +138,12 @@ public class Global {
 	
 	public static String filenametemplate = "";  // 自定义文件命名模板
 
+	public static boolean f2logfullonerror = true;
+
+	public static boolean f2logmasksensitive = true;
+
+	public static int f2logmaxpreview = 1000;
+
 	@Value("${file.save}")
 	public void setSavefile(String value) {
 		Global.savefile = value;
@@ -152,5 +158,20 @@ public class Global {
 	@Value("${file.app.path}")
 	public void setAppPath(String value) {
 		Global.apppath = value;
+	}
+
+	@Value("${streamvault.f2.log-full-on-error:true}")
+	public void setF2LogFullOnError(boolean value) {
+		Global.f2logfullonerror = value;
+	}
+
+	@Value("${streamvault.f2.log-mask-sensitive:true}")
+	public void setF2LogMaskSensitive(boolean value) {
+		Global.f2logmasksensitive = value;
+	}
+
+	@Value("${streamvault.f2.log-max-preview:1000}")
+	public void setF2LogMaxPreview(int value) {
+		Global.f2logmaxpreview = value;
 	}
 }

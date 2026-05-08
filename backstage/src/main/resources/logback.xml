@@ -37,6 +37,24 @@
         </encoder>
     </appender>
 
+    <!-- F2 专用错误日志 -->
+    <appender name="F2_ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>/app/log/f2-error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>/app/log/f2-error-%d{yyyyMMdd}.%i.log</fileNamePattern>
+            <maxHistory>20</maxHistory>
+            <maxFileSize>50MB</maxFileSize>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="com.flower.spirit.utils.CommandUtil" level="ERROR" additivity="false">
+        <appender-ref ref="F2_ERROR_FILE" />
+        <appender-ref ref="STDOUT" />
+    </logger>
+
     <!-- 根日志配置 -->
     <root level="INFO">
         <appender-ref ref="STDOUT" />
