@@ -177,7 +177,7 @@
     		})
      }
      function loadTable(){
-    		layui.use(['table','form'], function(){
+			layui.use(['table','form'], function(){
     			 var option = {}
     			 var  dataid = $('#taskid').val();
     			 if(dataid != "" ){
@@ -185,7 +185,7 @@
     			 }
     			  table = layui.table;
     			  var form = layui.form;
-    			  table.render({
+			  table.render({
     				id:'projectList',
     				elem: '#projectList',
     				height: 'full-100',
@@ -205,25 +205,48 @@
     			        first: false,
     			        last: false,
     			     },
-    			     cols: [[ 
-    			    	 {field: 'id', title: 'ID', width: 80, sort: true, align: 'center'},
-    			    	 {field: 'videoid', title: '视频ID', width: 160, templet: function(d){
-    			    		 return '<span class="video-id">' + d.videoid + '</span>';
-    			    	 }},
-    			    	 {field: 'videoname', title: '视频名称', minWidth: 300, templet: function(d){
-    			    		 return '<div class="video-title" lay-event="showTip">' + d.videoname + '</div>';
-    			    	 }},
-    			    	 {field: 'status', title: '状态', width: 120, align: 'center', templet: function(d){
-    			    		 var statusClass = '';
-    			    		 if(d.status === '已完成') statusClass = 'status-completed';
-    			    		 else if(d.status === '未下载') statusClass = 'status-pending';
-    			    		 else if(d.status === '不支持') statusClass = 'status-error';
-    			    		 return '<span class="status-badge ' + statusClass + '">' + d.status + '</span>';
-    			    	 }},
-    			    	 {field: 'createtime', title: '提交时间', width: 160, align: 'center', templet: function(d){
-    			    		 return '<span class="create-time">' + d.createtime + '</span>';
-    			    	 }}
-    			     ]],
+			     cols: [[ 
+			    	 {field: 'id', title: 'ID', width: 80, sort: true, align: 'center'},
+			    	 {field: 'videoid', title: '视频ID', width: 160, templet: function(d){
+			    		 return '<span class="video-id">' + d.videoid + '</span>';
+			    	 }},
+			    	 {field: 'mediatype', title: '媒体类型', width: 100, align: 'center', templet: function(d){
+			    		 var t = d.mediatype || 'unknown';
+			    		 if (t === 'video') return '<span class="status-badge status-completed">视频</span>';
+			    		 if (t === 'image') return '<span class="status-badge status-pending">图文</span>';
+			    		 if (t === 'mix') return '<span class="status-badge status-error">混合</span>';
+			    		 return '<span class="status-badge">' + t + '</span>';
+			    	 }},
+			    	 {field: 'videoname', title: '内容标题/描述', minWidth: 300, templet: function(d){
+			    		 return '<div class="video-title" lay-event="showTip">' + d.videoname + '</div>';
+			    	 }},
+			    	 {field: 'status', title: '状态', width: 120, align: 'center', templet: function(d){
+			    		 var statusClass = '';
+			    		 if(d.status === '已完成' || d.status === '图文已完成') statusClass = 'status-completed';
+			    		 else if(d.status === '未下载') statusClass = 'status-pending';
+			    		 else if(d.status === '不支持' || d.status === '执行失败') statusClass = 'status-error';
+			    		 return '<span class="status-badge ' + statusClass + '">' + d.status + '</span>';
+			    	 }},
+			    	 {field: 'errorcode', title: '错误码', width: 160, align: 'center', templet: function(d){
+			    		 return d.errorcode ? '<span class="video-id">' + d.errorcode + '</span>' : '--';
+			    	 }},
+			    	 {field: 'errormsg', title: '错误信息', width: 220, templet: function(d){
+			    		 return d.errormsg ? '<span title="'+ d.errormsg +'">' + d.errormsg + '</span>' : '--';
+			    	 }},
+			    	 {field: 'detailjson', title: '原始JSON', width: 120, align: 'center', templet: function(d){
+			    		 if(!d.detailjson){ return '--'; }
+			    		 var escaped = encodeURIComponent(d.detailjson);
+			    		 return '<button class="layui-btn layui-btn-xs layui-btn-normal" onclick="showTextDialog(\'原始JSON\', decodeURIComponent(\'' + escaped + '\'))">查看JSON</button>';
+			    	 }},
+			    	 {field: 'processlog', title: '任务日志', width: 120, align: 'center', templet: function(d){
+			    		 if(!d.processlog){ return '--'; }
+			    		 var escaped = encodeURIComponent(d.processlog);
+			    		 return '<button class="layui-btn layui-btn-xs" onclick="showTextDialog(\'任务日志\', decodeURIComponent(\'' + escaped + '\'))">查看日志</button>';
+			    	 }},
+			    	 {field: 'createtime', title: '提交时间', width: 160, align: 'center', templet: function(d){
+			    		 return '<span class="create-time">' + d.createtime + '</span>';
+			    	 }}
+			     ]],
     			     title: '媒体表'	,
     			     parseData:function(res){
     			    	 console.log(res);
@@ -253,11 +276,22 @@
     			    		 });
     			    	 });
     			     }
-    			  });
-    			  
-    			  
+	 			  });
 
-    			  
+	 			  window.showTextDialog = function(title, text){
+	 				  var safeText = text || '';
+	 				  layer.open({
+	 					  type: 1,
+	 					  title: title,
+	 					  area: ['70%', '70%'],
+	 					  content: '<div style="padding:12px;"><pre style="white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow:auto;">'+
+	 					  $('<div/>').text(safeText).html() + '</pre></div>'
+	 				  });
+	 			  }
+			  
+			  
+
+			  
     			  
     			});
     	}

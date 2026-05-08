@@ -43,6 +43,12 @@ public class CollectDataDetailService {
 	            if (res.getStatus() != null) {
 	                predicates.add(cb.like(root.get("status"), "%" + res.getStatus() + "%"));
 	            }
+	            if (res.getMediatype() != null && !res.getMediatype().trim().isEmpty()) {
+	            	predicates.add(cb.equal(root.get("mediatype"), res.getMediatype().trim()));
+	            }
+	            if (res.getErrorcode() != null && !res.getErrorcode().trim().isEmpty()) {
+	            	predicates.add(cb.like(root.get("errorcode"), "%" + res.getErrorcode().trim() + "%"));
+	            }
 	        }
 
 	        query.orderBy(cb.desc(root.get("id")));

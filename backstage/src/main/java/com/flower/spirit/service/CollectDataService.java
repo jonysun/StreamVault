@@ -440,8 +440,16 @@ public class CollectDataService {
 				// System.out.println(allDYData.get(i));
 				logger.info(entity.getOriginaladdress() + "任务中第" + i + "个");
 				String status = "";
+				String mediaType = "unknown";
+				String errorCode = null;
+				String errorMsg = null;
+				StringBuilder processLog = new StringBuilder();
 				JSONObject aweme_detail = allDYData.getJSONObject(i);
 				String awemeId = aweme_detail.getString("aweme_id");
+				String desc = aweme_detail.getString("desc");
+				String displayName = safeDisplayName(desc, awemeId, "视频");
+				String detailJson = safeDetailJson(aweme_detail);
+				appendLog(processLog, "item-start", "awemeId=" + awemeId + ", desc=" + (desc == null ? "" : desc));
 				String coveruri = "";
 				JSONArray cover = aweme_detail.getJSONArray("cover");
 				if (cover.size() >= 2) {
@@ -451,6 +459,9 @@ public class CollectDataService {
 				}
 				JSONArray jsonArray = aweme_detail.getJSONArray("video_play_addr");
 				if (jsonArray == null || jsonArray.isEmpty()) {
+					mediaType = "image";
+					displayName = safeDisplayName(desc, awemeId, "图文");
+					appendLog(processLog, "branch", "video_play_addr empty -> imageText executor");
 					// 不支持
 					try {
 						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(),null);
@@ -458,9 +469,16 @@ public class CollectDataService {
 						collectDataDetailEntity.setDataid(entity.getId());
 						collectDataDetailEntity.setVideoid(awemeId);
 						collectDataDetailEntity.setOriginaladdress(awemeId);
+						status = "图文已完成";
 						collectDataDetailEntity.setStatus(status);
+						collectDataDetailEntity.setMediatype(mediaType);
+						collectDataDetailEntity.setVideoname(displayName);
+						collectDataDetailEntity.setDetailjson(detailJson);
+						appendLog(processLog, "imageText", "executor success");
+						collectDataDetailEntity.setProcesslog(processLog.toString());
+						collectDataDetailEntity.setErrorcode(errorCode);
+						collectDataDetailEntity.setErrormsg(errorMsg);
 						collectDataDetailEntity.setCreatetime(DateUtils.formatDateTime(new Date()));
-						status = "已完成";
 						Thread.sleep(2500);
 						collectDataDetailService.save(collectDataDetailEntity);
 						String carriedout = entity.getCarriedout() == null ? "1"
@@ -472,20 +490,49 @@ public class CollectDataService {
 						logger.error("收藏类模块中抖音图集下载异常");
 						logger.error(e.getMessage());
 						logger.error("收藏类模块中抖音图集下载异常");
+						status = "执行失败";
+						errorCode = "IMAGE_TEXT_EXECUTOR_FAIL";
+						errorMsg = trimMsg(e.getMessage());
+						appendLog(processLog, "imageText", "executor failed: " + trimMsg(e.getMessage()));
+						CollectDataDetailEntity failed = new CollectDataDetailEntity();
+						failed.setDataid(entity.getId());
+						failed.setVideoid(awemeId);
+						failed.setOriginaladdress(awemeId);
+						failed.setStatus(status);
+						failed.setMediatype(mediaType);
+						failed.setVideoname(displayName);
+						failed.setDetailjson(detailJson);
+						failed.setProcesslog(processLog.toString());
+						failed.setErrorcode(errorCode);
+						failed.setErrormsg(errorMsg);
+						failed.setCreatetime(DateUtils.formatDateTime(new Date()));
+						if (collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId()) == null) {
+							collectDataDetailService.save(failed);
+						}
 					}
 					continue;
 				}
+				mediaType = "video";
 				String videoplay = "";
 				if (jsonArray.size() >= 2) {
 					videoplay = jsonArray.getString(jsonArray.size() - 1);
 				} else {
 					videoplay = jsonArray.getString(0);
 				}
-				String desc = aweme_detail.getString("desc");
+				appendLog(processLog, "branch", "video path selected");
 				logger.info("[CollectTask] item start taskId={} index={} awemeId={} desc={}", entity.getId(), i,
 						awemeId, desc);
 
 				List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(awemeId);
+				if (findByVideoid.size() > 0) {
+					VideoDataEntity existsVideo = findByVideoid.get(0);
+					File vf = existsVideo.getVideoaddr() == null ? null : new File(existsVideo.getVideoaddr());
+					if (vf == null || !vf.exists()) {
+						appendLog(processLog, "dedup", "db exists but file missing, force redownload");
+						findByVideoid = new ArrayList<>();
+					}
+				}
+				appendLog(processLog, "dedup", "exists=" + (findByVideoid.size() > 0));
 				logger.info("[CollectTask] item dedup taskId={} awemeId={} exists={}", entity.getId(), awemeId,
 						findByVideoid.size() > 0);
 				if (findByVideoid.size() == 0) {
@@ -504,6 +551,7 @@ public class CollectDataService {
 							null);
 					logger.info("已使用批量下载,下载器类型为:" + Global.downtype);
 					if (Global.downtype.equals("a2")) {
+						appendLog(processLog, "download", "using aria2");
 						Aria2Util.sendMessage(Global.a2_link, Aria2Util.createDouparameter(videoplay, dir,
 								filename + ".mp4", Global.a2_token, Global.tiktokCookie));
 					}
@@ -512,6 +560,7 @@ public class CollectDataService {
 					header.put("cookie", Global.tiktokCookie);
 					header.put("Referer", "https://www.douyin.com/");
 					if (Global.downtype.equals("http")) {
+						appendLog(processLog, "download", "using http builtin");
 						// 内置下载器
 						dir = FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname,
 								null);
@@ -528,6 +577,10 @@ public class CollectDataService {
 						if (downloadFileWithOkHttp.equals("1")) {
 							logger.info(aweme_detail.toJSONString());
 							risk = "1";
+							status = "执行失败";
+							errorCode = "DOWNLOAD_RISK_OR_FAIL";
+							errorMsg = "内置下载返回1";
+							appendLog(processLog, "download", "http downloader returned 1");
 							logger.error("[CollectTask] risk triggered taskId={} awemeId={} output={}", entity.getId(), awemeId,
 									downloadFileWithOkHttp);
 							break;
@@ -567,12 +620,16 @@ public class CollectDataService {
 						videoDataEntity.setVideoauthor(dyNickname);
 					}
 					videoDataDao.save(videoDataEntity);
+					appendLog(processLog, "save", "video saved");
 					logger.info("下载流程结束");
 					Thread.sleep(5000);
 					logger.info("等待五秒在继续下一个");
 				}
 				if (status.equals("")) {
 					status = findByVideoid.size() == 0 ? "已完成" : "已完成(未下载已存在)";
+				}
+				if (status.contains("已存在")) {
+					appendLog(processLog, "skip", "already exists in video library");
 				}
 
 				// 这里应该判断一下CollectDataDetailEntity记录是否存在 存在 则不处理 因为已经不预删除了
@@ -582,9 +639,14 @@ public class CollectDataService {
 				CollectDataDetailEntity byVideoAndDataid = collectDataDetailService.findByVideoAndDataid(
 						collectDataDetailEntity.getVideoid(), collectDataDetailEntity.getDataid());
 				if (byVideoAndDataid == null) {
-					collectDataDetailEntity.setVideoname(desc);
+					collectDataDetailEntity.setVideoname(displayName);
 					collectDataDetailEntity.setOriginaladdress(awemeId);
 					collectDataDetailEntity.setStatus(status);
+					collectDataDetailEntity.setMediatype(mediaType);
+					collectDataDetailEntity.setDetailjson(detailJson);
+					collectDataDetailEntity.setProcesslog(processLog.toString());
+					collectDataDetailEntity.setErrorcode(errorCode);
+					collectDataDetailEntity.setErrormsg(errorMsg);
 					collectDataDetailEntity.setCreatetime(DateUtils.formatDateTime(new Date()));
 					collectDataDetailService.save(collectDataDetailEntity);
 					// 修改主体
@@ -604,6 +666,9 @@ public class CollectDataService {
 		entity.setTaskstatus("处理完成");
 		if (risk.equals("1")) {
 			entity.setTaskstatus("可能触发风控本次已终止");
+		}
+		if (allDYData == null) {
+			entity.setTaskstatus("执行失败(抓取异常)");
 		}
 		entity.setEndtime(DateUtils.formatDateTime(new Date()));
 		collectdDataDao.save(entity);
@@ -728,6 +793,36 @@ public class CollectDataService {
 			return normalized.substring(0, 1000);
 		}
 		return normalized;
+	}
+
+	private void appendLog(StringBuilder sb, String stage, String msg) {
+		sb.append("[").append(DateUtils.formatDateTime(new Date())).append("] ")
+				.append(stage).append(" - ").append(msg == null ? "" : msg).append("\n");
+	}
+
+	private String safeDisplayName(String desc, String awemeId, String fallbackPrefix) {
+		if (desc != null && !desc.trim().isEmpty()) {
+			return desc;
+		}
+		return "[" + fallbackPrefix + "]-" + (awemeId == null ? "unknown" : awemeId);
+	}
+
+	private String trimMsg(String msg) {
+		if (msg == null) {
+			return null;
+		}
+		return msg.length() > 500 ? msg.substring(0, 500) : msg;
+	}
+
+	private String safeDetailJson(JSONObject obj) {
+		if (obj == null) {
+			return null;
+		}
+		String text = obj.toJSONString();
+		if (text.length() > 16000) {
+			return text.substring(0, 16000) + "...(truncated)";
+		}
+		return text;
 	}
 
 	public JSONArray getAllDYData(CollectDataEntity entity) throws Exception {

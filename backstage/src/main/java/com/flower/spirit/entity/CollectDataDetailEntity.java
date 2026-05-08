@@ -35,6 +35,16 @@ public class CollectDataDetailEntity extends DataEntity<CollectDataDetailEntity>
 	private String originaladdress;
 	
 	private String status;
+
+	private String mediatype;
+
+	private String detailjson;
+
+	private String processlog;
+
+	private String errorcode;
+
+	private String errormsg;
 	
 	private String createtime;
 	
@@ -94,6 +104,46 @@ public class CollectDataDetailEntity extends DataEntity<CollectDataDetailEntity>
 
 	public void setCreatetime(String createtime) {
 		this.createtime = createtime;
+	}
+
+	public String getMediatype() {
+		return mediatype;
+	}
+
+	public void setMediatype(String mediatype) {
+		this.mediatype = mediatype;
+	}
+
+	public String getDetailjson() {
+		return detailjson;
+	}
+
+	public void setDetailjson(String detailjson) {
+		this.detailjson = detailjson;
+	}
+
+	public String getProcesslog() {
+		return processlog;
+	}
+
+	public void setProcesslog(String processlog) {
+		this.processlog = processlog;
+	}
+
+	public String getErrorcode() {
+		return errorcode;
+	}
+
+	public void setErrorcode(String errorcode) {
+		this.errorcode = errorcode;
+	}
+
+	public String getErrormsg() {
+		return errormsg;
+	}
+
+	public void setErrormsg(String errormsg) {
+		this.errormsg = errormsg;
 	}
 
 	
