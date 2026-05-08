@@ -131,6 +131,15 @@
 			background: #f8f9fa;
 			aspect-ratio: 1;
 		}
+		.media-select {
+			position: absolute;
+			top: 6px;
+			left: 6px;
+			z-index: 11;
+			background: rgba(0,0,0,0.65);
+			border-radius: 3px;
+			padding: 2px;
+		}
 		
 		.media-item img {
 			width: 100%;
@@ -249,6 +258,18 @@
 			padding: 20px;
 			margin-bottom: 20px;
 		}
+		.batch-toolbar {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 12px;
+		}
+		.batch-toolbar .batch-actions {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.batch-count { color: #666; font-size: 13px; }
 		
 		/* 移动端搜索区域适配 */
 		@media (max-width: 768px) {
@@ -475,6 +496,17 @@
 			border-radius: 25px;
 			backdrop-filter: blur(10px);
 		}
+		.preview-counter {
+			position: absolute;
+			top: 10px;
+			left: 50%;
+			transform: translateX(-50%);
+			color: #fff;
+			background: rgba(0,0,0,0.6);
+			padding: 4px 10px;
+			border-radius: 14px;
+			font-size: 12px;
+		}
 		
 		.preview-control-btn {
 			background: rgba(255, 255, 255, 0.2);
@@ -643,6 +675,17 @@
 
 				<!-- 内容区域 -->
 				<div class="content-area">
+					<div class="batch-toolbar">
+						<div class="batch-actions">
+							<label style="margin:0;display:flex;align-items:center;gap:6px;">
+								<input type="checkbox" id="selectAllGraphic"> 全选
+							</label>
+							<button type="button" class="btn btn-sm btn-danger" id="batchDeleteGraphicBtn">
+								<i class="mdi mdi-delete"></i> 批量删除
+							</button>
+						</div>
+						<div class="batch-count" id="batchSelectedCount">已选 0 项</div>
+					</div>
 					<!-- 加载状态 -->
 					<div class="loading" id="loadingState" style="display: none;">
 						<i class="mdi mdi-loading"></i>
@@ -684,11 +727,13 @@
 	<div class="modal-dialog modal-lg" role="document">
 		<div class="modal-content">
 			<div class="modal-header">
+				<h5 class="modal-title" id="previewModalTitle">媒体预览</h5>
 				<button type="button" class="close" data-dismiss="modal" aria-label="关闭">
 					<span aria-hidden="true">&times;</span>
 				</button>
 			</div>
 			<div class="modal-body">
+				<div class="preview-counter" id="previewCounter" style="display:none;">1 / 1</div>
 				<img id="previewImage" src="" alt="图片预览" style="display: none;">
 				<video id="previewVideo" controls style="display: none;">
 					<source src="" type="video/mp4">
@@ -697,6 +742,12 @@
 				
 				<!-- 预览控制面板 -->
 				<div class="preview-controls">
+					<button class="preview-control-btn" id="prevMediaBtn" title="上一项">
+						<i class="mdi mdi-chevron-left"></i>
+					</button>
+					<button class="preview-control-btn" id="nextMediaBtn" title="下一项">
+						<i class="mdi mdi-chevron-right"></i>
+					</button>
 					<button class="preview-control-btn" id="zoomOutBtn" title="缩小">
 						<i class="mdi mdi-magnify-minus"></i>
 					</button>
@@ -738,6 +789,9 @@ $(function(){
 var currentPage = 1;
 var pageSize = 15;
 var searchParams = {};
+var selectedGraphicIds = new Set();
+var currentMediaList = [];
+var currentMediaIndex = 0;
 
 /**
  * 初始化页面
@@ -971,8 +1025,9 @@ function generateMediaGrid(mediaList, cardId) {
 		if (isVideo) {
 			html += `
 				<div class="media-item">
+					<label class="media-select"><input type="checkbox" class="media-check" data-id="${cardId}"></label>
 					${typeIndicator}
-					<video class="preview-video" data-src="${mediaUrl}" style="cursor: pointer;" preload="none" loading="lazy">
+					<video class="preview-video" data-src="${mediaUrl}" data-index="${i}" data-list='${JSON.stringify(mediaList)}' style="cursor: pointer;" preload="none" loading="lazy">
 						<source src="${mediaUrl}" type="video/mp4">
 						您的浏览器不支持视频播放
 					</video>
@@ -981,7 +1036,8 @@ function generateMediaGrid(mediaList, cardId) {
 		} else {
 			html += `
 				<div class="media-item">
-					<img src="${mediaUrl}" alt="图片" class="preview-image" data-src="${mediaUrl}" loading="lazy">
+					<label class="media-select"><input type="checkbox" class="media-check" data-id="${cardId}"></label>
+					<img src="${mediaUrl}" alt="图片" class="preview-image" data-src="${mediaUrl}" data-index="${i}" data-list='${JSON.stringify(mediaList)}' loading="lazy">
 				</div>
 			`;
 		}
@@ -993,6 +1049,7 @@ function generateMediaGrid(mediaList, cardId) {
 			<div class="media-item d-flex align-items-center justify-content-center bg-light expand-media-btn" 
 				 data-card-id="${cardId}" data-all-media='${JSON.stringify(mediaList)}' 
 				 style="cursor: pointer; border: 2px dashed #ccc;">
+				<label class="media-select"><input type="checkbox" class="media-check" data-id="${cardId}"></label>
 				<div class="text-center">
 					<i class="mdi mdi-plus-circle text-primary" style="font-size: 20px;"></i>
 					<br>
@@ -1055,18 +1112,30 @@ function getMediaTypeText(mediaList) {
  * 绑定卡片相关事件
  */
 function bindCardEvents() {
+	$('.media-check').off('change').on('change', function(e){
+		e.stopPropagation();
+		var id = $(this).data('id');
+		if ($(this).is(':checked')) selectedGraphicIds.add(String(id));
+		else selectedGraphicIds.delete(String(id));
+		updateBatchCount();
+	});
+
 	// 图片预览
 	$('.preview-image').click(function() {
 		var imageSrc = $(this).data('src');
 		var fileName = getFileNameFromPath(imageSrc);
-		showMediaPreview(imageSrc, false, fileName);
+		var list = $(this).data('list') || [];
+		var idx = Number($(this).data('index') || 0);
+		showMediaPreview(imageSrc, false, fileName, list, idx);
 	});
 	
 	// 视频预览
 	$('.preview-video').click(function() {
 		var videoSrc = $(this).data('src');
 		var fileName = getFileNameFromPath(videoSrc);
-		showMediaPreview(videoSrc, true, fileName);
+		var list = $(this).data('list') || [];
+		var idx = Number($(this).data('index') || 0);
+		showMediaPreview(videoSrc, true, fileName, list, idx);
 	});
 	
 	// 展开查看所有媒体文件
@@ -1125,6 +1194,58 @@ function bindCardEvents() {
 			layer.close(index);
 		});
 	});
+
+	$('#selectAllGraphic').off('change').on('change', function(){
+		var checked = $(this).is(':checked');
+		$('.media-check').prop('checked', checked).trigger('change');
+	});
+
+	$('#batchDeleteGraphicBtn').off('click').on('click', function(){
+		if (selectedGraphicIds.size === 0) {
+			layer.msg('请先选择要删除的图文项');
+			return;
+		}
+		layer.confirm('确认删除已选择的 ' + selectedGraphicIds.size + ' 项图文内容吗？', {
+			icon: 3,
+			title: '批量删除确认'
+		}, function(index){
+			layer.close(index);
+			batchDeleteGraphic(Array.from(selectedGraphicIds));
+		});
+	});
+}
+
+function updateBatchCount(){
+	$('#batchSelectedCount').text('已选 ' + selectedGraphicIds.size + ' 项');
+}
+
+function batchDeleteGraphic(ids){
+	if (!ids || ids.length === 0) return;
+	var loadingIndex = layer.load(1, {shade:[0.3,'#000'], content:'批量删除中...'});
+	var success = 0;
+	var fail = 0;
+	var idx = 0;
+
+	function next(){
+		if (idx >= ids.length){
+			layer.close(loadingIndex);
+			layer.msg('批量删除完成，成功 ' + success + '，失败 ' + fail);
+			selectedGraphicIds.clear();
+			$('#selectAllGraphic').prop('checked', false);
+			updateBatchCount();
+			loadGraphicContentList();
+			return;
+		}
+		var id = ids[idx++];
+		$.get('/admin/api/deleteGraphicContent', {id:id}, function(res){
+			if (res.resCode === '000001') success++; else fail++;
+			next();
+		}).fail(function(){
+			fail++;
+			next();
+		});
+	}
+	next();
 }
 
 /**
@@ -1562,15 +1683,18 @@ function showEmptyState() {
  * @param {boolean} isVideo 是否为视频
  * @param {string} fileName 文件名
  */
-function showMediaPreview(mediaSrc, isVideo, fileName) {
+function showMediaPreview(mediaSrc, isVideo, fileName, mediaList, mediaIndex) {
 	
 	// 重置缩放
 	currentZoom = 1;
 	currentMediaSrc = mediaSrc;
 	currentFileName = fileName || getFileNameFromPath(mediaSrc);
+	currentMediaList = mediaList || [mediaSrc];
+	currentMediaIndex = typeof mediaIndex === 'number' ? mediaIndex : 0;
 	
 	// 设置标题
 	$('#previewModalTitle').text(currentFileName);
+	$('#previewCounter').show().text((currentMediaIndex + 1) + ' / ' + currentMediaList.length);
 	
 	if (isVideo) {
 		// 显示视频，隐藏图片
@@ -1604,6 +1728,13 @@ var currentFileName = '';
  * 初始化预览控制事件
  */
 function initPreviewControls() {
+	$('#prevMediaBtn').click(function(){
+		switchMedia(-1);
+	});
+	$('#nextMediaBtn').click(function(){
+		switchMedia(1);
+	});
+
 	// 缩小
 	$('#zoomOutBtn').click(function() {
 		if (currentZoom > 0.2) {
@@ -1645,7 +1776,35 @@ function initPreviewControls() {
 				exitFullscreen();
 			}
 		}
+		if ($('#imagePreviewModal').hasClass('show')) {
+			if (e.keyCode === 37) {
+				switchMedia(-1);
+			} else if (e.keyCode === 39) {
+				switchMedia(1);
+			}
+		}
 	});
+
+	$('#imagePreviewModal .modal-body').on('wheel', function(e){
+		if ($('#previewImage').is(':visible')) {
+			e.preventDefault();
+			var delta = e.originalEvent.deltaY;
+			if (delta > 0) {
+				if (currentZoom > 0.2) currentZoom -= 0.1;
+			} else {
+				if (currentZoom < 3) currentZoom += 0.1;
+			}
+			applyZoom();
+		}
+	});
+}
+
+function switchMedia(step){
+	if (!currentMediaList || currentMediaList.length <= 1) return;
+	currentMediaIndex = (currentMediaIndex + step + currentMediaList.length) % currentMediaList.length;
+	var nextSrc = currentMediaList[currentMediaIndex];
+	var isVideo = isVideoFile(nextSrc);
+	showMediaPreview(nextSrc, isVideo, getFileNameFromPath(nextSrc), currentMediaList, currentMediaIndex);
 }
 
 /**
@@ -1731,6 +1890,9 @@ $(document).ready(function() {
 		applyZoom();
 		$('#previewImage').attr('src', '');
 		$('#previewVideo source').attr('src', '');
+		$('#previewCounter').hide().text('');
+		currentMediaList = [];
+		currentMediaIndex = 0;
 	});
 });
 

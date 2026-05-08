@@ -18,6 +18,8 @@ public interface CollectdDataDao
 
 	public List<CollectDataEntity> findByMonitoring(String string);
 
+	public List<CollectDataEntity> findByMonitoringAndTaskenabled(String monitoring, String taskenabled);
+
 	/**
 	 * 统计收藏夹数据总数
 	 * 

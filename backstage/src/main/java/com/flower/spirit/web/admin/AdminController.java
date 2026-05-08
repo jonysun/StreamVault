@@ -344,6 +344,16 @@ public class AdminController {
 	public AjaxEntity execCollectData(CollectDataEntity collectDataEntity,HttpServletRequest request) {
 		return collectDataService.execCollectData(collectDataEntity);
 	}
+
+	@GetMapping(value = "/pauseCollectData")
+	public AjaxEntity pauseCollectData(Integer id) {
+		return collectDataService.pauseCollectData(id);
+	}
+
+	@GetMapping(value = "/resumeCollectData")
+	public AjaxEntity resumeCollectData(Integer id) {
+		return collectDataService.resumeCollectData(id);
+	}
 	
 	//updateTikTokConfig
 	/**

@@ -85,9 +85,12 @@ public class CollectDataService {
 	
     @Transactional
     public AjaxEntity saveCollectData(CollectDataEntity entity) {
+		if (entity.getTaskenabled() == null || entity.getTaskenabled().trim().isEmpty()) {
+			entity.setTaskenabled("Y");
+		}
         collectdDataDao.save(entity);
         quartzTaskService.scheduleTask(entity);
-    	return new AjaxEntity(Global.ajax_success, "任务创建成功", entity);
+     	return new AjaxEntity(Global.ajax_success, "任务创建成功", entity);
     }
     
 
@@ -1048,6 +1051,13 @@ public class CollectDataService {
 
 
 	public AjaxEntity execCollectData(CollectDataEntity collectDataEntity){
+		if (collectDataEntity == null || collectDataEntity.getId() == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务ID不能为空", null);
+		}
+		Optional<CollectDataEntity> current = collectdDataDao.findById(collectDataEntity.getId());
+		if (current.isPresent() && "N".equalsIgnoreCase(current.get().getTaskenabled())) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务已暂停，请先开始任务", null);
+		}
 		//先判断 任务存不存在
 		boolean taskExists = quartzTaskService.isTaskExists(collectDataEntity.getId());
 		if(taskExists) {
@@ -1070,5 +1080,35 @@ public class CollectDataService {
 			}
 		}
 		return new AjaxEntity(Global.ajax_success, "任务启动成功", null);
+	}
+
+	public AjaxEntity pauseCollectData(Integer id) {
+		if (id == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务ID不能为空", null);
+		}
+		Optional<CollectDataEntity> byId = collectdDataDao.findById(id);
+		if (!byId.isPresent()) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务不存在", null);
+		}
+		CollectDataEntity task = byId.get();
+		task.setTaskenabled("N");
+		collectdDataDao.save(task);
+		quartzTaskService.removeTaskSchedule(id);
+		return new AjaxEntity(Global.ajax_success, "任务已暂停", task);
+	}
+
+	public AjaxEntity resumeCollectData(Integer id) {
+		if (id == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务ID不能为空", null);
+		}
+		Optional<CollectDataEntity> byId = collectdDataDao.findById(id);
+		if (!byId.isPresent()) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务不存在", null);
+		}
+		CollectDataEntity task = byId.get();
+		task.setTaskenabled("Y");
+		collectdDataDao.save(task);
+		quartzTaskService.scheduleTask(task);
+		return new AjaxEntity(Global.ajax_success, "任务已开始", task);
 	}
 }

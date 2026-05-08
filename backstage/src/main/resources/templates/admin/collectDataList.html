@@ -598,6 +598,50 @@
 			});
 		})
 	}
+
+	function pauseTask(){
+		$('.pauseTask').click(function () {
+			var id = $(this).attr('data-id');
+			layer.confirm("确定暂停此任务吗？", function(index){
+				layer.load();
+				$.get('/admin/api/pauseCollectData?id=' + id, function(res){
+					layer.closeAll('loading');
+					if(res.resCode === '000001'){
+						layer.msg('任务已暂停');
+						setTimeout(function(){ window.location.reload(); }, 1000);
+					}else{
+						layer.alert(res.message || '暂停失败');
+					}
+				}).fail(function(){
+					layer.closeAll('loading');
+					layer.alert('网络请求失败');
+				});
+				layer.close(index);
+			});
+		})
+	}
+
+	function resumeTask(){
+		$('.resumeTask').click(function () {
+			var id = $(this).attr('data-id');
+			layer.confirm("确定开始此任务吗？", function(index){
+				layer.load();
+				$.get('/admin/api/resumeCollectData?id=' + id, function(res){
+					layer.closeAll('loading');
+					if(res.resCode === '000001'){
+						layer.msg('任务已开始');
+						setTimeout(function(){ window.location.reload(); }, 1000);
+					}else{
+						layer.alert(res.message || '开始失败');
+					}
+				}).fail(function(){
+					layer.closeAll('loading');
+					layer.alert('网络请求失败');
+				});
+				layer.close(index);
+			});
+		})
+	}
 	function textnone(str){
 		if(str == null || str == undefined){
 			return "无";
@@ -695,6 +739,9 @@
 							// 监控状态样式
 							var monitorClass = list[i].monitoring === 'Y' ? 'text-success' : 'text-secondary';
 							var monitorText = list[i].monitoring === 'Y' ? '已开启' : '未开启';
+							var enabled = list[i].taskenabled !== 'N';
+							var enabledText = enabled ? '运行中' : '已暂停';
+							var enabledClass = enabled ? 'text-success' : 'text-warning';
 
 							html +='<tr>'
 									+'<td title="'+list[i].id+'">'+list[i].id+'</td>'
@@ -716,15 +763,16 @@
 										+'<small class="text-muted">'+addressValue+'</small>'
 									+'</td>'
 									+'<td title="'+list[i].platform+'">'+list[i].platform+'</td>'
-									+'<td><span class="'+monitorClass+'">'+monitorText+'</span></td>'
-									+'<td><span class="'+statusClass+'">'+textnone(statusText)+'</span></td>'
+								+'<td><span class="'+monitorClass+'">'+monitorText+'</span><br/><small class="'+enabledClass+'">'+enabledText+'</small></td>'
+								+'<td><span class="'+statusClass+'">'+textnone(statusText)+'</span></td>'
 									+'<td>'+textnone(list[i].count)+'/'+textnone(list[i].carriedout)+'</td>'
 									+'<td>'+textnone(list[i].taskcron)+'</td>'
 									+'<td>'+textnone(list[i].createtime)+'</td>'
 									+'<td>'+textnone(list[i].endtime)+'</td>'
 									+'<td>'
 									+'<div class="btn-group">'
-									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-success startTask" href="#!" title="开始任务" data-toggle="tooltip">开始任务</a>'
+									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-success startTask" href="#!" title="开始任务" data-toggle="tooltip">执行一次</a>'
+									+(enabled ? '<a data-id="'+list[i].id+'" class="btn btn-xs btn-warning pauseTask" href="#!" title="暂停任务" data-toggle="tooltip">暂停</a>' : '<a data-id="'+list[i].id+'" class="btn btn-xs btn-info resumeTask" href="#!" title="开始任务" data-toggle="tooltip">开始</a>')
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewProcesses" href="#!" title="查看进程" data-toggle="tooltip">查看进程</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default deleteProcesses" href="#!" title="删除" data-toggle="tooltip">删除</a>'
 									+(list[i].platform === '哔哩' && !list[i].originaladdress.startsWith('bili-fav-') && !list[i].originaladdress.startsWith('bili-arc-')  && !list[i].originaladdress.startsWith('bili-seaarc-') ? 
@@ -737,6 +785,8 @@
 					viewProcesses();
 					deleteProcesses();
 					startTask();
+					pauseTask();
+					resumeTask();
 						laypage({
 							cont: 'pager',
 							pages: record.page.totalPages,

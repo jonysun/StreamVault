@@ -63,6 +63,10 @@ public class QuartzTaskService {
      */
     public void scheduleTask(CollectDataEntity task) {
         try {
+            if ("N".equalsIgnoreCase(task.getTaskenabled())) {
+                logger.info("任务已暂停，跳过调度注册：{}", task.getId());
+                return;
+            }
             String jobName = "job-" + task.getId();
             String groupName = "collect";
             // 获取cron表达式
@@ -241,6 +245,10 @@ public class QuartzTaskService {
             }
             List<CollectDataEntity> tasks = collectdDataDao.findByMonitoring("Y");
             for (CollectDataEntity task : tasks) {
+                // 兼容旧数据：taskenabled为空视为启用
+                if ("N".equalsIgnoreCase(task.getTaskenabled())) {
+                    continue;
+                }
                 scheduleTask(task);
             }
             logger.info("刷新任务完成，共{}个", tasks.size());

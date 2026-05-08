@@ -51,6 +51,8 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	private String originaladdress;
 	
 	private String monitoring;   //是否监控
+
+	private String taskenabled; // 任务是否启用: Y/N
 	
 	private String lastCheckTime;
 	
@@ -153,6 +155,14 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 		this.monitoring = monitoring;
 	}
 
+	public String getTaskenabled() {
+		return taskenabled;
+	}
+
+	public void setTaskenabled(String taskenabled) {
+		this.taskenabled = taskenabled;
+	}
+
 	public String getLastCheckTime() {
 		return lastCheckTime;
 	}
@@ -206,7 +216,7 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 		return "CollectDataEntity [id=" + id + ", taskid=" + taskid + ", platform=" + platform + ", taskname="
 				+ taskname + ", taskstatus=" + taskstatus + ", createtime=" + createtime + ", endtime=" + endtime
 				+ ", count=" + count + ", carriedout=" + carriedout + ", originaladdress=" + originaladdress
-				+ ", monitoring=" + monitoring + ", lastCheckTime=" + lastCheckTime + ", lastid=" + lastid + ", maxcur="
+				+ ", monitoring=" + monitoring + ", taskenabled=" + taskenabled + ", lastCheckTime=" + lastCheckTime + ", lastid=" + lastid + ", maxcur="
 				+ maxcur + ", omaxcur=" + omaxcur + ", generatenfo=" + generatenfo + ", taskcron=" + taskcron + "]";
 	}
 
