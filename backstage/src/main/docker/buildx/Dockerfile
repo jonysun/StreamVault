@@ -1,30 +1,34 @@
+FROM python:3.12-slim AS f2-builder
+
+ENV TZ=Asia/Shanghai
+
+# 在固定版本 Python 环境中安装 f2，避免在 Python 3.14 下触发 pydantic-core 源码编译
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir f2
+
+
 FROM eclipse-temurin:17-jre
 
 ENV TZ=Asia/Shanghai
 ARG YT_DLP_VERSION=2026.03.17
 
-# 安装系统依赖（包括 ffmpeg, python3, pip, venv 等）
+# 安装运行时依赖（ffmpeg + 基础工具）
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
-        python3 \
-        python3-pip \
-        python3-venv \
-        python3-dev \
-        libffi-dev \
         wget \
         curl \
         ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 创建虚拟环境并安装 f2
-RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir f2
+# 从 f2-builder 复制 Python 运行时与虚拟环境
+COPY --from=f2-builder /usr/local /usr/local
+COPY --from=f2-builder /opt/venv /opt/venv
 
-# 添加虚拟环境路径到环境变量中
-ENV PATH="/opt/venv/bin:$PATH"
+# 添加 Python 与虚拟环境路径到环境变量中
+ENV PATH="/opt/venv/bin:/usr/local/bin:$PATH"
 
 # 安装 yt-dlp
 RUN wget -O /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp && \
