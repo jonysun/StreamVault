@@ -215,6 +215,10 @@
                                     <div id="fileNameTemplatePreview" style="font-size: 11px; color: #8c8c8c; margin-top: 3px;"></div>
                                 </div>
                                 <div class="form-group">
+                                    <label>图影集萃“查看更多”阈值</label>
+                                    <input class="form-control" type="number" id="mediapreviewlimit" name="mediapreviewlimit" placeholder="默认6" th:value="${config.mediapreviewlimit}">
+                                </div>
+                                <div class="form-group">
                                     <label>F2失败输出完整Traceback</label>
                                     <select id="f2logfullonerror" class="form-control" name="f2logfullonerror">
                                         <option value="1" th:selected="${config.f2logfullonerror} eq '1'">是</option>
@@ -688,6 +692,7 @@
               option['f2logfullonerror'] = $("#f2logfullonerror").val();
               option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
               option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
+              option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
               $.post("/admin/api/saveConfig",option,function(data,status){
                   if(data.resCode =="000001"){
                       layer.closeAll();
@@ -854,6 +859,7 @@
             option['f2logfullonerror'] = $("#f2logfullonerror").val();
             option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
             option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
+            option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
             $.post("/admin/api/saveConfig",option,function(data,status){
                 if(data.resCode =="000001"){
                     layer.closeAll();

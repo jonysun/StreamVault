@@ -72,6 +72,8 @@ public class ConfigEntity implements Serializable {
 
 	private String f2logmaxpreview; // f2日志预览最大长度
 
+	private String mediapreviewlimit; // 图影集萃“查看更多”阈值
+
 	public Integer getId() {
 		return id;
 	}
@@ -246,6 +248,14 @@ public class ConfigEntity implements Serializable {
 
 	public void setF2logmaxpreview(String f2logmaxpreview) {
 		this.f2logmaxpreview = f2logmaxpreview;
+	}
+
+	public String getMediapreviewlimit() {
+		return mediapreviewlimit;
+	}
+
+	public void setMediapreviewlimit(String mediapreviewlimit) {
+		this.mediapreviewlimit = mediapreviewlimit;
 	}
 
 	// public String getYtdlpargs() {

@@ -53,6 +53,9 @@ public class ConfigService {
 		if (cfg.getF2logmaxpreview() == null || cfg.getF2logmaxpreview().trim().isEmpty()) {
 			cfg.setF2logmaxpreview("1000");
 		}
+		if (cfg.getMediapreviewlimit() == null || cfg.getMediapreviewlimit().trim().isEmpty()) {
+			cfg.setMediapreviewlimit("6");
+		}
 		return cfg;
 	}
 
@@ -129,6 +132,13 @@ public class ConfigService {
 				Global.f2logmaxpreview = Integer.parseInt(configEntity.getF2logmaxpreview().trim());
 			} catch (NumberFormatException e) {
 				logger.warn("f2logmaxpreview配置非法，保持原值: {}", Global.f2logmaxpreview);
+			}
+		}
+		if (configEntity.getMediapreviewlimit() != null && !configEntity.getMediapreviewlimit().trim().isEmpty()) {
+			try {
+				Global.mediaPreviewLimit = Integer.parseInt(configEntity.getMediapreviewlimit().trim());
+			} catch (NumberFormatException e) {
+				logger.warn("mediapreviewlimit配置非法，保持原值: {}", Global.mediaPreviewLimit);
 			}
 		}
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);

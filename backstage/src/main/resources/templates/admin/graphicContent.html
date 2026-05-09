@@ -624,6 +624,7 @@
 		<!--页面主要内容-->
 		<main class="lyear-layout-content">
 			<div class="container-fluid">
+				<input type="hidden" id="mediaPreviewLimitCfg" th:value="${mediaPreviewLimit}" />
 				
 				<!-- 搜索区域 -->
 				<div class="search-section">
@@ -1009,9 +1010,10 @@ function generateMediaGrid(mediaList, cardId) {
 	}
 	
 	var html = '<div class="media-grid">';
+	var previewLimit = getMediaPreviewLimit();
 	
-	// 最多显示6个媒体文件
-	var displayCount = Math.min(mediaList.length, 6);
+	// 最多显示N个媒体文件
+	var displayCount = Math.min(mediaList.length, previewLimit);
 	
 	for (var i = 0; i < displayCount; i++) {
 		var mediaPath = mediaList[i];
@@ -1044,7 +1046,7 @@ function generateMediaGrid(mediaList, cardId) {
 	}
 	
 	// 如果还有更多媒体文件，显示展开按钮
-	if (mediaList.length > 6) {
+	if (mediaList.length > previewLimit) {
 		html += `
 			<div class="media-item d-flex align-items-center justify-content-center bg-light expand-media-btn" 
 				 data-card-id="${cardId}" data-all-media='${JSON.stringify(mediaList)}' 
@@ -1053,7 +1055,7 @@ function generateMediaGrid(mediaList, cardId) {
 				<div class="text-center">
 					<i class="mdi mdi-plus-circle text-primary" style="font-size: 20px;"></i>
 					<br>
-					<small class="text-muted">+${mediaList.length - 6} 更多</small>
+					<small class="text-muted">+${mediaList.length - previewLimit} 更多</small>
 					<br>
 					<small class="text-primary">点击查看</small>
 				</div>
@@ -1124,7 +1126,7 @@ function bindCardEvents() {
 	$('.preview-image').click(function() {
 		var imageSrc = $(this).data('src');
 		var fileName = getFileNameFromPath(imageSrc);
-		var list = $(this).data('list') || [];
+		var list = normalizeMediaList($(this).attr('data-list'));
 		var idx = Number($(this).data('index') || 0);
 		showMediaPreview(imageSrc, false, fileName, list, idx);
 	});
@@ -1133,7 +1135,7 @@ function bindCardEvents() {
 	$('.preview-video').click(function() {
 		var videoSrc = $(this).data('src');
 		var fileName = getFileNameFromPath(videoSrc);
-		var list = $(this).data('list') || [];
+		var list = normalizeMediaList($(this).attr('data-list'));
 		var idx = Number($(this).data('index') || 0);
 		showMediaPreview(videoSrc, true, fileName, list, idx);
 	});
@@ -1215,6 +1217,15 @@ function bindCardEvents() {
 	});
 }
 
+function getMediaPreviewLimit() {
+	var raw = $('#mediaPreviewLimitCfg').val();
+	var n = parseInt(raw, 10);
+	if (!isNaN(n) && n > 0) {
+		return n;
+	}
+	return 6;
+}
+
 function updateBatchCount(){
 	$('#batchSelectedCount').text('已选 ' + selectedGraphicIds.size + ' 项');
 }
@@ -1271,7 +1282,7 @@ function showAllMediaModal(mediaList, cardId) {
 				<div class="modal-media-item">
 					${typeIndicator}
 					<video style="width: 100%; height: 200px; object-fit: cover; cursor: pointer;" 
-						   class="modal-preview-video" data-src="${mediaUrl}" data-filename="${fileName}">
+						   class="modal-preview-video" data-src="${mediaUrl}" data-filename="${fileName}" data-index="${i}" data-list='${JSON.stringify(mediaList)}'>
 						<source src="${mediaUrl}" type="video/mp4">
 						您的浏览器不支持视频播放
 					</video>
@@ -1282,7 +1293,7 @@ function showAllMediaModal(mediaList, cardId) {
 			modalContent += `
 				<div class="modal-media-item">
 					<img src="${mediaUrl}" alt="图片" style="width: 100%; height: 200px; object-fit: cover; cursor: pointer;" 
-						 class="modal-preview-image" data-src="${mediaUrl}" data-filename="${fileName}">
+						 class="modal-preview-image" data-src="${mediaUrl}" data-filename="${fileName}" data-index="${i}" data-list='${JSON.stringify(mediaList)}'>
 					<div class="media-filename" title="${fileName}">${fileName}</div>
 				</div>
 			`;
@@ -1301,28 +1312,46 @@ function showAllMediaModal(mediaList, cardId) {
 		area: ['90%', '80%'],
 		zIndex: 19891014, // 设置较高的z-index
 		content: modalContent,
-		success: function(layero, index) {
-			// 绑定模态框内的图片预览事件
-			layero.find('.modal-preview-image').click(function() {
-				var imageSrc = $(this).data('src');
-				var fileName = $(this).data('filename');
-				// 关闭当前的所有媒体模态框
-				layer.close(index);
-				// 显示图片预览
-				showMediaPreview(imageSrc, false, fileName);
-			});
-			
-			// 绑定模态框内的视频预览事件
-			layero.find('.modal-preview-video').click(function() {
-				var videoSrc = $(this).data('src');
-				var fileName = $(this).data('filename');
-				// 关闭当前的所有媒体模态框
-				layer.close(index);
-				// 显示视频预览
-				showMediaPreview(videoSrc, true, fileName);
-			});
+			success: function(layero, index) {
+				// 绑定模态框内的图片预览事件
+				layero.find('.modal-preview-image').click(function() {
+					var imageSrc = $(this).data('src');
+					var fileName = $(this).data('filename');
+					var idx = Number($(this).data('index') || 0);
+					var list = normalizeMediaList($(this).attr('data-list'));
+					// 关闭当前的所有媒体模态框
+					layer.close(index);
+					// 显示图片预览
+					showMediaPreview(imageSrc, false, fileName, list, idx);
+				});
+				
+				// 绑定模态框内的视频预览事件
+				layero.find('.modal-preview-video').click(function() {
+					var videoSrc = $(this).data('src');
+					var fileName = $(this).data('filename');
+					var idx = Number($(this).data('index') || 0);
+					var list = normalizeMediaList($(this).attr('data-list'));
+					// 关闭当前的所有媒体模态框
+					layer.close(index);
+					// 显示视频预览
+					showMediaPreview(videoSrc, true, fileName, list, idx);
+				});
+			}
+		});
+}
+
+function normalizeMediaList(raw) {
+	if (!raw) return [];
+	if (Array.isArray(raw)) return raw;
+	if (typeof raw === 'string') {
+		try {
+			var parsed = JSON.parse(raw);
+			return Array.isArray(parsed) ? parsed : [];
+		} catch (e) {
+			return [];
 		}
-	});
+	}
+	return [];
 }
 
 /**
@@ -1694,7 +1723,13 @@ function showMediaPreview(mediaSrc, isVideo, fileName, mediaList, mediaIndex) {
 	
 	// 设置标题
 	$('#previewModalTitle').text(currentFileName);
-	$('#previewCounter').show().text((currentMediaIndex + 1) + ' / ' + currentMediaList.length);
+	if (currentMediaList.length > 1) {
+		$('#previewCounter').show().text((currentMediaIndex + 1) + ' / ' + currentMediaList.length);
+		$('#prevMediaBtn, #nextMediaBtn').show();
+	} else {
+		$('#previewCounter').hide().text('');
+		$('#prevMediaBtn, #nextMediaBtn').hide();
+	}
 	
 	if (isVideo) {
 		// 显示视频，隐藏图片

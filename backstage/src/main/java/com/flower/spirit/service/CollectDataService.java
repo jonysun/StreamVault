@@ -425,6 +425,8 @@ public class CollectDataService {
 		}
 		int videoaddcount = 0;
 		int graphiccount = 0;
+		int successThisRun = 0;
+		int targetSuccess = entity.getMaxcur() != null ? entity.getMaxcur() : 80;
 		logger.info("任务开始" + entity.getOriginaladdress());
 		JSONArray allDYData = this.getDYData(entity, monitor);
 		logger.info("[CollectTask] getDYData result id={} isNull={} size={}", entity.getId(), allDYData == null,
@@ -440,6 +442,10 @@ public class CollectDataService {
 			entity.setTaskstatus("已开始处理");
 			collectdDataDao.save(entity);
 			for (int i = 0; i < allDYData.size(); i++) {
+				if (successThisRun >= targetSuccess) {
+					logger.info("[CollectTask] 已达到本轮目标成功数，停止本轮处理 targetSuccess={} successThisRun={}", targetSuccess, successThisRun);
+					break;
+				}
 				// System.out.println(allDYData.get(i));
 				logger.info(entity.getOriginaladdress() + "任务中第" + i + "个");
 				String status = "";
@@ -489,6 +495,7 @@ public class CollectDataService {
 						entity.setCarriedout(carriedout);
 						collectdDataDao.save(entity);
 						graphiccount++;
+						successThisRun++;
 					} catch (Exception e) {
 						logger.error("收藏类模块中抖音图集下载异常");
 						logger.error(e.getMessage());
@@ -658,6 +665,9 @@ public class CollectDataService {
 					entity.setCarriedout(carriedout);
 					collectdDataDao.save(entity);
 					videoaddcount++;
+					if ("已完成".equals(status) || "图文已完成".equals(status)) {
+						successThisRun++;
+					}
 				}
 
 			}
@@ -677,8 +687,8 @@ public class CollectDataService {
 		collectdDataDao.save(entity);
 		System.gc();
 		logger.info("任务结束" + entity.getOriginaladdress());
-		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} finalStatus={} carriedout={}",
-				entity.getId(), videoaddcount, graphiccount, totalCount, entity.getTaskstatus(), entity.getCarriedout());
+		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} finalStatus={} carriedout={}",
+				entity.getId(), videoaddcount, graphiccount, totalCount, successThisRun, targetSuccess, entity.getTaskstatus(), entity.getCarriedout());
 	}
 
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {
@@ -695,13 +705,24 @@ public class CollectDataService {
 		// maxc = null!= entity.getMaxcur() ?entity.getMaxcur():80;
 		// }
 
+		List<String> successStatuses = new ArrayList<>();
+		successStatuses.add("已完成");
+		successStatuses.add("图文已完成");
+		long successCountByDataid = collectDataDetailDao.countByDataidAndStatusIn(entity.getId(), successStatuses);
 		long countByDataid = collectDataDetailDao.countByDataid(entity.getId());
 		if (countByDataid > 0) {
-			maxc = null != entity.getMaxcur() ? entity.getMaxcur() : 80;
+			// 监控阶段：基于“历史成功条目数”扩大抓取窗口，失败条目不占成功基数。
+			int monitorWindow = null != entity.getMaxcur() ? entity.getMaxcur() : 80;
+			long expanded = successCountByDataid + monitorWindow;
+			// 防止窗口无限膨胀导致单次抓取过大
+			maxc = (int) Math.min(expanded, 2000L);
+			logger.info("[CollectTask] monitor mode targetNew={} expandedFetchWindow={} (successProcessed={} + target={}, allDetail={})",
+					monitorWindow, maxc, successCountByDataid, monitorWindow, countByDataid);
 		} else {
 			maxc = null != entity.getOmaxcur() ? entity.getOmaxcur() : 80;
 		}
-		logger.info("[CollectTask] getDYData resolved maxc={} existingDetailCount={}", maxc, countByDataid);
+		logger.info("[CollectTask] getDYData resolved maxc={} existingDetailCount={} (omaxcur={}, maxcur={})",
+				maxc, countByDataid, entity.getOmaxcur(), entity.getMaxcur());
 
 		if (entity.getOriginaladdress().startsWith("post")) {
 			logger.info("[CollectTask] getDYData mode=post uid={} maxc={} out={}", sec_user_id, maxc, taskout);

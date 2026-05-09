@@ -145,6 +145,13 @@ public class AppConfig {
 				logger.warn("f2logmaxpreview配置非法，保持原值: {}", Global.f2logmaxpreview);
 			}
 		}
+		if (data.getMediapreviewlimit() != null && !data.getMediapreviewlimit().trim().isEmpty()) {
+			try {
+				Global.mediaPreviewLimit = Integer.parseInt(data.getMediapreviewlimit().trim());
+			} catch (NumberFormatException e) {
+				logger.warn("mediapreviewlimit配置非法，保持原值: {}", Global.mediaPreviewLimit);
+			}
+		}
 		//清空 ffmpeg 队列
 		ffmpegQueueService.clearTask();
 		logger.info("ffmpeg队列已清空");

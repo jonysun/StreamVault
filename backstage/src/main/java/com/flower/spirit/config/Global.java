@@ -144,6 +144,8 @@ public class Global {
 
 	public static int f2logmaxpreview = 1000;
 
+	public static int mediaPreviewLimit = 6;
+
 	@Value("${file.save}")
 	public void setSavefile(String value) {
 		Global.savefile = value;

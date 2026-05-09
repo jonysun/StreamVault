@@ -185,7 +185,8 @@ public class PageController {
 	 * @return
 	 */
 	@RequestMapping(value = "/graphicContentList")
-	public String graphicContentList() {
+	public String graphicContentList(Model model) {
+		model.addAttribute("mediaPreviewLimit", Global.mediaPreviewLimit);
 		return "admin/graphicContent";
 	}
 
