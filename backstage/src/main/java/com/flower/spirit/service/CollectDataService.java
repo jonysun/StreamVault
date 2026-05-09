@@ -1132,4 +1132,33 @@ public class CollectDataService {
 		quartzTaskService.scheduleTask(task);
 		return new AjaxEntity(Global.ajax_success, "任务已开始", task);
 	}
+
+	public AjaxEntity updateCollectData(CollectDataEntity input) {
+		if (input == null || input.getId() == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务ID不能为空", null);
+		}
+		Optional<CollectDataEntity> byId = collectdDataDao.findById(input.getId());
+		if (!byId.isPresent()) {
+			return new AjaxEntity(Global.ajax_uri_error, "任务不存在", null);
+		}
+		CollectDataEntity db = byId.get();
+		// 不允许修改基础识别参数（类型/平台/地址）
+		db.setTaskname(input.getTaskname() != null ? input.getTaskname() : db.getTaskname());
+		db.setMonitoring(input.getMonitoring() != null ? input.getMonitoring() : db.getMonitoring());
+		db.setTaskcron(input.getTaskcron() != null ? input.getTaskcron().trim() : db.getTaskcron());
+		if (input.getMaxcur() != null) {
+			db.setMaxcur(input.getMaxcur());
+		}
+		if (input.getOmaxcur() != null) {
+			db.setOmaxcur(input.getOmaxcur());
+		}
+		collectdDataDao.save(db);
+		// 修改后立即生效：若启用监控则重建调度；否则移除
+		if ("Y".equalsIgnoreCase(db.getMonitoring()) && !"N".equalsIgnoreCase(db.getTaskenabled())) {
+			quartzTaskService.scheduleTask(db);
+		} else {
+			quartzTaskService.removeTaskSchedule(db.getId());
+		}
+		return new AjaxEntity(Global.ajax_success, "任务更新成功", db);
+	}
 }

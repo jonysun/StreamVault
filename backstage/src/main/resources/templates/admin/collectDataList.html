@@ -440,11 +440,12 @@
 
 		// 提交表单时处理值
 		$('.submitCollect').click(function(){
+			var isEdit = $('.optionid').val() !== '';
 			var platform = $('.platform').val();
 			var originaladdress = $('.originaladdress').val();
 			
 			// 如果是抖音,根据类型拼接值
-			if(platform === '抖音') {
+			if(platform === '抖音' && !isEdit) {
 				var type = $('.douyin-select').val();
 				if(type === 'post') {
 					originaladdress = 'post' + originaladdress;
@@ -461,7 +462,7 @@
 					originaladdress = 'fav-' + collectId+"-fav";
 				}
 			}
-			if(platform === '哔哩') {
+			if(platform === '哔哩' && !isEdit) {
 				var type = $('.bilibili-select').val();
 				var seaarcid = $('.seaarcid').val();
 				if(type === 'fav') {
@@ -474,6 +475,7 @@
 			}
 			
 			var option = {
+				id: $('.optionid').val(),
 				platform: platform,
 				originaladdress: originaladdress,
 				monitoring: $('.monitoring').val(),
@@ -496,9 +498,14 @@
 			}
 			/* option['generatenfo'] =$('.generatenfo').val(); */
 			layer.load();
-			$.post("/admin/api/submitCollectData", option, function(data,status){
+			var api = isEdit ? "/admin/api/updateCollectData" : "/admin/api/submitCollectData";
+			$.post(api, option, function(data,status){
 				if(data.resCode == "000001"){
 					layer.closeAll();
+					if (isEdit) {
+						layer.alert('任务修改成功！', function(){ window.location.reload(); });
+						return;
+					}
 					// 询问是否立即启动任务
 					layer.confirm('任务保存成功！是否立即启动任务？', {
 						btn: ['立即启动','稍后启动'] // 按钮
@@ -524,6 +531,45 @@
 	});
 	function addCollect(){
 		$('.addCollect').click(function(){
+			$('.addCollectBox .card-header h4').text('添加收藏任务');
+			$('.optionid').val('');
+			$('.submitCollect').text('保存信息');
+			$('.platform, .douyin-select, .bilibili-select, .originaladdress, .seaarcid').prop('disabled', false);
+			$('.taskname').val('');
+			$('.monitoring').val('N').trigger('change');
+			$('.taskcron').val('');
+			$('.max-fetch').val('');
+			$('.monitor-max-fetch').val('');
+			layer.open({
+				type: 1,
+				skin: 'layui-layer-rim',
+				area: ['680px', '720px'],
+				content: $('.addCollectBox')
+			});
+		})
+	}
+
+	function editCollect(){
+		$('.editCollect').click(function(){
+			var row = $(this).data('row');
+			if (typeof row === 'string') {
+				try { row = JSON.parse(decodeURIComponent(row)); } catch(e) { row = null; }
+			}
+			if(!row){
+				layer.msg('读取任务数据失败');
+				return;
+			}
+			$('.addCollectBox .card-header h4').text('编辑收藏任务');
+			$('.optionid').val(row.id);
+			$('.taskname').val(row.taskname || '');
+			$('.monitoring').val(row.monitoring || 'N').trigger('change');
+			$('.taskcron').val(row.taskcron || '');
+			$('.platform').val(row.platform || '抖音').trigger('change');
+			$('.max-fetch').val(row.omaxcur || '');
+			$('.monitor-max-fetch').val(row.maxcur || '');
+			$('.submitCollect').text('保存修改');
+			// 仅允许改下载数、cron、任务名、监控开关
+			$('.platform, .douyin-select, .bilibili-select, .originaladdress, .seaarcid').prop('disabled', true);
 			layer.open({
 				type: 1,
 				skin: 'layui-layer-rim',
@@ -772,6 +818,7 @@
 									+'<td>'
 									+'<div class="btn-group">'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-success startTask" href="#!" title="开始任务" data-toggle="tooltip">执行一次</a>'
+									+'<a data-row="'+encodeURIComponent(JSON.stringify(list[i]))+'" class="btn btn-xs btn-primary editCollect" href="#!" title="编辑任务" data-toggle="tooltip">编辑</a>'
 									+(enabled ? '<a data-id="'+list[i].id+'" class="btn btn-xs btn-warning pauseTask" href="#!" title="暂停任务" data-toggle="tooltip">暂停</a>' : '<a data-id="'+list[i].id+'" class="btn btn-xs btn-info resumeTask" href="#!" title="开始任务" data-toggle="tooltip">开始</a>')
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewProcesses" href="#!" title="查看进程" data-toggle="tooltip">查看进程</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default deleteProcesses" href="#!" title="删除" data-toggle="tooltip">删除</a>'
@@ -785,6 +832,7 @@
 					viewProcesses();
 					deleteProcesses();
 					startTask();
+					editCollect();
 					pauseTask();
 					resumeTask();
 						laypage({

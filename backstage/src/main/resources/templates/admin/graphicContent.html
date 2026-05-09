@@ -935,6 +935,12 @@ function generateGraphicCard(item) {
 	if (isStreamVaultContent) {
 		var html = `
 			<div class="graphic-card" data-id="${item.id}" data-stream-vault="true">
+				<div class="graphic-header" style="padding:10px 15px; border-bottom:1px solid #eee;">
+					<label style="margin:0; display:flex; align-items:center; gap:8px;">
+						<input type="checkbox" class="card-check" data-id="${item.id}"> 
+						<span style="font-size:13px;color:#666;">选择此图文集</span>
+					</label>
+				</div>
 				<div class="graphic-content" style="padding-top: 5;">
 					${mediaHtml}
 				</div>
@@ -964,7 +970,10 @@ function generateGraphicCard(item) {
 		var html = `
 			<div class="graphic-card" data-id="${item.id}">
 				<div class="graphic-header">
-					<h6 class="graphic-title" title="${displayTitle}">${displayTitle}</h6>
+					<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+						<input type="checkbox" class="card-check" data-id="${item.id}">
+						<h6 class="graphic-title" style="margin:0;" title="${displayTitle}">${displayTitle}</h6>
+					</div>
 					<div class="graphic-meta">
 						<span class="platform-badge ${platformClass}">${platformName}</span>
 						<span>ID: ${item.videoid || 'N/A'}</span>
@@ -1027,7 +1036,6 @@ function generateMediaGrid(mediaList, cardId) {
 		if (isVideo) {
 			html += `
 				<div class="media-item">
-					<label class="media-select"><input type="checkbox" class="media-check" data-id="${cardId}"></label>
 					${typeIndicator}
 					<video class="preview-video" data-src="${mediaUrl}" data-index="${i}" data-list='${JSON.stringify(mediaList)}' style="cursor: pointer;" preload="none" loading="lazy">
 						<source src="${mediaUrl}" type="video/mp4">
@@ -1038,7 +1046,6 @@ function generateMediaGrid(mediaList, cardId) {
 		} else {
 			html += `
 				<div class="media-item">
-					<label class="media-select"><input type="checkbox" class="media-check" data-id="${cardId}"></label>
 					<img src="${mediaUrl}" alt="图片" class="preview-image" data-src="${mediaUrl}" data-index="${i}" data-list='${JSON.stringify(mediaList)}' loading="lazy">
 				</div>
 			`;
@@ -1051,7 +1058,6 @@ function generateMediaGrid(mediaList, cardId) {
 			<div class="media-item d-flex align-items-center justify-content-center bg-light expand-media-btn" 
 				 data-card-id="${cardId}" data-all-media='${JSON.stringify(mediaList)}' 
 				 style="cursor: pointer; border: 2px dashed #ccc;">
-				<label class="media-select"><input type="checkbox" class="media-check" data-id="${cardId}"></label>
 				<div class="text-center">
 					<i class="mdi mdi-plus-circle text-primary" style="font-size: 20px;"></i>
 					<br>
@@ -1114,7 +1120,7 @@ function getMediaTypeText(mediaList) {
  * 绑定卡片相关事件
  */
 function bindCardEvents() {
-	$('.media-check').off('change').on('change', function(e){
+	$('.card-check').off('change').on('change', function(e){
 		e.stopPropagation();
 		var id = $(this).data('id');
 		if ($(this).is(':checked')) selectedGraphicIds.add(String(id));
@@ -1199,7 +1205,7 @@ function bindCardEvents() {
 
 	$('#selectAllGraphic').off('change').on('change', function(){
 		var checked = $(this).is(':checked');
-		$('.media-check').prop('checked', checked).trigger('change');
+		$('.card-check').prop('checked', checked).trigger('change');
 	});
 
 	$('#batchDeleteGraphicBtn').off('click').on('click', function(){
