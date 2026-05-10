@@ -933,6 +933,8 @@ function generateGraphicCard(item) {
 	
 	// StreamVault内容的HTML结构（隐藏标题和内容文字）
 	if (isStreamVaultContent) {
+		var publishText = formatTimeDisplay(item.publishtime);
+		var downloadText = formatTimeDisplay(item.createtime);
 		var html = `
 			<div class="graphic-card" data-id="${item.id}" data-stream-vault="true">
 				<div class="graphic-header" style="padding:10px 15px; border-bottom:1px solid #eee;">
@@ -950,6 +952,7 @@ function generateGraphicCard(item) {
 						<span class="platform-badge ${platformClass}">${platformName}</span>
 						<span class="ml-2">ID: ${item.videoid || 'N/A'}</span>
 						<span class="badge badge-info ml-2">媒体</span>
+						<div style="margin-top:4px; color:#666;">发布时间：${publishText} ｜ 下载时间：${downloadText}</div>
 					</div>
 					<div class="action-buttons">
 						<button class="btn btn-sm btn-outline-primary download-package" data-id="${item.id}" data-title="${displayTitle}" data-images='${JSON.stringify(mediaList)}'>
@@ -967,6 +970,8 @@ function generateGraphicCard(item) {
 		`;
 	} else {
 		// 普通图文内容的HTML结构
+		var publishText = formatTimeDisplay(item.publishtime);
+		var downloadText = formatTimeDisplay(item.createtime);
 		var html = `
 			<div class="graphic-card" data-id="${item.id}">
 				<div class="graphic-header">
@@ -977,6 +982,7 @@ function generateGraphicCard(item) {
 					<div class="graphic-meta">
 						<span class="platform-badge ${platformClass}">${platformName}</span>
 						<span>ID: ${item.videoid || 'N/A'}</span>
+						<span style="display:block; margin-top:4px; color:#666;">发布时间：${publishText} ｜ 下载时间：${downloadText}</span>
 					</div>
 				</div>
 				
@@ -1230,6 +1236,13 @@ function getMediaPreviewLimit() {
 		return n;
 	}
 	return 6;
+}
+
+function formatTimeDisplay(timeStr) {
+	if (!timeStr) return '--';
+	var d = new Date(timeStr);
+	if (isNaN(d.getTime())) return '--';
+	return d.toLocaleString('zh-CN');
 }
 
 function updateBatchCount(){

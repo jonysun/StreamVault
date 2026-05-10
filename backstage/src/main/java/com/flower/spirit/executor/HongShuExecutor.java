@@ -131,6 +131,7 @@ public class HongShuExecutor {
 					VideoDataEntity videoDataEntity = new VideoDataEntity(keyid, title, title, "小红书", coverunaddr,
 							videofile,
 							videounrealaddr, url);
+					videoDataEntity.setPublishtime(DateUtils.formatDateTime(new Date(Long.parseLong(time)*1000)));
 					videoDataEntity.setVideoauthor(nickname);
 					videoDataDao.save(videoDataEntity);
 					processHistoryService.saveProcess(saveProcess.getId(), url,  "小红书");
@@ -178,6 +179,7 @@ public class HongShuExecutor {
 		graphicContentEntity.setContent(desc);
 		graphicContentEntity.setImages(imageurl.toJSONString());
 		graphicContentEntity.setAuthor(nickname);
+		graphicContentEntity.setPublishtime(null);
 		graphicContentEntity.setCreatetime(new Date());
 		graphicContentDao.save(graphicContentEntity);
 		sendNotify.sendNotifyData(filename+"(图文)", url, "小红书");

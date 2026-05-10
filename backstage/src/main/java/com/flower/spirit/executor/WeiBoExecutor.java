@@ -126,6 +126,7 @@ public class WeiBoExecutor {
 			graphicContentEntity.setContent(text_raw);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(username);
+			graphicContentEntity.setPublishtime(object.getString("created_at"));
 			graphicContentEntity.setCreatetime(new Date());
 			graphicContentDao.save(graphicContentEntity);
 			sendNotify.sendNotifyData(filename, weibourl, "微博");

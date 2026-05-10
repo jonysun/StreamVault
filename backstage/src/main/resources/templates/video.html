@@ -1644,7 +1644,8 @@
             const title = video.videoname || video.title || '未知标题';
             const cover = video.videocover || video.cover;
             const platform = video.videoplatform || video.platform || '未知平台';
-            const createTime = video.createtime || video.createTime;
+            const createTime = video.createtime || video.createTime || '';
+            const publishTime = video.publishtime || video.publishTime || '';
             const videoAddr = video.videounrealaddr || video.videoAddr || '';
             
             // 将视频播放地址进行base64编码存储在data属性中，避免特殊符号问题
@@ -1655,6 +1656,7 @@
             card.setAttribute('data-video-desc', btoa(encodeURIComponent(video.videodesc || video.description || '')));
             card.setAttribute('data-video-platform', btoa(encodeURIComponent(platform)));
             card.setAttribute('data-create-time', createTime || '');
+            card.setAttribute('data-publish-time', publishTime || '');
             
             // 添加平台标识用于筛选（用于前端平台筛选功能）
             const platformLower = platform.toLowerCase();
@@ -1666,7 +1668,8 @@
             card.onclick = () => playVideoFromCard(card);
             
             const platformClass = getPlatformClass(platform);
-            const formattedDate = formatDate(createTime);
+            const formattedPublishDate = formatPublishDate(publishTime);
+            const formattedCreateDate = formatDate(createTime);
             
             // 拼接缩略图路径，添加token参数
 			const coverUrl = addAppTokenToUrl(cover);
@@ -1686,12 +1689,13 @@
                 </div>
                 <div class="p-3">
                     <h3 class="font-medium text-gray-900 line-clamp-2 mb-2">${title}</h3>
-                    <div class="flex items-center justify-between text-sm text-gray-500">
+                    <div class="flex items-center justify-between text-sm text-gray-500 mb-1">
                         <span class="${platformClass} text-white px-2 py-1 rounded text-xs cursor-pointer hover:shadow-md transition-all" data-platform="${platform}">
                             ${platform}
                         </span>
-                        <span>${formattedDate}</span>
+                        <span>发布 ${formattedPublishDate}</span>
                     </div>
+                    <div class="text-xs text-gray-400">下载 ${formattedCreateDate}</div>
                 </div>
             `;
             
@@ -1740,6 +1744,9 @@
         // 格式化日期
         function formatDate(dateString) {
             const date = new Date(dateString);
+            if (!dateString || isNaN(date.getTime())) {
+                return '--';
+            }
             const now = new Date();
             const diff = now - date;
             
@@ -1756,6 +1763,13 @@
             } else {
                 return date.toLocaleDateString('zh-CN');
             }
+        }
+
+        function formatPublishDate(dateString) {
+            if (!dateString) return '--';
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return '--';
+            return date.toLocaleString('zh-CN', { hour12: false });
         }
         
         // URL添加token
@@ -1985,7 +1999,8 @@
                     videoname: title,
                     videodesc: description,
                     videoplatform: platform,
-                    createtime: createTime
+                    createtime: createTime,
+                    publishtime: card.getAttribute('data-publish-time')
                 };
                 currentVideoId = videoId;
                 
@@ -2042,7 +2057,9 @@
             // 设置视频信息
             document.getElementById('videoTitle').textContent = videoInfo.videoname || videoInfo.title;
             document.getElementById('videoDesc').textContent = videoInfo.videodesc || videoInfo.description || '暂无简介';
-            document.getElementById('createTime').textContent = formatDate(videoInfo.createtime || videoInfo.createTime);
+            const publishText = formatPublishDate(videoInfo.publishtime || videoInfo.publishTime);
+            const downloadText = formatDate(videoInfo.createtime || videoInfo.createTime);
+            document.getElementById('createTime').textContent = `发布时间：${publishText} ｜ 下载时间：${downloadText}`;
             
             // 设置平台标签
             const platformTag = document.getElementById('platformTag');

@@ -80,7 +80,7 @@
 									<view class="tag platform" v-if="item.videoplatform">{{ item.videoplatform }}</view>
 									<view class="tag videotype" v-if="item.videotag">{{ item.videotag }}</view>
 								</view>
-								<text class="video-time">{{ formatTime(item.createtime) }}</text>
+							<text class="video-time">发:{{ formatTime(item.publishtime) }} / 下:{{ formatTime(item.createtime) }}</text>
 							</view>
 						</view>
 					</view>
@@ -206,9 +206,10 @@
 				}
 			},
 			formatTime(timeStr) {
-				if (!timeStr) return '';
+				if (!timeStr) return '--';
 				try {
 					const date = new Date(timeStr);
+					if (isNaN(date.getTime())) return '--';
 					const now = new Date();
 					const diff = now - date;
 					const days = Math.floor(diff / (1000 * 60 * 60 * 24));

@@ -50,4 +50,6 @@ public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, I
 	
 	@Query(value = "SELECT * FROM biz_graphic_content ORDER BY id DESC LIMIT 3", nativeQuery = true)
 	List<GraphicContentEntity> findRecentlyAdded();
+
+	List<GraphicContentEntity> findByPlatformAndPublishtimeIsNull(String platform);
 }

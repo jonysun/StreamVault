@@ -19,7 +19,7 @@
 					<text class="video-title">{{videoInfo.videoname}}</text>
 				</view>
 				<view class="video-stats">
-					<text class="upload-time">{{formatTime(videoInfo.createTime)}}</text>
+					<text class="upload-time">发布时间：{{formatTime(videoInfo.publishtime || videoInfo.publishTime)}} ｜ 下载时间：{{formatTime(videoInfo.createTime || videoInfo.createtime)}}</text>
 				</view>
 			</view>
 
@@ -93,8 +93,9 @@
 				uni.showToast({ title: '视频加载失败', icon: 'none' });
 			},
 			formatTime(timestamp) {
-				if (!timestamp) return '';
+				if (!timestamp) return '--';
 				const date = new Date(timestamp);
+				if (isNaN(date.getTime())) return '--';
 				return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 			},
 			copyVideoLink() {

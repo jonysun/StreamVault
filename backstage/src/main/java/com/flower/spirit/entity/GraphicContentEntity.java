@@ -46,6 +46,8 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	
 	private Date createtime;
 
+	private String publishtime;
+
 	public Integer getId() {
 		return id;
 	}
@@ -125,6 +127,14 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	public void setCreatetime(Date createtime) {
 		this.createtime = createtime;
+	}
+
+	public String getPublishtime() {
+		return publishtime;
+	}
+
+	public void setPublishtime(String publishtime) {
+		this.publishtime = publishtime;
 	}
 
 	public String getMarkroute() {

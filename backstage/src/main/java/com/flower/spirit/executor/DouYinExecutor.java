@@ -134,6 +134,7 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
+			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -220,6 +221,7 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
+			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -240,6 +242,18 @@ public class DouYinExecutor {
 			return normalized.substring(0, 1000);
 		}
 		return normalized;
+	}
+
+	private static String formatPublishTimeFromEpochSeconds(String epochSeconds) {
+		if (epochSeconds == null || epochSeconds.trim().isEmpty()) {
+			return null;
+		}
+		try {
+			long sec = Long.parseLong(epochSeconds.trim());
+			return com.flower.spirit.utils.DateUtils.formatDateTime(new Date(sec * 1000L));
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 }

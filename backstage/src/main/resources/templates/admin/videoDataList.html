@@ -1068,10 +1068,12 @@
             }, 100); // 延迟100ms隐藏,避免快速移动时的闪烁
         }
 
-        function formatTime(time) {
-            if (!time) return '';
-            return new Date(time).toLocaleString();
-        }
+		function formatTime(time) {
+			if (!time) return '--';
+			var d = new Date(time);
+			if (isNaN(d.getTime())) return '--';
+			return d.toLocaleString();
+		}
 
         function formatVideoInfo(item) {
             // 判断是否为隐私模式
@@ -1079,16 +1081,18 @@
             var displayName = isPrivate ? '******' : item.videoname;
             var displayDesc = isPrivate ? '******' : item.videodesc;
 
-            var html = '<div class="video-title content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videoname) + '">' + displayName + '</div>';
-            html += '<div class="video-desc content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videodesc) + '">' + displayDesc + '</div>';
+			var html = '<div class="video-title content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videoname) + '">' + displayName + '</div>';
+			html += '<div class="video-desc content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videodesc) + '">' + displayDesc + '</div>';
+			html += '<div class="small mt-1 text-info">发布时间：' + formatTime(item.publishtime) + '</div>';
+			html += '<div class="small text-muted">下载时间：' + formatTime(item.createtime) + '</div>';
 
-            // 只在非隐私模式下显示地址信息
-            if (!isPrivate) {
-                var addressInfo = getAddressInfo(item);
-                html += '<div class="small mt-1">';
-                html += '<span class="badge ' + addressInfo.cc + '">' + addressInfo.type + '</span> ';
-                html += '<span class="text-muted">' + addressInfo.value + '</span>';
-                html += '</div>';
+			// 只在非隐私模式下显示地址信息
+			if (!isPrivate) {
+				var addressInfo = getAddressInfo(item);
+				html += '<div class="small mt-1">';
+				html += '<span class="badge ' + addressInfo.cc + '">' + addressInfo.type + '</span> ';
+				html += '<span class="text-muted">' + addressInfo.value + '</span>';
+				html += '</div>';
             }
 
             return html;

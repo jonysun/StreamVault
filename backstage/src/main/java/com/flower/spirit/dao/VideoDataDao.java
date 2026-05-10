@@ -46,4 +46,6 @@ public interface VideoDataDao
 	
 	@Query(value = "SELECT * FROM biz_video WHERE (videoprivacy IS NULL OR videoprivacy = '' OR videoprivacy != '1') ORDER BY id DESC LIMIT 3", nativeQuery = true)
 	List<VideoDataEntity> findRecentlyAdded();
+
+	List<VideoDataEntity> findByVideoplatformAndPublishtimeIsNull(String videoplatform);
 }

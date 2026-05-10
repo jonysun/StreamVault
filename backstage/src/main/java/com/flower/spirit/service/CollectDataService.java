@@ -629,6 +629,7 @@ public class CollectDataService {
 					VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, "抖音", coverunaddr,
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
+					videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 					if (Global.getGeneratenfo) {
 						String uid = aweme_detail.getString("uid");
 						String publisher = dyNickname + "-" + uid + ".png";
@@ -908,6 +909,18 @@ public class CollectDataService {
 			return text.substring(0, 16000) + "...(truncated)";
 		}
 		return text;
+	}
+
+	private String formatPublishTimeFromEpochSeconds(String epochSeconds) {
+		if (epochSeconds == null || epochSeconds.trim().isEmpty()) {
+			return null;
+		}
+		try {
+			long sec = Long.parseLong(epochSeconds.trim());
+			return DateUtils.formatDateTime(new Date(sec * 1000L));
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	public JSONArray getAllDYData(CollectDataEntity entity) throws Exception {

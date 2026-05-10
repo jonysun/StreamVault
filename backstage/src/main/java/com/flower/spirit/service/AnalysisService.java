@@ -653,6 +653,7 @@ public class AnalysisService {
 		HttpUtil.downloadFileWithOkHttp(cover, coverfile, coverdir, header);
 		VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, platform, coverunaddr, videofile+filename + ".mp4",
 				videounrealaddr, originaladdress);
+		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
 		// 生成元数据
 		if (Global.getGeneratenfo) {
 			// 下载发布者头像
@@ -677,6 +678,18 @@ public class AnalysisService {
 
 		videoDataDao.save(videoDataEntity);
 		logger.info("下载流程结束");
+	}
+
+	private String formatPublishTimeFromEpochSeconds(String epochSeconds) {
+		if (epochSeconds == null || epochSeconds.trim().isEmpty()) {
+			return null;
+		}
+		try {
+			long sec = Long.parseLong(epochSeconds.trim());
+			return DateUtils.formatDateTime(new Date(sec * 1000L));
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	/**

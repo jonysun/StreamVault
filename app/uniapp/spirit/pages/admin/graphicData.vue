@@ -78,7 +78,7 @@
 								<view class="meta-left">
 									<text class="author">@{{ item.author || '未知' }}</text>
 								</view>
-								<text class="create-time">{{ formatDate(item.createtime) }}</text>
+							<text class="create-time">发:{{ formatDate(item.publishtime) }} / 下:{{ formatDate(item.createtime) }}</text>
 							</view>
 						</view>
 					</view>
@@ -150,7 +150,7 @@
 				<view class="preview-info">
 					<text class="preview-desc">{{ previewItem.content || previewItem.title }}</text>
 					<view class="preview-footer">
-						<text class="preview-time">{{ formatDate(previewItem.createtime) }}</text>
+						<text class="preview-time">发布时间：{{ formatDate(previewItem.publishtime) }} ｜ 下载时间：{{ formatDate(previewItem.createtime) }}</text>
 						<view class="preview-actions">
 							<view class="action-btn" @tap="copyOriginalLink(previewItem)">
 								<uni-icons type="link" size="16" color="#666"></uni-icons>
@@ -346,9 +346,10 @@
 				return map[platform] || platform;
 			},
 			formatDate(timeStr) {
-				if (!timeStr) return '';
+				if (!timeStr) return '--';
 				try {
 					const date = new Date(timeStr);
+					if (isNaN(date.getTime())) return '--';
 					const now = new Date();
 					const diff = now - date;
 					const days = Math.floor(diff / (1000 * 60 * 60 * 24));
