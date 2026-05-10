@@ -66,6 +66,14 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	
 	private String taskcron;
 
+	private String lastfetchsnapshot; // 最近一次全量拉取列表快照(JSON)
+
+	private String lastplanitems; // 最近一次计划下载列表(JSON)
+
+	private String lastfetchtime; // 最近一次拉取时间
+
+	private Integer lastfetchcount; // 最近一次拉取总数
+
 	public Integer getId() {
 		return id;
 	}
@@ -211,13 +219,46 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 		this.taskcron = taskcron;
 	}
 
+	public String getLastfetchsnapshot() {
+		return lastfetchsnapshot;
+	}
+
+	public void setLastfetchsnapshot(String lastfetchsnapshot) {
+		this.lastfetchsnapshot = lastfetchsnapshot;
+	}
+
+	public String getLastplanitems() {
+		return lastplanitems;
+	}
+
+	public void setLastplanitems(String lastplanitems) {
+		this.lastplanitems = lastplanitems;
+	}
+
+	public String getLastfetchtime() {
+		return lastfetchtime;
+	}
+
+	public void setLastfetchtime(String lastfetchtime) {
+		this.lastfetchtime = lastfetchtime;
+	}
+
+	public Integer getLastfetchcount() {
+		return lastfetchcount;
+	}
+
+	public void setLastfetchcount(Integer lastfetchcount) {
+		this.lastfetchcount = lastfetchcount;
+	}
+
 	@Override
 	public String toString() {
 		return "CollectDataEntity [id=" + id + ", taskid=" + taskid + ", platform=" + platform + ", taskname="
 				+ taskname + ", taskstatus=" + taskstatus + ", createtime=" + createtime + ", endtime=" + endtime
 				+ ", count=" + count + ", carriedout=" + carriedout + ", originaladdress=" + originaladdress
 				+ ", monitoring=" + monitoring + ", taskenabled=" + taskenabled + ", lastCheckTime=" + lastCheckTime + ", lastid=" + lastid + ", maxcur="
-				+ maxcur + ", omaxcur=" + omaxcur + ", generatenfo=" + generatenfo + ", taskcron=" + taskcron + "]";
+				+ maxcur + ", omaxcur=" + omaxcur + ", generatenfo=" + generatenfo + ", taskcron=" + taskcron
+				+ ", lastfetchtime=" + lastfetchtime + ", lastfetchcount=" + lastfetchcount + "]";
 	}
 
 	

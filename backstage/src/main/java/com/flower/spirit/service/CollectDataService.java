@@ -431,6 +431,12 @@ public class CollectDataService {
 		int skippedThisRun = 0;
 		logger.info("任务开始" + entity.getOriginaladdress());
 		JSONArray allDYData = this.getDYData(entity, monitor);
+		if (allDYData != null) {
+			entity.setLastfetchcount(allDYData.size());
+			entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
+			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData));
+			collectdDataDao.save(entity);
+		}
 		logger.info("[CollectTask] getDYData result id={} isNull={} size={}", entity.getId(), allDYData == null,
 				allDYData == null ? 0 : allDYData.size());
 		if (allDYData == null) {
@@ -443,6 +449,7 @@ public class CollectDataService {
 			entity.setCount(String.valueOf(allDYData.size()));
 			entity.setTaskstatus("已开始处理");
 			collectdDataDao.save(entity);
+			JSONArray planItems = new JSONArray();
 			for (int i = 0; i < allDYData.size(); i++) {
 				if (successThisRun >= targetSuccess) {
 					logger.info("[CollectTask] 已达到本轮目标成功数，停止本轮处理 targetSuccess={} successThisRun={}", targetSuccess, successThisRun);
@@ -457,6 +464,10 @@ public class CollectDataService {
 				StringBuilder processLog = new StringBuilder();
 				JSONObject aweme_detail = allDYData.getJSONObject(i);
 				String awemeId = aweme_detail.getString("aweme_id");
+				JSONObject planItem = new JSONObject();
+				planItem.put("aweme_id", awemeId);
+				planItem.put("desc", aweme_detail.getString("desc"));
+				planItem.put("index", i + 1);
 				String desc = aweme_detail.getString("desc");
 				String displayName = safeDisplayName(desc, awemeId, "视频");
 				String detailJson = safeDetailJson(aweme_detail);
@@ -471,8 +482,18 @@ public class CollectDataService {
 				JSONArray jsonArray = aweme_detail.getJSONArray("video_play_addr");
 				if (jsonArray == null || jsonArray.isEmpty()) {
 					mediaType = "image";
+					planItem.put("mediatype", mediaType);
+					planItem.put("decision", "image-branch");
 					displayName = safeDisplayName(desc, awemeId, "图文");
 					appendLog(processLog, "branch", "video_play_addr empty -> imageText executor");
+					CollectDataDetailEntity existingDetail = collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId());
+					if (existingDetail != null) {
+						appendLog(processLog, "skip", "detail exists in collect_data_detail");
+						skippedThisRun++;
+						planItem.put("decision", "skip-detail-exists");
+						planItems.add(planItem);
+						continue;
+					}
 					// 不支持
 					try {
 						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(),null);
@@ -498,6 +519,7 @@ public class CollectDataService {
 						collectdDataDao.save(entity);
 						graphiccount++;
 						successThisRun++;
+						planItem.put("decision", "image-success");
 					} catch (Exception e) {
 						logger.error("收藏类模块中抖音图集下载异常");
 						logger.error(e.getMessage());
@@ -522,10 +544,13 @@ public class CollectDataService {
 						if (collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId()) == null) {
 							collectDataDetailService.save(failed);
 						}
+						planItem.put("decision", "image-fail");
 					}
+					planItems.add(planItem);
 					continue;
 				}
 				mediaType = "video";
+				planItem.put("mediatype", mediaType);
 				String videoplay = "";
 				if (jsonArray.size() >= 2) {
 					videoplay = jsonArray.getString(jsonArray.size() - 1);
@@ -549,6 +574,7 @@ public class CollectDataService {
 				logger.info("[CollectTask] item dedup taskId={} awemeId={} exists={}", entity.getId(), awemeId,
 						findByVideoid.size() > 0);
 				if (findByVideoid.size() == 0) {
+					planItem.put("decision", "video-download");
 					String dyNickname = aweme_detail.getString("nickname");
 					String dyCreateTime = aweme_detail.getString("create_time");
 					String filename = FileNameTemplateUtil.resolveFileName(desc, awemeId, dyNickname, dyCreateTime, "抖音");
@@ -644,6 +670,7 @@ public class CollectDataService {
 				if (status.contains("已存在")) {
 					appendLog(processLog, "skip", "already exists in video library");
 					skippedThisRun++;
+					planItem.put("decision", "skip-video-exists");
 				}
 
 				// 这里应该判断一下CollectDataDetailEntity记录是否存在 存在 则不处理 因为已经不预删除了
@@ -671,16 +698,22 @@ public class CollectDataService {
 					videoaddcount++;
 					if ("已完成".equals(status) || "图文已完成".equals(status)) {
 						successThisRun++;
+						planItem.put("decision", "video-success");
 					}
 					if ("执行失败".equals(status)) {
 						failedThisRun++;
+						planItem.put("decision", "video-fail");
 					}
 				} else {
 					appendLog(processLog, "skip", "detail exists in collect_data_detail");
 					skippedThisRun++;
+					planItem.put("decision", "skip-detail-exists");
 				}
+				planItems.add(planItem);
 
 			}
+			entity.setLastplanitems(planItems.toJSONString());
+			collectdDataDao.save(entity);
 		}
 		int totalCount = videoaddcount + graphiccount;
 		if (totalCount > 0) {
@@ -699,6 +732,24 @@ public class CollectDataService {
 		logger.info("任务结束" + entity.getOriginaladdress());
 		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} failedThisRun={} skippedThisRun={} finalStatus={} carriedout={}",
 				entity.getId(), videoaddcount, graphiccount, totalCount, successThisRun, targetSuccess, failedThisRun, skippedThisRun, entity.getTaskstatus(), entity.getCarriedout());
+	}
+
+	private String buildFetchSnapshot(JSONArray allData) {
+		JSONArray arr = new JSONArray();
+		for (int i = 0; i < allData.size(); i++) {
+			JSONObject src = allData.getJSONObject(i);
+			JSONObject item = new JSONObject();
+			item.put("index", i + 1);
+			item.put("aweme_id", src.getString("aweme_id"));
+			item.put("desc", src.getString("desc"));
+			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
+			arr.add(item);
+		}
+		String text = arr.toJSONString();
+		if (text.length() > 200000) {
+			return text.substring(0, 200000) + "...(truncated)";
+		}
+		return text;
 	}
 
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {

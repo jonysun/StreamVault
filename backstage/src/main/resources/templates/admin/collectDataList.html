@@ -820,6 +820,8 @@
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-success startTask" href="#!" title="开始任务" data-toggle="tooltip">执行一次</a>'
 									+'<a data-row="'+encodeURIComponent(JSON.stringify(list[i]))+'" class="btn btn-xs btn-primary editCollect" href="#!" title="编辑任务" data-toggle="tooltip">编辑</a>'
 									+(enabled ? '<a data-id="'+list[i].id+'" class="btn btn-xs btn-warning pauseTask" href="#!" title="暂停任务" data-toggle="tooltip">暂停</a>' : '<a data-id="'+list[i].id+'" class="btn btn-xs btn-info resumeTask" href="#!" title="开始任务" data-toggle="tooltip">开始</a>')
+									+'<a data-json="'+encodeURIComponent(list[i].lastfetchsnapshot || '')+'" class="btn btn-xs btn-default viewSnapshot" href="#!" title="最近拉取全量" data-toggle="tooltip">全量列表</a>'
+									+'<a data-json="'+encodeURIComponent(list[i].lastplanitems || '')+'" class="btn btn-xs btn-default viewPlan" href="#!" title="本轮计划下载" data-toggle="tooltip">计划列表</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewProcesses" href="#!" title="查看进程" data-toggle="tooltip">查看进程</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default deleteProcesses" href="#!" title="删除" data-toggle="tooltip">删除</a>'
 									+(list[i].platform === '哔哩' && !list[i].originaladdress.startsWith('bili-fav-') && !list[i].originaladdress.startsWith('bili-arc-')  && !list[i].originaladdress.startsWith('bili-seaarc-') ? 
@@ -835,6 +837,8 @@
 					editCollect();
 					pauseTask();
 					resumeTask();
+					viewSnapshot();
+					viewPlan();
 						laypage({
 							cont: 'pager',
 							pages: record.page.totalPages,
@@ -848,6 +852,39 @@
 					}
 
 				})
+	}
+
+	function viewSnapshot(){
+		$('.viewSnapshot').click(function(){
+			var content = decodeURIComponent($(this).attr('data-json') || '');
+			if(!content){
+				layer.msg('暂无最近一次全量拉取数据');
+				return;
+			}
+			showTextDialog('最近一次全量拉取列表', content);
+		});
+	}
+
+	function viewPlan(){
+		$('.viewPlan').click(function(){
+			var content = decodeURIComponent($(this).attr('data-json') || '');
+			if(!content){
+				layer.msg('暂无最近一次计划下载数据');
+				return;
+			}
+			showTextDialog('最近一次计划下载列表', content);
+		});
+	}
+
+	function showTextDialog(title, text){
+		var safeText = text || '';
+		layer.open({
+			type: 1,
+			title: title,
+			area: ['70%', '70%'],
+			content: '<div style="padding:12px;"><pre style="white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow:auto;">'+
+			$('<div/>').text(safeText).html() + '</pre></div>'
+		});
 	}
 </script>
 </body>
