@@ -427,6 +427,8 @@ public class CollectDataService {
 		int graphiccount = 0;
 		int successThisRun = 0;
 		int targetSuccess = entity.getMaxcur() != null ? entity.getMaxcur() : 80;
+		int failedThisRun = 0;
+		int skippedThisRun = 0;
 		logger.info("任务开始" + entity.getOriginaladdress());
 		JSONArray allDYData = this.getDYData(entity, monitor);
 		logger.info("[CollectTask] getDYData result id={} isNull={} size={}", entity.getId(), allDYData == null,
@@ -504,6 +506,7 @@ public class CollectDataService {
 						errorCode = "IMAGE_TEXT_EXECUTOR_FAIL";
 						errorMsg = trimMsg(e.getMessage());
 						appendLog(processLog, "imageText", "executor failed: " + trimMsg(e.getMessage()));
+						failedThisRun++;
 						CollectDataDetailEntity failed = new CollectDataDetailEntity();
 						failed.setDataid(entity.getId());
 						failed.setVideoid(awemeId);
@@ -640,6 +643,7 @@ public class CollectDataService {
 				}
 				if (status.contains("已存在")) {
 					appendLog(processLog, "skip", "already exists in video library");
+					skippedThisRun++;
 				}
 
 				// 这里应该判断一下CollectDataDetailEntity记录是否存在 存在 则不处理 因为已经不预删除了
@@ -668,6 +672,12 @@ public class CollectDataService {
 					if ("已完成".equals(status) || "图文已完成".equals(status)) {
 						successThisRun++;
 					}
+					if ("执行失败".equals(status)) {
+						failedThisRun++;
+					}
+				} else {
+					appendLog(processLog, "skip", "detail exists in collect_data_detail");
+					skippedThisRun++;
 				}
 
 			}
@@ -687,8 +697,8 @@ public class CollectDataService {
 		collectdDataDao.save(entity);
 		System.gc();
 		logger.info("任务结束" + entity.getOriginaladdress());
-		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} finalStatus={} carriedout={}",
-				entity.getId(), videoaddcount, graphiccount, totalCount, successThisRun, targetSuccess, entity.getTaskstatus(), entity.getCarriedout());
+		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} failedThisRun={} skippedThisRun={} finalStatus={} carriedout={}",
+				entity.getId(), videoaddcount, graphiccount, totalCount, successThisRun, targetSuccess, failedThisRun, skippedThisRun, entity.getTaskstatus(), entity.getCarriedout());
 	}
 
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {

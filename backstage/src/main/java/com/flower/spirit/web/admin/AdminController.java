@@ -332,6 +332,11 @@ public class AdminController {
 	public AjaxEntity submitCollectData(CollectDataEntity collectDataEntity,HttpServletRequest request) {
 		return collectDataService.saveCollectData(collectDataEntity);
 	}
+
+	@PostMapping(value = "/updateCollectData")
+	public AjaxEntity updateCollectData(CollectDataEntity collectDataEntity) {
+		return collectDataService.updateCollectData(collectDataEntity);
+	}
 	
 	
 	/**

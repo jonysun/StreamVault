@@ -1719,12 +1719,30 @@ function showEmptyState() {
  * @param {string} fileName 文件名
  */
 function showMediaPreview(mediaSrc, isVideo, fileName, mediaList, mediaIndex) {
+	console.log('[preview] open', {
+		mediaSrc: mediaSrc,
+		isVideo: isVideo,
+		fromListLen: mediaList ? mediaList.length : 0,
+		fromIndex: mediaIndex
+	});
 	
 	// 重置缩放
 	currentZoom = 1;
 	currentMediaSrc = mediaSrc;
 	currentFileName = fileName || getFileNameFromPath(mediaSrc);
 	currentMediaList = mediaList || [mediaSrc];
+	if (!currentMediaList || currentMediaList.length <= 1) {
+		// 兜底：从“查看更多弹窗”中重建当前图文集列表
+		var rebuilt = rebuildMediaListFromModal();
+		console.log('[preview] rebuild list from modal', rebuilt.length);
+		if (rebuilt && rebuilt.length > 0) {
+			currentMediaList = rebuilt;
+			var foundIndex = rebuilt.indexOf(mediaSrc);
+			if (foundIndex >= 0) {
+				mediaIndex = foundIndex;
+			}
+		}
+	}
 	currentMediaIndex = typeof mediaIndex === 'number' ? mediaIndex : 0;
 	
 	// 设置标题
@@ -1755,9 +1773,23 @@ function showMediaPreview(mediaSrc, isVideo, fileName, mediaList, mediaIndex) {
 		// 图片支持缩放，显示缩放按钮
 		$('#zoomOutBtn, #zoomInBtn, #resetZoomBtn').show();
 	}
+	$('#previewModalTitle').text(currentFileName + (currentMediaList.length > 1 ? '（可翻页）' : ''));
 	
 	// 显示模态框，设置高z-index确保在layer弹窗之上
 	$('#imagePreviewModal').css('z-index', 19891015).modal('show');
+}
+
+function rebuildMediaListFromModal() {
+	var arr = [];
+	$('.modal-preview-image').each(function(){
+		var src = $(this).data('src');
+		if (src) arr.push(src);
+	});
+	$('.modal-preview-video').each(function(){
+		var src = $(this).data('src');
+		if (src) arr.push(src);
+	});
+	return arr;
 }
 
 // 全局变量
