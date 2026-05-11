@@ -630,6 +630,10 @@ public class CollectDataService {
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
 					videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
+					String taskUid = entity.getOriginaladdress().replaceFirst("^(post|like|recommend)", "");
+					if (taskUid != null && !taskUid.trim().isEmpty() && !taskUid.startsWith("fav-")) {
+						videoDataEntity.setSourceurl("https://www.douyin.com/user/" + taskUid + "?modal_id=" + awemeId);
+					}
 					if (Global.getGeneratenfo) {
 						String uid = aweme_detail.getString("uid");
 						String publisher = dyNickname + "-" + uid + ".png";

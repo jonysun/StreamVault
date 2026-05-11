@@ -135,6 +135,10 @@ public class DouYinExecutor {
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
+			String uid = extractTaskUid(originaladdress);
+			if (uid != null) {
+				graphicContentEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + post);
+			}
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -222,6 +226,10 @@ public class DouYinExecutor {
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
+			String uid = extractTaskUid(type);
+			if (uid != null) {
+				graphicContentEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + post);
+			}
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -254,6 +262,17 @@ public class DouYinExecutor {
 		} catch (Exception e) {
 			return null;
 		}
+	}
+
+	private static String extractTaskUid(String taskAddress) {
+		if (taskAddress == null || taskAddress.trim().isEmpty()) {
+			return null;
+		}
+		String uid = taskAddress.replaceFirst("^(post|like|recommend)", "");
+		if (uid.startsWith("fav-")) {
+			return null;
+		}
+		return uid.isEmpty() ? null : uid;
 	}
 
 }

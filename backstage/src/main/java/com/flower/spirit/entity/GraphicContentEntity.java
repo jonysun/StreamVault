@@ -49,6 +49,8 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	private String publishtime;
 
+	private String sourceurl;
+
 	@Transient
 	private String publishStart;
 
@@ -142,6 +144,14 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	public void setPublishtime(String publishtime) {
 		this.publishtime = publishtime;
+	}
+
+	public String getSourceurl() {
+		return sourceurl;
+	}
+
+	public void setSourceurl(String sourceurl) {
+		this.sourceurl = sourceurl;
 	}
 
 	public String getPublishStart() {

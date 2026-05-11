@@ -12,6 +12,7 @@ import org.springframework.data.web.config.EnableSpringDataWebSupport;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import com.flower.spirit.service.PublishTimeBackfillService;
+import com.flower.spirit.service.ResetContentIndexService;
 import com.flower.spirit.utils.FileUtil;
 
 
@@ -30,6 +31,10 @@ public class SpiritApplication {
 				backfillOnly = true;
 				break;
 			}
+			if ("--reset-content-index".equals(arg)) {
+				backfillOnly = true;
+				break;
+			}
 		}
 		SpringApplication application = new SpringApplication(SpiritApplication.class);
 		if (backfillOnly) {
@@ -40,6 +45,12 @@ public class SpiritApplication {
 			if ("--backfill-douyin-publishtime".equals(arg)) {
 				PublishTimeBackfillService service = context.getBean(PublishTimeBackfillService.class);
 				service.backfillDouyinPublishTime();
+				SpringApplication.exit(context, () -> 0);
+				return;
+			}
+			if ("--reset-content-index".equals(arg)) {
+				ResetContentIndexService service = context.getBean(ResetContentIndexService.class);
+				service.resetContentIndexKeepTasks();
 				SpringApplication.exit(context, () -> 0);
 				return;
 			}

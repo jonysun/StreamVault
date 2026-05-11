@@ -972,12 +972,13 @@ function generateGraphicCard(item) {
 						<button class="btn btn-sm btn-outline-primary download-package" data-id="${item.id}" data-title="${displayTitle}" data-images='${JSON.stringify(mediaList)}'>
 							<i class="mdi mdi-download"></i> 打包下载
 						</button>
-						<button class="btn btn-sm btn-outline-success copy-link" data-url="${item.originaladdress || ''}">
-							<i class="mdi mdi-link"></i> 复制链接
-						</button>
-						<button class="btn btn-sm btn-outline-danger delete-content" data-id="${item.id}" data-title="${displayTitle}">
-							<i class="mdi mdi-delete"></i> 删除
-						</button>
+					<button class="btn btn-sm btn-outline-success copy-link" data-url="${item.originaladdress || ''}">
+						<i class="mdi mdi-link"></i> 复制链接
+					</button>
+					${item.sourceurl ? `<a class="btn btn-sm btn-outline-info" href="${item.sourceurl}" target="_blank"><i class="mdi mdi-open-in-new"></i> 查看原作品</a>` : ''}
+					<button class="btn btn-sm btn-outline-danger delete-content" data-id="${item.id}" data-title="${displayTitle}">
+						<i class="mdi mdi-delete"></i> 删除
+					</button>
 					</div>
 				</div>
 			</div>
@@ -1013,12 +1014,13 @@ function generateGraphicCard(item) {
 						<button class="btn btn-sm btn-outline-primary download-package" data-id="${item.id}" data-title="${displayTitle}" data-images='${JSON.stringify(mediaList)}'>
 							<i class="mdi mdi-download"></i> 打包下载
 						</button>
-						<button class="btn btn-sm btn-outline-success copy-link" data-url="${item.originaladdress || ''}">
-							<i class="mdi mdi-link"></i> 复制链接
-						</button>
-						<button class="btn btn-sm btn-outline-danger delete-content" data-id="${item.id}" data-title="${displayTitle}">
-							<i class="mdi mdi-delete"></i> 删除
-						</button>
+					<button class="btn btn-sm btn-outline-success copy-link" data-url="${item.originaladdress || ''}">
+						<i class="mdi mdi-link"></i> 复制链接
+					</button>
+					${item.sourceurl ? `<a class="btn btn-sm btn-outline-info" href="${item.sourceurl}" target="_blank"><i class="mdi mdi-open-in-new"></i> 查看原作品</a>` : ''}
+					<button class="btn btn-sm btn-outline-danger delete-content" data-id="${item.id}" data-title="${displayTitle}">
+						<i class="mdi mdi-delete"></i> 删除
+					</button>
 					</div>
 				</div>
 			</div>

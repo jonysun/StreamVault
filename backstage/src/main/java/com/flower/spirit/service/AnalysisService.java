@@ -468,6 +468,7 @@ public class AnalysisService {
 
 				VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,
 						Global.platform.youtube.name(), coverdb, filename, videodb, youtube);
+				videoDataEntity.setSourceurl("https://www.youtube.com/watch?v=" + display_id);
 				videoDataEntity.setVideoauthor(uploader);
 				videoDataDao.save(videoDataEntity);
 				processHistoryService.saveProcess(saveProcess.getId(), youtube, platform);
@@ -556,6 +557,10 @@ public class AnalysisService {
 				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(cid, title, desc, platform, coverunaddr,
 						videoPath, videounaddr, video);
+				String bvid = videoInfo.get("bvid");
+				if (bvid != null && !bvid.trim().isEmpty()) {
+					videoDataEntity.setSourceurl("https://www.bilibili.com/video/" + bvid + "/");
+				}
 				videoDataEntity.setVideoauthor(upname);
 				if(Global.danmudown && Global.biliodddmm) {
 					BiliUtil.biliDanmaku("1", cid, aid, Integer.valueOf(duration), dir + File.separator+filename+".ass",title);
@@ -654,10 +659,14 @@ public class AnalysisService {
 		VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, platform, coverunaddr, videofile+filename + ".mp4",
 				videounrealaddr, originaladdress);
 		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
+		String uid = map.get("uid");
+		if (uid != null && !uid.trim().isEmpty()) {
+			videoDataEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + awemeId);
+		}
 		// 生成元数据
 		if (Global.getGeneratenfo) {
 			// 下载发布者头像
-			String uid = map.get("uid");
+			uid = map.get("uid");
 			String publisher = nickname + "-" + uid + ".png";
 			HttpUtil.downloadFileWithOkHttp(map.get("avatar_thumb"), publisher, coverdir, header);
 			if (null != Global.nfonetaddr && !"".equals(Global.nfonetaddr)) {

@@ -66,6 +66,8 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	private String videoinfo;
 
 	private String publishtime;
+
+	private String sourceurl;
 	
 	
 	
@@ -198,6 +200,14 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setPublishtime(String publishtime) {
 		this.publishtime = publishtime;
+	}
+
+	public String getSourceurl() {
+		return sourceurl;
+	}
+
+	public void setSourceurl(String sourceurl) {
+		this.sourceurl = sourceurl;
 	}
 
 	public String getVideoauthor() {

@@ -1096,6 +1096,9 @@
 			var html = '<div class="video-title content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videoname) + '">' + displayName + '</div>';
 			html += '<div class="video-desc content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videodesc) + '">' + displayDesc + '</div>';
 				html += '<div class="small mt-1 text-info">发布时间：' + formatTime(item.publishtime) + '</div>';
+				if (!isPrivate && item.sourceurl) {
+					html += '<div class="small mt-1"><a href="' + item.sourceurl + '" target="_blank" class="text-primary">查看原作品</a></div>';
+				}
 
 			// 只在非隐私模式下显示地址信息
 			if (!isPrivate) {
