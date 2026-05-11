@@ -19,6 +19,11 @@
 			white-space: nowrap;
 			overflow: hidden;
 		}
+		td:last-child {
+			white-space: normal;
+			overflow: visible;
+			text-overflow: clip;
+		}
 		th:nth-child(1) { width: 3%; }  /* 编号 */
 		th:nth-child(2) { width: 12%; } /* 任务名称 */
 		th:nth-child(3) { width: 15%; } /* 源地址 */
@@ -33,6 +38,7 @@
 		
 		.btn-group {
 			display: flex;
+			flex-wrap: wrap;
 			gap: 5px;
 		}
 		.btn-group .btn {
@@ -248,7 +254,7 @@
 									<i class="mdi mdi-help-circle-outline"></i>
 								</a>
 							</label>
-							<input type="text" class="max-fetch form-control taskcron" placeholder="不填默认按全局">
+							<input type="text" class="form-control taskcron" placeholder="不填默认按全局">
 						</div>
 					</div>
 <!-- 					<div class="col-md-6">

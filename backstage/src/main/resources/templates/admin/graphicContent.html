@@ -1065,6 +1065,13 @@ function generateMediaGrid(mediaList, cardId) {
 	
 	var html = '<div class="media-grid">';
 	var previewLimit = getMediaPreviewLimit();
+	var firstImageForPoster = null;
+	for (var p = 0; p < mediaList.length; p++) {
+		if (!isVideoFile(mediaList[p])) {
+			firstImageForPoster = mediaList[p].replace(/\\/g, '/');
+			break;
+		}
+	}
 	
 	// 最多显示N个媒体文件
 	var displayCount = Math.min(mediaList.length, previewLimit);
@@ -1082,7 +1089,7 @@ function generateMediaGrid(mediaList, cardId) {
 			html += `
 				<div class="media-item">
 					${typeIndicator}
-					<video class="preview-video" data-src="${mediaUrl}" data-index="${i}" data-list='${JSON.stringify(mediaList)}' style="cursor: pointer;" preload="none" loading="lazy">
+					<video class="preview-video" data-src="${mediaUrl}" data-index="${i}" data-list='${JSON.stringify(mediaList)}' style="cursor: pointer;" preload="metadata" loading="lazy" ${firstImageForPoster ? `poster="${firstImageForPoster}"` : ''}>
 						<source src="${mediaUrl}" type="video/mp4">
 						您的浏览器不支持视频播放
 					</video>
