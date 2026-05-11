@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
+import jakarta.persistence.Transient;
 
 import com.flower.spirit.common.DataEntity;
 
@@ -47,6 +48,12 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	private Date createtime;
 
 	private String publishtime;
+
+	@Transient
+	private String publishStart;
+
+	@Transient
+	private String publishEnd;
 
 	public Integer getId() {
 		return id;
@@ -135,6 +142,22 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	public void setPublishtime(String publishtime) {
 		this.publishtime = publishtime;
+	}
+
+	public String getPublishStart() {
+		return publishStart;
+	}
+
+	public void setPublishStart(String publishStart) {
+		this.publishStart = publishStart;
+	}
+
+	public String getPublishEnd() {
+		return publishEnd;
+	}
+
+	public void setPublishEnd(String publishEnd) {
+		this.publishEnd = publishEnd;
 	}
 
 	public String getMarkroute() {

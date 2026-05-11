@@ -103,6 +103,12 @@ public class VideoDataService {
 	            if (StringUtil.isString(res.getVideoauthor())) {
 	                predicates.add(cb.like(root.get("videoauthor"), "%" + res.getVideoauthor() + "%"));
 	            }
+	            if (StringUtil.isString(res.getPublishStart())) {
+	            	predicates.add(cb.greaterThanOrEqualTo(root.get("publishtime"), res.getPublishStart().trim() + " 00:00:00"));
+	            }
+	            if (StringUtil.isString(res.getPublishEnd())) {
+	            	predicates.add(cb.lessThanOrEqualTo(root.get("publishtime"), res.getPublishEnd().trim() + " 23:59:59"));
+	            }
 	        }
 
 	        query.orderBy(cb.desc(root.get("id")));

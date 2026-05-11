@@ -660,6 +660,18 @@
 									<input type="text" name="title" class="form-control" placeholder="请输入标题关键词" id="titleFilter">
 								</div>
 							</div>
+							<div class="col-md-3 col-sm-6 col-12">
+								<div class="form-group">
+									<label class="control-label">发布日期起</label>
+									<input type="date" name="publishStart" class="form-control" id="publishStartFilter">
+								</div>
+							</div>
+							<div class="col-md-3 col-sm-6 col-12">
+								<div class="form-group">
+									<label class="control-label">发布日期止</label>
+									<input type="date" name="publishEnd" class="form-control" id="publishEndFilter">
+								</div>
+							</div>
 							<div class="col-md-2 col-sm-4 col-12">
 								<div class="form-group">
 									<label class="control-label d-none d-sm-block">&nbsp;</label>
@@ -830,6 +842,8 @@ function collectSearchParams() {
 		platform: $('#platformFilter').val(),
 		author: $('#authorFilter').val(),
 		title: $('#titleFilter').val(),
+		publishStart: $('#publishStartFilter').val(),
+		publishEnd: $('#publishEndFilter').val(),
 		pageNo: currentPage, // 前后端页码都从1开始，直接传递
 		pageSize: pageSize
 	};

@@ -572,7 +572,19 @@
                                                     </select>
                                                 </div>
                                             </div>
-                                        </div>
+									<div class="col-lg-3 col-md-6 col-sm-12">
+										<div class="form-group mb-3">
+											<label class="control-label">发布日期起</label>
+											<input type="date" class="form-control publishStart" name="publishStart" />
+										</div>
+									</div>
+									<div class="col-lg-3 col-md-6 col-sm-12">
+										<div class="form-group mb-3">
+											<label class="control-label">发布日期止</label>
+											<input type="date" class="form-control publishEnd" name="publishEnd" />
+										</div>
+									</div>
+								</div>
                                         <div class="row">
                                             <div class="col-12">
                                                 <div class="form-group text-center">
@@ -1083,8 +1095,7 @@
 
 			var html = '<div class="video-title content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videoname) + '">' + displayName + '</div>';
 			html += '<div class="video-desc content-field" data-id="' + item.id + '" title="' + (isPrivate ? '' : item.videodesc) + '">' + displayDesc + '</div>';
-			html += '<div class="small mt-1 text-info">发布时间：' + formatTime(item.publishtime) + '</div>';
-			html += '<div class="small text-muted">下载时间：' + formatTime(item.createtime) + '</div>';
+				html += '<div class="small mt-1 text-info">发布时间：' + formatTime(item.publishtime) + '</div>';
 
 			// 只在非隐私模式下显示地址信息
 			if (!isPrivate) {
@@ -1297,6 +1308,14 @@
             var videodesc = $('.videodesc').val();
             if (videodesc != "") {
                 option['videodesc'] = videodesc;
+            }
+            var publishStart = $('.publishStart').val();
+            if (publishStart != "") {
+                option['publishStart'] = publishStart;
+            }
+            var publishEnd = $('.publishEnd').val();
+            if (publishEnd != "") {
+                option['publishEnd'] = publishEnd;
             }
             var videoplatform = $('.videoplatform').val();
             if (videoplatform != "") {

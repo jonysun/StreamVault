@@ -213,6 +213,12 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	 */
 	@Transient
 	private String excludePlatform;
+
+	@Transient
+	private String publishStart;
+
+	@Transient
+	private String publishEnd;
 	
 	public String getExcludePlatform() {
 		return excludePlatform;
@@ -220,6 +226,22 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	
 	public void setExcludePlatform(String excludePlatform) {
 		this.excludePlatform = excludePlatform;
+	}
+
+	public String getPublishStart() {
+		return publishStart;
+	}
+
+	public void setPublishStart(String publishStart) {
+		this.publishStart = publishStart;
+	}
+
+	public String getPublishEnd() {
+		return publishEnd;
+	}
+
+	public void setPublishEnd(String publishEnd) {
+		this.publishEnd = publishEnd;
 	}
 	
 
