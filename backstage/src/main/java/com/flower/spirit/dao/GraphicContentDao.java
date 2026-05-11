@@ -52,4 +52,7 @@ public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, I
 	List<GraphicContentEntity> findRecentlyAdded();
 
 	List<GraphicContentEntity> findByPlatformAndPublishtimeIsNull(String platform);
+
+	@Query("SELECT DISTINCT g.author FROM GraphicContentEntity g WHERE g.author IS NOT NULL AND g.author <> '' ORDER BY g.author")
+	List<String> findDistinctAuthors();
 }

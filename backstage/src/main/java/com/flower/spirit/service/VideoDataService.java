@@ -101,7 +101,17 @@ public class VideoDataService {
 	                predicates.add(cb.like(root.get("videotag"), "%" + res.getVideotag() + "%"));
 	            }
 	            if (StringUtil.isString(res.getVideoauthor())) {
-	                predicates.add(cb.like(root.get("videoauthor"), "%" + res.getVideoauthor() + "%"));
+	            	String[] authors = res.getVideoauthor().split(",");
+	            	List<Predicate> authorPredicates = new ArrayList<>();
+	            	for (String author : authors) {
+	            		String trimmed = author == null ? "" : author.trim();
+	            		if (!trimmed.isEmpty()) {
+	            			authorPredicates.add(cb.like(root.get("videoauthor"), "%" + trimmed + "%"));
+	            		}
+	            	}
+	            	if (!authorPredicates.isEmpty()) {
+	            		predicates.add(cb.or(authorPredicates.toArray(new Predicate[0])));
+	            	}
 	            }
 	            if (StringUtil.isString(res.getPublishStart())) {
 	            	predicates.add(cb.greaterThanOrEqualTo(root.get("publishtime"), res.getPublishStart().trim() + " 00:00:00"));
@@ -306,6 +316,10 @@ public class VideoDataService {
 	
 	public List<VideoDataEntity> findRecentlyAdded() {
 		return videoDataDao.findRecentlyAdded();
+	}
+
+	public List<String> findDistinctAuthors() {
+		return videoDataDao.findDistinctVideoauthors();
 	}
 
 }

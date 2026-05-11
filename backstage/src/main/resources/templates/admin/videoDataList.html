@@ -535,12 +535,13 @@
                                                 </div>
                                             </div>
                                             <div class="col-lg-3 col-md-6 col-sm-12">
-                                                <div class="form-group mb-3">
-                                                    <label class="control-label">视频作者</label>
-                                                    <input type="text" class="form-control videoauthor" name="videoauthor"
-                                                        placeholder="请输入视频作者" />
-                                                </div>
-                                            </div>
+									<div class="form-group mb-3">
+										<label class="control-label">视频作者</label>
+										<input type="text" class="form-control videoauthor" name="videoauthor"
+											placeholder="请输入或逗号分隔多个作者" list="videoAuthorOptions" />
+										<datalist id="videoAuthorOptions"></datalist>
+									</div>
+								</div>
                                             <div class="col-lg-3 col-md-6 col-sm-12">
                                                 <div class="form-group mb-3">
                                                     <label class="control-label">视频简介</label>
@@ -706,7 +707,25 @@
             $('.searchData').click(function () {
                 findList(1)
             })
+			loadVideoAuthors();
+			let authorTimer;
+			$('.videoauthor').on('input', function(){
+				clearTimeout(authorTimer);
+				authorTimer = setTimeout(function(){ findList(1); }, 500);
+			});
         })
+
+		function loadVideoAuthors(){
+			$.get('/admin/api/videoAuthors', function(res){
+				if(res.resCode === '000001' && Array.isArray(res.record)) {
+					var html = '';
+					res.record.forEach(function(author){
+						html += '<option value="' + author + '"></option>';
+					});
+					$('#videoAuthorOptions').html(html);
+				}
+			});
+		}
 
         /**
          * 重置搜索表单

@@ -754,6 +754,10 @@
                     <div class="row" id="platformsContainer" style="display: none;">
                         <!-- 平台统计卡片将在这里动态生成 -->
                     </div>
+
+					<div class="row" id="authorStatsContainer" style="display: none; margin-top: 10px;">
+						<!-- 作者统计卡片将在这里动态生成 -->
+					</div>
                     
                     <!-- 最近入库 -->
                     <div class="row recently-added-section" id="recentlyAddedSection" style="display: none;">
@@ -1069,6 +1073,7 @@
                     </div>
                 `);
             }
+			loadAuthorStats();
             
             // 分阶段更新主要指标，创建更好的视觉效果
               const metrics = [
@@ -1111,6 +1116,33 @@
             // 加载最近入库数据
             loadRecentlyAdded();
         }
+
+		function loadAuthorStats() {
+			$.ajax({
+				url: '/admin/api/authorDownloadStats',
+				type: 'GET',
+				dataType: 'json',
+				success: function(response) {
+					if (response && response.resCode === '000001' && Array.isArray(response.record) && response.record.length > 0) {
+						renderAuthorStats(response.record);
+						$('#authorStatsContainer').fadeIn(400);
+					}
+				}
+			});
+		}
+
+		function renderAuthorStats(stats) {
+			const container = $('#authorStatsContainer');
+			container.empty();
+			let html = '<div class="col-12"><div class="platform-card"><div class="platform-header"><div class="platform-icon" style="background: var(--warning-color);"><i class="mdi mdi-account-group"></i></div><h3 class="platform-title">作者下载进度</h3></div>';
+			html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>任务</th><th>视频进度</th><th>图文进度</th><th>状态</th></tr></thead><tbody>';
+			stats.forEach(function(item){
+				const status = item.enabled === 'N' ? '已暂停' : (item.monitoring === 'Y' ? '监控中' : '手动');
+				html += '<tr><td>' + (item.taskName || '--') + '</td><td>' + (item.videoDone || 0) + '/' + (item.videoTotal || 0) + '</td><td>' + (item.imageDone || 0) + '/' + (item.imageTotal || 0) + '</td><td>' + status + '</td></tr>';
+			});
+			html += '</tbody></table></div></div></div>';
+			container.html(html);
+		}
         
         // 删除createTotalCard函数，因为现在使用固定的主要指标卡片
         

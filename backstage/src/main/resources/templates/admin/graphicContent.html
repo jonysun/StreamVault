@@ -651,7 +651,8 @@
 							<div class="col-md-3 col-sm-6 col-12">
 								<div class="form-group">
 									<label class="control-label">作者</label>
-									<input type="text" name="author" class="form-control" placeholder="请输入作者名称" id="authorFilter">
+									<input type="text" name="author" class="form-control" placeholder="请输入或逗号分隔多个作者" id="authorFilter" list="graphicAuthorOptions">
+									<datalist id="graphicAuthorOptions"></datalist>
 								</div>
 							</div>
 							<div class="col-md-4 col-sm-8 col-12">
@@ -796,6 +797,7 @@ $(function(){
 	
 	// 绑定搜索事件
 	bindSearchEvents();
+	loadGraphicAuthors();
 });
 
 // 当前页面参数
@@ -830,6 +832,27 @@ function bindSearchEvents() {
 	$('.search-form input').keypress(function(e) {
 		if (e.which == 13) {
 			$('#searchBtn').click();
+		}
+	});
+	let authorTimer;
+	$('#authorFilter').on('input', function(){
+		clearTimeout(authorTimer);
+		authorTimer = setTimeout(function(){
+			currentPage = 1;
+			collectSearchParams();
+			loadGraphicContentList();
+		}, 500);
+	});
+}
+
+function loadGraphicAuthors() {
+	$.get('/admin/api/graphicAuthors', function(res){
+		if(res.resCode === '000001' && Array.isArray(res.record)) {
+			var html = '';
+			res.record.forEach(function(author){
+				html += '<option value="' + author + '"></option>';
+			});
+			$('#graphicAuthorOptions').html(html);
 		}
 	});
 }

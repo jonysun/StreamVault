@@ -48,4 +48,7 @@ public interface VideoDataDao
 	List<VideoDataEntity> findRecentlyAdded();
 
 	List<VideoDataEntity> findByVideoplatformAndPublishtimeIsNull(String videoplatform);
+
+	@Query("SELECT DISTINCT v.videoauthor FROM VideoDataEntity v WHERE v.videoauthor IS NOT NULL AND v.videoauthor <> '' ORDER BY v.videoauthor")
+	List<String> findDistinctVideoauthors();
 }

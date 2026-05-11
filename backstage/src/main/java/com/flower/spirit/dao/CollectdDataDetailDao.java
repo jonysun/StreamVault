@@ -29,6 +29,9 @@ public interface CollectdDataDetailDao extends JpaRepository<CollectDataDetailEn
 	@Query("SELECT COUNT(c) FROM CollectDataDetailEntity c WHERE c.dataid = :dataid AND c.status IN (:statuses)")
 	long countByDataidAndStatusIn(@Param("dataid") Integer dataid, @Param("statuses") List<String> statuses);
 
+	@Query("SELECT COUNT(c) FROM CollectDataDetailEntity c WHERE c.dataid = :dataid AND c.mediatype = :mediatype AND c.status IN (:statuses)")
+	long countByDataidAndMediatypeAndStatusIn(@Param("dataid") Integer dataid, @Param("mediatype") String mediatype, @Param("statuses") List<String> statuses);
+
 	
 
 }

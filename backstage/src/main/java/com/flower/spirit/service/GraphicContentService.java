@@ -58,7 +58,17 @@ public class GraphicContentService {
 	                predicates.add(cb.like(root.get("platform"), "%" + res.getPlatform() + "%"));
 	            }
 	            if (StringUtil.isString(res.getAuthor())) {
-	                predicates.add(cb.like(root.get("author"), "%" + res.getAuthor() + "%"));
+	            	String[] authors = res.getAuthor().split(",");
+	            	List<Predicate> authorPredicates = new ArrayList<>();
+	            	for (String author : authors) {
+	            		String trimmed = author == null ? "" : author.trim();
+	            		if (!trimmed.isEmpty()) {
+	            			authorPredicates.add(cb.like(root.get("author"), "%" + trimmed + "%"));
+	            		}
+	            	}
+	            	if (!authorPredicates.isEmpty()) {
+	            		predicates.add(cb.or(authorPredicates.toArray(new Predicate[0])));
+	            	}
 	            }
 	            if (StringUtil.isString(res.getPublishStart())) {
 	            	predicates.add(cb.greaterThanOrEqualTo(root.get("publishtime"), res.getPublishStart().trim() + " 00:00:00"));
@@ -127,5 +137,9 @@ public class GraphicContentService {
 	
 	public List<GraphicContentEntity> findRecentlyAdded() {
 		return graphicContentDao.findRecentlyAdded();
+	}
+
+	public List<String> findDistinctAuthors() {
+		return graphicContentDao.findDistinctAuthors();
 	}
 }

@@ -630,9 +630,21 @@ public class CollectDataService {
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
 					videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
-					String taskUid = entity.getOriginaladdress().replaceFirst("^(post|like|recommend)", "");
-					if (taskUid != null && !taskUid.trim().isEmpty() && !taskUid.startsWith("fav-")) {
-						videoDataEntity.setSourceurl("https://www.douyin.com/user/" + taskUid + "?modal_id=" + awemeId);
+					String sourceUid = aweme_detail.getString("sec_uid");
+					if (sourceUid == null || sourceUid.trim().isEmpty()) {
+						sourceUid = aweme_detail.getString("uid");
+					}
+					if ((sourceUid == null || sourceUid.trim().isEmpty()) && aweme_detail.getJSONObject("author") != null) {
+						sourceUid = aweme_detail.getJSONObject("author").getString("sec_uid");
+						if (sourceUid == null || sourceUid.trim().isEmpty()) {
+							sourceUid = aweme_detail.getJSONObject("author").getString("uid");
+						}
+					}
+					if ((sourceUid == null || sourceUid.trim().isEmpty()) && !entity.getOriginaladdress().startsWith("fav-")) {
+						sourceUid = entity.getOriginaladdress().replaceFirst("^(post|like|recommend)", "");
+					}
+					if (sourceUid != null && !sourceUid.trim().isEmpty() && !sourceUid.startsWith("fav-")) {
+						videoDataEntity.setSourceurl("https://www.douyin.com/user/" + sourceUid + "?modal_id=" + awemeId);
 					}
 					if (Global.getGeneratenfo) {
 						String uid = aweme_detail.getString("uid");
@@ -1230,5 +1242,45 @@ public class CollectDataService {
 			quartzTaskService.removeTaskSchedule(db.getId());
 		}
 		return new AjaxEntity(Global.ajax_success, "任务更新成功", db);
+	}
+
+	public List<Map<String, Object>> authorDownloadStats() {
+		List<Map<String, Object>> result = new ArrayList<>();
+		List<CollectDataEntity> tasks = collectdDataDao.findAll();
+		List<String> successStatuses = new ArrayList<>();
+		successStatuses.add("已完成");
+		successStatuses.add("图文已完成");
+		for (CollectDataEntity task : tasks) {
+			if (!"抖音".equals(task.getPlatform())) {
+				continue;
+			}
+			Map<String, Object> row = new HashMap<>();
+			row.put("taskId", task.getId());
+			row.put("taskName", task.getTaskname());
+			row.put("enabled", task.getTaskenabled());
+			row.put("monitoring", task.getMonitoring());
+			int totalVideo = 0;
+			int totalImage = 0;
+			try {
+				if (task.getLastfetchsnapshot() != null && !task.getLastfetchsnapshot().trim().isEmpty()) {
+					JSONArray arr = JSONArray.parseArray(task.getLastfetchsnapshot());
+					for (int i = 0; i < arr.size(); i++) {
+						JSONObject obj = arr.getJSONObject(i);
+						if (obj.getBooleanValue("has_video_play_addr")) totalVideo++;
+						else totalImage++;
+					}
+				}
+			} catch (Exception e) {
+				logger.warn("[AuthorStats] parse snapshot failed taskId={}", task.getId());
+			}
+			long doneVideo = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "video", successStatuses);
+			long doneImage = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "image", successStatuses);
+			row.put("videoDone", doneVideo);
+			row.put("videoTotal", totalVideo);
+			row.put("imageDone", doneImage);
+			row.put("imageTotal", totalImage);
+			result.add(row);
+		}
+		return result;
 	}
 }

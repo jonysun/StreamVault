@@ -564,6 +564,21 @@ public class AdminController {
 		result.put("videoData", videoDataService.findRecentlyAdded());
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", result);
 	}
+
+	@GetMapping(value = "/videoAuthors")
+	public AjaxEntity videoAuthors() {
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", videoDataService.findDistinctAuthors());
+	}
+
+	@GetMapping(value = "/graphicAuthors")
+	public AjaxEntity graphicAuthors() {
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", graphicContentService.findDistinctAuthors());
+	}
+
+	@GetMapping(value = "/authorDownloadStats")
+	public AjaxEntity authorDownloadStats() {
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", collectDataService.authorDownloadStats());
+	}
 	
 //	@ResponseBody
 //	@GetMapping("/playStream")
