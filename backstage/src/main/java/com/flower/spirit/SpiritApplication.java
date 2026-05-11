@@ -3,6 +3,7 @@ package com.flower.spirit;
 import java.io.File;
 
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -23,7 +24,18 @@ public class SpiritApplication {
 
 	public static void main(String[] args) {
 		SpiritApplication.initData();
-		ConfigurableApplicationContext context = SpringApplication.run(SpiritApplication.class, args);
+		boolean backfillOnly = false;
+		for (String arg : args) {
+			if ("--backfill-douyin-publishtime".equals(arg)) {
+				backfillOnly = true;
+				break;
+			}
+		}
+		SpringApplication application = new SpringApplication(SpiritApplication.class);
+		if (backfillOnly) {
+			application.setWebApplicationType(WebApplicationType.NONE);
+		}
+		ConfigurableApplicationContext context = application.run(args);
 		for (String arg : args) {
 			if ("--backfill-douyin-publishtime".equals(arg)) {
 				PublishTimeBackfillService service = context.getBean(PublishTimeBackfillService.class);

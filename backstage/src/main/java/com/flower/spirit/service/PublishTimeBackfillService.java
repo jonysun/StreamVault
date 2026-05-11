@@ -2,8 +2,8 @@ package com.flower.spirit.service;
 
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 
+import com.alibaba.fastjson.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,8 +13,8 @@ import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DateUtils;
-import com.flower.spirit.utils.DouUtil;
 
 @Service
 public class PublishTimeBackfillService {
@@ -33,9 +33,9 @@ public class PublishTimeBackfillService {
 		List<VideoDataEntity> videos = videoDataDao.findByVideoplatformAndPublishtimeIsNull("抖音");
 		for (VideoDataEntity video : videos) {
 			try {
-				Map<String, String> data = DouUtil.downVideo(video.getOriginaladdress());
+				JSONObject data = fetchDouyinVideoById(video.getVideoid());
 				if (data != null) {
-					String publishTime = formatPublishTimeFromEpochSeconds(data.get("create_time"));
+					String publishTime = formatPublishTimeFromEpochSeconds(data.getString("create_time"));
 					if (publishTime != null) {
 						video.setPublishtime(publishTime);
 						videoDataDao.save(video);
@@ -56,9 +56,10 @@ public class PublishTimeBackfillService {
 		List<GraphicContentEntity> graphics = graphicContentDao.findByPlatformAndPublishtimeIsNull("douyin");
 		for (GraphicContentEntity item : graphics) {
 			try {
-				Map<String, String> data = DouUtil.downVideo(item.getOriginaladdress());
+				JSONObject data = fetchDouyinPostById(item.getVideoid());
 				if (data != null) {
-					String publishTime = formatPublishTimeFromEpochSeconds(data.get("create_time"));
+					JSONObject awemeDetail = data.getJSONObject("aweme_detail");
+					String publishTime = awemeDetail == null ? null : formatPublishTimeFromEpochSeconds(awemeDetail.getString("create_time"));
 					if (publishTime != null) {
 						item.setPublishtime(publishTime);
 						graphicContentDao.save(item);
@@ -76,6 +77,39 @@ public class PublishTimeBackfillService {
 
 		logger.info("[PublishBackfill] douyin backfill finish videoUpdated={} videoFailed={} graphicUpdated={} graphicFailed={}",
 				videoUpdated, videoFailed, graphicUpdated, graphicFailed);
+	}
+
+	private JSONObject fetchDouyinVideoById(String awemeId) {
+		if (awemeId == null || awemeId.trim().isEmpty()) {
+			return null;
+		}
+		String output = CommandUtil.f2cmd(com.flower.spirit.config.Global.tiktokCookie, awemeId, "fetch_video", null, null, null, null);
+		if (output == null || output.isBlank()) {
+			return null;
+		}
+		try {
+			return JSONObject.parseObject(output);
+		} catch (Exception e) {
+			logger.warn("[PublishBackfill] fetch_video parse failed awemeId={}", awemeId);
+			return null;
+		}
+	}
+
+	private JSONObject fetchDouyinPostById(String awemeId) {
+		if (awemeId == null || awemeId.trim().isEmpty()) {
+			return null;
+		}
+		String out = "/tmp/backfill_" + awemeId + ".json";
+		String output = CommandUtil.f2cmd(com.flower.spirit.config.Global.tiktokCookie, awemeId, "fetch_post_data", null, null, null, out);
+		if (output == null || output.isBlank()) {
+			return null;
+		}
+		try {
+			return JSONObject.parseObject(com.flower.spirit.utils.FileUtil.readJson(out));
+		} catch (Exception e) {
+			logger.warn("[PublishBackfill] fetch_post_data parse failed awemeId={}", awemeId);
+			return null;
+		}
 	}
 
 	private String formatPublishTimeFromEpochSeconds(String epochSeconds) {
