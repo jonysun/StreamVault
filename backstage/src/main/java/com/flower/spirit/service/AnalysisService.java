@@ -690,15 +690,7 @@ public class AnalysisService {
 	}
 
 	private String formatPublishTimeFromEpochSeconds(String epochSeconds) {
-		if (epochSeconds == null || epochSeconds.trim().isEmpty()) {
-			return null;
-		}
-		try {
-			long sec = Long.parseLong(epochSeconds.trim());
-			return DateUtils.formatDateTime(new Date(sec * 1000L));
-		} catch (Exception e) {
-			return null;
-		}
+		return DateUtils.normalizePublishTime(epochSeconds);
 	}
 
 	/**
