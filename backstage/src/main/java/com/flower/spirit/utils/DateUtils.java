@@ -114,6 +114,34 @@ public class DateUtils extends org.apache.commons.lang3.time.DateUtils {
 	}
 
 	/**
+	 * 归一化发布时间，兼容：
+	 * 1. epoch 秒，如 1712345678
+	 * 2. 抖音字符串时间，如 2026-03-19 12-46-42
+	 * 3. 标准时间，如 2026-03-19 12:46:42
+	 */
+	public static String normalizePublishTime(String raw) {
+		if (raw == null || raw.trim().isEmpty()) {
+			return null;
+		}
+		String value = raw.trim();
+		try {
+			if (value.matches("^\\d{10}$")) {
+				long sec = Long.parseLong(value);
+				return formatDateTime(new Date(sec * 1000L));
+			}
+			if (value.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}-\\d{2}$")) {
+				String fixed = value.substring(0, 10) + " " + value.substring(11).replace('-', ':');
+				Date date = parseDate(fixed);
+				return date == null ? null : formatDateTime(date);
+			}
+			Date date = parseDate(value);
+			return date == null ? null : formatDateTime(date);
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	/**
 	 * 获取过去的天数
 	 * @param date
 	 * @return
