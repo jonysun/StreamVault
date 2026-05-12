@@ -219,6 +219,20 @@
                                     <input class="form-control" type="number" id="mediapreviewlimit" name="mediapreviewlimit" placeholder="默认6" th:value="${config.mediapreviewlimit}">
                                 </div>
                                 <div class="form-group">
+                                    <label>媒体首页展示模式</label>
+                                    <select id="mediahomemode" class="form-control" name="mediahomemode">
+                                        <option value="grid" th:selected="${config.mediahomemode} eq 'grid'">平铺模式</option>
+                                        <option value="feed" th:selected="${config.mediahomemode} eq 'feed'">抖音滑动模式</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>滑动模式默认静音自动播放</label>
+                                    <select id="mediafeedmuted" class="form-control" name="mediafeedmuted">
+                                        <option value="1" th:selected="${config.mediafeedmuted} eq '1'">是</option>
+                                        <option value="0" th:selected="${config.mediafeedmuted} eq '0'">否</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
                                     <label>F2失败输出完整Traceback</label>
                                     <select id="f2logfullonerror" class="form-control" name="f2logfullonerror">
                                         <option value="1" th:selected="${config.f2logfullonerror} eq '1'">是</option>
@@ -693,6 +707,8 @@
               option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
               option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
               option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
+              option['mediahomemode'] = $("#mediahomemode").val();
+              option['mediafeedmuted'] = $("#mediafeedmuted").val();
               $.post("/admin/api/saveConfig",option,function(data,status){
                   if(data.resCode =="000001"){
                       layer.closeAll();
@@ -860,6 +876,8 @@
             option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
             option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
             option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
+            option['mediahomemode'] = $("#mediahomemode").val();
+            option['mediafeedmuted'] = $("#mediafeedmuted").val();
             $.post("/admin/api/saveConfig",option,function(data,status){
                 if(data.resCode =="000001"){
                     layer.closeAll();

@@ -15,6 +15,143 @@
             gap: 20px;
             padding: 20px;
         }
+
+        .video-feed {
+            display: none;
+            height: calc(100vh - 120px);
+            overflow-y: auto;
+            scroll-snap-type: y mandatory;
+            background: #000;
+        }
+
+        .feed-controls {
+            display: none;
+            position: absolute;
+            right: 12px;
+            top: 18px;
+            z-index: 6;
+            gap: 10px;
+            flex-direction: column;
+        }
+
+        .feed-control-btn {
+            border: 0;
+            border-radius: 999px;
+            width: 48px;
+            height: 48px;
+            font-size: 11px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .feed-control-btn:hover {
+            background: rgba(0, 0, 0, 0.62);
+        }
+
+        .feed-control-btn i {
+            font-size: 18px;
+            line-height: 1;
+            margin-bottom: 2px;
+        }
+
+        .feed-control-btn span {
+            line-height: 1;
+            transform: scale(0.95);
+        }
+
+        .feed-item {
+            height: calc(100vh - 120px);
+            scroll-snap-align: start;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+
+        .feed-video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+
+        .feed-overlay {
+            position: absolute;
+            left: 12px;
+            right: 12px;
+            bottom: 14px;
+            color: #fff;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.55);
+            pointer-events: none;
+            z-index: 3;
+        }
+
+        .feed-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            line-height: 1.35;
+            max-width: 90%;
+        }
+
+        .feed-meta {
+            font-size: 12px;
+            opacity: 0.95;
+        }
+
+        .feed-author-chip {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: #fff;
+            background: rgba(255,255,255,0.2);
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        .feed-author-chip:hover {
+            background: rgba(255,255,255,0.32);
+        }
+
+        .author-sheet {
+            padding: 12px;
+            max-height: 62vh;
+            overflow: auto;
+            background: #fff;
+        }
+
+        .author-sheet-header {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .author-chip {
+            margin: 0 8px 8px 0;
+        }
+
+        .feed-private-mask {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.42);
+            color: #fff;
+            font-size: 22px;
+            z-index: 2;
+            pointer-events: none;
+        }
         
         .video-card {
             position: relative;
@@ -184,6 +321,11 @@
                 gap: 15px;
                 padding: 15px;
             }
+
+            .video-feed,
+            .feed-item {
+                height: calc(100vh - 98px);
+            }
         }
         .video-container {
             position: relative;
@@ -260,7 +402,22 @@
                                 </div>
                             </div>
                             <div class="card-body p-0">
+                                <input type="hidden" id="mediaHomeMode" th:value="${T(com.flower.spirit.config.Global).mediaHomeMode}" />
+                                <input type="hidden" id="mediaFeedMuted" th:value="${T(com.flower.spirit.config.Global).mediaFeedMuted}" />
+                                <div class="feed-controls" id="feedControls">
+                                    <button type="button" class="feed-control-btn" id="feedOrderBtn" title="播放顺序">
+                                        <i class="mdi mdi-sort"></i><span>倒序</span>
+                                    </button>
+                                    <button type="button" class="feed-control-btn" id="feedAuthorBtn" title="作者筛选">
+                                        <i class="mdi mdi-account"></i><span>全部</span>
+                                    </button>
+                                    <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
+                                        <i class="mdi mdi-volume-off"></i><span>静音</span>
+                                    </button>
+                                </div>
                                 <div class="video-grid" id="videoGrid">
+                                </div>
+                                <div class="video-feed" id="videoFeed">
                                 </div>
                                 <div class="loading" id="loading" style="display: none;">
                                     <i class="mdi mdi-loading mdi-spin"></i> 加载中...
@@ -283,8 +440,31 @@
     var page = 1;
     var isLoading = false;
     var hasMore = true;
+    var mediaHomeMode = 'grid';
+    var feedObserver = null;
+    var feedOrder = 'desc';
+    var feedAuthor = '';
+    var feedMuted = true;
+    var feedAuthorSet = {};
+    var authorSheetIndex = -1;
+    var feedRandomPool = [];
+    var feedRandomCursor = 0;
+    var feedRandomLoading = false;
+    var feedRandomBatchSize = 20;
     
     $(function(){
+        var rawMode = $('#mediaHomeMode').val();
+        feedMuted = ($('#mediaFeedMuted').val() + '') === 'true';
+        mediaHomeMode = rawMode === 'feed' ? 'feed' : 'grid';
+        if (mediaHomeMode === 'feed') {
+            $('#videoGrid').hide();
+            $('#feedControls').css('display', 'flex');
+            $('#videoFeed').show();
+            bindFeedScroll();
+            bindFeedKeyboard();
+            bindFeedControls();
+            updateFeedButtons();
+        }
         findList(page);
         
         // 使用节流函数优化滚动事件
@@ -463,6 +643,12 @@
     }
     
     function findList(page) {
+        if (mediaHomeMode === 'feed' && feedOrder === 'random') {
+            if (feedRandomPool.length === 0 && !feedRandomLoading) {
+                loadRandomPoolAndRender();
+            }
+            return;
+        }
         if(isLoading || !hasMore) return;
         isLoading = true;
         $('#loading').show();
@@ -470,6 +656,15 @@
         var option = {
             pageNo: page,
             pageSize: 25
+        }
+        if (mediaHomeMode === 'feed') {
+            option.sortField = 'createtime';
+            if (feedOrder === 'asc' || feedOrder === 'desc') {
+                option.sortOrder = feedOrder;
+            }
+            if (feedAuthor && feedAuthor.trim() !== '') {
+                option.videoauthor = feedAuthor.trim();
+            }
         }
         
         $.post("/admin/api/findVideoDataList", option, function(data, status) {
@@ -480,37 +675,45 @@
                 hasMore = list.length > 0 && !data.record.last;
                 
                 if(list.length > 0) {
+                    if (mediaHomeMode === 'feed') {
+                        appendFeedAuthorOptions(list);
+                    }
                     var html = "";
                     for(var i = 0; i < list.length; i++) {
                         var isPrivate = list[i].videoprivacy === '1';
-                        html += '<div class="video-card" data-video="'+list[i].videounrealaddr+'" data-private="'+isPrivate+'">';
-                        html += '<div class="video-cover'+(isPrivate ? ' is-private' : '')+'">';
-                        html += '<div class="skeleton"></div>';
-                        html += '<img data-src="'+list[i].videocover+'" alt="'+list[i].videoname+'" class="lazy-image" onerror="this.src=\'/static/images/noimage.jpg\'">';
-                        html += '<div class="video-play"><i class="mdi mdi-'+(isPrivate ? 'lock' : 'play')+'"></i></div>';
-                        html += '</div>';
-                        html += '<div class="video-info">';
-                        html += '<div class="video-title'+(isPrivate ? ' is-private' : '')+'" title="'+(isPrivate ? '' : list[i].videoname)+'">'+(isPrivate ? '******' : list[i].videoname)+'</div>';
-                        html += '<div class="video-meta">';
-                        html += '<span class="video-platform badge-info">'+(isPrivate ? '****' : list[i].videoplatform)+'</span>';
-                        html += '<span class="video-time">'+formatTime(list[i].createtime)+'</span>';
-                        html += '</div>';
-                        html += '</div>';
-                        html += '</div>';
+                        if (mediaHomeMode === 'feed') {
+                            html += buildFeedItemHtml(list[i], isPrivate);
+                        } else {
+                            html += '<div class="video-card" data-video="'+list[i].videounrealaddr+'" data-private="'+isPrivate+'">';
+                            html += '<div class="video-cover'+(isPrivate ? ' is-private' : '')+'">';
+                            html += '<div class="skeleton"></div>';
+                            html += '<img data-src="'+list[i].videocover+'" alt="'+list[i].videoname+'" class="lazy-image" onerror="this.src=\'/static/images/noimage.jpg\'">';
+                            html += '<div class="video-play"><i class="mdi mdi-'+(isPrivate ? 'lock' : 'play')+'"></i></div>';
+                            html += '</div>';
+                            html += '<div class="video-info">';
+                            html += '<div class="video-title'+(isPrivate ? ' is-private' : '')+'" title="'+(isPrivate ? '' : list[i].videoname)+'">'+(isPrivate ? '******' : list[i].videoname)+'</div>';
+                            html += '<div class="video-meta">';
+                            html += '<span class="video-platform badge-info">'+(isPrivate ? '****' : list[i].videoplatform)+'</span>';
+                            html += '<span class="video-time">'+formatTime(list[i].createtime)+'</span>';
+                            html += '</div>';
+                            html += '</div>';
+                            html += '</div>';
+                        }
                     }
                     
                     // 使用requestAnimationFrame优化DOM操作
                     requestAnimationFrame(function() {
-                        $('#videoGrid').append(html);
-                        
-                        // 初始化懒加载
-                        initLazyLoading();
-                        
-                        // 绑定点击事件
-                        $('.video-card').off('click').on('click', function() {
-                            var $card = $(this);
-                            playVideo($card.data('video'), $card.data('private'));
-                        });
+                        if (mediaHomeMode === 'feed') {
+                            $('#videoFeed').append(html);
+                            initFeedAutoPlay();
+                        } else {
+                            $('#videoGrid').append(html);
+                            initLazyLoading();
+                            $('.video-card').off('click').on('click', function() {
+                                var $card = $(this);
+                                playVideo($card.data('video'), $card.data('private'));
+                            });
+                        }
                     });
                 }
             }
@@ -521,6 +724,310 @@
             isLoading = false;
             $('#loading').hide();
         });
+    }
+
+    function buildFeedItemHtml(item, isPrivate) {
+        var safeTitle = isPrivate ? '******' : (item.videoname || '未命名视频');
+        var safePlatform = isPrivate ? '****' : (item.videoplatform || '未知平台');
+        var safeAuthor = isPrivate ? '****' : (item.videoauthor || '未知作者');
+        var timeText = formatTime(item.createtime);
+        var html = '<div class="feed-item" data-private="' + isPrivate + '">';
+        html += '<video class="feed-video" src="' + (item.videounrealaddr || '') + '" controls preload="metadata" playsinline webkit-playsinline></video>';
+        if (isPrivate) {
+            html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
+        }
+        html += '<div class="feed-overlay">';
+        html += '<div class="feed-title">' + safeTitle + '</div>';
+        var authorChip = '';
+        if (!isPrivate && safeAuthor !== '未知作者') {
+            authorChip = '<span class="feed-author-chip" data-author="' + escapeHtml(safeAuthor) + '">' + safeAuthor + '</span>';
+        }
+        html += '<div class="feed-meta">' + safePlatform + ' · ' + timeText + authorChip + '</div>';
+        html += '</div>';
+        html += '</div>';
+        return html;
+    }
+
+    function initFeedAutoPlay() {
+        if (!('IntersectionObserver' in window)) {
+            return;
+        }
+        if (feedObserver) {
+            feedObserver.disconnect();
+        }
+        feedObserver = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+                var video = entry.target.querySelector('.feed-video');
+                if (!video) {
+                    return;
+                }
+                if (entry.isIntersecting && entry.intersectionRatio >= 0.75) {
+                    video.muted = feedMuted;
+                    var p = video.play();
+                    if (p && typeof p.catch === 'function') {
+                        p.catch(function() {});
+                    }
+                } else {
+                    video.pause();
+                }
+            });
+        }, {
+            threshold: [0.75],
+            root: document.getElementById('videoFeed')
+        });
+
+        document.querySelectorAll('#videoFeed .feed-item').forEach(function(item) {
+            feedObserver.observe(item);
+        });
+    }
+
+    function bindFeedScroll() {
+        $('#videoFeed').on('scroll', function() {
+            if (!hasMore || isLoading) {
+                return;
+            }
+            var el = this;
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+                if (feedOrder === 'random') {
+                    renderNextRandomBatch();
+                } else {
+                    page++;
+                    findList(page);
+                }
+            }
+        });
+    }
+
+    function bindFeedKeyboard() {
+        $(document).on('keydown', function(e) {
+            if (mediaHomeMode !== 'feed') {
+                return;
+            }
+            var container = $('#videoFeed')[0];
+            if (!container) {
+                return;
+            }
+            var step = container.clientHeight;
+            if (e.key === 'ArrowDown') {
+                container.scrollBy({ top: step, behavior: 'smooth' });
+                e.preventDefault();
+            } else if (e.key === 'ArrowUp') {
+                container.scrollBy({ top: -step, behavior: 'smooth' });
+                e.preventDefault();
+            }
+        });
+    }
+
+    function bindFeedControls() {
+        $('#feedOrderBtn').on('click', function() {
+            if (feedOrder === 'desc') {
+                feedOrder = 'asc';
+            } else if (feedOrder === 'asc') {
+                feedOrder = 'random';
+            } else {
+                feedOrder = 'desc';
+            }
+            updateFeedButtons();
+            reloadFeed();
+        });
+
+        $('#feedAuthorBtn').on('click', function() {
+            openFeedAuthorSelector();
+        });
+
+        $('#feedMuteBtn').on('click', function() {
+            feedMuted = !feedMuted;
+            $('#videoFeed .feed-video').each(function() {
+                this.muted = feedMuted;
+            });
+            updateFeedButtons();
+        });
+
+        $('#videoFeed').on('click', '.feed-author-chip', function(e) {
+            e.stopPropagation();
+            var author = ($(this).data('author') || '').toString().trim();
+            if (!author || author === '未知作者' || author === '****') {
+                return;
+            }
+            feedAuthor = author;
+            updateFeedButtons();
+            reloadFeed();
+        });
+    }
+
+    function reloadFeed() {
+        page = 1;
+        hasMore = true;
+        isLoading = false;
+        $('#videoFeed').empty();
+        feedAuthorSet = {};
+        if (feedOrder === 'random') {
+            feedRandomPool = [];
+            feedRandomCursor = 0;
+            feedRandomLoading = false;
+            loadRandomPoolAndRender();
+            return;
+        }
+        feedRandomPool = [];
+        feedRandomCursor = 0;
+        feedRandomLoading = false;
+        findList(page);
+    }
+
+    function shuffleList(arr) {
+        for (var i = arr.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var temp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = temp;
+        }
+        return arr;
+    }
+
+    function buildFeedRequestOption(pageNo) {
+        var option = {
+            pageNo: pageNo,
+            pageSize: 25
+        };
+        if (mediaHomeMode === 'feed') {
+            option.sortField = 'createtime';
+            if (feedOrder === 'asc' || feedOrder === 'desc') {
+                option.sortOrder = feedOrder;
+            }
+            if (feedAuthor && feedAuthor.trim() !== '') {
+                option.videoauthor = feedAuthor.trim();
+            }
+        }
+        return option;
+    }
+
+    function loadRandomPoolAndRender() {
+        if (feedRandomLoading) {
+            return;
+        }
+        feedRandomLoading = true;
+        hasMore = false;
+        $('#loading').show();
+        var all = [];
+        var currentPage = 1;
+
+        function pullNext() {
+            var option = buildFeedRequestOption(currentPage);
+            $.post('/admin/api/findVideoDataList', option, function(data) {
+                if (data && data.resCode === '000001' && data.record && data.record.content) {
+                    var list = data.record.content || [];
+                    if (list.length > 0) {
+                        appendFeedAuthorOptions(list);
+                        all = all.concat(list);
+                    }
+                    if (data.record.last) {
+                        finalizeRandomPool(all);
+                    } else {
+                        currentPage++;
+                        pullNext();
+                    }
+                } else {
+                    finalizeRandomPool(all);
+                }
+            }).fail(function() {
+                finalizeRandomPool(all);
+            });
+        }
+
+        function finalizeRandomPool(fullList) {
+            feedRandomPool = shuffleList(fullList.slice());
+            feedRandomCursor = 0;
+            feedRandomLoading = false;
+            $('#loading').hide();
+            renderNextRandomBatch(true);
+        }
+
+        pullNext();
+    }
+
+    function renderNextRandomBatch(forceFirst) {
+        if (feedOrder !== 'random') {
+            return;
+        }
+        if (forceFirst) {
+            $('#videoFeed').empty();
+        }
+        if (!feedRandomPool || feedRandomPool.length === 0) {
+            hasMore = false;
+            return;
+        }
+        var start = feedRandomCursor;
+        var end = Math.min(feedRandomCursor + feedRandomBatchSize, feedRandomPool.length);
+        if (start >= end) {
+            hasMore = false;
+            return;
+        }
+        var html = '';
+        for (var i = start; i < end; i++) {
+            var item = feedRandomPool[i];
+            var isPrivate = item.videoprivacy === '1';
+            html += buildFeedItemHtml(item, isPrivate);
+        }
+        feedRandomCursor = end;
+        hasMore = feedRandomCursor < feedRandomPool.length;
+        requestAnimationFrame(function() {
+            $('#videoFeed').append(html);
+            initFeedAutoPlay();
+        });
+    }
+
+    function appendFeedAuthorOptions(list) {
+        for (var i = 0; i < list.length; i++) {
+            var author = (list[i].videoauthor || '').trim();
+            if (!author || feedAuthorSet[author]) {
+                continue;
+            }
+            feedAuthorSet[author] = true;
+        }
+    }
+
+    function openFeedAuthorSelector() {
+        var authors = Object.keys(feedAuthorSet).sort();
+        var html = '<div class="author-sheet">';
+        html += '<div class="author-sheet-header">选择作者</div>';
+        html += '<button type="button" class="btn btn-sm btn-outline-primary feed-author-option author-chip" data-author="">全部作者</button>';
+        for (var i = 0; i < authors.length; i++) {
+            html += '<button type="button" class="btn btn-sm btn-outline-secondary feed-author-option author-chip" data-author="' + escapeHtml(authors[i]) + '">' + escapeHtml(authors[i]) + '</button>';
+        }
+        html += '</div>';
+        authorSheetIndex = layer.open({
+            type: 1,
+            title: false,
+            closeBtn: 1,
+            shadeClose: true,
+            area: ['100%', '68vh'],
+            offset: 'b',
+            skin: 'layui-layer-rim',
+            content: html
+        });
+        $(document).off('click.feedAuthorOption').on('click.feedAuthorOption', '.feed-author-option', function() {
+            feedAuthor = ($(this).data('author') || '').toString().trim();
+            updateFeedButtons();
+            reloadFeed();
+            layer.close(authorSheetIndex);
+            $(document).off('click.feedAuthorOption');
+        });
+    }
+
+    function updateFeedButtons() {
+        var orderText = feedOrder === 'asc' ? '顺序' : (feedOrder === 'random' ? '随机' : '倒序');
+        $('#feedOrderBtn span').text(orderText);
+        var authorText = feedAuthor && feedAuthor.trim() !== '' ? feedAuthor : '全部';
+        if (authorText.length > 4) {
+            authorText = authorText.substring(0, 4) + '…';
+        }
+        $('#feedAuthorBtn span').text(authorText);
+        $('#feedMuteBtn i').attr('class', feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high');
+        $('#feedMuteBtn span').text(feedMuted ? '静音' : '有声');
+    }
+
+    function escapeHtml(text) {
+        return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 </script>
 </body>

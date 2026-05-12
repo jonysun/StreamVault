@@ -133,6 +133,10 @@ public class Global {
 	public static int RangeNumber = 1;
 	
 	public static String frontend = "blank";
+
+	public static String mediaHomeMode = "grid";
+
+	public static boolean mediaFeedMuted = true;
 	
 	public static String hiddenplatforms = "";  // 在视频首页隐藏的平台（逗号分隔）
 	

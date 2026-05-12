@@ -103,6 +103,12 @@ public class AppConfig {
 		if(null!=data.getFrontend() && !"".equals(data.getFrontend())) {
 			Global.frontend = data.getFrontend();
 		}
+		if ("feed".equalsIgnoreCase(data.getMediahomemode())) {
+			Global.mediaHomeMode = "feed";
+		} else {
+			Global.mediaHomeMode = "grid";
+		}
+		Global.mediaFeedMuted = !"0".equals(data.getMediafeedmuted());
 		if(null!=data.getRangenum() && !"".equals(data.getRangenum())) {
 			Global.RangeNumber = Integer.valueOf(data.getRangenum());
 		}

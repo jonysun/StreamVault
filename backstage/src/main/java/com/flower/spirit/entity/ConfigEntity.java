@@ -53,6 +53,10 @@ public class ConfigEntity implements Serializable {
 	private String useragent;
 	
 	private String frontend; //video  nav
+
+	private String mediahomemode; // 媒体首页展示模式: grid/feed
+
+	private String mediafeedmuted; // 滑动模式默认静音自动播放: 1/0
 	
 	private String ytdlpmode;
 	
@@ -176,6 +180,22 @@ public class ConfigEntity implements Serializable {
 
 	public void setFrontend(String frontend) {
 		this.frontend = frontend;
+	}
+
+	public String getMediahomemode() {
+		return mediahomemode;
+	}
+
+	public void setMediahomemode(String mediahomemode) {
+		this.mediahomemode = mediahomemode;
+	}
+
+	public String getMediafeedmuted() {
+		return mediafeedmuted;
+	}
+
+	public void setMediafeedmuted(String mediafeedmuted) {
+		this.mediafeedmuted = mediafeedmuted;
 	}
 
 	public String getYtdlpmode() {

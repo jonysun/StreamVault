@@ -56,6 +56,12 @@ public class ConfigService {
 		if (cfg.getMediapreviewlimit() == null || cfg.getMediapreviewlimit().trim().isEmpty()) {
 			cfg.setMediapreviewlimit("6");
 		}
+		if (cfg.getMediahomemode() == null || cfg.getMediahomemode().trim().isEmpty()) {
+			cfg.setMediahomemode("grid");
+		}
+		if (cfg.getMediafeedmuted() == null || cfg.getMediafeedmuted().trim().isEmpty()) {
+			cfg.setMediafeedmuted("1");
+		}
 		return cfg;
 	}
 
@@ -102,6 +108,12 @@ public class ConfigService {
 		if(null!=configEntity.getFrontend() && !"".equals(configEntity.getFrontend())) {
 			Global.frontend = configEntity.getFrontend();
 		}
+		if ("feed".equalsIgnoreCase(configEntity.getMediahomemode())) {
+			Global.mediaHomeMode = "feed";
+		} else {
+			Global.mediaHomeMode = "grid";
+		}
+		Global.mediaFeedMuted = !"0".equals(configEntity.getMediafeedmuted());
 		if(null!=configEntity.getRangenum() && !"".equals(configEntity.getRangenum())) {
 			Global.RangeNumber = Integer.valueOf(configEntity.getRangenum());
 		}
