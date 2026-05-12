@@ -78,7 +78,21 @@ public class GraphicContentService {
 	            }
 	        }
 
-	        query.orderBy(cb.desc(root.get("id")));
+	        String sortField = res == null ? null : res.getSortField();
+	        String sortOrder = res == null ? null : res.getSortOrder();
+	        String actualSortField = null;
+	        if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "author".equals(sortField)) {
+	        	actualSortField = sortField;
+	        }
+	        if (actualSortField != null) {
+	        	if ("asc".equalsIgnoreCase(sortOrder)) {
+	        		query.orderBy(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
+	        	} else {
+	        		query.orderBy(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
+	        	}
+	        } else {
+	        	query.orderBy(cb.desc(root.get("id")));
+	        }
 	        return cb.and(predicates.toArray(new Predicate[0]));
 	    };
 

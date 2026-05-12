@@ -588,8 +588,17 @@ public class CollectDataService {
 							taskname, "jpg");
 					String dir2 = FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname,
 							null);
+					boolean localVideoExists = false;
+					File localVideoFile = new File(videofile);
+					if (localVideoFile.exists() && localVideoFile.isFile() && localVideoFile.length() > 0) {
+						localVideoExists = true;
+						appendLog(processLog, "download", "local file exists, skip real download");
+						logger.info("[CollectTask] local file hit, skip download taskId={} awemeId={} path={}", entity.getId(),
+								awemeId, videofile);
+						planItem.put("decision", "video-local-hit");
+					}
 					logger.info("已使用批量下载,下载器类型为:" + Global.downtype);
-					if (Global.downtype.equals("a2")) {
+					if (!localVideoExists && Global.downtype.equals("a2")) {
 						appendLog(processLog, "download", "using aria2");
 						Aria2Util.sendMessage(Global.a2_link, Aria2Util.createDouparameter(videoplay, dir,
 								filename + ".mp4", Global.a2_token, Global.tiktokCookie));
@@ -598,7 +607,7 @@ public class CollectDataService {
 					header.put("User-Agent", DouUtil.ua);
 					header.put("cookie", Global.tiktokCookie);
 					header.put("Referer", "https://www.douyin.com/");
-					if (Global.downtype.equals("http")) {
+					if (!localVideoExists && Global.downtype.equals("http")) {
 						appendLog(processLog, "download", "using http builtin");
 						// 内置下载器
 						dir = FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname,
@@ -625,7 +634,9 @@ public class CollectDataService {
 							break;
 						}
 					}
-					HttpUtil.downloadFileWithOkHttp(coveruri, filename + ".jpg", dir2, header);
+					if (!localVideoExists) {
+						HttpUtil.downloadFileWithOkHttp(coveruri, filename + ".jpg", dir2, header);
+					}
 					VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, "抖音", coverunaddr,
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
@@ -677,9 +688,14 @@ public class CollectDataService {
 					}
 					videoDataDao.save(videoDataEntity);
 					appendLog(processLog, "save", "video saved");
+					if (localVideoExists) {
+						status = "已完成(文件已存在-已入库)";
+					}
 					logger.info("下载流程结束");
-					Thread.sleep(5000);
-					logger.info("等待五秒在继续下一个");
+					if (!localVideoExists) {
+						Thread.sleep(5000);
+						logger.info("等待五秒在继续下一个");
+					}
 				}
 				if (status.equals("")) {
 					status = findByVideoid.size() == 0 ? "已完成" : "已完成(未下载已存在)";
@@ -713,7 +729,7 @@ public class CollectDataService {
 					entity.setCarriedout(carriedout);
 					collectdDataDao.save(entity);
 					videoaddcount++;
-					if ("已完成".equals(status) || "图文已完成".equals(status)) {
+					if (status.startsWith("已完成") || "图文已完成".equals(status)) {
 						successThisRun++;
 						planItem.put("decision", "video-success");
 					}

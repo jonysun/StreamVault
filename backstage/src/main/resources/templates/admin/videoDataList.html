@@ -504,6 +504,42 @@
                 margin: 5px !important;
             }
         }
+
+        .author-multi-select {
+            position: relative;
+        }
+
+        .author-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid #e4e7ea;
+            border-radius: 4px;
+            background: #fff;
+            z-index: 20;
+            padding: 6px;
+            display: none;
+        }
+
+        .author-option {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 2px;
+            margin: 0;
+            font-weight: normal;
+            cursor: pointer;
+        }
+
+        .author-selected {
+            margin-top: 6px;
+            min-height: 20px;
+            color: #666;
+            font-size: 12px;
+        }
     </style>
 </head>
 
@@ -535,13 +571,16 @@
                                                 </div>
                                             </div>
                                             <div class="col-lg-3 col-md-6 col-sm-12">
-									<div class="form-group mb-3">
-										<label class="control-label">视频作者</label>
-										<input type="text" class="form-control videoauthor" name="videoauthor"
-											placeholder="请输入或逗号分隔多个作者" list="videoAuthorOptions" />
-										<datalist id="videoAuthorOptions"></datalist>
-									</div>
+							<div class="form-group mb-3">
+								<label class="control-label">视频作者</label>
+								<div class="author-multi-select">
+									<input type="text" class="form-control" id="videoAuthorSearch" placeholder="输入筛选并勾选作者" autocomplete="off" />
+									<div id="videoAuthorDropdown" class="author-dropdown"></div>
 								</div>
+								<div id="videoAuthorSelected" class="author-selected">已选：无</div>
+								<input type="text" class="form-control mt-2 videoauthor-extra" placeholder="补充作者（可手输，逗号分隔）" />
+							</div>
+						</div>
                                             <div class="col-lg-3 col-md-6 col-sm-12">
                                                 <div class="form-group mb-3">
                                                     <label class="control-label">视频简介</label>
@@ -582,10 +621,30 @@
 									<div class="col-lg-3 col-md-6 col-sm-12">
 										<div class="form-group mb-3">
 											<label class="control-label">发布日期止</label>
-											<input type="date" class="form-control publishEnd" name="publishEnd" />
-										</div>
+										<input type="date" class="form-control publishEnd" name="publishEnd" />
 									</div>
 								</div>
+								<div class="col-lg-3 col-md-6 col-sm-12">
+									<div class="form-group mb-3">
+										<label class="control-label">排序字段</label>
+										<select class="form-control sortField" name="sortField">
+											<option value="">默认（编号倒序）</option>
+											<option value="createtime">下载时间</option>
+											<option value="publishtime">发布时间</option>
+											<option value="videoauthor">视频作者</option>
+										</select>
+									</div>
+								</div>
+								<div class="col-lg-3 col-md-6 col-sm-12">
+									<div class="form-group mb-3">
+										<label class="control-label">排序方向</label>
+										<select class="form-control sortOrder" name="sortOrder">
+											<option value="desc">倒序</option>
+											<option value="asc">正序</option>
+										</select>
+									</div>
+								</div>
+							</div>
                                         <div class="row">
                                             <div class="col-12">
                                                 <div class="form-group text-center">
@@ -702,29 +761,95 @@
     <script src="../static/js/layer/layer.js" type="text/javascript"></script>
     <script type="text/javascript">
         var readtoken = document.getElementById('readtoken').dataset.readtoken;
+        var videoAuthorOptions = [];
+        var selectedVideoAuthors = new Set();
         $(function () {
             findList(1);
             $('.searchData').click(function () {
                 findList(1)
             })
 			loadVideoAuthors();
-			let authorTimer;
-			$('.videoauthor').on('input', function(){
-				clearTimeout(authorTimer);
-				authorTimer = setTimeout(function(){ findList(1); }, 500);
-			});
+			bindVideoAuthorMultiSelect();
         })
 
 		function loadVideoAuthors(){
 			$.get('/admin/api/videoAuthors', function(res){
 				if(res.resCode === '000001' && Array.isArray(res.record)) {
-					var html = '';
-					res.record.forEach(function(author){
-						html += '<option value="' + author + '"></option>';
-					});
-					$('#videoAuthorOptions').html(html);
+					videoAuthorOptions = res.record.filter(function(author){ return !!author; });
+					renderVideoAuthorOptions('');
 				}
 			});
+		}
+
+		function bindVideoAuthorMultiSelect() {
+			$('#videoAuthorSearch').on('focus input', function(){
+				renderVideoAuthorOptions($(this).val());
+				$('#videoAuthorDropdown').show();
+			});
+			$(document).on('click', function(e){
+				if (!$(e.target).closest('.author-multi-select').length) {
+					$('#videoAuthorDropdown').hide();
+				}
+			});
+			$('#videoAuthorDropdown').on('change', 'input[type="checkbox"]', function(){
+				var author = $(this).data('author');
+				if ($(this).is(':checked')) {
+					selectedVideoAuthors.add(author);
+				} else {
+					selectedVideoAuthors.delete(author);
+				}
+				updateSelectedVideoAuthorsText();
+				findList(1);
+			});
+			$('.videoauthor-extra').on('input', function(){
+				findList(1);
+			});
+		}
+
+		function renderVideoAuthorOptions(keyword) {
+			var kw = (keyword || '').trim().toLowerCase();
+			var html = '';
+			videoAuthorOptions.forEach(function(author){
+				if (kw && author.toLowerCase().indexOf(kw) === -1) {
+					return;
+				}
+				var checked = selectedVideoAuthors.has(author) ? 'checked' : '';
+				html += '<label class="author-option">'
+					+ '<input type="checkbox" data-author="' + escapeHtml(author) + '" ' + checked + '>'
+					+ '<span>' + escapeHtml(author) + '</span>'
+					+ '</label>';
+			});
+			if (!html) {
+				html = '<div class="text-muted" style="padding:6px;">无匹配作者</div>';
+			}
+			$('#videoAuthorDropdown').html(html);
+			updateSelectedVideoAuthorsText();
+		}
+
+		function updateSelectedVideoAuthorsText() {
+			var arr = Array.from(selectedVideoAuthors);
+			$('#videoAuthorSelected').text(arr.length ? ('已选：' + arr.join('，')) : '已选：无');
+		}
+
+		function buildVideoAuthorQuery() {
+			var extra = $('.videoauthor-extra').val() || '';
+			var merged = Array.from(selectedVideoAuthors);
+			extra.split(',').forEach(function(item){
+				var v = (item || '').trim();
+				if (v && merged.indexOf(v) === -1) {
+					merged.push(v);
+				}
+			});
+			return merged.join(',');
+		}
+
+		function escapeHtml(text) {
+			return String(text || '')
+				.replace(/&/g, '&amp;')
+				.replace(/</g, '&lt;')
+				.replace(/>/g, '&gt;')
+				.replace(/"/g, '&quot;')
+				.replace(/'/g, '&#39;');
 		}
 
         /**
@@ -736,6 +861,9 @@
             $('.form-search input[type="text"]').val('');
             // 重置下拉选择框
             $('.form-search select').val('');
+            selectedVideoAuthors.clear();
+            updateSelectedVideoAuthorsText();
+            renderVideoAuthorOptions('');
             // 重新加载第一页数据
             findList(1);
         }
@@ -1347,9 +1475,14 @@
             if (videotag != "") {
                 option['videotag'] = videotag;
             }
-            var videoauthor = $('.videoauthor').val();
+            var videoauthor = buildVideoAuthorQuery();
             if (videoauthor != "") {
                 option['videoauthor'] = videoauthor;
+            }
+            var sortField = $('.sortField').val();
+            if (sortField != "") {
+                option['sortField'] = sortField;
+                option['sortOrder'] = $('.sortOrder').val() || 'desc';
             }
 
             var loadIndex = layer.load(1, { shade: [0.3, '#000'] });

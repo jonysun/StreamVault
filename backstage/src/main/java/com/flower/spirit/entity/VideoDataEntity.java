@@ -229,6 +229,12 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	@Transient
 	private String publishEnd;
+
+	@Transient
+	private String sortField;
+
+	@Transient
+	private String sortOrder;
 	
 	public String getExcludePlatform() {
 		return excludePlatform;
@@ -252,6 +258,22 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setPublishEnd(String publishEnd) {
 		this.publishEnd = publishEnd;
+	}
+
+	public String getSortField() {
+		return sortField;
+	}
+
+	public void setSortField(String sortField) {
+		this.sortField = sortField;
+	}
+
+	public String getSortOrder() {
+		return sortOrder;
+	}
+
+	public void setSortOrder(String sortOrder) {
+		this.sortOrder = sortOrder;
 	}
 	
 

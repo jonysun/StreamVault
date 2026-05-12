@@ -1,6 +1,7 @@
 package com.flower.spirit.executor;
 
 import java.io.IOException;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Date;
@@ -110,7 +111,12 @@ public class DouYinExecutor {
 					String storage = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,i);
 					String cos = FileUtil.generateDir(false, Global.platform.douyin.name(), filename, null, "mp4",i);
 					imageList.add(cos);
-					HttpUtil.downloadFileWithOkHttp(videoplay, filename+"-index-"+i + ".mp4", storage, header);
+					String target = storage + File.separator + filename+"-index-"+i + ".mp4";
+					if (isExistingNonEmptyFile(target)) {
+						logger.info("[DouyinImageText] local file hit, skip video download postId={} index={} path={}", post, i, target);
+					} else {
+						HttpUtil.downloadFileWithOkHttp(videoplay, filename+"-index-"+i + ".mp4", storage, header);
+					}
 				}else {
 					logger.info("[DouyinImageText] item type=image postId={} index={}", post, i);
 					//普通
@@ -123,7 +129,12 @@ public class DouYinExecutor {
 					 }
 					 String storage = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,i);
 					 String cos = FileUtil.generateDir(false, Global.platform.douyin.name(), filename, null, "jpeg",i);
-					 HttpUtil.downloadFileWithOkHttp(picaddr, filename+"-index-"+i + ".jpeg", storage, header);
+					 String target = storage + File.separator + filename+"-index-"+i + ".jpeg";
+					 if (isExistingNonEmptyFile(target)) {
+						 logger.info("[DouyinImageText] local file hit, skip image download postId={} index={} path={}", post, i, target);
+					 } else {
+						 HttpUtil.downloadFileWithOkHttp(picaddr, filename+"-index-"+i + ".jpeg", storage, header);
+					 }
 					 imageList.add(cos);
 				}
 			}
@@ -201,7 +212,12 @@ public class DouYinExecutor {
 					String storage = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,i);
 					String cos = FileUtil.generateDir(false, Global.platform.douyin.name(), filename, null, "mp4",i);
 					imageList.add(cos);
-					HttpUtil.downloadFileWithOkHttp(videoplay, filename+"-index-"+i + ".mp4", storage, header);
+					String target = storage + File.separator + filename+"-index-"+i + ".mp4";
+					if (isExistingNonEmptyFile(target)) {
+						logger.info("[DouyinImageText] local file hit, skip video download postId={} index={} path={}", post, i, target);
+					} else {
+						HttpUtil.downloadFileWithOkHttp(videoplay, filename+"-index-"+i + ".mp4", storage, header);
+					}
 				}else {
 					logger.info("[DouyinImageText] item type=image postId={} index={}", post, i);
 					//普通
@@ -214,7 +230,12 @@ public class DouYinExecutor {
 					 }
 					 String storage = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,i);
 					 String cos = FileUtil.generateDir(false, Global.platform.douyin.name(), filename, null, "jpeg",i);
-					 HttpUtil.downloadFileWithOkHttp(picaddr, filename+"-index-"+i + ".jpeg", storage, header);
+					 String target = storage + File.separator + filename+"-index-"+i + ".jpeg";
+					 if (isExistingNonEmptyFile(target)) {
+						 logger.info("[DouyinImageText] local file hit, skip image download postId={} index={} path={}", post, i, target);
+					 } else {
+						 HttpUtil.downloadFileWithOkHttp(picaddr, filename+"-index-"+i + ".jpeg", storage, header);
+					 }
 					 imageList.add(cos);
 				}
 			}
@@ -250,6 +271,14 @@ public class DouYinExecutor {
 			return normalized.substring(0, 1000);
 		}
 		return normalized;
+	}
+
+	private static boolean isExistingNonEmptyFile(String path) {
+		if (path == null || path.trim().isEmpty()) {
+			return false;
+		}
+		File file = new File(path);
+		return file.exists() && file.isFile() && file.length() > 0;
 	}
 
 	private static String formatPublishTimeFromEpochSeconds(String epochSeconds) {

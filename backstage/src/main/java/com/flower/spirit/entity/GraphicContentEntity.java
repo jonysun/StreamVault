@@ -57,6 +57,12 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	@Transient
 	private String publishEnd;
 
+	@Transient
+	private String sortField;
+
+	@Transient
+	private String sortOrder;
+
 	public Integer getId() {
 		return id;
 	}
@@ -168,6 +174,22 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	public void setPublishEnd(String publishEnd) {
 		this.publishEnd = publishEnd;
+	}
+
+	public String getSortField() {
+		return sortField;
+	}
+
+	public void setSortField(String sortField) {
+		this.sortField = sortField;
+	}
+
+	public String getSortOrder() {
+		return sortOrder;
+	}
+
+	public void setSortOrder(String sortOrder) {
+		this.sortOrder = sortOrder;
 	}
 
 	public String getMarkroute() {

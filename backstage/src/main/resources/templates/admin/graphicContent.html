@@ -240,6 +240,42 @@
 			font-size: 12px;
 			color: #666;
 		}
+
+		.author-multi-select {
+			position: relative;
+		}
+
+		.author-dropdown {
+			position: absolute;
+			top: calc(100% + 4px);
+			left: 0;
+			right: 0;
+			max-height: 220px;
+			overflow-y: auto;
+			border: 1px solid #e4e7ea;
+			border-radius: 4px;
+			background: #fff;
+			z-index: 20;
+			padding: 6px;
+			display: none;
+		}
+
+		.author-option {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			padding: 4px 2px;
+			margin: 0;
+			font-weight: normal;
+			cursor: pointer;
+		}
+
+		.author-selected {
+			margin-top: 6px;
+			min-height: 20px;
+			color: #666;
+			font-size: 12px;
+		}
 		
 		.action-buttons {
 			display: flex;
@@ -651,8 +687,12 @@
 							<div class="col-md-3 col-sm-6 col-12">
 								<div class="form-group">
 									<label class="control-label">作者</label>
-									<input type="text" name="author" class="form-control" placeholder="请输入或逗号分隔多个作者" id="authorFilter" list="graphicAuthorOptions">
-									<datalist id="graphicAuthorOptions"></datalist>
+									<div class="author-multi-select">
+										<input type="text" class="form-control" placeholder="输入筛选并勾选作者" id="graphicAuthorSearch" autocomplete="off">
+										<div id="graphicAuthorDropdown" class="author-dropdown"></div>
+									</div>
+									<div id="graphicAuthorSelected" class="author-selected">已选：无</div>
+									<input type="text" class="form-control mt-2" placeholder="补充作者（可手输，逗号分隔）" id="graphicAuthorExtra">
 								</div>
 							</div>
 							<div class="col-md-4 col-sm-8 col-12">
@@ -671,6 +711,26 @@
 								<div class="form-group">
 									<label class="control-label">发布日期止</label>
 									<input type="date" name="publishEnd" class="form-control" id="publishEndFilter">
+								</div>
+							</div>
+							<div class="col-md-3 col-sm-6 col-12">
+								<div class="form-group">
+									<label class="control-label">排序字段</label>
+									<select class="form-control" id="sortFieldFilter">
+										<option value="">默认（编号倒序）</option>
+										<option value="createtime">下载时间</option>
+										<option value="publishtime">发布时间</option>
+										<option value="author">图影作者</option>
+									</select>
+								</div>
+							</div>
+							<div class="col-md-3 col-sm-6 col-12">
+								<div class="form-group">
+									<label class="control-label">排序方向</label>
+									<select class="form-control" id="sortOrderFilter">
+										<option value="desc">倒序</option>
+										<option value="asc">正序</option>
+									</select>
 								</div>
 							</div>
 							<div class="col-md-2 col-sm-4 col-12">
@@ -807,6 +867,8 @@ var searchParams = {};
 var selectedGraphicIds = new Set();
 var currentMediaList = [];
 var currentMediaIndex = 0;
+var graphicAuthorOptions = [];
+var selectedGraphicAuthors = new Set();
 
 /**
  * 初始化页面
@@ -834,27 +896,91 @@ function bindSearchEvents() {
 			$('#searchBtn').click();
 		}
 	});
-	let authorTimer;
-	$('#authorFilter').on('input', function(){
-		clearTimeout(authorTimer);
-		authorTimer = setTimeout(function(){
-			currentPage = 1;
-			collectSearchParams();
-			loadGraphicContentList();
-		}, 500);
+	bindGraphicAuthorMultiSelect();
+	$('#graphicAuthorExtra').on('input', function(){
+		currentPage = 1;
+		collectSearchParams();
+		loadGraphicContentList();
 	});
 }
 
 function loadGraphicAuthors() {
 	$.get('/admin/api/graphicAuthors', function(res){
 		if(res.resCode === '000001' && Array.isArray(res.record)) {
-			var html = '';
-			res.record.forEach(function(author){
-				html += '<option value="' + author + '"></option>';
-			});
-			$('#graphicAuthorOptions').html(html);
+			graphicAuthorOptions = res.record.filter(function(author){ return !!author; });
+			renderGraphicAuthorOptions('');
 		}
 	});
+}
+
+function bindGraphicAuthorMultiSelect() {
+	$('#graphicAuthorSearch').on('focus input', function(){
+		renderGraphicAuthorOptions($(this).val());
+		$('#graphicAuthorDropdown').show();
+	});
+	$(document).on('click', function(e){
+		if (!$(e.target).closest('.author-multi-select').length) {
+			$('#graphicAuthorDropdown').hide();
+		}
+	});
+	$('#graphicAuthorDropdown').on('change', 'input[type="checkbox"]', function(){
+		var author = $(this).data('author');
+		if ($(this).is(':checked')) {
+			selectedGraphicAuthors.add(author);
+		} else {
+			selectedGraphicAuthors.delete(author);
+		}
+		updateSelectedGraphicAuthorsText();
+		currentPage = 1;
+		collectSearchParams();
+		loadGraphicContentList();
+	});
+}
+
+function renderGraphicAuthorOptions(keyword) {
+	var kw = (keyword || '').trim().toLowerCase();
+	var html = '';
+	graphicAuthorOptions.forEach(function(author){
+		if (kw && author.toLowerCase().indexOf(kw) === -1) {
+			return;
+		}
+		var checked = selectedGraphicAuthors.has(author) ? 'checked' : '';
+		html += '<label class="author-option">'
+			+ '<input type="checkbox" data-author="' + escapeHtml(author) + '" ' + checked + '>'
+			+ '<span>' + escapeHtml(author) + '</span>'
+			+ '</label>';
+	});
+	if (!html) {
+		html = '<div class="text-muted" style="padding:6px;">无匹配作者</div>';
+	}
+	$('#graphicAuthorDropdown').html(html);
+	updateSelectedGraphicAuthorsText();
+}
+
+function updateSelectedGraphicAuthorsText() {
+	var arr = Array.from(selectedGraphicAuthors);
+	$('#graphicAuthorSelected').text(arr.length ? ('已选：' + arr.join('，')) : '已选：无');
+}
+
+function buildGraphicAuthorQuery() {
+	var extra = $('#graphicAuthorExtra').val() || '';
+	var merged = Array.from(selectedGraphicAuthors);
+	extra.split(',').forEach(function(item){
+		var v = (item || '').trim();
+		if (v && merged.indexOf(v) === -1) {
+			merged.push(v);
+		}
+	});
+	return merged.join(',');
+}
+
+function escapeHtml(text) {
+	return String(text || '')
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
 }
 
 /**
@@ -863,10 +989,12 @@ function loadGraphicAuthors() {
 function collectSearchParams() {
 	searchParams = {
 		platform: $('#platformFilter').val(),
-		author: $('#authorFilter').val(),
+		author: buildGraphicAuthorQuery(),
 		title: $('#titleFilter').val(),
 		publishStart: $('#publishStartFilter').val(),
 		publishEnd: $('#publishEndFilter').val(),
+		sortField: $('#sortFieldFilter').val(),
+		sortOrder: $('#sortOrderFilter').val(),
 		pageNo: currentPage, // 前后端页码都从1开始，直接传递
 		pageSize: pageSize
 	};
