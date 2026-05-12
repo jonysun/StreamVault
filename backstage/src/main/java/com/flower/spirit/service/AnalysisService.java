@@ -58,6 +58,9 @@ public class AnalysisService {
 	@Autowired
 	private VideoDataDao videoDataDao;
 
+	@Autowired
+	private HlsTranscodeService hlsTranscodeService;
+
 	private Logger logger = LoggerFactory.getLogger(AnalysisService.class);
 
 	@Autowired
@@ -171,7 +174,10 @@ public class AnalysisService {
 					String coverdb = dircos + baseName + ".webp";
 					String videodb = dircos + name;
 					VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,detectedPlatform, coverdb, filename, videodb, url);
-					videoDataDao.save(videoDataEntity);
+					VideoDataEntity saved = videoDataDao.save(videoDataEntity);
+					if (saved != null && saved.getId() != null) {
+						hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));
+					}
 					processHistoryService.saveProcess(saveProcess.getId(), url, detectedPlatform);
 					sendNotify.sendNotifyData(namefix, url, detectedPlatform);
 				}
@@ -233,7 +239,10 @@ public class AnalysisService {
 						videofile,
 						videounrealaddr, url);
 				videoDataEntity.setVideoauthor(author);
-				videoDataDao.save(videoDataEntity);
+				VideoDataEntity saved = videoDataDao.save(videoDataEntity);
+				if (saved != null && saved.getId() != null) {
+					hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));
+				}
 				processHistoryService.saveProcess(saveProcess.getId(), url, platform);
 				sendNotify.sendNotifyData(title, url, platform);
 				logger.info("下载流程结束");

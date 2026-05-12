@@ -62,6 +62,24 @@ public class ConfigService {
 		if (cfg.getMediafeedmuted() == null || cfg.getMediafeedmuted().trim().isEmpty()) {
 			cfg.setMediafeedmuted("1");
 		}
+		if (cfg.getHlsenable() == null || cfg.getHlsenable().trim().isEmpty()) {
+			cfg.setHlsenable("0");
+		}
+		if (cfg.getHlsmode() == null || cfg.getHlsmode().trim().isEmpty()) {
+			cfg.setHlsmode("idle");
+		}
+		if (cfg.getHlsidlewindow() == null || cfg.getHlsidlewindow().trim().isEmpty()) {
+			cfg.setHlsidlewindow("01:00-07:00");
+		}
+		if (cfg.getHlsconcurrency() == null || cfg.getHlsconcurrency().trim().isEmpty()) {
+			cfg.setHlsconcurrency("1");
+		}
+		if (cfg.getHlsprivacyenabled() == null || cfg.getHlsprivacyenabled().trim().isEmpty()) {
+			cfg.setHlsprivacyenabled("1");
+		}
+		if (cfg.getHlssegmentseconds() == null || cfg.getHlssegmentseconds().trim().isEmpty()) {
+			cfg.setHlssegmentseconds("4");
+		}
 		return cfg;
 	}
 
@@ -114,6 +132,30 @@ public class ConfigService {
 			Global.mediaHomeMode = "grid";
 		}
 		Global.mediaFeedMuted = !"0".equals(configEntity.getMediafeedmuted());
+		Global.hlsEnable = "1".equals(configEntity.getHlsenable());
+		if ("immediate".equalsIgnoreCase(configEntity.getHlsmode())) {
+			Global.hlsMode = "immediate";
+		} else {
+			Global.hlsMode = "idle";
+		}
+		if (configEntity.getHlsidlewindow() != null && !configEntity.getHlsidlewindow().trim().isEmpty()) {
+			Global.hlsIdleWindow = configEntity.getHlsidlewindow().trim();
+		}
+		if (configEntity.getHlsconcurrency() != null && !configEntity.getHlsconcurrency().trim().isEmpty()) {
+			try {
+				Global.hlsConcurrency = Math.max(1, Integer.parseInt(configEntity.getHlsconcurrency().trim()));
+			} catch (NumberFormatException e) {
+				logger.warn("hlsconcurrency配置非法，保持原值: {}", Global.hlsConcurrency);
+			}
+		}
+		Global.hlsPrivacyEnabled = !"0".equals(configEntity.getHlsprivacyenabled());
+		if (configEntity.getHlssegmentseconds() != null && !configEntity.getHlssegmentseconds().trim().isEmpty()) {
+			try {
+				Global.hlsSegmentSeconds = Math.max(2, Integer.parseInt(configEntity.getHlssegmentseconds().trim()));
+			} catch (NumberFormatException e) {
+				logger.warn("hlssegmentseconds配置非法，保持原值: {}", Global.hlsSegmentSeconds);
+			}
+		}
 		if(null!=configEntity.getRangenum() && !"".equals(configEntity.getRangenum())) {
 			Global.RangeNumber = Integer.valueOf(configEntity.getRangenum());
 		}

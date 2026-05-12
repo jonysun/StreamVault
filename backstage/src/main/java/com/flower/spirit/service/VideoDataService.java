@@ -57,6 +57,9 @@ public class VideoDataService {
 	@Autowired
 	private VideoDataDao videoDataDao;
 
+	@Autowired
+	private HlsTranscodeService hlsTranscodeService;
+
 	private Logger logger = LoggerFactory.getLogger(VideoDataService.class);
 
 	public List<VideoDataEntity> findByVideoid(String videoid) {
@@ -140,6 +143,21 @@ public class VideoDataService {
 	    };
 
 	    Page<VideoDataEntity> findAll = videoDataDao.findAll(specification, of);
+	    if (findAll != null && findAll.getContent() != null) {
+	    	for (VideoDataEntity item : findAll.getContent()) {
+	    		if (item == null) {
+	    			continue;
+	    		}
+	    		String playUrl = item.getVideounrealaddr();
+	    		if (Global.hlsEnable && hlsTranscodeService.hasHls(item)) {
+	    			String hls = hlsTranscodeService.buildHlsPlayUrl(item);
+	    			if (hls != null && !hls.trim().isEmpty()) {
+	    				playUrl = hls;
+	    			}
+	    		}
+	    		item.setPlayurl(playUrl);
+	    	}
+	    }
 	    return new AjaxEntity(Global.ajax_success, "数据获取成功", findAll);
 	}
 

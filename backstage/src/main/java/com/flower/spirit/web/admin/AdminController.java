@@ -37,6 +37,7 @@ import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
+import com.flower.spirit.service.HlsTranscodeService;
 import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.service.SystemService;
 import com.flower.spirit.service.TikTokConfigService;
@@ -104,6 +105,9 @@ public class AdminController {
 	
 	@Autowired
 	private AnalysisService analysisService;
+
+	@Autowired
+	private HlsTranscodeService hlsTranscodeService;
 	
 	/**  
 	
@@ -563,6 +567,22 @@ public class AdminController {
 		result.put("graphicContent", graphicContentService.findRecentlyAdded());
 		result.put("videoData", videoDataService.findRecentlyAdded());
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", result);
+	}
+
+	@PostMapping(value = "/hlsEnqueueByIds")
+	public AjaxEntity hlsEnqueueByIds(String ids) {
+		return hlsTranscodeService.enqueueByIds(ids);
+	}
+
+	@PostMapping(value = "/hlsEnqueueMissingLatest")
+	public AjaxEntity hlsEnqueueMissingLatest(Integer limit) {
+		int v = limit == null ? 200 : limit.intValue();
+		return hlsTranscodeService.enqueueMissingLatest(v);
+	}
+
+	@PostMapping(value = "/hlsProcessNow")
+	public AjaxEntity hlsProcessNow() {
+		return hlsTranscodeService.processNowOnce();
 	}
 
 	@GetMapping(value = "/videoAuthors")

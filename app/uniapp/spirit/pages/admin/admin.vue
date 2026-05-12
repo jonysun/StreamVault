@@ -126,6 +126,11 @@
 					<text class="quick-text">服务器管理</text>
 					<uni-icons type="right" size="14" color="#ccc"></uni-icons>
 				</view>
+				<view class="quick-item" @tap="navigateTo('/pages/admin/cacheSettings')">
+					<uni-icons type="gear" size="20" color="#2563eb"></uni-icons>
+					<text class="quick-text">缓存设置</text>
+					<uni-icons type="right" size="14" color="#ccc"></uni-icons>
+				</view>
 				<view class="quick-item" @tap="handleLogout">
 					<uni-icons type="undo" size="20" color="#ef4444"></uni-icons>
 					<text class="quick-text quick-text-red">退出登录</text>

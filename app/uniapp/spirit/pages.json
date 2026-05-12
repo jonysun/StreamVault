@@ -80,8 +80,14 @@
 			"style": {
 				"navigationBarTitleText": ""
 			}
+		},
+		{
+			"path": "pages/admin/cacheSettings",
+			"style": {
+				"navigationBarTitleText": "缓存设置"
+			}
 		}
-    ],
+     ],
 	"tabBar": {
 		"color": "#9ca3af",
 		"selectedColor": "#2563eb",
@@ -92,6 +98,12 @@
 				"iconPath": "static/icon/index.png",
 				"selectedIconPath": "static/icon/index.png",
 				"text": "推送"
+			},
+			{
+				"pagePath": "pages/video/fallsVideo",
+				"iconPath": "static/icon/play.png",
+				"selectedIconPath": "static/icon/play.png",
+				"text": "作品"
 			},
 			{
 				"pagePath": "pages/video/videolist",

@@ -57,6 +57,18 @@ public class ConfigEntity implements Serializable {
 	private String mediahomemode; // 媒体首页展示模式: grid/feed
 
 	private String mediafeedmuted; // 滑动模式默认静音自动播放: 1/0
+
+	private String hlsenable; // 是否启用HLS转码: 1/0
+
+	private String hlsmode; // HLS执行模式: immediate/idle
+
+	private String hlsidlewindow; // HLS闲时时段: HH:mm-HH:mm,可多个逗号分隔
+
+	private String hlsconcurrency; // HLS并发
+
+	private String hlsprivacyenabled; // 隐私视频是否允许转码缓存: 1/0
+
+	private String hlssegmentseconds; // HLS分片时长（秒）
 	
 	private String ytdlpmode;
 	
@@ -196,6 +208,54 @@ public class ConfigEntity implements Serializable {
 
 	public void setMediafeedmuted(String mediafeedmuted) {
 		this.mediafeedmuted = mediafeedmuted;
+	}
+
+	public String getHlsenable() {
+		return hlsenable;
+	}
+
+	public void setHlsenable(String hlsenable) {
+		this.hlsenable = hlsenable;
+	}
+
+	public String getHlsmode() {
+		return hlsmode;
+	}
+
+	public void setHlsmode(String hlsmode) {
+		this.hlsmode = hlsmode;
+	}
+
+	public String getHlsidlewindow() {
+		return hlsidlewindow;
+	}
+
+	public void setHlsidlewindow(String hlsidlewindow) {
+		this.hlsidlewindow = hlsidlewindow;
+	}
+
+	public String getHlsconcurrency() {
+		return hlsconcurrency;
+	}
+
+	public void setHlsconcurrency(String hlsconcurrency) {
+		this.hlsconcurrency = hlsconcurrency;
+	}
+
+	public String getHlsprivacyenabled() {
+		return hlsprivacyenabled;
+	}
+
+	public void setHlsprivacyenabled(String hlsprivacyenabled) {
+		this.hlsprivacyenabled = hlsprivacyenabled;
+	}
+
+	public String getHlssegmentseconds() {
+		return hlssegmentseconds;
+	}
+
+	public void setHlssegmentseconds(String hlssegmentseconds) {
+		this.hlssegmentseconds = hlssegmentseconds;
 	}
 
 	public String getYtdlpmode() {

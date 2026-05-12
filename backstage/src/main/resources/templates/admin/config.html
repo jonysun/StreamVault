@@ -233,6 +233,47 @@
                                     </select>
                                 </div>
                                 <div class="form-group">
+                                    <label>HLS转码开关</label>
+                                    <select id="hlsenable" class="form-control" name="hlsenable">
+                                        <option value="1" th:selected="${config.hlsenable} eq '1'">开启</option>
+                                        <option value="0" th:selected="${config.hlsenable} eq '0'">关闭</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>HLS执行模式</label>
+                                    <select id="hlsmode" class="form-control" name="hlsmode">
+                                        <option value="idle" th:selected="${config.hlsmode} eq 'idle'">闲时执行</option>
+                                        <option value="immediate" th:selected="${config.hlsmode} eq 'immediate'">下载后立即执行</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>闲时时段</label>
+                                    <input class="form-control" type="text" id="hlsidlewindow" name="hlsidlewindow" placeholder="例如 01:00-07:00,12:30-13:30" th:value="${config.hlsidlewindow}">
+                                </div>
+                                <div class="form-group">
+                                    <label>HLS并发</label>
+                                    <input class="form-control" type="number" id="hlsconcurrency" name="hlsconcurrency" placeholder="默认1" th:value="${config.hlsconcurrency}">
+                                </div>
+                                <div class="form-group">
+                                    <label>隐私视频转码缓存</label>
+                                    <select id="hlsprivacyenabled" class="form-control" name="hlsprivacyenabled">
+                                        <option value="1" th:selected="${config.hlsprivacyenabled} eq '1'">允许</option>
+                                        <option value="0" th:selected="${config.hlsprivacyenabled} eq '0'">禁止</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>HLS分片时长（秒）</label>
+                                    <input class="form-control" type="number" id="hlssegmentseconds" name="hlssegmentseconds" placeholder="默认4" th:value="${config.hlssegmentseconds}">
+                                </div>
+                                <div class="form-group">
+                                    <label>运维手动批量转码</label>
+                                    <div style="display:flex;gap:8px;align-items:center;">
+                                        <input class="form-control" type="number" id="hlsBatchLimit" value="200" style="max-width:140px;" />
+                                        <button type="button" class="btn btn-info btn-sm" id="hlsEnqueueMissingBtn">批量入队</button>
+                                        <button type="button" class="btn btn-primary btn-sm" id="hlsRunNowBtn">立即执行一轮</button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
                                     <label>F2失败输出完整Traceback</label>
                                     <select id="f2logfullonerror" class="form-control" name="f2logfullonerror">
                                         <option value="1" th:selected="${config.f2logfullonerror} eq '1'">是</option>
@@ -709,6 +750,12 @@
               option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
               option['mediahomemode'] = $("#mediahomemode").val();
               option['mediafeedmuted'] = $("#mediafeedmuted").val();
+              option['hlsenable'] = $("#hlsenable").val();
+              option['hlsmode'] = $("#hlsmode").val();
+              option['hlsidlewindow'] = $("#hlsidlewindow").val();
+              option['hlsconcurrency'] = $("#hlsconcurrency").val();
+              option['hlsprivacyenabled'] = $("#hlsprivacyenabled").val();
+              option['hlssegmentseconds'] = $("#hlssegmentseconds").val();
               $.post("/admin/api/saveConfig",option,function(data,status){
                   if(data.resCode =="000001"){
                       layer.closeAll();
@@ -878,6 +925,12 @@
             option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
             option['mediahomemode'] = $("#mediahomemode").val();
             option['mediafeedmuted'] = $("#mediafeedmuted").val();
+            option['hlsenable'] = $("#hlsenable").val();
+            option['hlsmode'] = $("#hlsmode").val();
+            option['hlsidlewindow'] = $("#hlsidlewindow").val();
+            option['hlsconcurrency'] = $("#hlsconcurrency").val();
+            option['hlsprivacyenabled'] = $("#hlsprivacyenabled").val();
+            option['hlssegmentseconds'] = $("#hlssegmentseconds").val();
             $.post("/admin/api/saveConfig",option,function(data,status){
                 if(data.resCode =="000001"){
                     layer.closeAll();
@@ -961,6 +1014,17 @@
     $(function() {
         updateFileNameTemplatePreview();
         $('#filenametemplate').on('input', updateFileNameTemplatePreview);
+        $('#hlsEnqueueMissingBtn').on('click', function() {
+            var limit = $('#hlsBatchLimit').val() || '200';
+            $.post('/admin/api/hlsEnqueueMissingLatest', { limit: limit }, function(res) {
+                layer.msg(res && res.message ? res.message : '已提交');
+            });
+        });
+        $('#hlsRunNowBtn').on('click', function() {
+            $.post('/admin/api/hlsProcessNow', {}, function(res) {
+                layer.msg(res && res.message ? res.message : '已触发');
+            });
+        });
     });
     function detectPlatform() {
         var url = $('#platformUrl').val();

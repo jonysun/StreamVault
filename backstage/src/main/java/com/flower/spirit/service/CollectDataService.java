@@ -66,6 +66,9 @@ public class CollectDataService {
 	@Autowired
 	private VideoDataDao videoDataDao;
 
+	@Autowired
+	private HlsTranscodeService hlsTranscodeService;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -364,7 +367,10 @@ public class CollectDataService {
 						        videoDataEntity.setVideoinfo(videoInfoJson.toJSONString());
 							}
 							videoDataEntity.setVideoauthor(upname);
-							videoDataDao.save(videoDataEntity);
+							VideoDataEntity saved = videoDataDao.save(videoDataEntity);
+							if (saved != null && saved.getId() != null) {
+								hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));
+							}
 						}else {
 							logger.info(vt + (i + 1) + "-"+filename+"非常规类视频  当前不支持bangumi模式");
 						}
@@ -686,7 +692,10 @@ public class CollectDataService {
 					} else {
 						videoDataEntity.setVideoauthor(dyNickname);
 					}
-					videoDataDao.save(videoDataEntity);
+					VideoDataEntity saved = videoDataDao.save(videoDataEntity);
+					if (saved != null && saved.getId() != null) {
+						hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));
+					}
 					appendLog(processLog, "save", "video saved");
 					if (localVideoExists) {
 						status = "已完成(文件已存在-已入库)";

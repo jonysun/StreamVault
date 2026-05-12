@@ -235,6 +235,9 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	@Transient
 	private String sortOrder;
+
+	@Transient
+	private String playurl;
 	
 	public String getExcludePlatform() {
 		return excludePlatform;
@@ -274,6 +277,14 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setSortOrder(String sortOrder) {
 		this.sortOrder = sortOrder;
+	}
+
+	public String getPlayurl() {
+		return playurl;
+	}
+
+	public void setPlayurl(String playurl) {
+		this.playurl = playurl;
 	}
 	
 

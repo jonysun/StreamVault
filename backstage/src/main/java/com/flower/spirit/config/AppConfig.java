@@ -109,6 +109,30 @@ public class AppConfig {
 			Global.mediaHomeMode = "grid";
 		}
 		Global.mediaFeedMuted = !"0".equals(data.getMediafeedmuted());
+		Global.hlsEnable = "1".equals(data.getHlsenable());
+		if ("immediate".equalsIgnoreCase(data.getHlsmode())) {
+			Global.hlsMode = "immediate";
+		} else {
+			Global.hlsMode = "idle";
+		}
+		if (data.getHlsidlewindow() != null && !data.getHlsidlewindow().trim().isEmpty()) {
+			Global.hlsIdleWindow = data.getHlsidlewindow().trim();
+		}
+		if (data.getHlsconcurrency() != null && !data.getHlsconcurrency().trim().isEmpty()) {
+			try {
+				Global.hlsConcurrency = Math.max(1, Integer.parseInt(data.getHlsconcurrency().trim()));
+			} catch (NumberFormatException e) {
+				logger.warn("hlsconcurrency配置非法，保持原值: {}", Global.hlsConcurrency);
+			}
+		}
+		Global.hlsPrivacyEnabled = !"0".equals(data.getHlsprivacyenabled());
+		if (data.getHlssegmentseconds() != null && !data.getHlssegmentseconds().trim().isEmpty()) {
+			try {
+				Global.hlsSegmentSeconds = Math.max(2, Integer.parseInt(data.getHlssegmentseconds().trim()));
+			} catch (NumberFormatException e) {
+				logger.warn("hlssegmentseconds配置非法，保持原值: {}", Global.hlsSegmentSeconds);
+			}
+		}
 		if(null!=data.getRangenum() && !"".equals(data.getRangenum())) {
 			Global.RangeNumber = Integer.valueOf(data.getRangenum());
 		}

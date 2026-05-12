@@ -137,6 +137,18 @@ public class Global {
 	public static String mediaHomeMode = "grid";
 
 	public static boolean mediaFeedMuted = true;
+
+	public static boolean hlsEnable = false;
+
+	public static String hlsMode = "idle";
+
+	public static String hlsIdleWindow = "01:00-07:00";
+
+	public static int hlsConcurrency = 1;
+
+	public static boolean hlsPrivacyEnabled = true;
+
+	public static int hlsSegmentSeconds = 4;
 	
 	public static String hiddenplatforms = "";  // 在视频首页隐藏的平台（逗号分隔）
 	

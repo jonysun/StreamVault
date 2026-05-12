@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.FfmpegQueueService;
+import com.flower.spirit.service.HlsTranscodeService;
 
 @Configuration
 @Component
@@ -25,6 +26,9 @@ public class TaskService {
 	
 	@Autowired
 	private CookiesConfigService cookiesConfigService;
+
+	@Autowired
+	private HlsTranscodeService hlsTranscodeService;
 	
 	
 	@Scheduled(fixedDelay = 1000*5)
@@ -35,6 +39,11 @@ public class TaskService {
 	@Scheduled(fixedDelay = 1000*5)
 	public void taskMergeTasks() {
 		ffmpegQueueService.taskMergeTasks();
+	}
+
+	@Scheduled(fixedDelay = 1000*8)
+	public void hlsQueueTick() {
+		hlsTranscodeService.processQueueTick(false);
 	}
 	
 	@Scheduled(cron = "0 0 9 * * ?")

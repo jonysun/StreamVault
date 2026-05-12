@@ -684,7 +684,8 @@
                         if (mediaHomeMode === 'feed') {
                             html += buildFeedItemHtml(list[i], isPrivate);
                         } else {
-                            html += '<div class="video-card" data-video="'+list[i].videounrealaddr+'" data-private="'+isPrivate+'">';
+                            var playUrl = list[i].playurl || list[i].videounrealaddr;
+                            html += '<div class="video-card" data-video="'+playUrl+'" data-private="'+isPrivate+'">';
                             html += '<div class="video-cover'+(isPrivate ? ' is-private' : '')+'">';
                             html += '<div class="skeleton"></div>';
                             html += '<img data-src="'+list[i].videocover+'" alt="'+list[i].videoname+'" class="lazy-image" onerror="this.src=\'/static/images/noimage.jpg\'">';
@@ -732,7 +733,7 @@
         var safeAuthor = isPrivate ? '****' : (item.videoauthor || '未知作者');
         var timeText = formatTime(item.createtime);
         var html = '<div class="feed-item" data-private="' + isPrivate + '">';
-        html += '<video class="feed-video" src="' + (item.videounrealaddr || '') + '" controls preload="metadata" playsinline webkit-playsinline></video>';
+        html += '<video class="feed-video" src="' + (item.playurl || item.videounrealaddr || '') + '" controls preload="metadata" playsinline webkit-playsinline></video>';
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
