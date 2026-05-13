@@ -580,6 +580,17 @@ public class AdminController {
 		return hlsTranscodeService.enqueueMissingLatest(v);
 	}
 
+	@PostMapping(value = "/hlsRebuildByIds")
+	public AjaxEntity hlsRebuildByIds(String ids) {
+		return hlsTranscodeService.rebuildByIds(ids);
+	}
+
+	@PostMapping(value = "/hlsRebuildLatest")
+	public AjaxEntity hlsRebuildLatest(Integer limit) {
+		int v = limit == null ? 200 : limit.intValue();
+		return hlsTranscodeService.rebuildLatest(v);
+	}
+
 	@PostMapping(value = "/hlsProcessNow")
 	public AjaxEntity hlsProcessNow() {
 		return hlsTranscodeService.processNowOnce();

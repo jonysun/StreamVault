@@ -89,6 +89,53 @@ public class HlsTranscodeService {
 		return new AjaxEntity(Global.ajax_success, "扫描并入队完成: " + added, added);
 	}
 
+	public synchronized AjaxEntity rebuildByIds(String idsCsv) {
+		if (idsCsv == null || idsCsv.trim().isEmpty()) {
+			return new AjaxEntity(Global.ajax_uri_error, "ids不能为空", null);
+		}
+		String[] parts = idsCsv.split(",");
+		int added = 0;
+		for (String p : parts) {
+			String s = p == null ? "" : p.trim();
+			if (s.isEmpty()) {
+				continue;
+			}
+			try {
+				int id = Integer.parseInt(s);
+				if (enqueue(id, true)) {
+					added++;
+				}
+			} catch (NumberFormatException e) {
+				logger.warn("hls rebuildByIds ignore invalid id={}", s);
+			}
+		}
+		return new AjaxEntity(Global.ajax_success, "已强制重建入队: " + added, added);
+	}
+
+	public synchronized AjaxEntity rebuildLatest(int limit) {
+		int safeLimit = Math.max(1, Math.min(limit, 1000));
+		List<VideoDataEntity> all = videoDataDao.findAll();
+		all.sort(Comparator.comparing(VideoDataEntity::getId, Comparator.nullsLast(Comparator.reverseOrder())));
+		int added = 0;
+		int seen = 0;
+		for (VideoDataEntity v : all) {
+			if (v == null || v.getId() == null) {
+				continue;
+			}
+			if (!allowPrivacy(v)) {
+				continue;
+			}
+			seen++;
+			if (seen > safeLimit) {
+				break;
+			}
+			if (enqueue(v.getId(), true)) {
+				added++;
+			}
+		}
+		return new AjaxEntity(Global.ajax_success, "强制重建扫描并入队完成: " + added, added);
+	}
+
 	public synchronized AjaxEntity processNowOnce() {
 		processQueueTick(true);
 		return new AjaxEntity(Global.ajax_success, "已触发立即处理", null);
@@ -171,6 +218,10 @@ public class HlsTranscodeService {
 	}
 
 	private synchronized boolean enqueue(Integer id) {
+		return enqueue(id, false);
+	}
+
+	private synchronized boolean enqueue(Integer id, boolean forceRebuild) {
 		if (id == null || dedupe.contains(id)) {
 			return false;
 		}
@@ -179,12 +230,47 @@ public class HlsTranscodeService {
 			return false;
 		}
 		VideoDataEntity video = opt.get();
-		if (!allowPrivacy(video) || hasHls(video)) {
+		if (!allowPrivacy(video)) {
 			return false;
+		}
+		if (!forceRebuild && hasHls(video)) {
+			return false;
+		}
+		if (forceRebuild) {
+			clearHlsArtifacts(video);
 		}
 		dedupe.add(id);
 		queue.offer(id);
 		return true;
+	}
+
+	private void clearHlsArtifacts(VideoDataEntity video) {
+		if (video == null || video.getVideoaddr() == null || video.getVideoaddr().trim().isEmpty()) {
+			return;
+		}
+		File mp4 = new File(video.getVideoaddr());
+		File parent = mp4.getParentFile();
+		if (parent == null) {
+			return;
+		}
+		File hlsDir = new File(parent, "hls");
+		if (!hlsDir.exists() || !hlsDir.isDirectory()) {
+			return;
+		}
+		File[] files = hlsDir.listFiles();
+		if (files != null) {
+			for (File f : files) {
+				if (f == null || !f.exists()) {
+					continue;
+				}
+				if (!f.delete()) {
+					logger.warn("[HLS] force rebuild failed to delete file path={}", f.getPath());
+				}
+			}
+		}
+		if (!hlsDir.delete() && hlsDir.exists()) {
+			logger.warn("[HLS] force rebuild failed to delete dir path={}", hlsDir.getPath());
+		}
 	}
 
 	private synchronized Integer poll() {

@@ -270,6 +270,7 @@
                                     <div style="display:flex;gap:8px;align-items:center;">
                                         <input class="form-control" type="number" id="hlsBatchLimit" value="200" style="max-width:140px;" />
                                         <button type="button" class="btn btn-info btn-sm" id="hlsEnqueueMissingBtn">批量入队</button>
+                                        <button type="button" class="btn btn-warning btn-sm" id="hlsRebuildLatestBtn">强制重建入队</button>
                                         <button type="button" class="btn btn-primary btn-sm" id="hlsRunNowBtn">立即执行一轮</button>
                                     </div>
                                 </div>
@@ -1018,6 +1019,15 @@
             var limit = $('#hlsBatchLimit').val() || '200';
             $.post('/admin/api/hlsEnqueueMissingLatest', { limit: limit }, function(res) {
                 layer.msg(res && res.message ? res.message : '已提交');
+            });
+        });
+        $('#hlsRebuildLatestBtn').on('click', function() {
+            var limit = $('#hlsBatchLimit').val() || '200';
+            layer.confirm('将删除并重建最近N条的HLS缓存，是否继续？', function(idx) {
+                layer.close(idx);
+                $.post('/admin/api/hlsRebuildLatest', { limit: limit }, function(res) {
+                    layer.msg(res && res.message ? res.message : '已提交重建');
+                });
             });
         });
         $('#hlsRunNowBtn').on('click', function() {

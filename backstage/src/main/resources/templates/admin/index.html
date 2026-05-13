@@ -1020,12 +1020,18 @@
             return;
         }
         feedRandomLoading = true;
+        isLoading = true;
         hasMore = false;
         $('#loading').show();
         var all = [];
         var currentPage = 1;
+        var maxPages = 400;
 
         function pullNext() {
+            if (currentPage > maxPages) {
+                finalizeRandomPool(all);
+                return;
+            }
             var option = buildFeedRequestOption(currentPage);
             $.post('/admin/api/findVideoDataList', option, function(data) {
                 if (data && data.resCode === '000001' && data.record && data.record.content) {
@@ -1034,7 +1040,7 @@
                         appendFeedAuthorOptions(list);
                         all = all.concat(list);
                     }
-                    if (data.record.last) {
+                    if (data.record.last || list.length === 0) {
                         finalizeRandomPool(all);
                     } else {
                         currentPage++;
@@ -1052,8 +1058,12 @@
             feedRandomPool = shuffleList(fullList.slice());
             feedRandomCursor = 0;
             feedRandomLoading = false;
+            isLoading = false;
             $('#loading').hide();
             renderNextRandomBatch(true);
+            if (!feedRandomPool.length) {
+                $('#videoFeed').html('<div class="loading" style="display:block;">暂无可播放视频</div>');
+            }
         }
 
         pullNext();
