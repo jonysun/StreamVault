@@ -83,6 +83,19 @@
             background: #000;
         }
 
+        .feed-video.hide-controls {
+            cursor: pointer;
+        }
+
+        .feed-video.hide-controls::-webkit-media-controls {
+            opacity: 0;
+            transition: opacity .18s ease;
+        }
+
+        .feed-video.hide-controls.controls-visible::-webkit-media-controls {
+            opacity: 1;
+        }
+
         .feed-overlay {
             position: absolute;
             left: 12px;
@@ -436,6 +449,7 @@
 <script type="text/javascript" src="../static/js/perfect-scrollbar.min.js"></script>
 <script type="text/javascript" src="../static/js/main.min.js"></script>
 <script src="../static/js/layer/layer.js" type="text/javascript"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
 <script>
     var page = 1;
     var isLoading = false;
@@ -451,6 +465,7 @@
     var feedRandomCursor = 0;
     var feedRandomLoading = false;
     var feedRandomBatchSize = 20;
+    var hlsMap = {};
     
     $(function(){
         var rawMode = $('#mediaHomeMode').val();
@@ -511,7 +526,7 @@
             dialogHeight = '530px';
         }
          var html = '<div class="video-container" style="position: relative; width: 100%; height: 100%; background: #000;">' +
-                   '<video src="' + videourl + '" ' +
+                   '<video data-src="' + videourl + '" ' +
                    'width="100%" height="100%" ' +
                    'controls="controls" ' +
                    'preload="metadata" ' +
@@ -541,6 +556,7 @@
                 // 获取视频元素
                 var video = layero.find('video')[0];
                 if (video) {
+                    setupVideoSource(video, videourl);
                     // 移动端自动播放优化
                     if (isMobile) {
                         // 尝试自动播放（某些浏览器可能阻止）
@@ -733,7 +749,7 @@
         var safeAuthor = isPrivate ? '****' : (item.videoauthor || '未知作者');
         var timeText = formatTime(item.createtime);
         var html = '<div class="feed-item" data-private="' + isPrivate + '">';
-        html += '<video class="feed-video" src="' + (item.playurl || item.videounrealaddr || '') + '" controls preload="metadata" playsinline webkit-playsinline></video>';
+        html += '<video class="feed-video hide-controls" data-src="' + (item.playurl || item.videounrealaddr || '') + '" preload="metadata" playsinline webkit-playsinline></video>';
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
@@ -763,6 +779,7 @@
                     return;
                 }
                 if (entry.isIntersecting && entry.intersectionRatio >= 0.75) {
+                    setupVideoSource(video, video.getAttribute('data-src') || video.src || '');
                     video.muted = feedMuted;
                     var p = video.play();
                     if (p && typeof p.catch === 'function') {
@@ -780,6 +797,85 @@
         document.querySelectorAll('#videoFeed .feed-item').forEach(function(item) {
             feedObserver.observe(item);
         });
+
+        bindFeedVideoControls();
+    }
+
+    function bindFeedVideoControls() {
+        $('#videoFeed .feed-video').off('mouseenter mouseleave click');
+        $('#videoFeed .feed-video').on('mouseenter', function() {
+            this.controls = true;
+            this.classList.add('controls-visible');
+        });
+        $('#videoFeed .feed-video').on('mouseleave', function() {
+            this.controls = false;
+            this.classList.remove('controls-visible');
+        });
+        $('#videoFeed .feed-video').on('touchstart', function() {
+            var self = this;
+            self.controls = true;
+            self.classList.add('controls-visible');
+            if (self._ctrlTimer) {
+                clearTimeout(self._ctrlTimer);
+            }
+            self._ctrlTimer = setTimeout(function() {
+                self.controls = false;
+                self.classList.remove('controls-visible');
+            }, 1800);
+        });
+        $('#videoFeed .feed-video').on('click', function(e) {
+            if (this.paused) {
+                this.play().catch(function(){});
+            } else if (!this.controls) {
+                this.pause();
+            }
+        });
+    }
+
+    function setupVideoSource(videoEl, src) {
+        if (!videoEl || !src) {
+            return;
+        }
+        var current = videoEl.getAttribute('data-bound-src');
+        if (current === src) {
+            return;
+        }
+
+        if (current && hlsMap[current]) {
+            try { hlsMap[current].destroy(); } catch (e) {}
+            delete hlsMap[current];
+        }
+
+        videoEl.setAttribute('data-bound-src', src);
+        var isM3u8 = /\.m3u8(\?|$)/i.test(src);
+
+        if (!isM3u8) {
+            videoEl.src = src;
+            return;
+        }
+
+        if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+            videoEl.src = src;
+            return;
+        }
+
+        if (window.Hls && window.Hls.isSupported()) {
+            var hls = new window.Hls({
+                enableWorker: true,
+                lowLatencyMode: false
+            });
+            hls.loadSource(src);
+            hls.attachMedia(videoEl);
+            hls.on(window.Hls.Events.ERROR, function(event, data) {
+                if (data && data.fatal) {
+                    console.warn('[HLS] fatal error', data.type, data.details);
+                }
+            });
+            hlsMap[src] = hls;
+            return;
+        }
+
+        videoEl.src = src;
     }
 
     function bindFeedScroll() {

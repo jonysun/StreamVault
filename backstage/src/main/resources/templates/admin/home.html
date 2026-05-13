@@ -758,6 +758,10 @@
 					<div class="row" id="authorStatsContainer" style="display: none; margin-top: 10px;">
 						<!-- 作者统计卡片将在这里动态生成 -->
 					</div>
+
+					<div class="row" id="hlsStatsContainer" style="display: none; margin-top: 10px;">
+						<!-- HLS转码监控卡片将在这里动态生成 -->
+					</div>
                     
                     <!-- 最近入库 -->
                     <div class="row recently-added-section" id="recentlyAddedSection" style="display: none;">
@@ -1074,6 +1078,7 @@
                 `);
             }
 			loadAuthorStats();
+			loadHlsStats();
             
             // 分阶段更新主要指标，创建更好的视觉效果
               const metrics = [
@@ -1140,6 +1145,51 @@
 				const status = item.enabled === 'N' ? '已暂停' : (item.monitoring === 'Y' ? '监控中' : '手动');
 				html += '<tr><td>' + (item.taskName || '--') + '</td><td>' + (item.videoDone || 0) + '/' + (item.videoTotal || 0) + '</td><td>' + (item.imageDone || 0) + '/' + (item.imageTotal || 0) + '</td><td>' + status + '</td></tr>';
 			});
+			html += '</tbody></table></div></div></div>';
+			container.html(html);
+		}
+
+		function loadHlsStats() {
+			$.ajax({
+				url: '/admin/api/hlsStats',
+				type: 'GET',
+				dataType: 'json',
+				success: function(response) {
+					if (response && response.resCode === '000001' && response.record) {
+						renderHlsStats(response.record);
+						$('#hlsStatsContainer').fadeIn(400);
+					}
+				}
+			});
+		}
+
+		function renderHlsStats(stats) {
+			const container = $('#hlsStatsContainer');
+			container.empty();
+			const enabled = !!stats.enabled;
+			const mode = stats.mode || 'idle';
+			const queueSize = Number(stats.queueSize || 0);
+			const runningCount = Number(stats.runningCount || 0);
+			const runningVideoId = stats.runningVideoId == null ? '-' : stats.runningVideoId;
+			const lastSuccess = stats.lastSuccessAt ? new Date(stats.lastSuccessAt).toLocaleString() : '-';
+			const lastFail = stats.lastFailAt ? new Date(stats.lastFailAt).toLocaleString() : '-';
+			const idleWindow = stats.idleWindow || '-';
+			const seg = stats.segmentSeconds || '-';
+			const con = stats.concurrency || 1;
+			const privacy = stats.privacyEnabled ? '允许' : '禁止';
+			const statusBadge = enabled ? '<span class="badge badge-success">已启用</span>' : '<span class="badge badge-secondary">已关闭</span>';
+
+			let html = '<div class="col-12"><div class="platform-card">';
+			html += '<div class="platform-header"><div class="platform-icon" style="background: var(--primary-color);"><i class="mdi mdi-playlist-play"></i></div><h3 class="platform-title">HLS转码任务调度</h3></div>';
+			html += '<div class="table-responsive"><table class="table table-sm table-hover"><tbody>';
+			html += '<tr><th style="width:180px;">开关状态</th><td>' + statusBadge + '</td><th>执行模式</th><td>' + (mode === 'immediate' ? '立即执行' : '闲时执行') + '</td></tr>';
+			html += '<tr><th>闲时时段</th><td>' + idleWindow + '</td><th>并发</th><td>' + con + '</td></tr>';
+			html += '<tr><th>分片时长</th><td>' + seg + ' 秒</td><th>隐私转码</th><td>' + privacy + '</td></tr>';
+			html += '<tr><th>队列长度</th><td>' + queueSize + '</td><th>运行中</th><td>' + runningCount + ' (videoId: ' + runningVideoId + ')</td></tr>';
+			html += '<tr><th>最近成功</th><td>' + lastSuccess + '</td><th>最近失败</th><td>' + lastFail + '</td></tr>';
+			if (stats.lastError) {
+				html += '<tr><th>最近错误</th><td colspan="3" style="color:#dc3545;">' + escapeHtml(String(stats.lastError)) + '</td></tr>';
+			}
 			html += '</tbody></table></div></div></div>';
 			container.html(html);
 		}

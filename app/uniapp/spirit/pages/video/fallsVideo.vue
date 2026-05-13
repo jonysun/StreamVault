@@ -82,13 +82,42 @@
 			}
 		},
 		onLoad() {
-			this.serveraddr = uni.getStorageSync('serveraddr') || ''
-			this.serverport = uni.getStorageSync('serverport') || ''
-			this.servertoken = uni.getStorageSync('servertoken') || ''
+			this.ensureServerConfig()
 			this.cacheSettings = cacheManager.readSettings()
 			this.loadVideos()
 		},
+		onShow() {
+			if (!this.serveraddr || !this.serverport || !this.servertoken) {
+				this.ensureServerConfig()
+			}
+			if (this.playList.length === 0) {
+				this.loadVideos()
+			}
+		},
 		methods: {
+			ensureServerConfig() {
+				this.serveraddr = uni.getStorageSync('serveraddr') || ''
+				this.serverport = uni.getStorageSync('serverport') || ''
+				this.servertoken = uni.getStorageSync('servertoken') || ''
+				if (this.serveraddr && this.serverport && this.servertoken) {
+					return
+				}
+				const serverlist = uni.getStorageSync('serverlist') || []
+				if (!serverlist.length) {
+					return
+				}
+				let picked = serverlist.find(s => s && s.default === 'y')
+				if (!picked) picked = serverlist[0]
+				if (!picked) {
+					return
+				}
+				this.serveraddr = picked.server || ''
+				this.serverport = picked.port || ''
+				this.servertoken = picked.token || ''
+				if (this.serveraddr) uni.setStorageSync('serveraddr', this.serveraddr)
+				if (this.serverport) uni.setStorageSync('serverport', this.serverport)
+				if (this.servertoken) uni.setStorageSync('servertoken', this.servertoken)
+			},
 			normalizePath(rawPath) {
 				if (!rawPath) return ''
 				if (/^https?:\/\//i.test(rawPath)) return rawPath
@@ -99,6 +128,10 @@
 			},
 			loadVideos() {
 				if (this.isLoading || !this.hasMore) return
+				if (!this.serveraddr || !this.serverport || !this.servertoken) {
+					uni.showToast({ title: '请先配置服务器', icon: 'none' })
+					return
+				}
 				this.isLoading = true
 				uni.request({
 					url: `${this.serveraddr}:${this.serverport}/api/findVideos?token=${this.servertoken}`,
@@ -118,7 +151,15 @@
 							this.refreshAuthorOptions()
 							this.rebuildPlayList(false)
 							cacheManager.prefetchVideos(list)
+						} else {
+							uni.showToast({
+								title: (res.data && (res.data.message || res.data.resMsg)) || '获取视频失败',
+								icon: 'none'
+							})
 						}
+					},
+					fail: () => {
+						uni.showToast({ title: '网络异常，请检查服务器', icon: 'none' })
 					},
 					complete: () => { this.isLoading = false }
 				})

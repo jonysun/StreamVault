@@ -585,6 +585,11 @@ public class AdminController {
 		return hlsTranscodeService.processNowOnce();
 	}
 
+	@GetMapping(value = "/hlsStats")
+	public AjaxEntity hlsStats() {
+		return hlsTranscodeService.stats();
+	}
+
 	@GetMapping(value = "/videoAuthors")
 	public AjaxEntity videoAuthors() {
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", videoDataService.findDistinctAuthors());

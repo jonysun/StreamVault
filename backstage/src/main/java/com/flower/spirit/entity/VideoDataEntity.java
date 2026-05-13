@@ -238,6 +238,9 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	@Transient
 	private String playurl;
+
+	@Transient
+	private String hlsstatus;
 	
 	public String getExcludePlatform() {
 		return excludePlatform;
@@ -285,6 +288,14 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setPlayurl(String playurl) {
 		this.playurl = playurl;
+	}
+
+	public String getHlsstatus() {
+		return hlsstatus;
+	}
+
+	public void setHlsstatus(String hlsstatus) {
+		this.hlsstatus = hlsstatus;
 	}
 	
 

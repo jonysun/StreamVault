@@ -144,18 +144,32 @@ public class VideoDataService {
 
 	    Page<VideoDataEntity> findAll = videoDataDao.findAll(specification, of);
 	    if (findAll != null && findAll.getContent() != null) {
+	    	java.util.Set<Integer> queuedIds = hlsTranscodeService.queuedIdsSnapshot();
+	    	Integer runningId = hlsTranscodeService.runningVideoIdSnapshot();
 	    	for (VideoDataEntity item : findAll.getContent()) {
 	    		if (item == null) {
 	    			continue;
 	    		}
 	    		String playUrl = item.getVideounrealaddr();
-	    		if (Global.hlsEnable && hlsTranscodeService.hasHls(item)) {
+	    		boolean hasHls = Global.hlsEnable && hlsTranscodeService.hasHls(item);
+	    		if (hasHls) {
 	    			String hls = hlsTranscodeService.buildHlsPlayUrl(item);
 	    			if (hls != null && !hls.trim().isEmpty()) {
 	    				playUrl = hls;
 	    			}
 	    		}
 	    		item.setPlayurl(playUrl);
+	    		if (!Global.hlsEnable) {
+	    			item.setHlsstatus("关闭");
+	    		} else if (hasHls) {
+	    			item.setHlsstatus("已完成");
+	    		} else if (item.getId() != null && runningId != null && item.getId().intValue() == runningId.intValue()) {
+	    			item.setHlsstatus("转码中");
+	    		} else if (item.getId() != null && queuedIds.contains(item.getId())) {
+	    			item.setHlsstatus("排队中");
+	    		} else {
+	    			item.setHlsstatus("未完成");
+	    		}
 	    	}
 	    }
 	    return new AjaxEntity(Global.ajax_success, "数据获取成功", findAll);

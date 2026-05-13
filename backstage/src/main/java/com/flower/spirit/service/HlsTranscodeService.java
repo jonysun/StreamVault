@@ -35,6 +35,11 @@ public class HlsTranscodeService {
 	private final Set<Integer> dedupe = new HashSet<>();
 
 	private volatile int runningCount = 0;
+	private volatile Integer runningVideoId = null;
+	private volatile long lastRunAt = 0L;
+	private volatile long lastSuccessAt = 0L;
+	private volatile long lastFailAt = 0L;
+	private volatile String lastError = "";
 
 	public synchronized AjaxEntity enqueueByIds(String idsCsv) {
 		if (idsCsv == null || idsCsv.trim().isEmpty()) {
@@ -113,6 +118,36 @@ public class HlsTranscodeService {
 		return queue.size();
 	}
 
+	public synchronized Set<Integer> queuedIdsSnapshot() {
+		return new HashSet<>(dedupe);
+	}
+
+	public synchronized int runningCountSnapshot() {
+		return runningCount;
+	}
+
+	public synchronized Integer runningVideoIdSnapshot() {
+		return runningVideoId;
+	}
+
+	public synchronized AjaxEntity stats() {
+		java.util.Map<String, Object> map = new java.util.HashMap<>();
+		map.put("enabled", Global.hlsEnable);
+		map.put("mode", Global.hlsMode);
+		map.put("idleWindow", Global.hlsIdleWindow);
+		map.put("concurrency", Global.hlsConcurrency);
+		map.put("segmentSeconds", Global.hlsSegmentSeconds);
+		map.put("privacyEnabled", Global.hlsPrivacyEnabled);
+		map.put("queueSize", queue.size());
+		map.put("runningCount", runningCount);
+		map.put("runningVideoId", runningVideoId);
+		map.put("lastRunAt", lastRunAt);
+		map.put("lastSuccessAt", lastSuccessAt);
+		map.put("lastFailAt", lastFailAt);
+		map.put("lastError", lastError);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", map);
+	}
+
 	public boolean hasHls(VideoDataEntity video) {
 		if (video == null || video.getVideoaddr() == null || video.getVideoaddr().trim().isEmpty()) {
 			return false;
@@ -170,8 +205,11 @@ public class HlsTranscodeService {
 	}
 
 	private void transcodeOne(Integer id) {
+		runningVideoId = id;
+		lastRunAt = System.currentTimeMillis();
 		Optional<VideoDataEntity> opt = videoDataDao.findById(id);
 		if (!opt.isPresent()) {
+			runningVideoId = null;
 			return;
 		}
 		VideoDataEntity video = opt.get();
@@ -199,6 +237,9 @@ public class HlsTranscodeService {
 		CommandUtil.command(cmdCopy);
 		if (m3u8.isFile() && m3u8.length() > 0) {
 			logger.info("[HLS] transcode success id={} by copy", id);
+			lastSuccessAt = System.currentTimeMillis();
+			lastError = "";
+			runningVideoId = null;
 			return;
 		}
 
@@ -209,9 +250,14 @@ public class HlsTranscodeService {
 		CommandUtil.command(cmdEncode);
 		if (m3u8.isFile() && m3u8.length() > 0) {
 			logger.info("[HLS] transcode success id={} by encode", id);
+			lastSuccessAt = System.currentTimeMillis();
+			lastError = "";
 		} else {
 			logger.warn("[HLS] transcode failed id={}", id);
+			lastFailAt = System.currentTimeMillis();
+			lastError = "transcode failed for video id=" + id;
 		}
+		runningVideoId = null;
 	}
 
 	private boolean isInIdleWindow(String windowsRaw) {
