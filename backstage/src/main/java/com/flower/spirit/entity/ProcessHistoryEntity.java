@@ -34,6 +34,8 @@ public class ProcessHistoryEntity  extends DataEntity<ProcessHistoryEntity> impl
 	private String videoplatform;
 	
 	private String status;
+
+	private String tasklog;
 	
 	private String createtime;
 
@@ -94,6 +96,14 @@ public class ProcessHistoryEntity  extends DataEntity<ProcessHistoryEntity> impl
 
 	public void setCreatetime(String createtime) {
 		this.createtime = createtime;
+	}
+
+	public String getTasklog() {
+		return tasklog;
+	}
+
+	public void setTasklog(String tasklog) {
+		this.tasklog = tasklog;
 	}
 	
 	

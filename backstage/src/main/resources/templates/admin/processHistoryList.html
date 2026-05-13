@@ -105,6 +105,7 @@
                                             <th>视频原地址</th>
                                             <th>来源平台</th>
                                             <th>状态</th>
+                                            <th>任务日志</th>
                                             <th>提交时间</th>
                                             <th>操作</th>
                                         </tr>
@@ -215,6 +216,7 @@
                             +'<td title="'+list[i].originaladdress+'">'+list[i].originaladdress+'</td>'
                             +'<td title="'+list[i].videoplatform+'">'+list[i].videoplatform+'</td>'
                             +'<td title="'+list[i].status+'">'+list[i].status+'</td>'
+                            +'<td title="'+(list[i].tasklog || '')+'">'+(list[i].tasklog || '')+'</td>'
                             +'<td title="'+list[i].createtime+'">'+list[i].createtime+'</td>'
                             +'<td>'
                             +'<div class="btn-group">'

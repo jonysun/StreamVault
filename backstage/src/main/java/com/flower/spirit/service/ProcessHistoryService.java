@@ -12,6 +12,7 @@ import jakarta.persistence.criteria.Root;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +40,33 @@ public class ProcessHistoryService {
 			return processHistoryDao.save(processHistoryEntity);
 		}
 		return new ProcessHistoryEntity();
+	}
+
+	public ProcessHistoryEntity saveProcess(Integer id, String originaladdress, String videoplatform, String tasklog) {
+		ProcessHistoryEntity saved = saveProcess(id, originaladdress, videoplatform);
+		if (saved != null && saved.getId() != null && tasklog != null && !tasklog.trim().isEmpty()) {
+			saved.setTasklog(tasklog);
+			return processHistoryDao.save(saved);
+		}
+		return saved;
+	}
+
+	public void markProcessLog(Integer id, String status, String tasklog) {
+		if (!Global.openprocesshistory || id == null) {
+			return;
+		}
+		java.util.Optional<ProcessHistoryEntity> opt = processHistoryDao.findById(id);
+		if (!opt.isPresent()) {
+			return;
+		}
+		ProcessHistoryEntity item = opt.get();
+		if (StringUtil.isString(status)) {
+			item.setStatus(status);
+		}
+		if (tasklog != null) {
+			item.setTasklog(tasklog);
+		}
+		processHistoryDao.save(item);
 	}
 
 	 
@@ -72,6 +100,13 @@ public class ProcessHistoryService {
 	public AjaxEntity deleteProcessHistoryData(ProcessHistoryEntity processHistoryEntity) {
 		processHistoryDao.deleteById(processHistoryEntity.getId());
 		return new AjaxEntity(Global.ajax_success, "操作成功", null);
+	}
+
+	public AjaxEntity findLatest(int limit) {
+		int safeLimit = Math.max(1, Math.min(limit, 30));
+		PageRequest pageRequest = PageRequest.of(0, safeLimit, Sort.by(Sort.Direction.DESC, "id"));
+		Page<ProcessHistoryEntity> page = processHistoryDao.findAll(pageRequest);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", page.getContent());
 	}
 	
 	

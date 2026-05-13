@@ -25,6 +25,7 @@ import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.service.AnalysisService;
 import com.flower.spirit.service.VideoDataService;
 import com.flower.spirit.service.ConfigService;
+import com.flower.spirit.service.ProcessHistoryService;
 
 
 /**
@@ -46,6 +47,9 @@ public class ApiController {
 	
 	@Autowired
 	private ConfigService configService;
+
+	@Autowired
+	private ProcessHistoryService processHistoryService;
 	
 	
 	/**
@@ -82,6 +86,16 @@ public class ApiController {
 		    return new AjaxEntity(Global.ajax_uri_error, "app token 错误", null);
 		}
 		return videoDataService.findPage(res);
+	}
+
+	@RequestMapping("/recentProcessHistory")
+	public AjaxEntity recentProcessHistory(HttpServletRequest req, Integer limit) {
+		String token = req.getParameter("token");
+		if (!(Objects.equals(token, Global.apptoken) || Objects.equals(token, Global.readonlytoken))) {
+			return new AjaxEntity(Global.ajax_uri_error, "app token 错误", null);
+		}
+		int safeLimit = limit == null ? 8 : limit.intValue();
+		return processHistoryService.findLatest(safeLimit);
 	}
 	
 	

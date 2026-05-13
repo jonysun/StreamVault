@@ -6,12 +6,12 @@
 			<view class="ctrl" @tap="toggleMuted">{{ isMuted ? '静音' : '有声' }}</view>
 		</view>
 
-		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="280">
-			<swiper-item v-for="(video, index) in playList" :key="video.id || index">
-				<view class="video-wrapper">
-					<video
-						:id="`video-${index}`"
-						:src="video.playurl || video.videounrealaddr"
+			<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="280">
+				<swiper-item v-for="(video, index) in playList" :key="video.id || index">
+					<view class="video-wrapper">
+						<video
+							:id="`video-${index}`"
+							:src="video.playSrc"
 						:poster="video.videocover"
 						:controls="false"
 						:autoplay="false"
@@ -142,8 +142,10 @@
 						if (res.data && res.data.resCode === '000001' && res.data.record && res.data.record.content) {
 							const list = res.data.record.content || []
 							list.forEach(v => {
-								v.videounrealaddr = this.normalizePath(v.playurl || v.videounrealaddr)
+								v.playurl = this.normalizePath(v.playurl)
+								v.videounrealaddr = this.normalizePath(v.videounrealaddr)
 								v.videocover = this.normalizePath(v.videocover)
+								v.playSrc = v.playurl || v.videounrealaddr
 							})
 							this.baseList = this.baseList.concat(list)
 							this.pageNo++
@@ -208,8 +210,10 @@
 				const current = this.playList[idx]
 				if (current) {
 					const playable = cacheManager.getPlayableUrl(current)
-					if (playable && playable !== current.videounrealaddr) {
-						this.$set(current, 'videounrealaddr', playable)
+					if (playable && playable !== current.playSrc) {
+						this.$set(current, 'playSrc', playable)
+					} else if (!current.playSrc) {
+						this.$set(current, 'playSrc', current.playurl || current.videounrealaddr || '')
 					}
 				}
 				if (!this.videoContexts[idx]) {

@@ -89,6 +89,7 @@ public class AnalysisService {
 	 * @throws Exception
 	 */
 	public void processingVideos(String token, String video) throws Exception {
+		ProcessHistoryEntity history = null;
 		if (null == token || !token.equals(Global.apptoken)) {
 			logger.error("无效的token");
 			return;
@@ -100,21 +101,26 @@ public class AnalysisService {
 		logger.info("解析开始~原地址:" + video);
 		String platform = this.getPlatform(video);
 		String url = this.getUrl(video);
+		history = processHistoryService.saveProcess(null, url, platform, "已提交，等待调度线程执行");
 		//通过url 进行简易的模式拦截  重复提交的问题
 		List<VideoDataEntity> videoListData = videoDataDao.findByOriginaladdress(url);
 		if(videoListData.size()>0) {
 			 logger.error("当前提交的链接已在媒体库中存在,本链接不下载");
+			if (history != null && history.getId() != null) {
+				processHistoryService.markProcessLog(history.getId(), "执行完毕", "重复链接，媒体库已存在，跳过下载");
+			}
 			 return;
 		}
+		final Integer historyId = history != null ? history.getId() : null;
 		Map<String, Runnable> platformHandlers = new HashMap<>();
-		platformHandlers.put("哔哩", () -> executeTask(bilibili, () -> this.bilivideo(platform, url)));
-		platformHandlers.put("抖音", () -> executeTask(domestic, () -> this.dyvideo(platform, url)));
-		platformHandlers.put("YouTube", () -> executeTask(ytdlp, () -> this.YouTube(platform, url)));
-		platformHandlers.put("instagram", () -> executeTask(ytdlp, () -> this.instagram(platform, url)));
-		platformHandlers.put("twitter", () -> executeTask(ytdlp, () -> this.twitter(platform, url)));
-		platformHandlers.put("快手", () -> executeTask(domestic, () -> this.kuaishou(platform, url)));
-		platformHandlers.put("微博", () -> executeTask(domestic, () -> this.weibo(platform, url)));
-		platformHandlers.put("小红书", () -> executeTask(domestic, () -> this.xiaohongshu(platform, url)));
+		platformHandlers.put("哔哩", () -> executeTask(bilibili, historyId, "已入哔哩线程池队列", () -> this.bilivideo(platform, url)));
+		platformHandlers.put("抖音", () -> executeTask(domestic, historyId, "已入国内线程池队列", () -> this.dyvideo(platform, url)));
+		platformHandlers.put("YouTube", () -> executeTask(ytdlp, historyId, "已入yt-dlp线程池队列", () -> this.YouTube(platform, url)));
+		platformHandlers.put("instagram", () -> executeTask(ytdlp, historyId, "已入yt-dlp线程池队列", () -> this.instagram(platform, url)));
+		platformHandlers.put("twitter", () -> executeTask(ytdlp, historyId, "已入yt-dlp线程池队列", () -> this.twitter(platform, url)));
+		platformHandlers.put("快手", () -> executeTask(domestic, historyId, "已入国内线程池队列", () -> this.kuaishou(platform, url)));
+		platformHandlers.put("微博", () -> executeTask(domestic, historyId, "已入国内线程池队列", () -> this.weibo(platform, url)));
+		platformHandlers.put("小红书", () -> executeTask(domestic, historyId, "已入国内线程池队列", () -> this.xiaohongshu(platform, url)));
 		// 获取并执行对应平台的处理逻辑
 		Runnable handler = platformHandlers.get(platform);
 		if (handler != null) {
@@ -124,6 +130,9 @@ public class AnalysisService {
 			if (Global.ytdlpmode.equals("1")) {
 				// 此处交由ytdlp 全量操作,不建议使用
 				logger.info("已启动全量模式-全交由yt-dlp解析");
+				if (historyId != null) {
+					processHistoryService.markProcessLog(historyId, "已提交未执行", "平台未命中内置解析，已转交yt-dlp全量模式队列");
+				}
 				ytdlp.submit(() -> {
 					try {
 						processByYtdlp(url);
@@ -131,6 +140,8 @@ public class AnalysisService {
 						logger.error("yt-dlp处理异常", e);
 					}
 				});
+			} else if (historyId != null) {
+				processHistoryService.markProcessLog(historyId, "执行完毕", "平台不受支持且未开启yt-dlp全量模式，未执行下载");
 			}
 
 		}
@@ -263,12 +274,21 @@ public class AnalysisService {
 	 * @param executor 线程池
 	 * @param task     要执行的任务
 	 */
-	private void executeTask(ExecutorService executor, ExceptionRunnable task) {
+	private void executeTask(ExecutorService executor, Integer historyId, String queueLog, ExceptionRunnable task) {
+		if (historyId != null && StringUtils.isNotBlank(queueLog)) {
+			processHistoryService.markProcessLog(historyId, "已提交未执行", queueLog);
+		}
 		executor.execute(() -> {
 			try {
 				task.run();
+				if (historyId != null) {
+					processHistoryService.markProcessLog(historyId, "执行完毕", "任务执行完成");
+				}
 			} catch (Exception e) {
 				logger.error("任务执行失败: " + e.getMessage(), e);
+				if (historyId != null) {
+					processHistoryService.markProcessLog(historyId, "执行完毕", "任务执行失败: " + e.getMessage());
+				}
 			}
 		});
 	}

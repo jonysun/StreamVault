@@ -749,7 +749,7 @@
         var safeAuthor = isPrivate ? '****' : (item.videoauthor || '未知作者');
         var timeText = formatTime(item.createtime);
         var html = '<div class="feed-item" data-private="' + isPrivate + '">';
-        html += '<video class="feed-video hide-controls" data-src="' + (item.playurl || item.videounrealaddr || '') + '" preload="metadata" playsinline webkit-playsinline></video>';
+        html += '<video class="feed-video hide-controls" data-src="' + (item.playurl || item.videounrealaddr || '') + '" data-fallback="' + (item.videounrealaddr || '') + '" preload="auto" playsinline webkit-playsinline></video>';
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
@@ -866,9 +866,26 @@
             });
             hls.loadSource(src);
             hls.attachMedia(videoEl);
+            var mediaRecoverCount = 0;
+            var networkRecoverCount = 0;
+            var fallback = videoEl.getAttribute('data-fallback') || '';
             hls.on(window.Hls.Events.ERROR, function(event, data) {
                 if (data && data.fatal) {
                     console.warn('[HLS] fatal error', data.type, data.details);
+                    if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && networkRecoverCount < 2) {
+                        networkRecoverCount++;
+                        hls.startLoad();
+                        return;
+                    }
+                    if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && mediaRecoverCount < 2) {
+                        mediaRecoverCount++;
+                        hls.recoverMediaError();
+                        return;
+                    }
+                    try { hls.destroy(); } catch (e) {}
+                    if (fallback) {
+                        videoEl.src = fallback;
+                    }
                 }
             });
             hlsMap[src] = hls;

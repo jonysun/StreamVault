@@ -1,9 +1,9 @@
 {
     "name" : "StreamVault",
-    "appid" : "__UNI__24DF0DA",
+    "appid" : "__UNI__4D65104",
     "description" : "",
-    "versionName" : "1.0.8",
-    "versionCode" : 108,
+    "versionName" : "2.5.1",
+    "versionCode" : 251,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {

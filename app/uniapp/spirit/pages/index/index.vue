@@ -24,6 +24,14 @@
 			<button class="submit-btn" @click="pushMessage()" :disabled="!originaladdress">
 				<text class="btn-text">提交链接</text>
 			</button>
+			<view class="recent-box" v-if="recentHistory.length">
+				<view class="recent-title">最近提交记录</view>
+				<view class="recent-item" v-for="item in recentHistory" :key="item.id">
+					<text class="recent-status">{{ item.status || '已提交未执行' }}</text>
+					<text class="recent-url">{{ item.originaladdress || '' }}</text>
+					<text class="recent-log" v-if="item.tasklog">{{ item.tasklog }}</text>
+				</view>
+			</view>
 		</view>
 
 		<!-- 服务器选择 -->
@@ -82,12 +90,14 @@
 				servername:"",
 				serveraddr:"",
 				serverport:"",
-				servertoken:""
+				servertoken:"",
+				recentHistory: []
 			}
 		},
 		onLoad() {},
 		onShow() {
 			this.loadServer();
+			this.loadRecentHistory();
 			uni.getClipboardData({
 				success: (res) => {
 					if (res.data && (res.data.includes('http') || res.data.includes('douyin') || res.data.includes('instagram'))) {
@@ -157,7 +167,7 @@
 							'content-type': 'application/x-www-form-urlencoded'
 						},
 						data:option,
-						success(res) {
+						success: (res) => {
 							uni.hideLoading();
 							if(res.data.resCode =="000001" && res.data.message != null){
 								uni.showToast({
@@ -165,6 +175,8 @@
 									duration: 2000,
 									icon: 'success'
 								});
+								this.originaladdress = "";
+								this.loadRecentHistory();
 							} else {
 								uni.showToast({
 									title: res.data.resMsg || '提交失败',
@@ -186,6 +198,20 @@
 						icon: 'none'
 					});
 				}
+			},
+			loadRecentHistory() {
+				if (!this.serveraddr || !this.serverport || !this.servertoken) {
+					return;
+				}
+				uni.request({
+					url: this.serveraddr + ":" + this.serverport + "/api/recentProcessHistory?token=" + this.servertoken + "&limit=8",
+					method: 'GET',
+					success: (res) => {
+						if (res.data && res.data.resCode === '000001' && Array.isArray(res.data.record)) {
+							this.recentHistory = res.data.record;
+						}
+					}
+				});
 			}
 		}
 	}
@@ -287,6 +313,39 @@
 	color: #fff;
 	font-size: 30rpx;
 	font-weight: 600;
+}
+
+.recent-box {
+	margin-top: 20rpx;
+	padding-top: 14rpx;
+	border-top: 1px solid #eef1f5;
+}
+
+.recent-title {
+	font-size: 24rpx;
+	font-weight: 600;
+	color: #4b5563;
+	margin-bottom: 10rpx;
+}
+
+.recent-item {
+	padding: 10rpx 0;
+	border-bottom: 1px dashed #eef1f5;
+}
+
+.recent-status {
+	display: block;
+	font-size: 22rpx;
+	color: #2563eb;
+	margin-bottom: 4rpx;
+}
+
+.recent-url,
+.recent-log {
+	display: block;
+	font-size: 20rpx;
+	color: #6b7280;
+	word-break: break-all;
 }
 
 .server-card {

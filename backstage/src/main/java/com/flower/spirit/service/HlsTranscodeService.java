@@ -27,6 +27,7 @@ public class HlsTranscodeService {
 
 	private static final Logger logger = LoggerFactory.getLogger(HlsTranscodeService.class);
 	private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
+	private static final String HLS_FLAGS = "independent_segments+temp_file";
 
 	@Autowired
 	private VideoDataDao videoDataDao;
@@ -231,25 +232,27 @@ public class HlsTranscodeService {
 		String tsPattern = new File(hlsDir, "seg_%05d.ts").getPath();
 		String m3u8Path = m3u8.getPath();
 
-		String cmdCopy = "ffmpeg -y -i \"" + input.getPath() + "\" -c copy -hls_time " + Math.max(2, Global.hlsSegmentSeconds)
-				+ " -hls_list_size 0 -hls_playlist_type vod -hls_segment_filename \"" + tsPattern + "\" \"" + m3u8Path + "\"";
-		logger.info("[HLS] transcode start id={} mode=copy", id);
-		CommandUtil.command(cmdCopy);
-		if (m3u8.isFile() && m3u8.length() > 0) {
-			logger.info("[HLS] transcode success id={} by copy", id);
-			lastSuccessAt = System.currentTimeMillis();
-			lastError = "";
-			runningVideoId = null;
-			return;
+		if (m3u8.exists() && !m3u8.delete()) {
+			logger.warn("[HLS] failed to delete old m3u8 id={} path={}", id, m3u8.getPath());
+		}
+		File[] oldSegs = hlsDir.listFiles((dir, name) -> name != null && (name.endsWith(".ts") || name.endsWith(".m4s") || name.endsWith(".tmp")));
+		if (oldSegs != null) {
+			for (File seg : oldSegs) {
+				if (seg != null && seg.exists() && !seg.delete()) {
+					logger.warn("[HLS] failed to delete old segment id={} path={}", id, seg.getPath());
+				}
+			}
 		}
 
-		String cmdEncode = "ffmpeg -y -i \"" + input.getPath() + "\" -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k -hls_time "
-				+ Math.max(2, Global.hlsSegmentSeconds)
-				+ " -hls_list_size 0 -hls_playlist_type vod -hls_segment_filename \"" + tsPattern + "\" \"" + m3u8Path + "\"";
-		logger.info("[HLS] transcode fallback id={} mode=encode", id);
+		String cmdEncode = "ffmpeg -y -i \"" + input.getPath() + "\" -map 0:v:0 -map 0:a? -c:v libx264 -profile:v main -level 4.0 "
+				+ "-pix_fmt yuv420p -preset veryfast -crf 23 -g 48 -keyint_min 48 -sc_threshold 0 -c:a aac -b:a 128k "
+				+ "-ar 48000 -ac 2 -hls_time " + Math.max(2, Global.hlsSegmentSeconds)
+				+ " -hls_list_size 0 -hls_playlist_type vod -hls_flags " + HLS_FLAGS
+				+ " -hls_segment_filename \"" + tsPattern + "\" \"" + m3u8Path + "\"";
+		logger.info("[HLS] transcode start id={} mode=compat-encode", id);
 		CommandUtil.command(cmdEncode);
 		if (m3u8.isFile() && m3u8.length() > 0) {
-			logger.info("[HLS] transcode success id={} by encode", id);
+			logger.info("[HLS] transcode success id={} by compat-encode", id);
 			lastSuccessAt = System.currentTimeMillis();
 			lastError = "";
 		} else {
