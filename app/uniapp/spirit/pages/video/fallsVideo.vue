@@ -1,6 +1,7 @@
 <template>
 	<view class="video-container">
 		<cover-view class="top-controls">
+			<cover-view class="perf-chip" v-if="perfStats.samples > 0">首帧 {{ perfStats.lastMs }}ms / 均值 {{ perfStats.avgMs }}ms</cover-view>
 			<cover-view class="ctrl" @tap="toggleOrder">{{ orderText }}</cover-view>
 			<cover-view class="ctrl" @tap="openAuthorPopup">{{ authorText }}</cover-view>
 			<cover-view class="ctrl" @tap="toggleMuted">{{ isMuted ? '静音' : '有声' }}</cover-view>
@@ -77,7 +78,14 @@
 				preloadNeighbors: 1,
 				playDelayMs: 40,
 				touchStartY: 0,
-				touchStartTs: 0
+				touchStartTs: 0,
+				switchPending: {},
+				perfStats: {
+					lastMs: 0,
+					avgMs: 0,
+					samples: 0,
+					totalMs: 0
+				}
 			}
 		},
 		computed: {
@@ -264,6 +272,7 @@
 				this.pauseAll()
 				const idx = this.currentIndex
 				if (idx < 0 || idx >= this.playList.length) return
+				this.switchPending[idx] = Date.now()
 				const current = this.playList[idx]
 				if (current) {
 					const playable = cacheManager.getPlayableUrl(current)
@@ -291,11 +300,17 @@
 				return ''
 			},
 			prefetchAround(idx) {
-				const next = []
-				for (let i = idx + 1; i < Math.min(this.playList.length, idx + 11); i++) {
-					next.push(this.playList[i])
+				const queue = []
+				if (idx + 1 < this.playList.length) {
+					queue.push(this.playList[idx + 1])
 				}
-				cacheManager.prefetchVideos(next)
+				if (idx - 1 >= 0) {
+					queue.push(this.playList[idx - 1])
+				}
+				for (let i = idx + 2; i < Math.min(this.playList.length, idx + 6); i++) {
+					queue.push(this.playList[i])
+				}
+				cacheManager.prefetchVideos(queue)
 			},
 			pauseAll() {
 				Object.keys(this.videoContexts).forEach(k => {
@@ -303,7 +318,18 @@
 					if (c) c.pause()
 				})
 			},
-			onVideoPlay() {},
+			onVideoPlay(index) {
+				const start = this.switchPending[index]
+				if (!start) return
+				const ms = Math.max(0, Date.now() - start)
+				this.$delete(this.switchPending, index)
+				const nextSamples = (this.perfStats.samples || 0) + 1
+				const nextTotal = (this.perfStats.totalMs || 0) + ms
+				this.perfStats.lastMs = ms
+				this.perfStats.samples = nextSamples
+				this.perfStats.totalMs = nextTotal
+				this.perfStats.avgMs = Math.round(nextTotal / nextSamples)
+			},
 			onVideoPause() {},
 			onVideoEnded(index) {
 				if (index < this.playList.length - 1) {
@@ -347,4 +373,5 @@
 	.sheet-title { font-size: 28rpx; font-weight: 700; margin-bottom: 16rpx; }
 	.author-list { display: flex; flex-wrap: wrap; }
 	.author-chip { margin: 0 12rpx 12rpx 0; padding: 10rpx 18rpx; border-radius: 26rpx; background: #f3f4f6; color: #374151; font-size: 24rpx; }
+	.perf-chip { min-width: 260rpx; height: 46rpx; line-height: 46rpx; border-radius: 23rpx; text-align: center; background: rgba(0,0,0,.45); color:#e5e7eb; font-size: 20rpx; padding: 0 12rpx; }
 </style>

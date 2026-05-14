@@ -175,11 +175,16 @@ function prefetchOne(video) {
 
 async function prefetchVideos(videos) {
 	if (!videos || videos.length === 0) return
-	const tasks = videos.slice(0, 10)
-	for (let i = 0; i < tasks.length; i++) {
-		// serial to avoid heavy pressure
+	const tasks = videos.slice(0, 6)
+	// 下一条优先
+	// eslint-disable-next-line no-await-in-loop
+	await prefetchOne(tasks[0])
+	const rest = tasks.slice(1)
+	const concurrency = 2
+	for (let i = 0; i < rest.length; i += concurrency) {
+		const chunk = rest.slice(i, i + concurrency)
 		// eslint-disable-next-line no-await-in-loop
-		await prefetchOne(tasks[i])
+		await Promise.all(chunk.map(v => prefetchOne(v)))
 	}
 }
 
