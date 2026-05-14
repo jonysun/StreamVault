@@ -58,6 +58,8 @@ public class ConfigEntity implements Serializable {
 
 	private String mediafeedmuted; // 滑动模式默认静音自动播放: 1/0
 
+	private String mediafeedsource; // 滑动模式播放编码策略: mp4_only/hls_only/prefer_mp4/prefer_hls
+
 	private String hlsenable; // 是否启用HLS转码: 1/0
 
 	private String hlsmode; // HLS执行模式: immediate/idle
@@ -208,6 +210,14 @@ public class ConfigEntity implements Serializable {
 
 	public void setMediafeedmuted(String mediafeedmuted) {
 		this.mediafeedmuted = mediafeedmuted;
+	}
+
+	public String getMediafeedsource() {
+		return mediafeedsource;
+	}
+
+	public void setMediafeedsource(String mediafeedsource) {
+		this.mediafeedsource = mediafeedsource;
 	}
 
 	public String getHlsenable() {

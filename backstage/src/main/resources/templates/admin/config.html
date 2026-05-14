@@ -235,6 +235,15 @@
                                     </select>
                                 </div>
                                 <div class="form-group">
+                                    <label>滑动模式播放编码策略</label>
+                                    <select id="mediafeedsource" class="form-control" name="mediafeedsource">
+                                        <option value="mp4_only" th:selected="${config.mediafeedsource} eq 'mp4_only'">仅MP4等源文件</option>
+                                        <option value="hls_only" th:selected="${config.mediafeedsource} eq 'hls_only'">仅HLS</option>
+                                        <option value="prefer_mp4" th:selected="${config.mediafeedsource} eq 'prefer_mp4'">优先MP4</option>
+                                        <option value="prefer_hls" th:selected="${config.mediafeedsource} eq 'prefer_hls'">优先HLS</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
                                     <label>HLS转码开关</label>
                                     <select id="hlsenable" class="form-control" name="hlsenable">
                                         <option value="1" th:selected="${config.hlsenable} eq '1'">开启</option>
@@ -758,6 +767,7 @@
               option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
               option['mediahomemode'] = $("#mediahomemode").val();
               option['mediafeedmuted'] = $("#mediafeedmuted").val();
+              option['mediafeedsource'] = $("#mediafeedsource").val();
               option['hlsenable'] = $("#hlsenable").val();
               option['hlsmode'] = $("#hlsmode").val();
               option['hlsidlewindow'] = $("#hlsidlewindow").val();
@@ -933,6 +943,7 @@
             option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
             option['mediahomemode'] = $("#mediahomemode").val();
             option['mediafeedmuted'] = $("#mediafeedmuted").val();
+            option['mediafeedsource'] = $("#mediafeedsource").val();
             option['hlsenable'] = $("#hlsenable").val();
             option['hlsmode'] = $("#hlsmode").val();
             option['hlsidlewindow'] = $("#hlsidlewindow").val();

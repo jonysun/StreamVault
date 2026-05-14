@@ -62,6 +62,9 @@ public class ConfigService {
 		if (cfg.getMediafeedmuted() == null || cfg.getMediafeedmuted().trim().isEmpty()) {
 			cfg.setMediafeedmuted("1");
 		}
+		if (cfg.getMediafeedsource() == null || cfg.getMediafeedsource().trim().isEmpty()) {
+			cfg.setMediafeedsource("prefer_hls");
+		}
 		if (cfg.getHlsenable() == null || cfg.getHlsenable().trim().isEmpty()) {
 			cfg.setHlsenable("0");
 		}
@@ -132,6 +135,12 @@ public class ConfigService {
 			Global.mediaHomeMode = "grid";
 		}
 		Global.mediaFeedMuted = !"0".equals(configEntity.getMediafeedmuted());
+		String sourceMode = configEntity.getMediafeedsource();
+		if (!"mp4_only".equals(sourceMode) && !"hls_only".equals(sourceMode)
+				&& !"prefer_mp4".equals(sourceMode) && !"prefer_hls".equals(sourceMode)) {
+			sourceMode = "prefer_hls";
+		}
+		Global.mediaFeedSource = sourceMode;
 		Global.hlsEnable = "1".equals(configEntity.getHlsenable());
 		if ("immediate".equalsIgnoreCase(configEntity.getHlsmode())) {
 			Global.hlsMode = "immediate";

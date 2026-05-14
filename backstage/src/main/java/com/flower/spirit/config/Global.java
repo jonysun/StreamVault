@@ -138,6 +138,8 @@ public class Global {
 
 	public static boolean mediaFeedMuted = true;
 
+	public static String mediaFeedSource = "prefer_hls";
+
 	public static boolean hlsEnable = false;
 
 	public static String hlsMode = "idle";
