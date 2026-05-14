@@ -822,10 +822,7 @@
                 if (entry.isIntersecting && entry.intersectionRatio >= 0.75) {
                     setupVideoSource(video, video.getAttribute('data-src') || video.src || '');
                     video.muted = feedMuted;
-                    var p = video.play();
-                    if (p && typeof p.catch === 'function') {
-                        p.catch(function() {});
-                    }
+                    playWithSync(video);
                 } else {
                     video.pause();
                 }
@@ -921,6 +918,7 @@
         if (!isM3u8) {
             updateFeedSourceBadge(videoEl, 'MP4');
             videoEl.src = src;
+            bindStallGuard(videoEl);
             return;
         }
 
@@ -946,6 +944,7 @@
         if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
             updateFeedSourceBadge(videoEl, 'HLS');
             videoEl.src = src;
+            bindStallGuard(videoEl);
             return;
         }
 
@@ -953,13 +952,27 @@
             updateFeedSourceBadge(videoEl, 'HLS');
             var hls = new window.Hls({
                 enableWorker: true,
-                lowLatencyMode: false
+                lowLatencyMode: true,
+                backBufferLength: 30,
+                maxBufferLength: 12,
+                maxMaxBufferLength: 20,
+                manifestLoadingMaxRetry: 2,
+                levelLoadingMaxRetry: 2,
+                fragLoadingMaxRetry: 2,
+                startFragPrefetch: true,
+                capLevelToPlayerSize: true,
+                testBandwidth: false
             });
             videoEl._hlsIns = hls;
             hls.loadSource(src);
             hls.attachMedia(videoEl);
             var mediaRecoverCount = 0;
             var networkRecoverCount = 0;
+            bindStallGuard(videoEl);
+
+            hls.on(window.Hls.Events.MANIFEST_PARSED, function() {
+                playWithSync(videoEl);
+            });
 
             videoEl._frameWatchTimer = setTimeout(function() {
                 var noFrame = !(videoEl.videoWidth > 0 && videoEl.videoHeight > 0);
@@ -998,6 +1011,61 @@
         }
 
         videoEl.src = src;
+        bindStallGuard(videoEl);
+    }
+
+    function playWithSync(videoEl) {
+        if (!videoEl) {
+            return;
+        }
+        if (videoEl.readyState >= 2 && (videoEl.videoWidth > 0 || !videoEl.currentSrc || !/\.m3u8(\?|$)/i.test(videoEl.currentSrc))) {
+            var p = videoEl.play();
+            if (p && typeof p.catch === 'function') {
+                p.catch(function() {});
+            }
+            return;
+        }
+        var once = function() {
+            videoEl.removeEventListener('loadeddata', once);
+            videoEl.removeEventListener('canplay', once);
+            var p = videoEl.play();
+            if (p && typeof p.catch === 'function') {
+                p.catch(function() {});
+            }
+        };
+        videoEl.addEventListener('loadeddata', once);
+        videoEl.addEventListener('canplay', once);
+    }
+
+    function bindStallGuard(videoEl) {
+        if (!videoEl || videoEl._stallGuardBound) {
+            return;
+        }
+        videoEl._stallGuardBound = true;
+        var lastTime = 0;
+        var lastTick = 0;
+        videoEl.addEventListener('timeupdate', function() {
+            lastTime = videoEl.currentTime || 0;
+            lastTick = Date.now();
+        });
+        videoEl.addEventListener('waiting', function() {
+            setTimeout(function() {
+                if (videoEl.paused) {
+                    return;
+                }
+                var stuck = (Date.now() - lastTick > 1400);
+                if (!stuck) {
+                    return;
+                }
+                if (videoEl._hlsIns && typeof videoEl._hlsIns.recoverMediaError === 'function') {
+                    try { videoEl._hlsIns.recoverMediaError(); } catch (e) {}
+                }
+                try {
+                    videoEl.currentTime = Math.max(0, lastTime - 0.02);
+                } catch (e) {}
+                playWithSync(videoEl);
+            }, 800);
+        });
     }
 
     function updateFeedSourceBadge(videoEl, type) {

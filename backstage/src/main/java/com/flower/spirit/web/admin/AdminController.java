@@ -446,6 +446,11 @@ public class AdminController {
 	public AjaxEntity loadDouFav(String uid) {
 		return collectDataService.loadDouFav(uid);
 	}
+
+	@PostMapping(value = "/resolveDouyinUserLink")
+	public AjaxEntity resolveDouyinUserLink(String text) {
+		return collectDataService.resolveDouyinUserLink(text);
+	}
 	
 	@GetMapping(value = "/fixBiliFav")
 	public AjaxEntity fixBiliFav(String id) {

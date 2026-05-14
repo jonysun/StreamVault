@@ -1,6 +1,8 @@
 package com.flower.spirit.service;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -17,6 +19,8 @@ import org.quartz.JobExecutionContext;
 import org.quartz.SchedulerException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -1001,6 +1005,70 @@ public class CollectDataService {
 		int endIndex = f2cmd.indexOf(endTag);
 		String content = f2cmd.substring(startIndex, endIndex).trim();
 		return new AjaxEntity(Global.ajax_success, content, "请求成功");
+	}
+
+	public AjaxEntity resolveDouyinUserLink(String text) {
+		if (text == null || text.trim().isEmpty()) {
+			return new AjaxEntity(Global.ajax_uri_error, "链接内容不能为空", null);
+		}
+		String shortUrl = extractFirstUrl(text.trim());
+		if (shortUrl == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "未识别到链接", null);
+		}
+		try {
+			Document document = Jsoup.connect(shortUrl)
+					.userAgent(DouUtil.ua)
+					.followRedirects(true)
+					.timeout(10000)
+					.get();
+			String finalUrl = document.baseUri();
+			String secUserId = extractSecUserId(finalUrl);
+			if (secUserId == null || secUserId.trim().isEmpty()) {
+				return new AjaxEntity(Global.ajax_uri_error, "未解析到抖音用户ID", null);
+			}
+			Map<String, String> record = new HashMap<>();
+			record.put("platform", "抖音");
+			record.put("finalUrl", finalUrl);
+			record.put("secUserId", secUserId);
+			return new AjaxEntity(Global.ajax_success, "解析成功", record);
+		} catch (Exception e) {
+			logger.error("resolveDouyinUserLink error", e);
+			return new AjaxEntity(Global.ajax_uri_error, "抖音链接解析失败", null);
+		}
+	}
+
+	private String extractFirstUrl(String text) {
+		java.util.regex.Matcher m = java.util.regex.Pattern
+				.compile("https?://[^\\s]+", java.util.regex.Pattern.CASE_INSENSITIVE)
+				.matcher(text);
+		if (!m.find()) {
+			return null;
+		}
+		String url = m.group();
+		while (url.endsWith("。") || url.endsWith("，") || url.endsWith("；") || url.endsWith(",") || url.endsWith(".")) {
+			url = url.substring(0, url.length() - 1);
+		}
+		return url;
+	}
+
+	private String extractSecUserId(String finalUrl) {
+		if (finalUrl == null || finalUrl.isEmpty()) {
+			return null;
+		}
+		try {
+			URI uri = new URI(finalUrl);
+			String path = uri.getPath();
+			if (path == null) {
+				return null;
+			}
+			java.util.regex.Matcher m = java.util.regex.Pattern.compile("/user/([^/?#]+)").matcher(path);
+			if (m.find()) {
+				return m.group(1);
+			}
+		} catch (URISyntaxException e) {
+			logger.warn("invalid final url: {}", finalUrl);
+		}
+		return null;
 	}
 
 	public AjaxEntity createBillFav(CollectDataEntity collectDataEntity, String monitor) {

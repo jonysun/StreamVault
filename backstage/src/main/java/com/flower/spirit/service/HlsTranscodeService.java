@@ -331,8 +331,10 @@ public class HlsTranscodeService {
 		}
 
 		String cmdEncode = "ffmpeg -y -i \"" + input.getPath() + "\" -map 0:v:0 -map 0:a? -c:v libx264 -profile:v main -level 4.0 "
-				+ "-pix_fmt yuv420p -preset veryfast -crf 23 -g 48 -keyint_min 48 -sc_threshold 0 -c:a aac -b:a 128k "
+				+ "-pix_fmt yuv420p -preset veryfast -crf 23 -r 30 -vsync cfr -g 60 -keyint_min 60 -sc_threshold 0 "
+				+ "-c:a aac -b:a 128k -af aresample=async=1000:min_hard_comp=0.100:first_pts=0 "
 				+ "-ar 48000 -ac 2 -hls_time " + Math.max(2, Global.hlsSegmentSeconds)
+				+ " -max_muxing_queue_size 2048 -movflags +faststart"
 				+ " -hls_list_size 0 -hls_playlist_type vod -hls_flags " + HLS_FLAGS
 				+ " -hls_segment_filename \"" + tsPattern + "\" \"" + m3u8Path + "\"";
 		logger.info("[HLS] transcode start id={} mode=compat-encode", id);

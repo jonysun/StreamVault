@@ -6,7 +6,7 @@
 			<cover-view class="ctrl" @tap="toggleMuted">{{ isMuted ? '静音' : '有声' }}</cover-view>
 		</cover-view>
 
-			<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="swipeDuration" :skip-hidden-item-layout="true">
+			<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="swipeDuration" :skip-hidden-item-layout="true" :disable-touch="true" @touchstart="onTouchStart" @touchend="onTouchEnd">
 				<swiper-item v-for="(video, index) in playList" :key="video.id || index">
 					<view class="video-wrapper">
 						<video
@@ -76,7 +76,8 @@
 				swipeDuration: 220,
 				preloadNeighbors: 1,
 				playDelayMs: 40,
-				manualTouchEnabled: false
+				touchStartY: 0,
+				touchStartTs: 0
 			}
 		},
 		computed: {
@@ -106,6 +107,45 @@
 			}
 		},
 		methods: {
+			onTouchStart(e) {
+				const t = e && e.touches && e.touches[0]
+				if (!t) return
+				this.touchStartY = Number(t.pageY || 0)
+				this.touchStartTs = Date.now()
+			},
+			onTouchEnd(e) {
+				const t = e && e.changedTouches && e.changedTouches[0]
+				if (!t) return
+				const endY = Number(t.pageY || 0)
+				const dy = endY - this.touchStartY
+				const dt = Math.max(1, Date.now() - (this.touchStartTs || Date.now()))
+				const velocity = Math.abs(dy) / dt
+				const sys = uni.getSystemInfoSync()
+				const minDistancePx = Math.max(40, Number(sys.windowHeight || 720) * 0.12)
+				const passDistance = Math.abs(dy) >= minDistancePx
+				const passVelocity = velocity >= 0.45
+				if (!passDistance && !passVelocity) {
+					return
+				}
+				if (dy < 0) {
+					this.stepTo(this.currentIndex + 1)
+				} else {
+					this.stepTo(this.currentIndex - 1)
+				}
+			},
+			stepTo(nextIndex) {
+				const safe = Math.max(0, Math.min(this.playList.length - 1, nextIndex))
+				if (safe === this.currentIndex) return
+				this.currentIndex = safe
+				this.playCurrent()
+				if (this.currentIndex >= this.playList.length - 2) {
+					if (this.hasMore) {
+						this.loadVideos()
+					} else if (this.orderMode === 'random' && this.playList.length > 1) {
+						this.rebuildPlayList(false)
+					}
+				}
+			},
 			applyFeedSettings() {
 				const s = this.cacheSettings || {}
 				this.swipeDuration = Math.max(120, parseInt(s.feedSwipeDuration || 220, 10))
