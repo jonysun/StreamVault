@@ -88,6 +88,8 @@
         }
         .help-icon { cursor: pointer; font-size: 12px; color: #bfbfbf; margin-left: 2px; }
         .help-icon:hover { color: #4361ee; }
+        .runtime-status-card { margin-top: 12px; }
+        .runtime-status-card .table { margin-bottom: 0; }
         @media (max-width: 1200px) { .col-md-4 { width: 50%; } }
         @media (max-width: 768px) { .col-md-4, .col-md-6 { width: 100%; } }
     </style>
@@ -299,6 +301,11 @@
                     <!-- 系统配置统一保存 -->
                     <div class="section-action">
                         <button class="btn btn-primary saveConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 4px;"></i>保存系统配置</button>
+                    </div>
+
+                    <div class="section-title"><div class="section-title-inner"><i class="mdi mdi-chart-timeline-variant"></i>运行状态</div></div>
+                    <div class="col-md-12 runtime-status-card">
+                        <div id="hlsStatsContainer"></div>
                     </div>
                 </div>
 
@@ -1015,10 +1022,12 @@
     $(function() {
         updateFileNameTemplatePreview();
         $('#filenametemplate').on('input', updateFileNameTemplatePreview);
+        loadHlsStats();
         $('#hlsEnqueueMissingBtn').on('click', function() {
             var limit = $('#hlsBatchLimit').val() || '200';
             $.post('/admin/api/hlsEnqueueMissingLatest', { limit: limit }, function(res) {
                 layer.msg(res && res.message ? res.message : '已提交');
+                loadHlsStats();
             });
         });
         $('#hlsRebuildLatestBtn').on('click', function() {
@@ -1027,15 +1036,74 @@
                 layer.close(idx);
                 $.post('/admin/api/hlsRebuildLatest', { limit: limit }, function(res) {
                     layer.msg(res && res.message ? res.message : '已提交重建');
+                    loadHlsStats();
                 });
             });
         });
         $('#hlsRunNowBtn').on('click', function() {
             $.post('/admin/api/hlsProcessNow', {}, function(res) {
                 layer.msg(res && res.message ? res.message : '已触发');
+                loadHlsStats();
             });
         });
+        setInterval(loadHlsStats, 8000);
     });
+
+    function loadHlsStats() {
+        $.ajax({
+            url: '/admin/api/hlsStats',
+            type: 'GET',
+            dataType: 'json',
+            success: function(response) {
+                if (response && response.resCode === '000001' && response.record) {
+                    renderHlsStats(response.record);
+                } else {
+                    renderHlsStats(null);
+                }
+            },
+            error: function() {
+                renderHlsStats(null);
+            }
+        });
+    }
+
+    function renderHlsStats(stats) {
+        const container = $('#hlsStatsContainer');
+        container.empty();
+        if (!stats) {
+            container.html('<div class="card"><div class="card-body">HLS运行状态暂时不可用</div></div>');
+            return;
+        }
+        const enabled = !!stats.enabled;
+        const mode = stats.mode || 'idle';
+        const queueSize = Number(stats.queueSize || 0);
+        const runningCount = Number(stats.runningCount || 0);
+        const runningVideoId = stats.runningVideoId == null ? '-' : stats.runningVideoId;
+        const lastSuccess = stats.lastSuccessAt ? new Date(stats.lastSuccessAt).toLocaleString() : '-';
+        const lastFail = stats.lastFailAt ? new Date(stats.lastFailAt).toLocaleString() : '-';
+        const idleWindow = stats.idleWindow || '-';
+        const seg = stats.segmentSeconds || '-';
+        const con = stats.concurrency || 1;
+        const privacy = stats.privacyEnabled ? '允许' : '禁止';
+        const statusBadge = enabled ? '<span class="badge badge-success">已启用</span>' : '<span class="badge badge-secondary">已关闭</span>';
+
+        let html = '<div class="card"><div class="card-header"><h4 style="margin:0;">HLS转码任务调度</h4></div><div class="card-body">';
+        html += '<div class="table-responsive"><table class="table table-sm table-hover"><tbody>';
+        html += '<tr><th style="width:180px;">开关状态</th><td>' + statusBadge + '</td><th>执行模式</th><td>' + (mode === 'immediate' ? '立即执行' : '闲时执行') + '</td></tr>';
+        html += '<tr><th>闲时时段</th><td>' + idleWindow + '</td><th>并发</th><td>' + con + '</td></tr>';
+        html += '<tr><th>分片时长</th><td>' + seg + ' 秒</td><th>隐私转码</th><td>' + privacy + '</td></tr>';
+        html += '<tr><th>队列长度</th><td>' + queueSize + '</td><th>运行中</th><td>' + runningCount + ' (videoId: ' + runningVideoId + ')</td></tr>';
+        html += '<tr><th>最近成功</th><td>' + lastSuccess + '</td><th>最近失败</th><td>' + lastFail + '</td></tr>';
+        if (stats.lastError) {
+            html += '<tr><th>最近错误</th><td colspan="3" style="color:#dc3545;">' + escapeHtml(String(stats.lastError)) + '</td></tr>';
+        }
+        html += '</tbody></table></div></div></div>';
+        container.html(html);
+    }
+
+    function escapeHtml(text) {
+        return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
     function detectPlatform() {
         var url = $('#platformUrl').val();
         if(!url) {

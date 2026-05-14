@@ -6,7 +6,10 @@ const DEFAULT_SETTINGS = {
 	maxSizeMB: 1024,
 	wifiOnly: true,
 	allowPrivacy: true,
-	enabled: true
+	enabled: true,
+	feedSwipeDuration: 220,
+	feedPreloadNeighbors: 1,
+	feedPlayDelayMs: 40
 }
 
 function readIndex() {

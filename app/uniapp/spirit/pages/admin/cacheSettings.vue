@@ -21,6 +21,18 @@
 				<text class="label">缓存总大小(MB)</text>
 				<input type="number" v-model="settings.maxSizeMB" class="ipt" />
 			</view>
+			<view class="row-input">
+				<text class="label">滑动动画时长(ms)</text>
+				<input type="number" v-model="settings.feedSwipeDuration" class="ipt" />
+			</view>
+			<view class="row-input">
+				<text class="label">预加载相邻视频数</text>
+				<input type="number" v-model="settings.feedPreloadNeighbors" class="ipt" />
+			</view>
+			<view class="row-input">
+				<text class="label">切页后播放延迟(ms)</text>
+				<input type="number" v-model="settings.feedPlayDelayMs" class="ipt" />
+			</view>
 		</view>
 
 		<view class="card">
@@ -61,7 +73,10 @@
 					wifiOnly: !!this.settings.wifiOnly,
 					allowPrivacy: !!this.settings.allowPrivacy,
 					maxCount: Math.max(1, parseInt(this.settings.maxCount || 10, 10)),
-					maxSizeMB: Math.max(100, parseInt(this.settings.maxSizeMB || 1024, 10))
+					maxSizeMB: Math.max(100, parseInt(this.settings.maxSizeMB || 1024, 10)),
+					feedSwipeDuration: Math.max(120, parseInt(this.settings.feedSwipeDuration || 220, 10)),
+					feedPreloadNeighbors: Math.max(0, Math.min(2, parseInt(this.settings.feedPreloadNeighbors || 1, 10))),
+					feedPlayDelayMs: Math.max(0, Math.min(300, parseInt(this.settings.feedPlayDelayMs || 40, 10)))
 				}
 				cacheManager.writeSettings(payload)
 				cacheManager.evictIfNeeded()

@@ -1,39 +1,43 @@
 <template>
 	<view class="video-container">
-		<view class="top-controls">
-			<view class="ctrl" @tap="toggleOrder">{{ orderText }}</view>
-			<view class="ctrl" @tap="openAuthorPopup">{{ authorText }}</view>
-			<view class="ctrl" @tap="toggleMuted">{{ isMuted ? '静音' : '有声' }}</view>
-		</view>
+		<cover-view class="top-controls">
+			<cover-view class="ctrl" @tap="toggleOrder">{{ orderText }}</cover-view>
+			<cover-view class="ctrl" @tap="openAuthorPopup">{{ authorText }}</cover-view>
+			<cover-view class="ctrl" @tap="toggleMuted">{{ isMuted ? '静音' : '有声' }}</cover-view>
+		</cover-view>
 
-			<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="280">
+			<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="swipeDuration" :skip-hidden-item-layout="true">
 				<swiper-item v-for="(video, index) in playList" :key="video.id || index">
 					<view class="video-wrapper">
 						<video
 							:id="`video-${index}`"
-							:src="video.playSrc"
-						:poster="video.videocover"
-						:controls="false"
-						:autoplay="false"
-						:muted="isMuted"
-						:show-center-play-btn="false"
-						:show-play-btn="false"
-						:enable-progress-gesture="false"
-						:object-fit="'cover'"
-						class="video-player"
-						@play="onVideoPlay(index)"
-						@pause="onVideoPause(index)"
-						@ended="onVideoEnded(index)"
-					></video>
-					<view class="video-overlay">
-						<view class="bottom-info">
-							<text class="author-name" @tap="selectAuthor(video.videoauthor)">@{{ video.videoauthor || '未知作者' }}</text>
-							<text class="desc-text">{{ video.videoname || video.videodesc || '' }}</text>
-						</view>
+							:src="getVideoSrc(index, video)"
+							:poster="video.videocover"
+							:controls="false"
+							:autoplay="false"
+							:muted="isMuted"
+							:loop="false"
+							:show-center-play-btn="false"
+							:show-play-btn="false"
+							:enable-progress-gesture="false"
+							:object-fit="'cover'"
+							:play-strategy="0"
+							:codec="'hardware'"
+							:http-cache="true"
+							class="video-player"
+							@play="onVideoPlay(index)"
+							@pause="onVideoPause(index)"
+							@ended="onVideoEnded(index)"
+						></video>
+					<cover-view class="video-overlay">
+						<cover-view class="bottom-info">
+							<cover-view class="author-name" @tap="selectAuthor(video.videoauthor)">@{{ video.videoauthor || '未知作者' }}</cover-view>
+							<cover-view class="desc-text">{{ video.videoname || video.videodesc || '' }}</cover-view>
+						</cover-view>
+					</cover-view>
 					</view>
-				</view>
-			</swiper-item>
-		</swiper>
+				</swiper-item>
+			</swiper>
 
 		<uni-popup ref="authorPopup" type="top" background-color="#fff">
 			<view class="author-sheet">
@@ -68,7 +72,11 @@
 				serverport: '',
 				servertoken: '',
 				videoContexts: {},
-				cacheSettings: cacheManager.readSettings()
+				cacheSettings: cacheManager.readSettings(),
+				swipeDuration: 220,
+				preloadNeighbors: 1,
+				playDelayMs: 40,
+				manualTouchEnabled: false
 			}
 		},
 		computed: {
@@ -84,9 +92,12 @@
 		onLoad() {
 			this.ensureServerConfig()
 			this.cacheSettings = cacheManager.readSettings()
+			this.applyFeedSettings()
 			this.loadVideos()
 		},
 		onShow() {
+			this.cacheSettings = cacheManager.readSettings()
+			this.applyFeedSettings()
 			if (!this.serveraddr || !this.serverport || !this.servertoken) {
 				this.ensureServerConfig()
 			}
@@ -95,6 +106,12 @@
 			}
 		},
 		methods: {
+			applyFeedSettings() {
+				const s = this.cacheSettings || {}
+				this.swipeDuration = Math.max(120, parseInt(s.feedSwipeDuration || 220, 10))
+				this.preloadNeighbors = Math.max(0, Math.min(2, parseInt(s.feedPreloadNeighbors || 1, 10)))
+				this.playDelayMs = Math.max(0, Math.min(300, parseInt(s.feedPlayDelayMs || 40, 10)))
+			},
 			ensureServerConfig() {
 				this.serveraddr = uni.getStorageSync('serveraddr') || ''
 				this.serverport = uni.getStorageSync('serverport') || ''
@@ -219,8 +236,19 @@
 				if (!this.videoContexts[idx]) {
 					this.videoContexts[idx] = uni.createVideoContext(`video-${idx}`, this)
 				}
-				if (this.videoContexts[idx]) this.videoContexts[idx].play()
+				if (this.videoContexts[idx]) {
+					setTimeout(() => {
+						this.videoContexts[idx] && this.videoContexts[idx].play()
+					}, this.playDelayMs)
+				}
 				this.prefetchAround(idx)
+			},
+			getVideoSrc(index, video) {
+				if (!video) return ''
+				if (Math.abs(index - this.currentIndex) <= this.preloadNeighbors) {
+					return video.playSrc || ''
+				}
+				return ''
 			},
 			prefetchAround(idx) {
 				const next = []
