@@ -1,6 +1,18 @@
 <template>
 	<view class="container">
 		<view class="card">
+			<view class="row-input">
+				<text class="label">App主题</text>
+				<picker class="picker" :range="themeOptions" range-key="label" :value="themeIndex" @change="onThemeChange">
+					<view class="picker-value">{{ themeLabel }}</view>
+				</picker>
+			</view>
+			<view class="row-input">
+				<text class="label">播放结束策略</text>
+				<picker class="picker" :range="playbackOptions" range-key="label" :value="playbackIndex" @change="onPlaybackModeChange">
+					<view class="picker-value">{{ playbackLabel }}</view>
+				</picker>
+			</view>
 			<view class="row">
 				<text class="label">启用缓存</text>
 				<switch :checked="settings.enabled" @change="onSwitch('enabled', $event)" />
@@ -51,12 +63,39 @@
 		data() {
 			return {
 				settings: cacheManager.readSettings(),
-				stats: cacheManager.getStats()
+				stats: cacheManager.getStats(),
+				themeOptions: [
+					{ label: '浅色', value: 'light' },
+					{ label: '夜间', value: 'dark' }
+				],
+				playbackOptions: [
+					{ label: '自动下一条', value: 'autonext' },
+					{ label: '本条循环', value: 'loopone' },
+					{ label: '播放后停止', value: 'stop' }
+				]
 			}
 		},
 		computed: {
 			sizeMB() {
 				return (Number(this.stats.sizeBytes || 0) / 1024 / 1024).toFixed(1)
+			},
+			themeIndex() {
+				const mode = this.settings.appTheme || 'light'
+				const idx = this.themeOptions.findIndex(x => x.value === mode)
+				return idx >= 0 ? idx : 0
+			},
+			themeLabel() {
+				const i = this.themeIndex
+				return (this.themeOptions[i] && this.themeOptions[i].label) || '浅色'
+			},
+			playbackIndex() {
+				const mode = this.settings.playbackMode || 'autonext'
+				const idx = this.playbackOptions.findIndex(x => x.value === mode)
+				return idx >= 0 ? idx : 0
+			},
+			playbackLabel() {
+				const i = this.playbackIndex
+				return (this.playbackOptions[i] && this.playbackOptions[i].label) || '自动下一条'
 			}
 		},
 		onShow() {
@@ -64,6 +103,16 @@
 			this.stats = cacheManager.getStats()
 		},
 		methods: {
+			onThemeChange(e) {
+				const i = parseInt(e && e.detail && e.detail.value, 10)
+				const picked = this.themeOptions[Number.isNaN(i) ? 0 : i] || this.themeOptions[0]
+				this.$set(this.settings, 'appTheme', picked.value)
+			},
+			onPlaybackModeChange(e) {
+				const i = parseInt(e && e.detail && e.detail.value, 10)
+				const picked = this.playbackOptions[Number.isNaN(i) ? 0 : i] || this.playbackOptions[0]
+				this.$set(this.settings, 'playbackMode', picked.value)
+			},
 			onSwitch(key, e) {
 				this.$set(this.settings, key, !!(e && e.detail && e.detail.value))
 			},
@@ -76,7 +125,9 @@
 					maxSizeMB: Math.max(100, parseInt(this.settings.maxSizeMB || 1024, 10)),
 					feedSwipeDuration: Math.max(120, parseInt(this.settings.feedSwipeDuration || 220, 10)),
 					feedPreloadNeighbors: Math.max(0, Math.min(2, parseInt(this.settings.feedPreloadNeighbors || 1, 10))),
-					feedPlayDelayMs: Math.max(0, Math.min(300, parseInt(this.settings.feedPlayDelayMs || 40, 10)))
+					feedPlayDelayMs: Math.max(0, Math.min(300, parseInt(this.settings.feedPlayDelayMs || 40, 10))),
+					appTheme: (this.settings.appTheme === 'dark' ? 'dark' : 'light'),
+					playbackMode: ['autonext', 'loopone', 'stop'].includes(this.settings.playbackMode) ? this.settings.playbackMode : 'autonext'
 				}
 				cacheManager.writeSettings(payload)
 				cacheManager.evictIfNeeded()
@@ -105,6 +156,8 @@
 .row { display:flex; align-items:center; justify-content:space-between; padding: 14rpx 0; border-bottom: 1px solid #f1f1f1; }
 .row-input { padding: 14rpx 0; }
 .label { font-size: 28rpx; color:#111827; }
+.picker { margin-top: 10rpx; }
+.picker-value { border: 1px solid #e5e7eb; border-radius: 10rpx; height: 68rpx; line-height: 68rpx; padding: 0 18rpx; font-size: 26rpx; color: #111827; }
 .ipt { margin-top: 10rpx; border: 1px solid #e5e7eb; border-radius: 10rpx; height: 68rpx; padding: 0 18rpx; font-size: 26rpx; }
 .stats { font-size: 26rpx; color:#374151; }
 .btn-row { display:flex; gap: 16rpx; margin-top: 18rpx; }

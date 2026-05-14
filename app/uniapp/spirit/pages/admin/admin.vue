@@ -128,7 +128,7 @@
 				</view>
 				<view class="quick-item" @tap="navigateTo('/pages/admin/cacheSettings')">
 					<uni-icons type="gear" size="20" color="#2563eb"></uni-icons>
-					<text class="quick-text">缓存设置</text>
+					<text class="quick-text">系统设置</text>
 					<uni-icons type="right" size="14" color="#ccc"></uni-icons>
 				</view>
 				<view class="quick-item" @tap="handleLogout">

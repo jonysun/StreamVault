@@ -9,7 +9,9 @@ const DEFAULT_SETTINGS = {
 	enabled: true,
 	feedSwipeDuration: 220,
 	feedPreloadNeighbors: 1,
-	feedPlayDelayMs: 40
+	feedPlayDelayMs: 40,
+	appTheme: 'light',
+	playbackMode: 'autonext'
 }
 
 function readIndex() {
