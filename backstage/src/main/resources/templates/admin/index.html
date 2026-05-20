@@ -538,7 +538,7 @@
 <script src="../static/js/layer/layer.js" type="text/javascript"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
 <script>
-    var page = 1;
+    var page = 0;
     var isLoading = false;
     var hasMore = true;
     var mediaHomeMode = 'grid';
@@ -564,6 +564,8 @@
     var feedScrollDirection = 'down';
     var feedMaxDomItems = 16;
     var feedAllItems = [];
+    var feedAllLoaded = false;
+    var feedFullScanInProgress = false;
     var feedActiveVideo = null;
     var feedMetrics = {
         playAttempts: 0,
@@ -588,6 +590,7 @@
             ensureFeedSpacer();
             bindFeedScroll();
             bindFeedKeyboard();
+            bindFeedWheelNavigation();
             bindFeedControls();
             updateFeedButtons();
         }
@@ -798,6 +801,9 @@
                 if(list.length > 0) {
                     if (mediaHomeMode === 'feed') {
                         feedAllItems = feedAllItems.concat(list);
+                        if (data.record && data.record.last) {
+                            feedAllLoaded = true;
+                        }
                         appendFeedAuthorOptions(list);
                     }
                     var html = "";
@@ -935,16 +941,45 @@
     function bindFeedVideoControls() {
         $('#videoFeed .feed-video').off('click');
         $('#videoFeed .feed-item').off('mouseenter mouseleave');
+        $('#videoFeed .feed-bottom-hover-zone').off('mouseenter mouseleave');
         $('#videoFeed .feed-item').on('mouseenter', function() {
             var badge = this.querySelector('.feed-source-badge');
             if (badge) {
                 badge.classList.add('visible');
+            }
+            var video = this.querySelector('.feed-video');
+            if (video) {
+                video.classList.remove('controls-visible');
             }
         });
         $('#videoFeed .feed-item').on('mouseleave', function() {
             var badge = this.querySelector('.feed-source-badge');
             if (badge) {
                 badge.classList.remove('visible');
+            }
+            var video = this.querySelector('.feed-video');
+            if (video) {
+                video.classList.remove('controls-visible');
+            }
+        });
+        $('#videoFeed .feed-bottom-hover-zone').on('mouseenter', function() {
+            var item = this.parentNode;
+            if (!item) {
+                return;
+            }
+            var video = item.querySelector('.feed-video');
+            if (video) {
+                video.classList.add('controls-visible');
+            }
+        });
+        $('#videoFeed .feed-bottom-hover-zone').on('mouseleave', function() {
+            var item = this.parentNode;
+            if (!item) {
+                return;
+            }
+            var video = item.querySelector('.feed-video');
+            if (video) {
+                video.classList.remove('controls-visible');
             }
         });
         $('#videoFeed .feed-video').on('touchstart', function() {
@@ -1573,6 +1608,31 @@
         });
     }
 
+    function bindFeedWheelNavigation() {
+        document.addEventListener('wheel', function(e) {
+            if (mediaHomeMode !== 'feed') {
+                return;
+            }
+            var container = document.getElementById('videoFeed');
+            if (!container) {
+                return;
+            }
+            var active = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+            if (!active) {
+                return;
+            }
+            if (active !== container && !container.contains(active)) {
+                return;
+            }
+            if (Math.abs(e.deltaY) < 8) {
+                return;
+            }
+            var step = container.clientHeight || window.innerHeight || 1;
+            container.scrollBy({ top: e.deltaY > 0 ? step : -step, behavior: 'smooth' });
+            e.preventDefault();
+        }, { passive: false });
+    }
+
     function bindFeedControls() {
         $('#feedOrderBtn').on('click', function() {
             if (feedOrder === 'desc') {
@@ -1703,7 +1763,7 @@
     }
 
     function reloadFeed() {
-        page = 1;
+        page = 0;
         hasMore = true;
         isLoading = false;
         $('#videoFeed').empty();
@@ -1712,6 +1772,8 @@
         ensureFeedSpacer();
         feedAuthorSet = {};
         feedAllItems = [];
+        feedAllLoaded = false;
+        feedFullScanInProgress = false;
         feedRandomPool = [];
         feedRandomCursor = 0;
         feedRandomLoading = false;
@@ -1720,6 +1782,10 @@
 
     function applyOrderWithoutReload() {
         if (mediaHomeMode !== 'feed') {
+            return;
+        }
+        if ((feedOrder === 'random' || feedOrder === 'asc' || feedOrder === 'desc') && !feedAllLoaded) {
+            loadAllFeedItemsAndApplyOrder();
             return;
         }
         if (!feedAllItems || feedAllItems.length === 0) {
@@ -1756,6 +1822,55 @@
         if (c && activeAbs > 0) {
             c.scrollTop = activeAbs * (c.clientHeight || 1);
         }
+    }
+
+    function loadAllFeedItemsAndApplyOrder() {
+        if (feedFullScanInProgress) {
+            return;
+        }
+        feedFullScanInProgress = true;
+        var reqPage = 0;
+        var merged = [];
+        var loadingLayer = layer.load(2, { shade: [0.15, '#000'] });
+
+        function nextPage() {
+            var option = buildFeedRequestOption(reqPage);
+            $.post('/admin/api/findVideoDataList', option, function(data) {
+                if (!data || data.resCode !== '000001' || !data.record || !data.record.content) {
+                    finish(false);
+                    return;
+                }
+                var list = data.record.content || [];
+                if (list.length > 0) {
+                    merged = merged.concat(list);
+                    appendFeedAuthorOptions(list);
+                }
+                if (data.record.last || list.length === 0) {
+                    feedAllItems = merged;
+                    feedAllLoaded = true;
+                    page = reqPage;
+                    hasMore = false;
+                    finish(true);
+                    return;
+                }
+                reqPage++;
+                nextPage();
+            }).fail(function() {
+                finish(false);
+            });
+        }
+
+        function finish(success) {
+            feedFullScanInProgress = false;
+            layer.close(loadingLayer);
+            if (!success) {
+                layer.msg('加载完整列表失败，请稍后重试', {icon: 2});
+                return;
+            }
+            applyOrderWithoutReload();
+        }
+
+        nextPage();
     }
 
     function shuffleList(arr) {
