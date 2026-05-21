@@ -16,12 +16,28 @@
             padding: 20px;
         }
 
-        .feed-page.container-fluid,
+        .lyear-layout-content {
+            height: calc(100vh - 68px);
+            padding-top: 68px !important;
+            overflow: hidden;
+        }
+
+        .lyear-layout-content > .container-fluid.feed-page {
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+        }
+
+        .feed-page.container-fluid {
+            height: 100%;
+            overflow: hidden;
+        }
+
         .feed-page .row,
         .feed-page .col-lg-12,
         .feed-page .card,
         .feed-page .card-body {
             height: 100%;
+            min-height: 0;
         }
 
         .feed-page .card {
@@ -30,19 +46,18 @@
 
         .feed-page .card-body {
             position: relative;
-            min-height: calc(100vh - 120px);
-        }
-
-        .feed-page .video-feed {
-            height: 100%;
+            padding: 0 !important;
+            overflow: hidden;
         }
 
         .video-feed {
             display: none;
-            height: calc(100vh - 120px);
+            height: 100%;
             overflow-y: auto;
             scroll-snap-type: y mandatory;
+            scroll-snap-stop: always;
             background: #000;
+            overscroll-behavior-y: contain;
         }
 
         .feed-controls {
@@ -147,8 +162,10 @@
         }
 
         .feed-item {
-            height: calc(100vh - 120px);
+            height: 100%;
+            min-height: calc(100vh - 120px);
             scroll-snap-align: start;
+            scroll-snap-stop: always;
             position: relative;
             display: flex;
             align-items: center;
@@ -201,7 +218,7 @@
             bottom: 0;
             height: 92px;
             z-index: 4;
-            pointer-events: none;
+            pointer-events: auto;
         }
 
         .feed-source-badge {
@@ -495,6 +512,10 @@
         }
         
         @media (max-width: 768px) {
+            .feed-page.container-fluid {
+                height: 100%;
+            }
+
             .video-grid {
                 grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
                 gap: 15px;
@@ -503,7 +524,7 @@
 
             .video-feed,
             .feed-item {
-                height: calc(100vh - 98px);
+                min-height: calc(100vh - 98px);
             }
         }
         .video-container {
@@ -548,12 +569,16 @@
         
         @media (max-width: 480px) {
              .card-body {
-                 padding: 0.75rem;
+                  padding: 0.75rem;
+              }
+
+             .feed-page .card-body {
+                  padding: 0 !important;
              }
-             
+              
              .table th, .table td {
-                 padding: 0.5rem 0.25rem;
-             }
+                  padding: 0.5rem 0.25rem;
+              }
          }
         @media (orientation: landscape) and (max-height: 500px) {
             .layui-layer {
@@ -683,6 +708,9 @@
         // 使用节流函数优化滚动事件
         var throttleTimer;
         $(window).scroll(function() {
+            if (mediaHomeMode === 'feed') {
+                return;
+            }
             if (throttleTimer) {
                 return;
             }
@@ -1363,7 +1391,7 @@
         var roles = ['prev', 'current', 'next', 'next2'];
         for (var i = 0; i < roles.length; i++) {
             var video = document.createElement('video');
-            video.className = 'feed-video';
+            video.className = 'feed-video hide-controls';
             video.setAttribute('preload', 'auto');
             video.setAttribute('playsinline', '');
             video.setAttribute('webkit-playsinline', '');
