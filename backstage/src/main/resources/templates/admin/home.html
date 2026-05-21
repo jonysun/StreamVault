@@ -200,6 +200,24 @@
             margin: 0;
         }
 
+        .author-progress-wrap {
+            max-height: 320px;
+            overflow-y: auto;
+            border: 1px solid var(--gray-100);
+            border-radius: 10px;
+        }
+
+        .author-progress-wrap table {
+            margin-bottom: 0;
+        }
+
+        .author-progress-wrap thead th {
+            position: sticky;
+            top: 0;
+            background: var(--white);
+            z-index: 1;
+        }
+
         .platform-item {
             display: flex;
             justify-content: space-between;
@@ -1135,13 +1153,13 @@
 		function renderAuthorStats(stats) {
 			const container = $('#authorStatsContainer');
 			container.empty();
-			let html = '<div class="col-12"><div class="platform-card"><div class="platform-header"><div class="platform-icon" style="background: var(--warning-color);"><i class="mdi mdi-account-group"></i></div><h3 class="platform-title">作者下载进度</h3></div>';
-			html += '<div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>任务</th><th>视频进度</th><th>图文进度</th><th>状态</th></tr></thead><tbody>';
+			let html = '<div class="col-lg-6 col-xl-6 mb-4"><div class="platform-card"><div class="platform-header"><div class="platform-icon" style="background: var(--warning-color);"><i class="mdi mdi-account"></i></div><h3 class="platform-title">作者下载进度</h3></div>';
+			html += '<div class="author-progress-wrap"><div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>任务</th><th>视频进度</th><th>图文进度</th><th>状态</th></tr></thead><tbody>';
 			stats.forEach(function(item){
 				const status = item.enabled === 'N' ? '已暂停' : (item.monitoring === 'Y' ? '监控中' : '手动');
 				html += '<tr><td>' + (item.taskName || '--') + '</td><td>' + (item.videoDone || 0) + '/' + (item.videoTotal || 0) + '</td><td>' + (item.imageDone || 0) + '/' + (item.imageTotal || 0) + '</td><td>' + status + '</td></tr>';
 			});
-			html += '</tbody></table></div></div></div>';
+			html += '</tbody></table></div></div></div></div>';
 			container.html(html);
 		}
 

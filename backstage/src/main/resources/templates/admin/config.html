@@ -228,6 +228,32 @@
                                     </select>
                                 </div>
                                 <div class="form-group">
+                                    <label>F2失败输出完整Traceback</label>
+                                    <select id="f2logfullonerror" class="form-control" name="f2logfullonerror">
+                                        <option value="1" th:selected="${config.f2logfullonerror} eq '1'">是</option>
+                                        <option value="0" th:selected="${config.f2logfullonerror} eq '0'">否</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>F2日志敏感信息脱敏</label>
+                                    <select id="f2logmasksensitive" class="form-control" name="f2logmasksensitive">
+                                        <option value="1" th:selected="${config.f2logmasksensitive} eq '1'">是</option>
+                                        <option value="0" th:selected="${config.f2logmasksensitive} eq '0'">否</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>F2日志预览最大长度</label>
+                                    <input class="form-control" type="text" id="f2logmaxpreview" name="f2logmaxpreview" placeholder="默认1000" th:value="${config.f2logmaxpreview}">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header"><h4>媒体首页播放设置</h4></div>
+                            <div class="card-body">
+                                <div class="form-group">
                                     <label>滑动模式默认静音自动播放</label>
                                     <select id="mediafeedmuted" class="form-control" name="mediafeedmuted">
                                         <option value="1" th:selected="${config.mediafeedmuted} eq '1'">是</option>
@@ -284,24 +310,6 @@
                                         <button type="button" class="btn btn-warning btn-sm" id="hlsRebuildLatestBtn">强制重建入队</button>
                                         <button type="button" class="btn btn-primary btn-sm" id="hlsRunNowBtn">立即执行一轮</button>
                                     </div>
-                                </div>
-                                <div class="form-group">
-                                    <label>F2失败输出完整Traceback</label>
-                                    <select id="f2logfullonerror" class="form-control" name="f2logfullonerror">
-                                        <option value="1" th:selected="${config.f2logfullonerror} eq '1'">是</option>
-                                        <option value="0" th:selected="${config.f2logfullonerror} eq '0'">否</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>F2日志敏感信息脱敏</label>
-                                    <select id="f2logmasksensitive" class="form-control" name="f2logmasksensitive">
-                                        <option value="1" th:selected="${config.f2logmasksensitive} eq '1'">是</option>
-                                        <option value="0" th:selected="${config.f2logmasksensitive} eq '0'">否</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>F2日志预览最大长度</label>
-                                    <input class="form-control" type="text" id="f2logmaxpreview" name="f2logmaxpreview" placeholder="默认1000" th:value="${config.f2logmaxpreview}">
                                 </div>
                             </div>
                         </div>

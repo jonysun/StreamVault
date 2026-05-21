@@ -129,6 +129,18 @@
             font-weight: 600;
             padding: 14px 14px 10px;
             border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .feed-playlist-close {
+            border: 0;
+            background: transparent;
+            color: #fff;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0;
         }
 
         .feed-playlist-list {
@@ -163,7 +175,7 @@
 
         .feed-item {
             height: 100%;
-            min-height: calc(100vh - 120px);
+            min-height: 100%;
             scroll-snap-align: start;
             scroll-snap-stop: always;
             position: relative;
@@ -191,15 +203,6 @@
             cursor: pointer;
         }
 
-        .feed-video.hide-controls::-webkit-media-controls {
-            opacity: 0;
-            transition: opacity .18s ease;
-        }
-
-        .feed-video.hide-controls.controls-visible::-webkit-media-controls {
-            opacity: 1;
-        }
-
         .feed-overlay {
             position: absolute;
             left: 12px;
@@ -216,9 +219,99 @@
             left: 0;
             right: 0;
             bottom: 0;
-            height: 92px;
+            height: 120px;
             z-index: 4;
             pointer-events: auto;
+        }
+
+        .feed-custom-controls {
+            position: absolute;
+            left: 12px;
+            right: 12px;
+            bottom: 12px;
+            z-index: 8;
+            border-radius: 14px;
+            background: rgba(0, 0, 0, 0.62);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            padding: 10px 12px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .18s ease;
+        }
+
+        .feed-item.controls-visible .feed-custom-controls {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .feed-controls-topline {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            color: #fff;
+            font-size: 11px;
+        }
+
+        .feed-controls-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feed-inline-btn {
+            border: 0;
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .feed-progress-track {
+            position: relative;
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.22);
+            cursor: pointer;
+        }
+
+        .feed-progress-buffer,
+        .feed-progress-played {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            border-radius: inherit;
+        }
+
+        .feed-progress-buffer {
+            background: rgba(255,255,255,0.36);
+            width: 0;
+        }
+
+        .feed-progress-played {
+            background: #ffffff;
+            width: 0;
+        }
+
+        .feed-progress-thumb {
+            position: absolute;
+            top: 50%;
+            width: 12px;
+            height: 12px;
+            border-radius: 999px;
+            background: #fff;
+            transform: translate(-50%, -50%);
+            left: 0;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.32);
         }
 
         .feed-source-badge {
@@ -252,7 +345,7 @@
 
         .feed-debug-btn {
             position: absolute;
-            right: 12px;
+            left: 12px;
             top: 12px;
             z-index: 7;
             border: 0;
@@ -270,8 +363,8 @@
 
         .feed-debug-panel {
             position: absolute;
-            right: 12px;
-            top: 52px;
+            left: 54px;
+            top: 12px;
             z-index: 7;
             min-width: 220px;
             max-width: 280px;
@@ -526,6 +619,17 @@
             .feed-item {
                 min-height: calc(100vh - 98px);
             }
+
+            .feed-custom-controls {
+                left: 8px;
+                right: 8px;
+                bottom: 8px;
+                padding: 9px 10px;
+            }
+
+            .feed-playlist-drawer {
+                width: min(320px, 86vw);
+            }
         }
         .video-container {
             position: relative;
@@ -621,7 +725,7 @@
                                 <div class="video-feed" id="videoFeed">
                                 </div>
                                 <div class="feed-playlist-drawer" id="feedPlaylistDrawer">
-                                    <div class="feed-playlist-header">播放列表</div>
+                                    <div class="feed-playlist-header"><span>播放列表</span><button type="button" class="feed-playlist-close" id="feedPlaylistClose" aria-label="关闭"><i class="mdi mdi-close"></i></button></div>
                                     <div class="feed-playlist-list" id="feedPlaylistList"></div>
                                 </div>
                                 <div class="loading" id="loading" style="display: none;">
@@ -670,8 +774,6 @@
     var feedScrollDirection = 'down';
     var feedMaxDomItems = 16;
     var feedAllItems = [];
-    var feedAllLoaded = false;
-    var feedFullScanInProgress = false;
     var feedActiveVideo = null;
     var feedMetrics = {
         playAttempts: 0,
@@ -682,15 +784,31 @@
     };
     var feedSessionSeed = '';
     var feedCurrentAbsIndex = -1;
+    var feedControlState = {};
+    var feedProgressDrag = null;
+    var FEED_ORDER_STORAGE_KEY = 'streamv.admin.feedOrder';
+    var FEED_MUTED_STORAGE_KEY = 'streamv.admin.feedMuted';
     
     $(function(){
         var rawMode = $('#mediaHomeMode').val();
         feedMuted = ($('#mediaFeedMuted').val() + '') === 'true';
+        try {
+            var savedMuted = localStorage.getItem(FEED_MUTED_STORAGE_KEY);
+            if (savedMuted === '1' || savedMuted === '0') {
+                feedMuted = savedMuted === '1';
+            }
+        } catch (e) {}
         var rawSourceMode = ($('#mediaFeedSource').val() || '').toString().trim();
         if (['mp4_only', 'hls_only', 'prefer_mp4', 'prefer_hls'].indexOf(rawSourceMode) >= 0) {
             feedSourceMode = rawSourceMode;
         }
         mediaHomeMode = rawMode === 'feed' ? 'feed' : 'grid';
+        try {
+            var savedOrder = localStorage.getItem(FEED_ORDER_STORAGE_KEY);
+            if (savedOrder === 'asc' || savedOrder === 'desc' || savedOrder === 'random') {
+                feedOrder = savedOrder;
+            }
+        } catch (e) {}
         feedSessionSeed = String(Date.now()) + '_' + String(Math.floor(Math.random() * 1000000));
         if (mediaHomeMode === 'feed') {
             $('#videoGrid').hide();
@@ -903,33 +1021,26 @@
                 if(list.length > 0) {
                     if (mediaHomeMode === 'feed') {
                         feedAllItems = feedAllItems.concat(list);
-                        if (data.record && data.record.last) {
-                            feedAllLoaded = true;
-                        }
                         appendFeedAuthorOptions(list);
                     }
                     var html = "";
-                    var renderList = list;
-                    if (mediaHomeMode === 'feed' && feedOrder === 'random') {
-                        renderList = shuffleList(list.slice());
-                    }
-                    for(var i = 0; i < renderList.length; i++) {
-                        var isPrivate = renderList[i].videoprivacy === '1';
+                    for(var i = 0; i < list.length; i++) {
+                        var isPrivate = list[i].videoprivacy === '1';
                         if (mediaHomeMode === 'feed') {
-                            html += buildFeedItemHtml(renderList[i], isPrivate);
+                            html += buildFeedItemHtml(list[i], isPrivate);
                         } else {
-                            var playUrl = renderList[i].playurl || renderList[i].videounrealaddr;
+                            var playUrl = list[i].playurl || list[i].videounrealaddr;
                             html += '<div class="video-card" data-video="'+playUrl+'" data-private="'+isPrivate+'">';
                             html += '<div class="video-cover'+(isPrivate ? ' is-private' : '')+'">';
                             html += '<div class="skeleton"></div>';
-                            html += '<img data-src="'+renderList[i].videocover+'" alt="'+renderList[i].videoname+'" class="lazy-image" onerror="this.src=\'/static/images/noimage.jpg\'">';
+                            html += '<img data-src="'+list[i].videocover+'" alt="'+list[i].videoname+'" class="lazy-image" onerror="this.src=\'/static/images/noimage.jpg\'">';
                             html += '<div class="video-play"><i class="mdi mdi-'+(isPrivate ? 'lock' : 'play')+'"></i></div>';
                             html += '</div>';
                             html += '<div class="video-info">';
-                            html += '<div class="video-title'+(isPrivate ? ' is-private' : '')+'" title="'+(isPrivate ? '' : renderList[i].videoname)+'">'+(isPrivate ? '******' : renderList[i].videoname)+'</div>';
+                            html += '<div class="video-title'+(isPrivate ? ' is-private' : '')+'" title="'+(isPrivate ? '' : list[i].videoname)+'">'+(isPrivate ? '******' : list[i].videoname)+'</div>';
                             html += '<div class="video-meta">';
-                            html += '<span class="video-platform badge-info">'+(isPrivate ? '****' : renderList[i].videoplatform)+'</span>';
-                            html += '<span class="video-time">'+formatTime(renderList[i].createtime)+'</span>';
+                            html += '<span class="video-platform badge-info">'+(isPrivate ? '****' : list[i].videoplatform)+'</span>';
+                            html += '<span class="video-time">'+formatTime(list[i].createtime)+'</span>';
                             html += '</div>';
                             html += '</div>';
                             html += '</div>';
@@ -968,6 +1079,7 @@
         var safePlatform = isPrivate ? '****' : (item.videoplatform || '未知平台');
         var safeAuthor = isPrivate ? '****' : (item.videoauthor || '未知作者');
         var timeText = formatTime(item.createtime);
+        var itemKey = escapeHtml(getFeedItemKey(item));
         var html = '<div class="feed-item" data-private="' + isPrivate + '">';
         html += '<div class="feed-video-host" data-src="' + (item.playurl || item.videounrealaddr || '') + '" data-fallback="' + (item.videounrealaddr || '') + '" data-playurl="' + (item.playurl || '') + '" data-mp4="' + (item.videounrealaddr || item.playurl || '') + '"></div>';
         if (isPrivate) {
@@ -984,6 +1096,10 @@
         html += '<button type="button" class="feed-debug-btn" title="播放信息"><i class="mdi mdi-information-outline"></i></button>';
         html += '<div class="feed-debug-panel"></div>';
         html += '<div class="feed-source-badge"><i class="mdi mdi-file-video"></i><span>MP4</span></div>';
+        html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '">';
+        html += '<div class="feed-controls-topline"><span class="feed-controls-time">0:00 / 0:00</span><div class="feed-controls-actions"><button type="button" class="feed-inline-btn feed-play-toggle" title="播放/暂停"><i class="mdi mdi-play"></i></button><button type="button" class="feed-inline-btn feed-mute-toggle" title="静音"><i class="mdi mdi-volume-' + (feedMuted ? 'off' : 'high') + '"></i></button><button type="button" class="feed-inline-btn feed-fullscreen-toggle" title="全屏"><i class="mdi mdi-fullscreen"></i></button></div></div>';
+        html += '<div class="feed-progress-track"><div class="feed-progress-buffer"></div><div class="feed-progress-played"></div><div class="feed-progress-thumb"></div></div>';
+        html += '</div>';
         html += '<div class="feed-bottom-hover-zone"></div>';
         html += '</div>';
         return html;
@@ -1045,15 +1161,12 @@
         $('#videoFeed .feed-video').off('click');
         $('#videoFeed .feed-item').off('mouseenter mouseleave');
         $('#videoFeed .feed-bottom-hover-zone').off('mouseenter mouseleave');
+        $('#videoFeed .feed-progress-track').off('mousedown click');
+        $('#videoFeed .feed-play-toggle, #videoFeed .feed-mute-toggle, #videoFeed .feed-fullscreen-toggle').off('click');
         $('#videoFeed .feed-item').on('mouseenter', function() {
             var badge = this.querySelector('.feed-source-badge');
             if (badge) {
                 badge.classList.add('visible');
-            }
-            var video = this.querySelector('.feed-video');
-            if (video) {
-                video.controls = false;
-                video.classList.remove('controls-visible');
             }
         });
         $('#videoFeed .feed-item').on('mouseleave', function() {
@@ -1061,32 +1174,22 @@
             if (badge) {
                 badge.classList.remove('visible');
             }
-            var video = this.querySelector('.feed-video');
-            if (video) {
-                video.controls = false;
-                video.classList.remove('controls-visible');
-            }
+            this.classList.remove('controls-visible');
         });
         $('#videoFeed .feed-bottom-hover-zone').on('mouseenter', function() {
             var item = this.parentNode;
             if (!item) {
                 return;
             }
-            var video = item.querySelector('.feed-video');
-            if (video) {
-                video.controls = true;
-                video.classList.add('controls-visible');
-            }
+            item.classList.add('controls-visible');
         });
         $('#videoFeed .feed-bottom-hover-zone').on('mouseleave', function() {
             var item = this.parentNode;
             if (!item) {
                 return;
             }
-            var video = item.querySelector('.feed-video');
-            if (video) {
-                video.controls = false;
-                video.classList.remove('controls-visible');
+            if (!item.matches(':hover')) {
+                item.classList.remove('controls-visible');
             }
         });
         $('#videoFeed .feed-video').on('touchstart', function() {
@@ -1095,7 +1198,10 @@
             if (badge) {
                 badge.classList.add('visible');
             }
-            self.controls = false;
+            var item = self.closest('.feed-item');
+            if (item) {
+                item.classList.add('controls-visible');
+            }
             if (self._ctrlTimer) {
                 clearTimeout(self._ctrlTimer);
             }
@@ -1103,15 +1209,81 @@
                 if (badge) {
                     badge.classList.remove('visible');
                 }
+                if (item) {
+                    item.classList.remove('controls-visible');
+                }
             }, 1800);
         });
         $('#videoFeed .feed-video').on('click', function(e) {
             if (this.paused) {
                 this.play().catch(function(){});
-            } else if (!this.controls) {
+            } else if (!isControlElement(e.target)) {
                 this.pause();
             }
         });
+        $('#videoFeed .feed-play-toggle').on('click', function(e) {
+            e.stopPropagation();
+            var item = this.closest('.feed-item');
+            if (!item) {
+                return;
+            }
+            var video = item.querySelector('.feed-video');
+            if (!video) {
+                return;
+            }
+            if (video.paused) {
+                playWithSync(video);
+            } else {
+                video.pause();
+            }
+        });
+        $('#videoFeed .feed-mute-toggle').on('click', function(e) {
+            e.stopPropagation();
+            feedMuted = !feedMuted;
+            persistFeedMuted();
+            $('#videoFeed .feed-video').each(function() {
+                this.muted = feedMuted;
+            });
+            updateFeedButtons();
+            renderAllFeedControls();
+        });
+        $('#videoFeed .feed-fullscreen-toggle').on('click', function(e) {
+            e.stopPropagation();
+            var item = this.closest('.feed-item');
+            var target = item || null;
+            if (!target) {
+                return;
+            }
+            requestFeedFullscreen(target);
+        });
+        $('#videoFeed .feed-progress-track').on('click', function(e) {
+            if (feedProgressDrag) {
+                return;
+            }
+            e.stopPropagation();
+            seekFeedByTrack(this, e.clientX);
+        });
+        $('#videoFeed .feed-progress-track').on('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var track = this;
+            feedProgressDrag = { track: track };
+            seekFeedByTrack(track, e.clientX);
+            $(document).on('mousemove.feedProgress', function(moveEvt) {
+                if (!feedProgressDrag) {
+                    return;
+                }
+                seekFeedByTrack(track, moveEvt.clientX);
+            });
+            $(document).on('mouseup.feedProgress', function(upEvt) {
+                if (feedProgressDrag) {
+                    seekFeedByTrack(track, upEvt.clientX);
+                }
+                feedProgressDrag = null;
+                $(document).off('mousemove.feedProgress mouseup.feedProgress');
+            });
+        });
+        renderAllFeedControls();
     }
 
     function setupVideoSource(videoEl, src, autoPlayWhenReady) {
@@ -1137,6 +1309,7 @@
         }
 
         videoEl.setAttribute('data-bound-src', src);
+        ensureFeedControlBinding(videoEl);
         var isM3u8 = sourceType === 'HLS';
 
         if (videoEl._frameWatchTimer) {
@@ -1304,10 +1477,12 @@
     function pauseOtherFeedVideos(exceptVideo) {
         if (feedActiveVideo && feedActiveVideo !== exceptVideo) {
             try { feedActiveVideo.pause(); } catch (e) {}
+            syncFeedControlFromVideo(feedActiveVideo);
         }
         document.querySelectorAll('#videoFeed .feed-video').forEach(function(v) {
             if (v !== exceptVideo && !v.paused) {
                 try { v.pause(); } catch (e) {}
+                syncFeedControlFromVideo(v);
             }
         });
         feedActiveVideo = exceptVideo;
@@ -1395,7 +1570,6 @@
             video.setAttribute('preload', 'auto');
             video.setAttribute('playsinline', '');
             video.setAttribute('webkit-playsinline', '');
-            video.controls = false;
             video.muted = feedMuted;
             video._poolRole = roles[i];
             feedVideoPool.push(video);
@@ -1758,6 +1932,7 @@
             } else {
                 feedOrder = 'desc';
             }
+            persistFeedOrder();
             updateFeedButtons();
             applyOrderWithoutReload();
         });
@@ -1768,15 +1943,21 @@
 
         $('#feedMuteBtn').on('click', function() {
             feedMuted = !feedMuted;
+            persistFeedMuted();
             $('#videoFeed .feed-video').each(function() {
                 this.muted = feedMuted;
             });
             updateFeedButtons();
+            renderAllFeedControls();
         });
 
         $('#feedPlaylistBtn').on('click', function() {
             $('#feedPlaylistDrawer').toggleClass('open');
             renderFeedPlaylist();
+        });
+
+        $('#feedPlaylistClose').on('click', function() {
+            $('#feedPlaylistDrawer').removeClass('open');
         });
 
         $('#feedPlaylistList').on('click', '.feed-playlist-item', function() {
@@ -1839,6 +2020,17 @@
                 }
             }
         });
+
+        $(document).on('click.feedPlaylistOutside', function(e) {
+            var drawer = document.getElementById('feedPlaylistDrawer');
+            if (!drawer || !drawer.classList.contains('open')) {
+                return;
+            }
+            if (drawer.contains(e.target) || (e.target.closest && e.target.closest('#feedPlaylistBtn'))) {
+                return;
+            }
+            drawer.classList.remove('open');
+        });
     }
 
     function buildFeedDebugText(video) {
@@ -1891,6 +2083,182 @@
         return '0';
     }
 
+    function getFeedItemKey(item) {
+        if (!item) {
+            return '';
+        }
+        if (item.id != null) {
+            return String(item.id);
+        }
+        if (item.videoid != null) {
+            return String(item.videoid);
+        }
+        return String(item.playurl || item.videounrealaddr || item.videoname || '');
+    }
+
+    function getFeedControlState(itemKey) {
+        if (!itemKey) {
+            return null;
+        }
+        if (!feedControlState[itemKey]) {
+            feedControlState[itemKey] = {
+                duration: 0,
+                current: 0,
+                buffered: 0,
+                paused: true
+            };
+        }
+        return feedControlState[itemKey];
+    }
+
+    function toFeedClock(raw) {
+        var n = Math.max(0, Math.floor(Number(raw || 0)));
+        var m = Math.floor(n / 60);
+        var s = n % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    function renderFeedControlForItem(itemEl) {
+        if (!itemEl) {
+            return;
+        }
+        var controls = itemEl.querySelector('.feed-custom-controls');
+        if (!controls) {
+            return;
+        }
+        var state = getFeedControlState(controls.getAttribute('data-feed-key') || '');
+        if (!state) {
+            return;
+        }
+        var timeEl = controls.querySelector('.feed-controls-time');
+        var playBtn = controls.querySelector('.feed-play-toggle i');
+        var muteBtn = controls.querySelector('.feed-mute-toggle i');
+        var bufferEl = controls.querySelector('.feed-progress-buffer');
+        var playedEl = controls.querySelector('.feed-progress-played');
+        var thumbEl = controls.querySelector('.feed-progress-thumb');
+        var duration = Number(state.duration || 0);
+        var current = Math.max(0, Math.min(duration || 0, Number(state.current || 0)));
+        var buffered = Math.max(0, Math.min(duration || 0, Number(state.buffered || 0)));
+        var playedPercent = duration > 0 ? (current / duration) * 100 : 0;
+        var bufferPercent = duration > 0 ? (buffered / duration) * 100 : 0;
+        if (timeEl) {
+            timeEl.textContent = toFeedClock(current) + ' / ' + toFeedClock(duration);
+        }
+        if (playBtn) {
+            playBtn.className = state.paused ? 'mdi mdi-play' : 'mdi mdi-pause';
+        }
+        if (muteBtn) {
+            muteBtn.className = feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high';
+        }
+        if (bufferEl) {
+            bufferEl.style.width = bufferPercent.toFixed(3) + '%';
+        }
+        if (playedEl) {
+            playedEl.style.width = playedPercent.toFixed(3) + '%';
+        }
+        if (thumbEl) {
+            thumbEl.style.left = playedPercent.toFixed(3) + '%';
+        }
+    }
+
+    function renderAllFeedControls() {
+        document.querySelectorAll('#videoFeed .feed-item').forEach(function(item) {
+            renderFeedControlForItem(item);
+        });
+    }
+
+    function syncFeedControlFromVideo(videoEl) {
+        if (!videoEl || !videoEl.parentNode) {
+            return;
+        }
+        var itemEl = videoEl.closest('.feed-item');
+        if (!itemEl) {
+            return;
+        }
+        var controls = itemEl.querySelector('.feed-custom-controls');
+        if (!controls) {
+            return;
+        }
+        var state = getFeedControlState(controls.getAttribute('data-feed-key') || '');
+        if (!state) {
+            return;
+        }
+        state.duration = Number(videoEl.duration || state.duration || 0);
+        state.current = Number(videoEl.currentTime || 0);
+        state.paused = !!videoEl.paused;
+        try {
+            if (videoEl.buffered && videoEl.buffered.length > 0) {
+                state.buffered = Number(videoEl.buffered.end(videoEl.buffered.length - 1) || state.buffered || 0);
+            }
+        } catch (e) {}
+        renderFeedControlForItem(itemEl);
+    }
+
+    function ensureFeedControlBinding(videoEl) {
+        if (!videoEl || videoEl._customControlBound) {
+            return;
+        }
+        videoEl._customControlBound = true;
+        ['loadedmetadata', 'durationchange', 'timeupdate', 'progress', 'play', 'pause', 'volumechange', 'seeked'].forEach(function(evt) {
+            videoEl.addEventListener(evt, function() {
+                syncFeedControlFromVideo(videoEl);
+            });
+        });
+    }
+
+    function seekFeedByTrack(trackEl, clientX) {
+        if (!trackEl) {
+            return;
+        }
+        var itemEl = trackEl.closest('.feed-item');
+        if (!itemEl) {
+            return;
+        }
+        var video = itemEl.querySelector('.feed-video');
+        if (!video || !video.duration || !isFinite(video.duration)) {
+            return;
+        }
+        var rect = trackEl.getBoundingClientRect();
+        var ratio = rect.width > 0 ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0;
+        try {
+            video.currentTime = video.duration * ratio;
+            syncFeedControlFromVideo(video);
+        } catch (e) {}
+    }
+
+    function requestFeedFullscreen(target) {
+        if (!target) {
+            return;
+        }
+        if (target.requestFullscreen) {
+            target.requestFullscreen();
+            return;
+        }
+        if (target.webkitRequestFullscreen) {
+            target.webkitRequestFullscreen();
+            return;
+        }
+        if (target.msRequestFullscreen) {
+            target.msRequestFullscreen();
+        }
+    }
+
+    function isControlElement(target) {
+        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip'));
+    }
+
+    function persistFeedOrder() {
+        try {
+            localStorage.setItem(FEED_ORDER_STORAGE_KEY, feedOrder);
+        } catch (e) {}
+    }
+
+    function persistFeedMuted() {
+        try {
+            localStorage.setItem(FEED_MUTED_STORAGE_KEY, feedMuted ? '1' : '0');
+        } catch (e) {}
+    }
+
     function reloadFeed() {
         page = 0;
         hasMore = true;
@@ -1901,8 +2269,6 @@
         ensureFeedSpacer();
         feedAuthorSet = {};
         feedAllItems = [];
-        feedAllLoaded = false;
-        feedFullScanInProgress = false;
         feedRandomPool = [];
         feedRandomCursor = 0;
         feedRandomLoading = false;
@@ -1919,88 +2285,6 @@
             return;
         }
         reloadFeed();
-    }
-
-    function loadAllFeedItemsAndApplyOrder() {
-        if (feedFullScanInProgress) {
-            return;
-        }
-        feedFullScanInProgress = true;
-        var reqPage = 0;
-        var merged = [];
-        var pageSize = 50;
-        var retryCount = 0;
-        var maxRetry = 2;
-        var maxPages = 500;
-        var loadingLayer = layer.load(2, { shade: [0.15, '#000'] });
-
-        function nextPage() {
-            if (reqPage > maxPages) {
-                finish(false);
-                return;
-            }
-            var option = buildFeedRequestOption(reqPage, pageSize);
-            $.post('/admin/api/findVideoDataList', option, function(data) {
-                if (!data || data.resCode !== '000001' || !data.record || !data.record.content) {
-                    if (retryCount < maxRetry) {
-                        retryCount++;
-                        setTimeout(nextPage, 160);
-                        return;
-                    }
-                    finish(false);
-                    return;
-                }
-                retryCount = 0;
-                var list = data.record.content || [];
-                if (list.length > 0) {
-                    merged = merged.concat(list);
-                    appendFeedAuthorOptions(list);
-                }
-                if (data.record.last || list.length === 0) {
-                    feedAllItems = merged;
-                    feedAllLoaded = true;
-                    page = reqPage;
-                    hasMore = false;
-                    finish(true);
-                    return;
-                }
-                reqPage++;
-                nextPage();
-            }).fail(function() {
-                if (retryCount < maxRetry) {
-                    retryCount++;
-                    setTimeout(nextPage, 160);
-                    return;
-                }
-                finish(false);
-            });
-        }
-
-        function finish(success) {
-            feedFullScanInProgress = false;
-            layer.close(loadingLayer);
-            if (!success) {
-                if (merged.length > 0) {
-                    feedAllItems = merged;
-                }
-                renderFeedByOrderLocal();
-                layer.msg('完整列表加载中断，已基于当前可用数据切换顺序', {icon: 0, time: 1500});
-                return;
-            }
-            applyOrderWithoutReload();
-        }
-
-        nextPage();
-    }
-
-    function shuffleList(arr) {
-        for (var i = arr.length - 1; i > 0; i--) {
-            var j = Math.floor(Math.random() * (i + 1));
-            var temp = arr[i];
-            arr[i] = arr[j];
-            arr[j] = temp;
-        }
-        return arr;
     }
 
     function buildFeedRequestOption(pageNo, pageSize) {
@@ -2060,43 +2344,6 @@
             html = '<div style="padding:12px;color:#cbd5e1;font-size:12px;">暂无播放项</div>';
         }
         wrap.html(html);
-    }
-
-    function renderFeedByOrderLocal() {
-        if (!feedAllItems || feedAllItems.length === 0) {
-            return;
-        }
-        var itemEls = Array.prototype.slice.call(document.querySelectorAll('#videoFeed .feed-item'));
-        var activeAbs = -1;
-        if (itemEls.length > 0) {
-            var viewTop = ($('#videoFeed')[0] || {}).scrollTop || 0;
-            var itemHeight = ($('#videoFeed')[0] || {}).clientHeight || 1;
-            var spacerHeight = feedTrimmedHeadCount * itemHeight;
-            activeAbs = Math.max(0, feedTrimmedHeadCount + Math.round(Math.max(0, viewTop - spacerHeight) / itemHeight));
-        }
-        var sorted = feedAllItems.slice();
-        if (feedOrder === 'asc') {
-            sorted.sort(function(a, b) { return new Date(a.createtime).getTime() - new Date(b.createtime).getTime(); });
-        } else if (feedOrder === 'desc') {
-            sorted.sort(function(a, b) { return new Date(b.createtime).getTime() - new Date(a.createtime).getTime(); });
-        } else {
-            shuffleList(sorted);
-        }
-        var html = '';
-        for (var i = 0; i < sorted.length; i++) {
-            html += buildFeedItemHtml(sorted[i], sorted[i].videoprivacy === '1');
-        }
-        $('#videoFeed').empty();
-        ensureFeedSpacer();
-        $('#videoFeed').append(html);
-        feedAbsCounter = 0;
-        feedTrimmedHeadCount = 0;
-        hydrateFeedItems();
-        initFeedAutoPlay();
-        var c = $('#videoFeed')[0];
-        if (c && activeAbs > 0) {
-            c.scrollTop = activeAbs * (c.clientHeight || 1);
-        }
     }
 
     function loadRandomPoolAndRender() { return; }
