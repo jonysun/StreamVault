@@ -114,16 +114,16 @@ export default {
 			biliTypeValues: ['arc', 'seaarc', 'fav'],
 			biliTypeIndex: 0,
 			monitoringLabels: ['否', '是'],
-			monitoringIndex: 0,
+			monitoringIndex: 1,
 			douyinShareText: '',
 			taskForm: {
 				platform: '抖音',
 				taskname: '',
 				originaladdress: '',
-				monitoring: 'N',
+				monitoring: 'Y',
 				taskcron: '',
-				omaxcur: '80',
-				maxcur: '80',
+				omaxcur: '20',
+				maxcur: '20',
 				douyinType: 'post',
 				biliType: 'arc',
 				seaarcid: ''
@@ -182,16 +182,16 @@ export default {
 			this.platformIndex = 0
 			this.douyinTypeIndex = 0
 			this.biliTypeIndex = 0
-			this.monitoringIndex = 0
+			this.monitoringIndex = 1
 			this.douyinShareText = ''
 			this.taskForm = {
 				platform: '抖音',
 				taskname: '抖音作品任务',
 				originaladdress: '',
-				monitoring: 'N',
+				monitoring: 'Y',
 				taskcron: '',
-				omaxcur: '80',
-				maxcur: '80',
+				omaxcur: '20',
+				maxcur: '20',
 				douyinType: 'post',
 				biliType: 'arc',
 				seaarcid: ''
@@ -239,7 +239,10 @@ export default {
 						this.taskForm.douyinType = 'post'
 						this.douyinTypeIndex = 0
 						this.taskForm.originaladdress = res.data.record.secUserId || ''
-						if (!this.taskForm.taskname || this.taskForm.taskname === '抖音作品任务') {
+						const authorName = ((res.data.record.authorName || '') + '').trim()
+						if (authorName) {
+							this.taskForm.taskname = `${authorName}的抖音作品`
+						} else if (!this.taskForm.taskname || this.taskForm.taskname === '抖音作品任务') {
 							this.taskForm.taskname = '抖音作者作品任务'
 						}
 						uni.showToast({ title: '解析成功', icon: 'success' })

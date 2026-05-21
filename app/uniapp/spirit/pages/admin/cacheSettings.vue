@@ -13,6 +13,12 @@
 					<view class="picker-value">{{ playbackLabel }}</view>
 				</picker>
 			</view>
+			<view class="row-input">
+				<text class="label">播放源策略</text>
+				<picker class="picker" :range="sourceOptions" range-key="label" :value="sourceIndex" @change="onSourceModeChange">
+					<view class="picker-value">{{ sourceLabel }}</view>
+				</picker>
+			</view>
 			<view class="row">
 				<text class="label">启用缓存</text>
 				<switch :checked="settings.enabled" @change="onSwitch('enabled', $event)" />
@@ -40,6 +46,10 @@
 			<view class="row-input">
 				<text class="label">预加载相邻视频数</text>
 				<input type="number" v-model="settings.feedPreloadNeighbors" class="ipt" />
+			</view>
+			<view class="row-input">
+				<text class="label">预取视频数</text>
+				<input type="number" v-model="settings.feedPrefetchCount" class="ipt" />
 			</view>
 			<view class="row-input">
 				<text class="label">切页后播放延迟(ms)</text>
@@ -72,6 +82,12 @@
 					{ label: '自动下一条', value: 'autonext' },
 					{ label: '本条循环', value: 'loopone' },
 					{ label: '播放后停止', value: 'stop' }
+				],
+				sourceOptions: [
+					{ label: 'MP4优先', value: 'prefer_mp4' },
+					{ label: 'HLS优先', value: 'prefer_hls' },
+					{ label: '仅MP4', value: 'mp4_only' },
+					{ label: '仅HLS', value: 'hls_only' }
 				]
 			}
 		},
@@ -96,6 +112,15 @@
 			playbackLabel() {
 				const i = this.playbackIndex
 				return (this.playbackOptions[i] && this.playbackOptions[i].label) || '自动下一条'
+			},
+			sourceIndex() {
+				const mode = this.settings.playbackSourceMode || 'prefer_mp4'
+				const idx = this.sourceOptions.findIndex(x => x.value === mode)
+				return idx >= 0 ? idx : 0
+			},
+			sourceLabel() {
+				const i = this.sourceIndex
+				return (this.sourceOptions[i] && this.sourceOptions[i].label) || 'MP4优先'
 			}
 		},
 		onShow() {
@@ -113,6 +138,11 @@
 				const picked = this.playbackOptions[Number.isNaN(i) ? 0 : i] || this.playbackOptions[0]
 				this.$set(this.settings, 'playbackMode', picked.value)
 			},
+			onSourceModeChange(e) {
+				const i = parseInt(e && e.detail && e.detail.value, 10)
+				const picked = this.sourceOptions[Number.isNaN(i) ? 0 : i] || this.sourceOptions[0]
+				this.$set(this.settings, 'playbackSourceMode', picked.value)
+			},
 			onSwitch(key, e) {
 				this.$set(this.settings, key, !!(e && e.detail && e.detail.value))
 			},
@@ -125,7 +155,9 @@
 					maxSizeMB: Math.max(100, parseInt(this.settings.maxSizeMB || 1024, 10)),
 					feedSwipeDuration: Math.max(120, parseInt(this.settings.feedSwipeDuration || 220, 10)),
 					feedPreloadNeighbors: Math.max(0, Math.min(2, parseInt(this.settings.feedPreloadNeighbors || 1, 10))),
+					feedPrefetchCount: Math.max(1, Math.min(12, parseInt(this.settings.feedPrefetchCount || 6, 10))),
 					feedPlayDelayMs: Math.max(0, Math.min(300, parseInt(this.settings.feedPlayDelayMs || 40, 10))),
+					playbackSourceMode: ['prefer_mp4', 'prefer_hls', 'mp4_only', 'hls_only'].includes(this.settings.playbackSourceMode) ? this.settings.playbackSourceMode : 'prefer_mp4',
 					appTheme: (this.settings.appTheme === 'dark' ? 'dark' : 'light'),
 					playbackMode: ['autonext', 'loopone', 'stop'].includes(this.settings.playbackMode) ? this.settings.playbackMode : 'autonext'
 				}

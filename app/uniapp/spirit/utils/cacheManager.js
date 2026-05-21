@@ -9,7 +9,9 @@ const DEFAULT_SETTINGS = {
 	enabled: true,
 	feedSwipeDuration: 220,
 	feedPreloadNeighbors: 1,
+	feedPrefetchCount: 6,
 	feedPlayDelayMs: 40,
+	playbackSourceMode: 'prefer_mp4',
 	appTheme: 'light',
 	playbackMode: 'autonext'
 }
@@ -62,7 +64,7 @@ function getCacheKey(video) {
 	if (!video) return ''
 	if (video.id != null) return String(video.id)
 	if (video.videoid) return String(video.videoid)
-	return String(video.playurl || video.videounrealaddr || '')
+	return String(video.playSrc || video.playurl || video.videounrealaddr || '')
 }
 
 function getTotalSize(index) {
@@ -101,10 +103,10 @@ function evictIfNeeded() {
 
 function getPlayableUrl(video) {
 	const key = getCacheKey(video)
-	if (!key) return video.playurl || video.videounrealaddr || ''
+	if (!key) return video.playSrc || video.playurl || video.videounrealaddr || ''
 	const index = readIndex()
 	const item = index[key]
-	if (!item || !item.path) return video.playurl || video.videounrealaddr || ''
+	if (!item || !item.path) return video.playSrc || video.playurl || video.videounrealaddr || ''
 	item.lastAccess = now()
 	index[key] = item
 	writeIndex(index)
@@ -140,7 +142,7 @@ function prefetchOne(video) {
 			return
 		}
 
-		const remote = video.playurl || video.videounrealaddr
+		const remote = video.playSrc || video.playurl || video.videounrealaddr
 		if (!remote) {
 			resolve(false)
 			return
@@ -177,7 +179,9 @@ function prefetchOne(video) {
 
 async function prefetchVideos(videos) {
 	if (!videos || videos.length === 0) return
-	const tasks = videos.slice(0, 6)
+	const settings = readSettings()
+	const prefetchCount = Math.max(1, Math.min(12, parseInt(settings.feedPrefetchCount || 6, 10)))
+	const tasks = videos.slice(0, prefetchCount)
 	// 下一条优先
 	// eslint-disable-next-line no-await-in-loop
 	await prefetchOne(tasks[0])

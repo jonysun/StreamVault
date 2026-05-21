@@ -1023,6 +1023,7 @@ public class CollectDataService {
 					.get();
 			String finalUrl = document.baseUri();
 			String secUserId = extractSecUserId(finalUrl);
+			String authorName = extractDouyinAuthorName(document == null ? null : document.title());
 			if (secUserId == null || secUserId.trim().isEmpty()) {
 				return new AjaxEntity(Global.ajax_uri_error, "未解析到抖音用户ID", null);
 			}
@@ -1030,6 +1031,9 @@ public class CollectDataService {
 			record.put("platform", "抖音");
 			record.put("finalUrl", finalUrl);
 			record.put("secUserId", secUserId);
+			if (authorName != null && !authorName.trim().isEmpty()) {
+				record.put("authorName", authorName.trim());
+			}
 			return new AjaxEntity(Global.ajax_success, "解析成功", record);
 		} catch (Exception e) {
 			logger.error("resolveDouyinUserLink error", e);
@@ -1069,6 +1073,23 @@ public class CollectDataService {
 			logger.warn("invalid final url: {}", finalUrl);
 		}
 		return null;
+	}
+
+	private String extractDouyinAuthorName(String title) {
+		if (title == null) {
+			return null;
+		}
+		String t = title.trim();
+		if (t.isEmpty()) {
+			return null;
+		}
+		t = t.replaceAll("[|｜]\\s*抖音.*$", "").trim();
+		t = t.replaceAll("的抖音.*$", "").trim();
+		t = t.replaceAll("\\s*[-—].*$", "").trim();
+		if (t.isEmpty()) {
+			return null;
+		}
+		return t;
 	}
 
 	public AjaxEntity createBillFav(CollectDataEntity collectDataEntity, String monitor) {

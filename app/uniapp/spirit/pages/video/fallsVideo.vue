@@ -7,7 +7,7 @@
 			<cover-view class="icon-btn" @tap="toggleInfoPanel">i</cover-view>
 		</cover-view>
 
-		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="swipeDuration" :skip-hidden-item-layout="true" :disable-touch="true" @touchstart="onTouchStart" @touchend="onTouchEnd">
+		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="swipeDuration" :skip-hidden-item-layout="true">
 			<swiper-item v-for="(video, index) in playList" :key="video.id || video.videoid || index" class="swiper-cell">
 				<view class="video-wrapper">
 					<video
@@ -28,6 +28,7 @@
 						class="video-player"
 						@play="onVideoPlay(index)"
 						@pause="onVideoPause(index)"
+						@error="onVideoError(index)"
 						@ended="onVideoEnded(index)"
 						@timeupdate="onTimeUpdate"
 					></video>
@@ -41,7 +42,7 @@
 						</cover-view>
 					</cover-view>
 
-					<cover-view v-if="showControls" class="progress-wrap" @touchstart.stop.prevent="onProgressTouchStart" @touchmove.stop.prevent="onProgressTouchMove" @touchend.stop.prevent="onProgressTouchEnd">
+					<cover-view v-if="showControls && index === currentIndex" class="progress-wrap" @touchstart.stop.prevent="onProgressTouchStart" @touchmove.stop.prevent="onProgressTouchMove" @touchend.stop.prevent="onProgressTouchEnd">
 						<cover-view class="progress-time">{{ currentTimeText }} / {{ durationText }}</cover-view>
 						<cover-view class="progress-track">
 							<cover-view class="progress-buffer" :style="{ width: bufferPercent + '%' }"></cover-view>
@@ -50,7 +51,7 @@
 						</cover-view>
 					</cover-view>
 
-					<cover-view v-if="!isPlaying && index === currentIndex" class="pause-indicator">暂停</cover-view>
+					<cover-view v-if="manualPaused && !isPlaying && index === currentIndex" class="pause-indicator">暂停</cover-view>
 				</view>
 			</swiper-item>
 		</swiper>
@@ -69,6 +70,8 @@
 			<view class="info-sheet" :class="themeClass">
 				<view class="sheet-title">播放信息</view>
 				<view class="info-row">排序模式：{{ activeOrderLabel }}<text v-if="pendingOrderMode">（下一条将切换为{{ pendingOrderLabel }}）</text></view>
+				<view class="info-row">播放源策略：{{ playbackSourceLabel }}</view>
+				<view class="info-row">当前实际源：{{ activeSourceType }}</view>
 				<view class="info-row">播放索引：{{ currentIndex + 1 }} / {{ playList.length }}</view>
 				<view class="info-row">首帧耗时：最近 {{ perfStats.lastMs }}ms，均值 {{ perfStats.avgMs }}ms（{{ perfStats.samples }}次）</view>
 				<view class="info-row">播放状态：{{ isPlaying ? '播放中' : '暂停中' }}</view>
@@ -94,7 +97,12 @@
 				isPlaying: false,
 				currentIndex: 0,
 				activePlayingIndex: -1,
-				pageNo: 1,
+				pageNo: 0,
+				sessionRandomSeed: '',
+				requestPageSize: 50,
+				prefetchTriggerOffset: 5,
+				prefetchCount: 6,
+				isResettingFeed: false,
 				isLoading: false,
 				hasMore: true,
 				serveraddr: '',
@@ -105,16 +113,17 @@
 				swipeDuration: 220,
 				preloadNeighbors: 1,
 				playDelayMs: 40,
+				playbackSourceMode: 'prefer_mp4',
 				playbackMode: 'autonext',
 				appTheme: 'light',
-				touchStartY: 0,
-				touchStartTs: 0,
 				isDraggingProgress: false,
 				showControls: false,
+				manualPaused: false,
 				controlsHideTimer: null,
 				durationSec: 0,
 				currentSec: 0,
 				bufferSec: 0,
+				playRequestToken: 0,
 				switchPending: {},
 				perfStats: {
 					lastMs: 0,
@@ -149,6 +158,17 @@
 			orderTip() {
 				return this.pendingOrderMode ? `当前${this.activeOrderLabel}，下一条切换${this.pendingOrderLabel}` : `当前${this.activeOrderLabel}`
 			},
+			playbackSourceLabel() {
+				if (this.playbackSourceMode === 'mp4_only') return '仅MP4'
+				if (this.playbackSourceMode === 'hls_only') return '仅HLS'
+				if (this.playbackSourceMode === 'prefer_hls') return 'HLS优先'
+				return 'MP4优先'
+			},
+			activeSourceType() {
+				const current = this.playList[this.currentIndex]
+				if (!current || !current.playSrc) return '未知'
+				return /\.m3u8(\?|$)/i.test(current.playSrc) ? 'HLS' : 'MP4'
+			},
 			authorText() {
 				return this.selectedAuthor && this.selectedAuthor.trim() ? this.selectedAuthor : '全部'
 			},
@@ -174,7 +194,8 @@
 			this.ensureServerConfig()
 			this.cacheSettings = cacheManager.readSettings()
 			this.applyFeedSettings()
-			this.loadVideos()
+			this.initFeedSession()
+			this.resetAndLoadFeed({ keepOrder: true })
 		},
 		onShow() {
 			this.cacheSettings = cacheManager.readSettings()
@@ -183,10 +204,19 @@
 				this.ensureServerConfig()
 			}
 			if (this.playList.length === 0) {
-				this.loadVideos()
+				this.initFeedSession()
+				this.resetAndLoadFeed({ keepOrder: true })
 			}
 		},
 		methods: {
+			createRandomSeed() {
+				return `${Date.now()}_${Math.floor(Math.random() * 1000000)}`
+			},
+			initFeedSession() {
+				if (!this.sessionRandomSeed || this.activeOrderMode === 'random') {
+					this.sessionRandomSeed = this.createRandomSeed()
+				}
+			},
 			toClock(raw) {
 				const n = Math.max(0, Math.floor(Number(raw || 0)))
 				const m = Math.floor(n / 60)
@@ -206,14 +236,18 @@
 				this.showControlsBriefly()
 			},
 			pauseCurrent() {
+				this.playRequestToken++
 				const c = this.videoContexts[this.currentIndex]
 				if (c) c.pause()
 				this.isPlaying = false
+				this.manualPaused = true
 			},
 			resumeCurrent() {
+				this.playRequestToken++
 				const c = this.videoContexts[this.currentIndex]
 				if (c) c.play()
 				this.isPlaying = true
+				this.manualPaused = false
 			},
 			onProgressTouchStart(e) {
 				this.isDraggingProgress = true
@@ -241,74 +275,40 @@
 				const c = this.videoContexts[this.currentIndex]
 				if (c) c.seek(target)
 			},
-			onTouchStart(e) {
-				if (this.isDraggingProgress) return
-				const t = e && e.touches && e.touches[0]
-				if (!t) return
-				this.touchStartY = Number(t.pageY || 0)
-				this.touchStartTs = Date.now()
-			},
-			onTouchEnd(e) {
-				if (this.isDraggingProgress) return
-				const t = e && e.changedTouches && e.changedTouches[0]
-				if (!t) return
-				const endY = Number(t.pageY || 0)
-				const dy = endY - this.touchStartY
-				const dt = Math.max(1, Date.now() - (this.touchStartTs || Date.now()))
-				const velocity = Math.abs(dy) / dt
-				const sys = uni.getSystemInfoSync()
-				const minDistancePx = Math.max(40, Number(sys.windowHeight || 720) * 0.12)
-				const passDistance = Math.abs(dy) >= minDistancePx
-				const passVelocity = velocity >= 0.45
-				if (!passDistance && !passVelocity) {
-					return
-				}
-				if (dy < 0) {
-					this.stepByDirection(1)
-				} else {
-					this.stepByDirection(-1)
-				}
-			},
 			stepByDirection(direction) {
 				if (direction !== 1 && direction !== -1) return
+				this.showControls = false
 				if (this.pendingOrderMode && this.pendingOrderMode !== this.activeOrderMode) {
-					this.applyPendingOrder(direction)
+					this.applyPendingOrder()
 					return
 				}
 				this.stepTo(this.currentIndex + direction)
 			},
-			applyPendingOrder(direction) {
-				const current = this.playList[this.currentIndex]
-				const currentId = this.getVideoKey(current)
+			applyPendingOrder() {
 				this.activeOrderMode = this.pendingOrderMode
 				this.pendingOrderMode = ''
-				const list = this.getOrderedFilteredList(this.activeOrderMode)
-				this.playList = list
-				let idx = list.findIndex(v => this.getVideoKey(v) === currentId)
-				if (idx < 0) idx = 0
-				const target = Math.max(0, Math.min(list.length - 1, idx + direction))
-				this.currentIndex = target
-				this.$nextTick(() => this.playCurrent())
-				uni.showToast({ title: `已切换${this.activeOrderLabel}`, icon: 'none' })
+				this.resetAndLoadFeed({ resetSeed: this.activeOrderMode === 'random' }).then(() => {
+					uni.showToast({ title: `已切换${this.activeOrderLabel}`, icon: 'none' })
+				})
 			},
 			stepTo(nextIndex) {
 				const safe = Math.max(0, Math.min(this.playList.length - 1, nextIndex))
 				if (safe === this.currentIndex) return
 				this.currentIndex = safe
+				this.showControls = false
 				this.playCurrent()
-				if (this.currentIndex >= this.playList.length - 2) {
-					if (this.hasMore) {
-						this.loadVideos()
-					} else if (this.activeOrderMode === 'random' && this.playList.length > 1 && this.currentIndex >= this.playList.length - 1) {
-						this.rebuildPlayList(true)
-					}
+				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
+					this.loadVideos()
 				}
 			},
 			applyFeedSettings() {
 				const s = this.cacheSettings || {}
 				this.swipeDuration = Math.max(120, parseInt(s.feedSwipeDuration || 220, 10))
 				this.preloadNeighbors = Math.max(0, Math.min(2, parseInt(s.feedPreloadNeighbors || 1, 10)))
+				this.prefetchCount = Math.max(1, Math.min(12, parseInt(s.feedPrefetchCount || 6, 10)))
+				this.prefetchTriggerOffset = Math.max(1, Math.min(12, parseInt(s.feedPrefetchCount || 6, 10)))
 				this.playDelayMs = Math.max(0, Math.min(300, parseInt(s.feedPlayDelayMs || 40, 10)))
+				this.playbackSourceMode = ['prefer_mp4', 'prefer_hls', 'mp4_only', 'hls_only'].includes(s.playbackSourceMode) ? s.playbackSourceMode : 'prefer_mp4'
 				this.playbackMode = ['autonext', 'loopone', 'stop'].includes(s.playbackMode) ? s.playbackMode : 'autonext'
 				this.appTheme = (s.appTheme === 'dark' ? 'dark' : 'light')
 			},
@@ -343,10 +343,103 @@
 				const encodedPath = p.split('/').map(s => encodeURIComponent(s)).join('/')
 				return `${this.serveraddr}:${this.serverport}${encodedPath}?apptoken=${this.servertoken}`
 			},
-			loadVideos() {
-				if (this.isLoading || !this.hasMore) return
+			buildFeedQuery(pageNo) {
+				const query = {
+					pageNo,
+					pageSize: this.requestPageSize
+				}
+				if (this.activeOrderMode === 'random') {
+					query.randomMode = '1'
+					query.randomSeed = this.sessionRandomSeed
+				} else {
+					query.sortField = 'createtime'
+					query.sortOrder = this.activeOrderMode === 'asc' ? 'asc' : 'desc'
+				}
+				if (this.selectedAuthor && this.selectedAuthor.trim()) {
+					query.videoauthor = this.selectedAuthor.trim()
+				}
+				return query
+			},
+			resolvePlayableSource(video) {
+				if (!video) return ''
+				const playurl = video.playurl || ''
+				const mp4 = video.videounrealaddr || ''
+				const isHls = /\.m3u8(\?|$)/i.test(playurl)
+				if (this.playbackSourceMode === 'mp4_only') {
+					return mp4 || playurl || ''
+				}
+				if (this.playbackSourceMode === 'hls_only') {
+					return (isHls ? playurl : '') || playurl || mp4 || ''
+				}
+				if (this.playbackSourceMode === 'prefer_hls') {
+					return (isHls ? playurl : '') || mp4 || playurl || ''
+				}
+				return mp4 || playurl || ''
+			},
+			resolveFallbackSource(video) {
+				if (!video) return ''
+				const playurl = video.playurl || ''
+				const mp4 = video.videounrealaddr || ''
+				const preferred = this.resolvePlayableSource(video)
+				if (preferred === mp4) return playurl || ''
+				if (preferred === playurl) return mp4 || ''
+				return ''
+			},
+			preparePlaybackWindow(centerIndex) {
+				if (!Array.isArray(this.playList) || this.playList.length === 0) return
+				const start = Math.max(0, centerIndex - this.preloadNeighbors)
+				const end = Math.min(this.playList.length - 1, centerIndex + this.preloadNeighbors + 1)
+				for (let i = start; i <= end; i++) {
+					const item = this.playList[i]
+					if (!item) continue
+					const resolved = this.resolvePlayableSource(item)
+					if (resolved && item.playSrc !== resolved) {
+						this.$set(item, 'playSrc', resolved)
+					}
+				}
+			},
+			resetAndLoadFeed(options = {}) {
+				if (this.isResettingFeed) {
+					return Promise.resolve(false)
+				}
+				this.isResettingFeed = true
+				this.pauseAll()
+				this.playRequestToken++
+				this.baseList = []
+				this.playList = []
+				this.pageNo = 0
+				this.hasMore = true
+				this.currentIndex = 0
+				this.activePlayingIndex = -1
+				this.videoContexts = {}
+				this.currentSec = 0
+				this.durationSec = 0
+				this.bufferSec = 0
+				this.showControls = false
+				this.manualPaused = false
+				this.switchPending = {}
+				if (options.resetSeed || this.activeOrderMode === 'random') {
+					this.sessionRandomSeed = this.createRandomSeed()
+				}
+				return new Promise((resolve) => {
+					this.loadVideos(() => {
+						this.isResettingFeed = false
+						this.preparePlaybackWindow(0)
+						if (this.playList.length > 0) {
+							this.$nextTick(() => this.playCurrent())
+						}
+						resolve(true)
+					})
+				})
+			},
+			loadVideos(onDone) {
+				if (this.isLoading || !this.hasMore) {
+					if (typeof onDone === 'function') onDone()
+					return
+				}
 				if (!this.serveraddr || !this.serverport || !this.servertoken) {
 					uni.showToast({ title: '请先配置服务器', icon: 'none' })
+					if (typeof onDone === 'function') onDone()
 					return
 				}
 				this.isLoading = true
@@ -354,7 +447,7 @@
 					url: `${this.serveraddr}:${this.serverport}/api/findVideos?token=${this.servertoken}`,
 					method: 'POST',
 					header: { 'content-type': 'application/x-www-form-urlencoded' },
-					data: { pageNo: this.pageNo, pageSize: 15, sortField: 'createtime', sortOrder: 'desc' },
+					data: this.buildFeedQuery(this.pageNo),
 						success: (res) => {
 						if (res.data && res.data.resCode === '000001' && res.data.record && res.data.record.content) {
 							const list = res.data.record.content || []
@@ -362,13 +455,14 @@
 								v.playurl = this.normalizePath(v.playurl)
 								v.videounrealaddr = this.normalizePath(v.videounrealaddr)
 								v.videocover = this.normalizePath(v.videocover)
-								v.playSrc = v.playurl || v.videounrealaddr
+								v.playSrc = this.resolvePlayableSource(v)
 							})
 							this.baseList = this.baseList.concat(list)
+							this.playList = this.baseList.slice()
 							this.pageNo++
 							this.hasMore = !res.data.record.last
 							this.refreshAuthorOptions()
-							this.rebuildPlayList(false)
+							this.preparePlaybackWindow(this.currentIndex)
 							cacheManager.prefetchVideos(list)
 						} else {
 							uni.showToast({
@@ -380,7 +474,10 @@
 					fail: () => {
 						uni.showToast({ title: '网络异常，请检查服务器', icon: 'none' })
 					},
-					complete: () => { this.isLoading = false }
+						complete: () => {
+							this.isLoading = false
+							if (typeof onDone === 'function') onDone()
+						}
 				})
 			},
 			refreshAuthorOptions() {
@@ -390,58 +487,42 @@
 				})
 				this.authorOptions = Array.from(s).sort()
 			},
-			getOrderedFilteredList(mode) {
-				let list = this.baseList.slice()
-				if (this.selectedAuthor && this.selectedAuthor.trim()) list = list.filter(v => (v.videoauthor || '').indexOf(this.selectedAuthor.trim()) >= 0)
-				if (mode === 'asc') list.reverse()
-				if (mode === 'random') this.shuffle(list)
-				return list
-			},
-			getVideoKey(v) {
-				if (!v) return ''
-				if (v.id != null) return String(v.id)
-				if (v.videoid != null) return String(v.videoid)
-				return String(v.playurl || v.videounrealaddr || v.videoname || '')
-			},
-			rebuildPlayList(keepCurrent) {
-				const currentId = keepCurrent ? this.getVideoKey(this.playList[this.currentIndex]) : ''
-				const list = this.getOrderedFilteredList(this.activeOrderMode)
-				this.playList = list
-				if (!keepCurrent) this.currentIndex = 0
-				else {
-					const idx = list.findIndex(v => this.getVideoKey(v) === currentId)
-					this.currentIndex = idx >= 0 ? idx : 0
-				}
-				this.$nextTick(() => this.playCurrent())
-			},
-			shuffle(arr) {
-				for (let i = arr.length - 1; i > 0; i--) {
-					const j = Math.floor(Math.random() * (i + 1))
-					const t = arr[i]
-					arr[i] = arr[j]
-					arr[j] = t
-				}
-			},
 			onSwiperChange(e) {
 				const next = Number(e && e.detail && e.detail.current)
 				if (Number.isNaN(next)) return
-				if (next > this.currentIndex) this.stepByDirection(1)
-				else if (next < this.currentIndex) this.stepByDirection(-1)
+				if (next === this.currentIndex) return
+				this.showControls = false
+				this.currentIndex = next
+				if (this.pendingOrderMode && this.pendingOrderMode !== this.activeOrderMode) {
+					this.applyPendingOrder()
+					return
+				}
+				this.playCurrent()
+				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
+					this.loadVideos()
+				}
 			},
 			playCurrent() {
-				this.pauseAll()
+				const requestToken = ++this.playRequestToken
+				this.pausePrevious()
 				const idx = this.currentIndex
 				if (idx < 0 || idx >= this.playList.length) return
+				this.preparePlaybackWindow(idx)
 				this.activePlayingIndex = idx
 				this.isPlaying = false
+				this.manualPaused = false
+				this.currentSec = 0
+				this.durationSec = 0
+				this.bufferSec = 0
 				this.switchPending[idx] = Date.now()
 				const current = this.playList[idx]
 				if (current) {
+					this.$delete(current, '_fallbackTried')
 					const playable = cacheManager.getPlayableUrl(current)
 					if (playable && playable !== current.playSrc) {
 						this.$set(current, 'playSrc', playable)
-					} else if (!current.playSrc) {
-						this.$set(current, 'playSrc', current.playurl || current.videounrealaddr || '')
+					} else {
+						this.$set(current, 'playSrc', this.resolvePlayableSource(current))
 					}
 				}
 				if (!this.videoContexts[idx]) {
@@ -449,11 +530,13 @@
 				}
 				if (this.videoContexts[idx]) {
 					setTimeout(() => {
+						if (requestToken !== this.playRequestToken || idx !== this.currentIndex) return
+						this.preparePlaybackWindow(idx)
 						this.videoContexts[idx] && this.videoContexts[idx].play()
 					}, this.playDelayMs)
 				}
 				this.prefetchAround(idx)
-				this.showControlsBriefly()
+				this.showControls = false
 			},
 			getVideoSrc(index, video) {
 				if (!video) return ''
@@ -463,6 +546,7 @@
 				return ''
 			},
 			prefetchAround(idx) {
+				const prefetchCount = Math.max(1, this.prefetchCount)
 				const queue = []
 				if (idx + 1 < this.playList.length) {
 					queue.push(this.playList[idx + 1])
@@ -470,16 +554,24 @@
 				if (idx - 1 >= 0) {
 					queue.push(this.playList[idx - 1])
 				}
-				for (let i = idx + 2; i < Math.min(this.playList.length, idx + 6); i++) {
+				for (let i = idx + 2; i < Math.min(this.playList.length, idx + 1 + prefetchCount); i++) {
 					queue.push(this.playList[i])
 				}
 				cacheManager.prefetchVideos(queue)
 			},
 			pauseAll() {
+				this.playRequestToken++
 				Object.keys(this.videoContexts).forEach(k => {
 					const c = this.videoContexts[k]
 					if (c) c.pause()
 				})
+				this.isPlaying = false
+			},
+			pausePrevious() {
+				const prev = this.activePlayingIndex
+				if (prev < 0 || prev === this.currentIndex) return
+				const c = this.videoContexts[prev]
+				if (c) c.pause()
 				this.isPlaying = false
 			},
 			onVideoPlay(index) {
@@ -491,6 +583,7 @@
 				}
 				this.activePlayingIndex = index
 				this.isPlaying = true
+				this.manualPaused = false
 				const start = this.switchPending[index]
 				if (!start) return
 				const ms = Math.max(0, Date.now() - start)
@@ -504,6 +597,28 @@
 			},
 			onVideoPause(index) {
 				if (index === this.currentIndex) this.isPlaying = false
+			},
+			onVideoError(index) {
+				const item = this.playList[index]
+				if (!item) return
+				if (item._fallbackTried) {
+					if (index === this.currentIndex) {
+						uni.showToast({ title: '播放失败，请切换源策略', icon: 'none' })
+					}
+					return
+				}
+				const fallback = this.resolveFallbackSource(item)
+				if (!fallback || fallback === item.playSrc) {
+					if (index === this.currentIndex) {
+						uni.showToast({ title: '播放失败，请切换源策略', icon: 'none' })
+					}
+					return
+				}
+				this.$set(item, '_fallbackTried', true)
+				this.$set(item, 'playSrc', fallback)
+				if (index === this.currentIndex) {
+					this.$nextTick(() => this.playCurrent())
+				}
 			},
 			onTimeUpdate(e) {
 				const d = e && e.detail ? e.detail : {}
@@ -522,10 +637,9 @@
 					return
 				}
 				if (index < this.playList.length - 1) this.stepByDirection(1)
-				else if (this.hasMore) this.loadVideos()
-				else if (this.activeOrderMode === 'random' && this.playList.length > 1) {
-					this.rebuildPlayList(false)
-				}
+				else if (this.hasMore) this.loadVideos(() => {
+					if (this.currentIndex < this.playList.length - 1) this.stepByDirection(1)
+				})
 			},
 			toggleOrder() {
 				let next = 'desc'
@@ -547,7 +661,7 @@
 			selectAuthor(author) {
 				this.selectedAuthor = author || ''
 				this.$refs.authorPopup.close()
-				this.rebuildPlayList(true)
+				this.resetAndLoadFeed()
 			}
 		},
 		beforeDestroy() {
