@@ -241,6 +241,12 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	@Transient
 	private String hlsstatus;
+
+	@Transient
+	private String randomMode;
+
+	@Transient
+	private String randomSeed;
 	
 	public String getExcludePlatform() {
 		return excludePlatform;
@@ -296,6 +302,22 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setHlsstatus(String hlsstatus) {
 		this.hlsstatus = hlsstatus;
+	}
+
+	public String getRandomMode() {
+		return randomMode;
+	}
+
+	public void setRandomMode(String randomMode) {
+		this.randomMode = randomMode;
+	}
+
+	public String getRandomSeed() {
+		return randomSeed;
+	}
+
+	public void setRandomSeed(String randomSeed) {
+		this.randomSeed = randomSeed;
 	}
 	
 

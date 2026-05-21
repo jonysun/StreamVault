@@ -16,6 +16,27 @@
             padding: 20px;
         }
 
+        .feed-page.container-fluid,
+        .feed-page .row,
+        .feed-page .col-lg-12,
+        .feed-page .card,
+        .feed-page .card-body {
+            height: 100%;
+        }
+
+        .feed-page .card {
+            margin-bottom: 0;
+        }
+
+        .feed-page .card-body {
+            position: relative;
+            min-height: calc(100vh - 120px);
+        }
+
+        .feed-page .video-feed {
+            height: 100%;
+        }
+
         .video-feed {
             display: none;
             height: calc(100vh - 120px);
@@ -64,6 +85,65 @@
         .feed-control-btn span {
             line-height: 1;
             transform: scale(0.95);
+        }
+
+        .feed-playlist-drawer {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 320px;
+            z-index: 9;
+            background: rgba(10, 10, 10, 0.92);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-left: 1px solid rgba(255, 255, 255, 0.12);
+            transform: translateX(102%);
+            transition: transform .2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .feed-playlist-drawer.open {
+            transform: translateX(0);
+        }
+
+        .feed-playlist-header {
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 14px 14px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .feed-playlist-list {
+            overflow-y: auto;
+            padding: 10px;
+            flex: 1;
+        }
+
+        .feed-playlist-item {
+            display: block;
+            width: 100%;
+            border: 0;
+            text-align: left;
+            margin-bottom: 8px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            padding: 9px 10px;
+            font-size: 12px;
+        }
+
+        .feed-playlist-item.active {
+            background: rgba(86, 156, 255, 0.4);
+        }
+
+        .feed-playlist-item .meta {
+            display: block;
+            opacity: .75;
+            margin-top: 4px;
+            font-size: 11px;
         }
 
         .feed-item {
@@ -489,17 +569,10 @@
         <div th:insert="~{admin/include/common :: headermenu}"></div>
         
         <main class="lyear-layout-content">
-            <div class="container-fluid">
+            <div class="container-fluid feed-page">
                 <div class="row">
                     <div class="col-lg-12">
                         <div class="card">
-                            <div class="card-header bg-light">
-                                <div class="row align-items-center">
-                                    <div class="col">
-                                        <h5 class="card-title mb-0">视频库</h5>
-                                    </div>
-                                </div>
-                            </div>
                             <div class="card-body p-0">
                                 <input type="hidden" id="mediaHomeMode" th:value="${T(com.flower.spirit.config.Global).mediaHomeMode}" />
                                 <input type="hidden" id="mediaFeedMuted" th:value="${T(com.flower.spirit.config.Global).mediaFeedMuted}" />
@@ -514,10 +587,17 @@
                                     <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
                                         <i class="mdi mdi-volume-off"></i><span>静音</span>
                                     </button>
+                                    <button type="button" class="feed-control-btn" id="feedPlaylistBtn" title="播放列表">
+                                        <i class="mdi mdi-format-list-bulleted"></i><span>列表</span>
+                                    </button>
                                 </div>
                                 <div class="video-grid" id="videoGrid">
                                 </div>
                                 <div class="video-feed" id="videoFeed">
+                                </div>
+                                <div class="feed-playlist-drawer" id="feedPlaylistDrawer">
+                                    <div class="feed-playlist-header">播放列表</div>
+                                    <div class="feed-playlist-list" id="feedPlaylistList"></div>
                                 </div>
                                 <div class="loading" id="loading" style="display: none;">
                                     <i class="mdi mdi-loading mdi-spin"></i> 加载中...
@@ -558,7 +638,8 @@
     var feedPrewarmDone = {};
     var feedPrewarmPending = {};
     var feedVideoPool = [];
-    var feedPrefetchPageThreshold = 3;
+    var feedPrefetchPageThreshold = 5;
+    var feedPageSize = 50;
     var feedAbsCounter = 0;
     var feedTrimmedHeadCount = 0;
     var feedScrollDirection = 'down';
@@ -574,6 +655,8 @@
         prewarmHits: 0,
         stallsRecovered: 0
     };
+    var feedSessionSeed = '';
+    var feedCurrentAbsIndex = -1;
     
     $(function(){
         var rawMode = $('#mediaHomeMode').val();
@@ -583,6 +666,7 @@
             feedSourceMode = rawSourceMode;
         }
         mediaHomeMode = rawMode === 'feed' ? 'feed' : 'grid';
+        feedSessionSeed = String(Date.now()) + '_' + String(Math.floor(Math.random() * 1000000));
         if (mediaHomeMode === 'feed') {
             $('#videoGrid').hide();
             $('#feedControls').css('display', 'flex');
@@ -777,19 +861,9 @@
         isLoading = true;
         $('#loading').show();
         
-        var option = {
-            pageNo: page,
-            pageSize: mediaHomeMode === 'feed' ? 8 : 25
-        }
-        if (mediaHomeMode === 'feed') {
-            option.sortField = 'createtime';
-            if (feedOrder === 'asc' || feedOrder === 'desc') {
-                option.sortOrder = feedOrder;
-            }
-            if (feedAuthor && feedAuthor.trim() !== '') {
-                option.videoauthor = feedAuthor.trim();
-            }
-        }
+        var option = mediaHomeMode === 'feed'
+            ? buildFeedRequestOption(page, feedPageSize)
+            : { pageNo: page, pageSize: 25 };
         
         $.post("/admin/api/findVideoDataList", option, function(data, status) {
             if(data.resCode === "000001") {
@@ -840,6 +914,7 @@
                             $('#videoFeed').append(html);
                             hydrateFeedItems();
                             initFeedAutoPlay();
+                            renderFeedPlaylist();
                         } else {
                             $('#videoGrid').append(html);
                             initLazyLoading();
@@ -949,6 +1024,7 @@
             }
             var video = this.querySelector('.feed-video');
             if (video) {
+                video.controls = false;
                 video.classList.remove('controls-visible');
             }
         });
@@ -959,6 +1035,7 @@
             }
             var video = this.querySelector('.feed-video');
             if (video) {
+                video.controls = false;
                 video.classList.remove('controls-visible');
             }
         });
@@ -969,6 +1046,7 @@
             }
             var video = item.querySelector('.feed-video');
             if (video) {
+                video.controls = true;
                 video.classList.add('controls-visible');
             }
         });
@@ -979,6 +1057,7 @@
             }
             var video = item.querySelector('.feed-video');
             if (video) {
+                video.controls = false;
                 video.classList.remove('controls-visible');
             }
         });
@@ -988,6 +1067,7 @@
             if (badge) {
                 badge.classList.add('visible');
             }
+            self.controls = false;
             if (self._ctrlTimer) {
                 clearTimeout(self._ctrlTimer);
             }
@@ -1166,6 +1246,11 @@
         if (!videoEl) {
             return;
         }
+        var ownerIndex = Number(videoEl.getAttribute('data-feed-index') || '-1');
+        if (ownerIndex >= 0 && ownerIndex !== feedCurrentAbsIndex) {
+            feedCurrentAbsIndex = ownerIndex;
+            renderFeedPlaylist();
+        }
         pauseOtherFeedVideos(videoEl);
         feedMetrics.playAttempts++;
         if (videoEl.readyState >= 2 && (videoEl.videoWidth > 0 || !videoEl.currentSrc || !/\.m3u8(\?|$)/i.test(videoEl.currentSrc))) {
@@ -1282,7 +1367,7 @@
             video.setAttribute('preload', 'auto');
             video.setAttribute('playsinline', '');
             video.setAttribute('webkit-playsinline', '');
-            video.controls = true;
+            video.controls = false;
             video.muted = feedMuted;
             video._poolRole = roles[i];
             feedVideoPool.push(video);
@@ -1501,6 +1586,10 @@
             var spacerHeight = feedTrimmedHeadCount * itemHeight;
             var contentScrollTop = Math.max(0, scrollTop - spacerHeight);
             var currentAbsIndex = Math.max(0, feedTrimmedHeadCount + Math.floor(contentScrollTop / itemHeight));
+            if (currentAbsIndex !== feedCurrentAbsIndex) {
+                feedCurrentAbsIndex = currentAbsIndex;
+                renderFeedPlaylist();
+            }
             var offset = contentScrollTop % itemHeight;
             var ratio = offset / itemHeight;
             var direction = scrollTop >= feedLastScrollTop ? 'down' : 'up';
@@ -1518,8 +1607,7 @@
                 prewarmFeedIndexWindow(items, warmIndex, direction);
                 pruneFeedDom(items, currentAbsIndex, itemHeight);
                 trimFutureFeedDom(currentAbsIndex, direction);
-                var lastAbsIndex = Number(items[items.length - 1].getAttribute('data-abs-index') || String(currentAbsIndex));
-                var remaining = lastAbsIndex - warmIndex;
+                var remaining = feedAllItems.length - 1 - warmIndex;
                 if (remaining <= feedPrefetchPageThreshold && hasMore && !isLoading) {
                     page++;
                     findList(page);
@@ -1658,6 +1746,19 @@
             updateFeedButtons();
         });
 
+        $('#feedPlaylistBtn').on('click', function() {
+            $('#feedPlaylistDrawer').toggleClass('open');
+            renderFeedPlaylist();
+        });
+
+        $('#feedPlaylistList').on('click', '.feed-playlist-item', function() {
+            var abs = Number(this.getAttribute('data-abs') || '-1');
+            if (abs < 0) {
+                return;
+            }
+            jumpToFeedAbsIndex(abs);
+        });
+
         $('#videoFeed').on('click', '.feed-author-chip', function(e) {
             e.stopPropagation();
             var author = ($(this).data('author') || '').toString().trim();
@@ -1777,6 +1878,11 @@
         feedRandomPool = [];
         feedRandomCursor = 0;
         feedRandomLoading = false;
+        feedCurrentAbsIndex = -1;
+        if (feedOrder === 'random') {
+            feedSessionSeed = String(Date.now()) + '_' + String(Math.floor(Math.random() * 1000000));
+        }
+        renderFeedPlaylist();
         findList(page);
     }
 
@@ -1784,10 +1890,151 @@
         if (mediaHomeMode !== 'feed') {
             return;
         }
-        if ((feedOrder === 'random' || feedOrder === 'asc' || feedOrder === 'desc') && !feedAllLoaded) {
-            loadAllFeedItemsAndApplyOrder();
+        reloadFeed();
+    }
+
+    function loadAllFeedItemsAndApplyOrder() {
+        if (feedFullScanInProgress) {
             return;
         }
+        feedFullScanInProgress = true;
+        var reqPage = 0;
+        var merged = [];
+        var pageSize = 50;
+        var retryCount = 0;
+        var maxRetry = 2;
+        var maxPages = 500;
+        var loadingLayer = layer.load(2, { shade: [0.15, '#000'] });
+
+        function nextPage() {
+            if (reqPage > maxPages) {
+                finish(false);
+                return;
+            }
+            var option = buildFeedRequestOption(reqPage, pageSize);
+            $.post('/admin/api/findVideoDataList', option, function(data) {
+                if (!data || data.resCode !== '000001' || !data.record || !data.record.content) {
+                    if (retryCount < maxRetry) {
+                        retryCount++;
+                        setTimeout(nextPage, 160);
+                        return;
+                    }
+                    finish(false);
+                    return;
+                }
+                retryCount = 0;
+                var list = data.record.content || [];
+                if (list.length > 0) {
+                    merged = merged.concat(list);
+                    appendFeedAuthorOptions(list);
+                }
+                if (data.record.last || list.length === 0) {
+                    feedAllItems = merged;
+                    feedAllLoaded = true;
+                    page = reqPage;
+                    hasMore = false;
+                    finish(true);
+                    return;
+                }
+                reqPage++;
+                nextPage();
+            }).fail(function() {
+                if (retryCount < maxRetry) {
+                    retryCount++;
+                    setTimeout(nextPage, 160);
+                    return;
+                }
+                finish(false);
+            });
+        }
+
+        function finish(success) {
+            feedFullScanInProgress = false;
+            layer.close(loadingLayer);
+            if (!success) {
+                if (merged.length > 0) {
+                    feedAllItems = merged;
+                }
+                renderFeedByOrderLocal();
+                layer.msg('完整列表加载中断，已基于当前可用数据切换顺序', {icon: 0, time: 1500});
+                return;
+            }
+            applyOrderWithoutReload();
+        }
+
+        nextPage();
+    }
+
+    function shuffleList(arr) {
+        for (var i = arr.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var temp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = temp;
+        }
+        return arr;
+    }
+
+    function buildFeedRequestOption(pageNo, pageSize) {
+        var option = {
+            pageNo: pageNo,
+            pageSize: pageSize || 8
+        };
+        if (mediaHomeMode === 'feed') {
+            if (feedOrder === 'asc' || feedOrder === 'desc') {
+                option.sortField = 'createtime';
+                option.sortOrder = feedOrder;
+            } else if (feedOrder === 'random') {
+                option.randomMode = '1';
+                option.randomSeed = feedSessionSeed;
+            }
+            if (feedAuthor && feedAuthor.trim() !== '') {
+                option.videoauthor = feedAuthor.trim();
+            }
+        }
+        return option;
+    }
+
+    function jumpToFeedAbsIndex(absIndex) {
+        var container = $('#videoFeed')[0];
+        if (!container) {
+            return;
+        }
+        var itemHeight = container.clientHeight || 1;
+        var targetTop = absIndex * itemHeight;
+        container.scrollTo({ top: targetTop, behavior: 'smooth' });
+        feedCurrentAbsIndex = absIndex;
+        var items = Array.prototype.slice.call(document.querySelectorAll('#videoFeed .feed-item'));
+        prewarmFeedIndexWindow(items, absIndex, 'down');
+        renderFeedPlaylist();
+    }
+
+    function renderFeedPlaylist() {
+        if (mediaHomeMode !== 'feed') {
+            return;
+        }
+        var wrap = $('#feedPlaylistList');
+        if (!wrap.length) {
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < feedAllItems.length; i++) {
+            var item = feedAllItems[i] || {};
+            var title = item.videoprivacy === '1' ? '******' : (item.videoname || '未命名视频');
+            var author = item.videoprivacy === '1' ? '****' : (item.videoauthor || '未知作者');
+            var activeCls = i === feedCurrentAbsIndex ? ' active' : '';
+            html += '<button type="button" class="feed-playlist-item' + activeCls + '" data-abs="' + i + '">';
+            html += '<span>' + escapeHtml((i + 1) + '. ' + title) + '</span>';
+            html += '<span class="meta">@' + escapeHtml(author) + '</span>';
+            html += '</button>';
+        }
+        if (!html) {
+            html = '<div style="padding:12px;color:#cbd5e1;font-size:12px;">暂无播放项</div>';
+        }
+        wrap.html(html);
+    }
+
+    function renderFeedByOrderLocal() {
         if (!feedAllItems || feedAllItems.length === 0) {
             return;
         }
@@ -1822,82 +2069,6 @@
         if (c && activeAbs > 0) {
             c.scrollTop = activeAbs * (c.clientHeight || 1);
         }
-    }
-
-    function loadAllFeedItemsAndApplyOrder() {
-        if (feedFullScanInProgress) {
-            return;
-        }
-        feedFullScanInProgress = true;
-        var reqPage = 0;
-        var merged = [];
-        var loadingLayer = layer.load(2, { shade: [0.15, '#000'] });
-
-        function nextPage() {
-            var option = buildFeedRequestOption(reqPage);
-            $.post('/admin/api/findVideoDataList', option, function(data) {
-                if (!data || data.resCode !== '000001' || !data.record || !data.record.content) {
-                    finish(false);
-                    return;
-                }
-                var list = data.record.content || [];
-                if (list.length > 0) {
-                    merged = merged.concat(list);
-                    appendFeedAuthorOptions(list);
-                }
-                if (data.record.last || list.length === 0) {
-                    feedAllItems = merged;
-                    feedAllLoaded = true;
-                    page = reqPage;
-                    hasMore = false;
-                    finish(true);
-                    return;
-                }
-                reqPage++;
-                nextPage();
-            }).fail(function() {
-                finish(false);
-            });
-        }
-
-        function finish(success) {
-            feedFullScanInProgress = false;
-            layer.close(loadingLayer);
-            if (!success) {
-                layer.msg('加载完整列表失败，请稍后重试', {icon: 2});
-                return;
-            }
-            applyOrderWithoutReload();
-        }
-
-        nextPage();
-    }
-
-    function shuffleList(arr) {
-        for (var i = arr.length - 1; i > 0; i--) {
-            var j = Math.floor(Math.random() * (i + 1));
-            var temp = arr[i];
-            arr[i] = arr[j];
-            arr[j] = temp;
-        }
-        return arr;
-    }
-
-    function buildFeedRequestOption(pageNo) {
-        var option = {
-            pageNo: pageNo,
-            pageSize: 8
-        };
-        if (mediaHomeMode === 'feed') {
-            option.sortField = 'createtime';
-            if (feedOrder === 'asc' || feedOrder === 'desc') {
-                option.sortOrder = feedOrder;
-            }
-            if (feedAuthor && feedAuthor.trim() !== '') {
-                option.videoauthor = feedAuthor.trim();
-            }
-        }
-        return option;
     }
 
     function loadRandomPoolAndRender() { return; }

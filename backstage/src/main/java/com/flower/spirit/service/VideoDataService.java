@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpHeaders;
@@ -68,7 +69,11 @@ public class VideoDataService {
 	
 	
 	public AjaxEntity findPage(VideoDataEntity res) {
-	    PageRequest of = PageRequest.of(res.getPageNo(), res.getPageSize());
+	    int pageNo = res == null ? 0 : Math.max(0, res.getPageNo());
+	    int pageSize = res == null ? 25 : Math.max(1, res.getPageSize());
+	    PageRequest of = PageRequest.of(pageNo, pageSize);
+	    boolean randomMode = res != null && "1".equals(String.valueOf(res.getRandomMode()));
+	    String randomSeed = res == null ? null : res.getRandomSeed();
 
 	    Specification<VideoDataEntity> specification = (root, query, cb) -> {
 	        List<Predicate> predicates = new ArrayList<>();
@@ -124,25 +129,39 @@ public class VideoDataService {
 	            }
 	        }
 
-	        String sortField = res == null ? null : res.getSortField();
-	        String sortOrder = res == null ? null : res.getSortOrder();
-	        String actualSortField = null;
-	        if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
-	        	actualSortField = sortField;
-	        }
-	        if (actualSortField != null) {
-	        	if ("asc".equalsIgnoreCase(sortOrder)) {
-	        		query.orderBy(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
-	        	} else {
-	        		query.orderBy(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
+	        if (!randomMode) {
+	        	String sortField = res == null ? null : res.getSortField();
+	        	String sortOrder = res == null ? null : res.getSortOrder();
+	        	String actualSortField = null;
+	        	if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
+	        		actualSortField = sortField;
 	        	}
-	        } else {
-	        	query.orderBy(cb.desc(root.get("id")));
+	        	if (actualSortField != null) {
+	        		if ("asc".equalsIgnoreCase(sortOrder)) {
+	        			query.orderBy(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
+	        		} else {
+	        			query.orderBy(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
+	        		}
+	        	} else {
+	        		query.orderBy(cb.desc(root.get("id")));
+	        	}
 	        }
 	        return cb.and(predicates.toArray(new Predicate[0]));
 	    };
 
-	    Page<VideoDataEntity> findAll = videoDataDao.findAll(specification, of);
+	    Page<VideoDataEntity> findAll;
+	    if (randomMode) {
+	    	List<VideoDataEntity> all = videoDataDao.findAll(specification);
+	    	long seed = randomSeed == null ? System.nanoTime() : randomSeed.hashCode();
+	    	java.util.Random random = new java.util.Random(seed);
+	    	java.util.Collections.shuffle(all, random);
+	    	int from = Math.min(pageNo * pageSize, all.size());
+	    	int to = Math.min(from + pageSize, all.size());
+	    	List<VideoDataEntity> pageList = from >= to ? new ArrayList<>() : all.subList(from, to);
+	    	findAll = new PageImpl<>(pageList, of, all.size());
+	    } else {
+	    	findAll = videoDataDao.findAll(specification, of);
+	    }
 	    if (findAll != null && findAll.getContent() != null) {
 	    	java.util.Set<Integer> queuedIds = hlsTranscodeService.queuedIdsSnapshot();
 	    	Integer runningId = hlsTranscodeService.runningVideoIdSnapshot();
