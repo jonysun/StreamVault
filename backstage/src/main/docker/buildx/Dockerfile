@@ -11,7 +11,7 @@ RUN python3 -m venv /opt/venv && \
 FROM eclipse-temurin:17-jre
 
 ENV TZ=Asia/Shanghai
-ARG YT_DLP_VERSION=
+ARG YT_DLP_VERSION=2026.03.17
 
 # 安装运行时依赖（ffmpeg + 基础工具）
 RUN apt-get update && \
