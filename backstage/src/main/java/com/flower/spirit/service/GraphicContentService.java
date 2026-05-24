@@ -32,6 +32,9 @@ public class GraphicContentService {
 	
 	@Autowired
 	private GraphicContentDao graphicContentDao;
+
+	@Autowired
+	private BlockedWorkService blockedWorkService;
 	
 	
 	
@@ -103,10 +106,15 @@ public class GraphicContentService {
 
 
 
-	public AjaxEntity deleteGraphicContent(String id) {
+	public AjaxEntity deleteGraphicContent(String id, String blockwork) {
 		Optional<GraphicContentEntity> findById = graphicContentDao.findById(Integer.valueOf(id));
 		if (findById.isPresent()) {
 			GraphicContentEntity graphicContentEntity = findById.get();
+			if (!"0".equals(blockwork)) {
+				blockedWorkService.blockWork(graphicContentEntity.getPlatform(), graphicContentEntity.getVideoid(), "graphic",
+						graphicContentEntity.getTitle(), graphicContentEntity.getAuthor(), graphicContentEntity.getAuthoruid(),
+						graphicContentEntity.getSourceurl() != null ? graphicContentEntity.getSourceurl() : graphicContentEntity.getOriginaladdress(), "manual-delete");
+			}
 			CommandUtil.deleteDirectory(Paths.get(graphicContentEntity.getMarkroute()).normalize().toString());
 			graphicContentDao.deleteById(Integer.valueOf(id));
 		}

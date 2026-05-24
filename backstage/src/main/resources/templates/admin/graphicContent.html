@@ -1370,13 +1370,13 @@ function bindCardEvents() {
 		console.log('准备删除图文内容，ID:', id, '标题:', title);
 		
 		// 显示确认对话框
-		layer.confirm('确定要删除图文内容 "' + title + '" 吗？<br><span style="color: #ff6b6b;">此操作不可撤销！</span>', {
+		layer.confirm('确定要删除图文内容 "' + title + '" 吗？<br><span style="color: #ff6b6b;">此操作不可撤销！</span><br><label style="font-weight:normal;margin-top:8px;display:block;"><input type="checkbox" id="singleGraphicBlockWork" checked> 是否拉黑该作品</label>', {
 			icon: 3,
 			title: '删除确认',
 			btn: ['确定删除', '取消']
 		}, function(index) {
 			// 确认删除
-			deleteGraphicContent(id, index);
+		deleteGraphicContent(id, index, $('#singleGraphicBlockWork').is(':checked') ? '1' : '0');
 		}, function(index) {
 			// 取消删除
 			layer.close(index);
@@ -1393,12 +1393,12 @@ function bindCardEvents() {
 			layer.msg('请先选择要删除的图文项');
 			return;
 		}
-		layer.confirm('确认删除已选择的 ' + selectedGraphicIds.size + ' 项图文内容吗？', {
+		layer.confirm('确认删除已选择的 ' + selectedGraphicIds.size + ' 项图文内容吗？<br><label style="font-weight:normal;margin-top:8px;display:block;"><input type="checkbox" id="batchGraphicBlockWork" checked> 是否拉黑该作品</label>', {
 			icon: 3,
 			title: '批量删除确认'
 		}, function(index){
 			layer.close(index);
-			batchDeleteGraphic(Array.from(selectedGraphicIds));
+			batchDeleteGraphic(Array.from(selectedGraphicIds), $('#batchGraphicBlockWork').is(':checked') ? '1' : '0');
 		});
 	});
 }
@@ -1423,7 +1423,7 @@ function updateBatchCount(){
 	$('#batchSelectedCount').text('已选 ' + selectedGraphicIds.size + ' 项');
 }
 
-function batchDeleteGraphic(ids){
+function batchDeleteGraphic(ids, blockwork){
 	if (!ids || ids.length === 0) return;
 	var loadingIndex = layer.load(1, {shade:[0.3,'#000'], content:'批量删除中...'});
 	var success = 0;
@@ -1441,7 +1441,7 @@ function batchDeleteGraphic(ids){
 			return;
 		}
 		var id = ids[idx++];
-		$.get('/admin/api/deleteGraphicContent', {id:id}, function(res){
+		$.get('/admin/api/deleteGraphicContent', {id:id, blockwork:blockwork || '1'}, function(res){
 			if (res.resCode === '000001') success++; else fail++;
 			next();
 		}).fail(function(){
@@ -1758,7 +1758,7 @@ function sanitizeFileName(fileName) {
  * @param {string} id 内容ID
  * @param {number} layerIndex 确认对话框的索引
  */
-function deleteGraphicContent(id, layerIndex) {
+function deleteGraphicContent(id, layerIndex, blockwork) {
 	console.log('开始删除图文内容，ID:', id);
 	
 	// 显示删除进度提示
@@ -1774,7 +1774,7 @@ function deleteGraphicContent(id, layerIndex) {
 	});
 	
 	// 发送删除请求
-	$.get("/admin/api/deleteGraphicContent", { id: id }, function(data) {
+	$.get("/admin/api/deleteGraphicContent", { id: id, blockwork: blockwork || '1' }, function(data) {
 		layer.close(loadingIndex);
 		layer.close(layerIndex);
 		

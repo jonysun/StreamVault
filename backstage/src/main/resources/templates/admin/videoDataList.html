@@ -901,9 +901,10 @@
                 return;
             }
 
-            layer.confirm("删除后下载的资源将一并删除,是否删除选中的" + selectedIds.length + "项?", function (index) {
+            layer.confirm("删除后下载的资源将一并删除,是否删除选中的" + selectedIds.length + "项?<br><label style='font-weight:normal;margin-top:8px;display:block;'><input type='checkbox' id='batchBlockWork' checked> 是否拉黑该作品</label>", function (index) {
                 var deleteCount = 0;
                 var totalCount = selectedIds.length;
+                var blockwork = $('#batchBlockWork').is(':checked') ? '1' : '0';
                 var $progress = $('.delete-progress');
                 var $progressList = $progress.find('.progress-list');
 
@@ -927,7 +928,7 @@
                     var name = selectedNames[deleteCount];
                     var $item = $progressList.find('.progress-item[data-id="' + id + '"]');
 
-                    $.get("/admin/api/deleteVideoData?id=" + id, function (res) {
+                    $.get("/admin/api/deleteVideoData?id=" + id + "&blockwork=" + blockwork, function (res) {
                         if (res.resCode == "000001") {
                             $item.removeClass('pending').addClass('success')
                                 .html(name + ' - 删除成功');
@@ -1072,10 +1073,11 @@
         function deleteData() {
             $('.deleteData').click(function () {
                 var id = $(this).attr('data-id');
-                layer.confirm("删除后下载的资源将一并删除,是否删除", function (index) {
+                layer.confirm("删除后下载的资源将一并删除,是否删除<br><label style='font-weight:normal;margin-top:8px;display:block;'><input type='checkbox' id='singleBlockWork' checked> 是否拉黑该作品</label>", function (index) {
                     //调用接口删除
                     var loadIndex = layer.load(1, { shade: [0.3, '#000'] });
-                    $.get("/admin/api/deleteVideoData?id=" + id, function (res) {
+                    var blockwork = $('#singleBlockWork').is(':checked') ? '1' : '0';
+                    $.get("/admin/api/deleteVideoData?id=" + id + "&blockwork=" + blockwork, function (res) {
                         layer.close(loadIndex);
                         if (res.resCode == "000001") {
                             layer.msg(res.message)

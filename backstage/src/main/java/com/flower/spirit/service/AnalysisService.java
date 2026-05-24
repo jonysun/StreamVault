@@ -80,6 +80,12 @@ public class AnalysisService {
 	@Autowired
 	private HongShuExecutor hongShuExecutor;
 
+	@Autowired
+	private AuthorProfileService authorProfileService;
+
+	@Autowired
+	private BlockedWorkService blockedWorkService;
+
 
 	/**
 	 * 解析资源
@@ -184,7 +190,15 @@ public class AnalysisService {
 					String name = new File(filename).getName();
 					String coverdb = dircos + baseName + ".webp";
 					String videodb = dircos + name;
+					if (blockedWorkService.isBlocked(detectedPlatform, display_id, "video")) {
+						continue;
+					}
 					VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,detectedPlatform, coverdb, filename, videodb, url);
+					videoDataEntity.setVideoauthor(parseObject.getString("uploader"));
+					videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
+					videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
+					videoDataEntity.setSourceurl(parseObject.getString("uploader_url"));
+					authorProfileService.upsertAuthor(detectedPlatform, parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), parseObject.getString("uploader"), null, parseObject.getString("uploader_url"));
 					VideoDataEntity saved = videoDataDao.save(videoDataEntity);
 					if (saved != null && saved.getId() != null) {
 						hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));
@@ -246,10 +260,18 @@ public class AnalysisService {
 							videofile);
 				}
 				videofile = videofile+filename + ".mp4";
+				if (blockedWorkService.isBlocked(platform, videoId, "video")) {
+					return;
+				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(videoId, title, title, platform, coverunaddr,
 						videofile,
 						videounrealaddr, url);
 				videoDataEntity.setVideoauthor(author);
+				videoDataEntity.setAuthoruid(video.getAuthorId());
+				videoDataEntity.setAuthorusername(video.getAuthorId());
+				videoDataEntity.setAuthoravatar(coverUrl);
+				videoDataEntity.setSourceurl(url);
+				authorProfileService.upsertAuthor(platform, video.getAuthorId(), video.getAuthorId(), author, coverUrl, url);
 				VideoDataEntity saved = videoDataDao.save(videoDataEntity);
 				if (saved != null && saved.getId() != null) {
 					hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));
@@ -391,9 +413,16 @@ public class AnalysisService {
 
 				String videodb = dircos + name;
 
+				if (blockedWorkService.isBlocked(Global.platform.twitter.name(), display_id, "video")) {
+					continue;
+				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,
 						Global.platform.twitter.name(), coverdb, filename, videodb, url);
 				videoDataEntity.setVideoauthor(uploader);
+				videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
+				videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
+				videoDataEntity.setSourceurl(uploader_url);
+				authorProfileService.upsertAuthor(Global.platform.twitter.name(), parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), uploader, null, uploader_url);
 				videoDataDao.save(videoDataEntity);
 				processHistoryService.saveProcess(saveProcess.getId(), url, platform);
 				if (Global.getGeneratenfo) {
@@ -441,8 +470,16 @@ public class AnalysisService {
 
 			String videodb = dircos + name;
 
+			if (blockedWorkService.isBlocked(Global.platform.instagram.name(), display_id, "video")) {
+				return;
+			}
 			VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,
 					Global.platform.instagram.name(), coverdb, filename, videodb, url);
+			videoDataEntity.setVideoauthor(uploader);
+			videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
+			videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
+			videoDataEntity.setSourceurl(uploader_url);
+			authorProfileService.upsertAuthor(Global.platform.instagram.name(), parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), uploader, null, uploader_url);
 			videoDataDao.save(videoDataEntity);
 			processHistoryService.saveProcess(saveProcess.getId(), url, platform);
 			if (Global.getGeneratenfo) {
@@ -495,10 +532,16 @@ public class AnalysisService {
 
 				String videodb = dircos + name;
 
+				if (blockedWorkService.isBlocked(Global.platform.youtube.name(), display_id, "video")) {
+					continue;
+				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,
 						Global.platform.youtube.name(), coverdb, filename, videodb, youtube);
 				videoDataEntity.setSourceurl("https://www.youtube.com/watch?v=" + display_id);
 				videoDataEntity.setVideoauthor(uploader);
+				videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
+				videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
+				authorProfileService.upsertAuthor(Global.platform.youtube.name(), parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), uploader, null, uploader_url);
 				videoDataDao.save(videoDataEntity);
 				processHistoryService.saveProcess(saveProcess.getId(), youtube, platform);
 				if (Global.getGeneratenfo) {
@@ -584,6 +627,9 @@ public class AnalysisService {
 							filename + ".jpg", dir);
 					
 				}
+				if (blockedWorkService.isBlocked(platform, cid, "video")) {
+					continue;
+				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(cid, title, desc, platform, coverunaddr,
 						videoPath, videounaddr, video);
 				String bvid = videoInfo.get("bvid");
@@ -591,6 +637,11 @@ public class AnalysisService {
 					videoDataEntity.setSourceurl("https://www.bilibili.com/video/" + bvid + "/");
 				}
 				videoDataEntity.setVideoauthor(upname);
+				videoDataEntity.setAuthoruid(upmid);
+				videoDataEntity.setAuthorusername(upmid);
+				videoDataEntity.setAuthoravatar(upface);
+				authorProfileService.upsertAuthor(platform, upmid, upmid, upname, upface,
+						upmid != null && !upmid.trim().isEmpty() ? "https://space.bilibili.com/" + upmid : null);
 				if(Global.danmudown && Global.biliodddmm) {
 					BiliUtil.biliDanmaku("1", cid, aid, Integer.valueOf(duration), dir + File.separator+filename+".ass",title);
 				    JSONObject videoInfoJson = new JSONObject();
@@ -652,6 +703,10 @@ public class AnalysisService {
 	 */
 	public void putRecord(String awemeId, String desc, String playApi, String cover, String platform,
 			String originaladdress, String type, String cookie, Map<String, String> map) throws IOException, InterruptedException {
+		if (blockedWorkService.isBlocked(platform, awemeId, "video")) {
+			logger.info("[DirectData] blocked work hit platform={} workId={}, skip save", platform, awemeId);
+			return;
+		}
 		String nickname = map.get("nickname");
 		String create_time = map.get("create_time");
 		String filename = FileNameTemplateUtil.resolveFileName(desc, awemeId, nickname, create_time, "抖音");
@@ -692,6 +747,11 @@ public class AnalysisService {
 		if (uid != null && !uid.trim().isEmpty()) {
 			videoDataEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + awemeId);
 		}
+		authorProfileService.upsertAuthor("抖音", uid, uid, nickname, map.get("avatar_thumb"),
+				uid != null && !uid.trim().isEmpty() ? "https://www.douyin.com/user/" + uid : null);
+		videoDataEntity.setAuthoruid(uid);
+		videoDataEntity.setAuthorusername(uid);
+		videoDataEntity.setAuthoravatar(map.get("avatar_thumb"));
 		// 生成元数据
 		if (Global.getGeneratenfo) {
 			// 下载发布者头像

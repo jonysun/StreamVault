@@ -42,6 +42,12 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	private String markroute;
 	
 	private String author;
+
+	private String authoruid;
+
+	private String authorusername;
+
+	private String authoravatar;
 	
 	private String tags;
 	
@@ -62,6 +68,9 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	@Transient
 	private String sortOrder;
+
+	@Transient
+	private String blockwork;
 
 	public Integer getId() {
 		return id;
@@ -128,6 +137,30 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 		this.author = author;
 	}
 
+	public String getAuthoruid() {
+		return authoruid;
+	}
+
+	public void setAuthoruid(String authoruid) {
+		this.authoruid = authoruid;
+	}
+
+	public String getAuthorusername() {
+		return authorusername;
+	}
+
+	public void setAuthorusername(String authorusername) {
+		this.authorusername = authorusername;
+	}
+
+	public String getAuthoravatar() {
+		return authoravatar;
+	}
+
+	public void setAuthoravatar(String authoravatar) {
+		this.authoravatar = authoravatar;
+	}
+
 	public String getTags() {
 		return tags;
 	}
@@ -190,6 +223,14 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	public void setSortOrder(String sortOrder) {
 		this.sortOrder = sortOrder;
+	}
+
+	public String getBlockwork() {
+		return blockwork;
+	}
+
+	public void setBlockwork(String blockwork) {
+		this.blockwork = blockwork;
 	}
 
 	public String getMarkroute() {

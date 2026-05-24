@@ -73,10 +73,18 @@ public class CollectDataService {
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
 
+	@Autowired
+	private AuthorProfileService authorProfileService;
+
+	@Autowired
+	private BlockedWorkService blockedWorkService;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
 	private QuartzTaskService quartzTaskService;
+
+	private volatile long lastCollectTaskFinishedAt = 0L;
 
 	/**
 	 * 文件储存真实路径
@@ -302,6 +310,7 @@ public class CollectDataService {
 	 * @throws Exception
 	 */
 	public void createBiliData(CollectDataEntity entity, JSONArray json, String namepath, String vt) throws Exception {
+		sleepCollectTaskIntervalIfNeeded();
 		entity.setTaskstatus("已开始处理");
 		collectdDataDao.save(entity);
 		int videoaddcount = 0;
@@ -312,6 +321,10 @@ public class CollectDataService {
 			for (int y = 0; y < videoDataInfo.size(); y++) {
 				Map<String, String> map = videoDataInfo.get(y);
 				String status = "";
+				String currentVideoId = map == null ? bvid : map.get("cid");
+				if (blockedWorkService.isBlocked("哔哩", currentVideoId, "video")) {
+					continue;
+				}
 				if (map != null) {
 					String cid = map.get("cid");
 					List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(cid);
@@ -346,6 +359,8 @@ public class CollectDataService {
 							String upface = owner.getString("face");
 							String upname = owner.getString("name");
 							String upmid = owner.getString("mid");
+							authorProfileService.upsertAuthor("哔哩", upmid, upmid, upname, upface,
+									upmid != null && !upmid.trim().isEmpty() ? "https://space.bilibili.com/" + upmid : null);
 							String ctime = map.get("ctime");
 							// 下载up 头像 up头像不参与数据 只参与nfo
 							HttpUtil.downBiliFromUrl(upface, "upcover" + upmid + ".jpg", dir);
@@ -371,6 +386,9 @@ public class CollectDataService {
 						        videoDataEntity.setVideoinfo(videoInfoJson.toJSONString());
 							}
 							videoDataEntity.setVideoauthor(upname);
+							videoDataEntity.setAuthoruid(upmid);
+							videoDataEntity.setAuthorusername(upmid);
+							videoDataEntity.setAuthoravatar(upface);
 							VideoDataEntity saved = videoDataDao.save(videoDataEntity);
 							if (saved != null && saved.getId() != null) {
 								hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));
@@ -407,7 +425,7 @@ public class CollectDataService {
 					videoaddcount++;
 				}
 
-				Thread.sleep(2500);
+				sleepCollectItemInterval();
 			}
 		}
 		if (videoaddcount > 0) {
@@ -416,11 +434,13 @@ public class CollectDataService {
 		entity.setTaskstatus("处理完成");
 		entity.setEndtime(DateUtils.formatDateTime(new Date()));
 		collectdDataDao.save(entity);
+		markCollectTaskFinished();
 		System.gc();
 
 	}
 
 	public void createDyData(CollectDataEntity entity, String monitor) throws Exception {
+		sleepCollectTaskIntervalIfNeeded();
 		logger.info("[CollectTask] createDyData start id={} name={} monitor={} originaladdress={}",
 				entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
 		String taskname = entity.getTaskname(); // 任务名称 作为tvshou.nfo元数据
@@ -496,6 +516,13 @@ public class CollectDataService {
 					planItem.put("decision", "image-branch");
 					displayName = safeDisplayName(desc, awemeId, "图文");
 					appendLog(processLog, "branch", "video_play_addr empty -> imageText executor");
+					if (blockedWorkService.isBlocked("抖音", awemeId, "graphic")) {
+						appendLog(processLog, "skip", "blocked work");
+						skippedThisRun++;
+						planItem.put("decision", "skip-blocked");
+						planItems.add(planItem);
+						continue;
+					}
 					CollectDataDetailEntity existingDetail = collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId());
 					if (existingDetail != null) {
 						appendLog(processLog, "skip", "detail exists in collect_data_detail");
@@ -521,7 +548,7 @@ public class CollectDataService {
 						collectDataDetailEntity.setErrorcode(errorCode);
 						collectDataDetailEntity.setErrormsg(errorMsg);
 						collectDataDetailEntity.setCreatetime(DateUtils.formatDateTime(new Date()));
-						Thread.sleep(2500);
+						sleepCollectItemInterval();
 						collectDataDetailService.save(collectDataDetailEntity);
 						String carriedout = entity.getCarriedout() == null ? "1"
 								: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
@@ -572,6 +599,13 @@ public class CollectDataService {
 						awemeId, desc);
 
 				List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(awemeId);
+				if (blockedWorkService.isBlocked("抖音", awemeId, "video")) {
+					appendLog(processLog, "skip", "blocked work");
+					skippedThisRun++;
+					planItem.put("decision", "skip-blocked");
+					planItems.add(planItem);
+					continue;
+				}
 				if (findByVideoid.size() > 0) {
 					VideoDataEntity existsVideo = findByVideoid.get(0);
 					File vf = existsVideo.getVideoaddr() == null ? null : new File(existsVideo.getVideoaddr());
@@ -664,6 +698,12 @@ public class CollectDataService {
 					if ((sourceUid == null || sourceUid.trim().isEmpty()) && !entity.getOriginaladdress().startsWith("fav-")) {
 						sourceUid = entity.getOriginaladdress().replaceFirst("^(post|like|recommend)", "");
 					}
+					authorProfileService.upsertAuthor("抖音", sourceUid, aweme_detail.getString("uid"), dyNickname,
+							aweme_detail.getString("avatar_thumb"),
+							sourceUid != null && !sourceUid.trim().isEmpty() && !sourceUid.startsWith("fav-") ? "https://www.douyin.com/user/" + sourceUid : null);
+					videoDataEntity.setAuthoruid(sourceUid);
+					videoDataEntity.setAuthorusername(aweme_detail.getString("uid"));
+					videoDataEntity.setAuthoravatar(aweme_detail.getString("avatar_thumb"));
 					if (sourceUid != null && !sourceUid.trim().isEmpty() && !sourceUid.startsWith("fav-")) {
 						videoDataEntity.setSourceurl("https://www.douyin.com/user/" + sourceUid + "?modal_id=" + awemeId);
 					}
@@ -706,8 +746,8 @@ public class CollectDataService {
 					}
 					logger.info("下载流程结束");
 					if (!localVideoExists) {
-						Thread.sleep(5000);
-						logger.info("等待五秒在继续下一个");
+						sleepCollectItemInterval();
+						logger.info("等待设定间隔后继续下一个");
 					}
 				}
 				if (status.equals("")) {
@@ -774,6 +814,7 @@ public class CollectDataService {
 		}
 		entity.setEndtime(DateUtils.formatDateTime(new Date()));
 		collectdDataDao.save(entity);
+		markCollectTaskFinished();
 		System.gc();
 		logger.info("任务结束" + entity.getOriginaladdress());
 		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} failedThisRun={} skippedThisRun={} finalStatus={} carriedout={}",
@@ -989,7 +1030,7 @@ public class CollectDataService {
 		max_cursor = parseObject.getString("max_cursor");
 		if (!max_cursor.equals("0")) {
 			data.addAll(jsonArray);
-			Thread.sleep(2500);
+			sleepCollectItemInterval();
 			return this.getDYNextData(api, data, max_cursor, sign);
 		} else {
 			data.addAll(jsonArray);
@@ -1292,7 +1333,7 @@ public class CollectDataService {
 			if(byId.isPresent()) {
 				CollectDataEntity db = byId.get();
 				quartzTaskService.scheduleTask(db);
-				try {Thread.sleep(2000);} catch (InterruptedException e) {}
+				sleepCollectTaskIntervalIfNeeded();
 				quartzTaskService.triggerTask(db.getId());
 			}
 		}
@@ -1356,6 +1397,43 @@ public class CollectDataService {
 			quartzTaskService.removeTaskSchedule(db.getId());
 		}
 		return new AjaxEntity(Global.ajax_success, "任务更新成功", db);
+	}
+
+	private void sleepCollectTaskIntervalIfNeeded() {
+		int intervalMs = Math.max(0, Global.collectTaskIntervalMs);
+		if (intervalMs <= 0) {
+			return;
+		}
+		long previous = lastCollectTaskFinishedAt;
+		if (previous <= 0L) {
+			return;
+		}
+		long elapsed = System.currentTimeMillis() - previous;
+		long remaining = intervalMs - elapsed;
+		if (remaining <= 0L) {
+			return;
+		}
+		try {
+			Thread.sleep(remaining);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	private void sleepCollectItemInterval() {
+		int intervalMs = Math.max(0, Global.collectItemIntervalMs);
+		if (intervalMs <= 0) {
+			return;
+		}
+		try {
+			Thread.sleep(intervalMs);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	private void markCollectTaskFinished() {
+		lastCollectTaskFinishedAt = System.currentTimeMillis();
 	}
 
 	public List<Map<String, Object>> authorDownloadStats() {

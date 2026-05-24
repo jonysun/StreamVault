@@ -164,6 +164,10 @@ public class Global {
 
 	public static int mediaPreviewLimit = 6;
 
+	public static int collectTaskIntervalMs = 3000;
+
+	public static int collectItemIntervalMs = 2500;
+
 	@Value("${file.save}")
 	public void setSavefile(String value) {
 		Global.savefile = value;

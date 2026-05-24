@@ -61,6 +61,9 @@ public class VideoDataService {
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
 
+	@Autowired
+	private BlockedWorkService blockedWorkService;
+
 	private Logger logger = LoggerFactory.getLogger(VideoDataService.class);
 
 	public List<VideoDataEntity> findByVideoid(String videoid) {
@@ -204,6 +207,11 @@ public class VideoDataService {
 		Optional<VideoDataEntity> findById = videoDataDao.findById(data.getId());
 		if (findById.isPresent()) {
 			VideoDataEntity videoDataEntity = findById.get();
+			if (!"0".equals(data.getBlockwork())) {
+				blockedWorkService.blockWork(videoDataEntity.getVideoplatform(), videoDataEntity.getVideoid(), "video",
+						videoDataEntity.getVideoname(), videoDataEntity.getVideoauthor(), videoDataEntity.getAuthoruid(),
+						videoDataEntity.getSourceurl() != null ? videoDataEntity.getSourceurl() : videoDataEntity.getOriginaladdress(), "manual-delete");
+			}
 			File file = new File(videoDataEntity.getVideoaddr());
 			if(file.isFile()) {
 				CommandUtil.deleteDirectory(file.getParentFile().getPath());

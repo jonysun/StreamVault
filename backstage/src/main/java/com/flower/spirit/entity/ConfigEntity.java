@@ -92,6 +92,10 @@ public class ConfigEntity implements Serializable {
 
 	private String mediapreviewlimit; // 图影集萃“查看更多”阈值
 
+	private String collecttaskintervalms; // 收藏任务之间间隔（毫秒）
+
+	private String collectitemintervalms; // 收藏任务内子项间隔（毫秒）
+
 	public Integer getId() {
 		return id;
 	}
@@ -346,6 +350,22 @@ public class ConfigEntity implements Serializable {
 
 	public void setMediapreviewlimit(String mediapreviewlimit) {
 		this.mediapreviewlimit = mediapreviewlimit;
+	}
+
+	public String getCollecttaskintervalms() {
+		return collecttaskintervalms;
+	}
+
+	public void setCollecttaskintervalms(String collecttaskintervalms) {
+		this.collecttaskintervalms = collecttaskintervalms;
+	}
+
+	public String getCollectitemintervalms() {
+		return collectitemintervalms;
+	}
+
+	public void setCollectitemintervalms(String collectitemintervalms) {
+		this.collectitemintervalms = collectitemintervalms;
 	}
 
 	// public String getYtdlpargs() {

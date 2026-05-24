@@ -16,6 +16,8 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.common.RequestEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.entity.BiliConfigEntity;
+import com.flower.spirit.entity.AuthorProfileEntity;
+import com.flower.spirit.entity.BlockedWorkEntity;
 import com.flower.spirit.entity.CollectDataDetailEntity;
 import com.flower.spirit.entity.CollectDataEntity;
 import com.flower.spirit.entity.ConfigEntity;
@@ -32,6 +34,8 @@ import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CollectDataDetailService;
 import com.flower.spirit.service.CollectDataService;
 import com.flower.spirit.service.AnalysisService;
+import com.flower.spirit.service.AuthorProfileService;
+import com.flower.spirit.service.BlockedWorkService;
 import com.flower.spirit.service.ConfigService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
@@ -99,6 +103,12 @@ public class AdminController {
 	
 	@Autowired
 	private VideoMixService videoMixService;
+
+	@Autowired
+	private AuthorProfileService authorProfileService;
+
+	@Autowired
+	private BlockedWorkService blockedWorkService;
 	
 	@Autowired
 	private GraphicContentService graphicContentService;
@@ -494,9 +504,29 @@ public class AdminController {
 		return graphicContentService.findPage(graphicContentEntity);
 	}
 
+	@PostMapping(value = "/findAuthorProfileList")
+	public AjaxEntity findAuthorProfileList(AuthorProfileEntity authorProfileEntity) {
+		return authorProfileService.findPage(authorProfileEntity);
+	}
+
+	@GetMapping(value = "/findAuthorNameHistory")
+	public AjaxEntity findAuthorNameHistory(Integer authorProfileId) {
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", authorProfileService.findNameHistory(authorProfileId));
+	}
+
+	@PostMapping(value = "/findBlockedWorkList")
+	public AjaxEntity findBlockedWorkList(BlockedWorkEntity blockedWorkEntity) {
+		return blockedWorkService.findPage(blockedWorkEntity);
+	}
+
+	@GetMapping(value = "/restoreBlockedWork")
+	public AjaxEntity restoreBlockedWork(Integer id) {
+		return blockedWorkService.restore(id);
+	}
+
 	@GetMapping(value = "/deleteGraphicContent")
-	public AjaxEntity deleteGraphicContent(String id, HttpServletRequest request) {
-		return graphicContentService.deleteGraphicContent(id);
+	public AjaxEntity deleteGraphicContent(String id, String blockwork, HttpServletRequest request) {
+		return graphicContentService.deleteGraphicContent(id, blockwork);
 	}
 
 	/**

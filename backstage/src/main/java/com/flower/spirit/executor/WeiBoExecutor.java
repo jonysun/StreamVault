@@ -38,6 +38,12 @@ public class WeiBoExecutor {
 	
 	@Autowired
 	private GraphicContentDao graphicContentDao;
+
+	@Autowired
+	private com.flower.spirit.service.AuthorProfileService authorProfileService;
+
+	@Autowired
+	private com.flower.spirit.service.BlockedWorkService blockedWorkService;
 	
 	@Autowired
 	private ProcessHistoryService processHistoryService;
@@ -76,6 +82,9 @@ public class WeiBoExecutor {
 		if(byVideoidAndPlatform.isPresent()) {
 			return;
 		}
+		if (blockedWorkService.isBlocked("微博", weiboId, "graphic")) {
+			return;
+		}
 		
     	ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, weibourl, "微博");
     	if(weiboId != null) {
@@ -93,8 +102,12 @@ public class WeiBoExecutor {
     		JSONObject object = JSONObject.parseObject(fetchWeiboDetail);
     		String title = object.getString("text");
     		String text_raw = object.getString("text_raw");
-    		String username = object.getJSONObject("user").getString("screen_name");
-    		MediaInfo mediaInfo = extractMediaInfo(object);
+			String username = object.getJSONObject("user").getString("screen_name");
+			String uid = object.getJSONObject("user").getString("idstr");
+			String avatar = object.getJSONObject("user").getString("avatar_hd");
+			authorProfileService.upsertAuthor("微博", uid, uid, username, avatar,
+					uid != null && !uid.trim().isEmpty() ? "https://weibo.com/u/" + uid : weibourl);
+			MediaInfo mediaInfo = extractMediaInfo(object);
     		String videoUrl = mediaInfo.getVideoUrl();
     		List<String> imageUrls = mediaInfo.getImageUrls();
     		if ((videoUrl == null || videoUrl.isBlank()) 
@@ -126,6 +139,10 @@ public class WeiBoExecutor {
 			graphicContentEntity.setContent(text_raw);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(username);
+			graphicContentEntity.setAuthoruid(uid);
+			graphicContentEntity.setAuthorusername(uid);
+			graphicContentEntity.setAuthoravatar(avatar);
+			graphicContentEntity.setSourceurl(weibourl);
 			graphicContentEntity.setPublishtime(object.getString("created_at"));
 			graphicContentEntity.setCreatetime(new Date());
 			graphicContentDao.save(graphicContentEntity);

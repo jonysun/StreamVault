@@ -173,6 +173,50 @@
             font-size: 11px;
         }
 
+        .feed-author-drawer {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 320px;
+            z-index: 9;
+            background: rgba(10, 10, 10, 0.92);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border-left: 1px solid rgba(255, 255, 255, 0.12);
+            transform: translateX(102%);
+            transition: transform .2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .feed-author-drawer.open {
+            transform: translateX(0);
+        }
+
+        .feed-author-list {
+            overflow-y: auto;
+            padding: 10px;
+            flex: 1;
+        }
+
+        .feed-author-item {
+            display: block;
+            width: 100%;
+            border: 0;
+            text-align: left;
+            margin-bottom: 8px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            padding: 9px 10px;
+            font-size: 12px;
+        }
+
+        .feed-author-item.active {
+            background: rgba(86, 156, 255, 0.4);
+        }
+
         .feed-item {
             height: 100%;
             min-height: 100%;
@@ -410,19 +454,6 @@
 
         .feed-author-chip:hover {
             background: rgba(255,255,255,0.32);
-        }
-
-        .author-sheet {
-            padding: 12px;
-            max-height: 62vh;
-            overflow: auto;
-            background: #fff;
-        }
-
-        .author-sheet-header {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 10px;
         }
 
         .author-chip {
@@ -716,6 +747,9 @@
                                     <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
                                         <i class="mdi mdi-volume-off"></i><span>静音</span>
                                     </button>
+                                    <button type="button" class="feed-control-btn" id="feedAutoNextBtn" title="自动播放">
+                                        <i class="mdi mdi-skip-next-circle"></i><span>自动</span>
+                                    </button>
                                     <button type="button" class="feed-control-btn" id="feedPlaylistBtn" title="播放列表">
                                         <i class="mdi mdi-format-list-bulleted"></i><span>列表</span>
                                     </button>
@@ -727,6 +761,10 @@
                                 <div class="feed-playlist-drawer" id="feedPlaylistDrawer">
                                     <div class="feed-playlist-header"><span>播放列表</span><button type="button" class="feed-playlist-close" id="feedPlaylistClose" aria-label="关闭"><i class="mdi mdi-close"></i></button></div>
                                     <div class="feed-playlist-list" id="feedPlaylistList"></div>
+                                </div>
+                                <div class="feed-author-drawer" id="feedAuthorDrawer">
+                                    <div class="feed-playlist-header"><span>选择作者</span><button type="button" class="feed-playlist-close" id="feedAuthorClose" aria-label="关闭"><i class="mdi mdi-close"></i></button></div>
+                                    <div class="feed-author-list" id="feedAuthorList"></div>
                                 </div>
                                 <div class="loading" id="loading" style="display: none;">
                                     <i class="mdi mdi-loading mdi-spin"></i> 加载中...
@@ -757,7 +795,6 @@
     var feedMuted = true;
     var feedSourceMode = 'prefer_hls';
     var feedAuthorSet = {};
-    var authorSheetIndex = -1;
     var feedRandomPool = [];
     var feedRandomCursor = 0;
     var feedRandomLoading = false;
@@ -788,6 +825,12 @@
     var feedProgressDrag = null;
     var FEED_ORDER_STORAGE_KEY = 'streamv.admin.feedOrder';
     var FEED_MUTED_STORAGE_KEY = 'streamv.admin.feedMuted';
+    var FEED_AUTONEXT_STORAGE_KEY = 'streamv.admin.feedAutoNext';
+    var feedAutoNext = true;
+    var feedFullscreenTransitioning = false;
+    var feedFullscreenTarget = null;
+    var feedSuppressAutoNextUntil = 0;
+    var feedPendingAutoNextIndex = -1;
     
     $(function(){
         var rawMode = $('#mediaHomeMode').val();
@@ -809,6 +852,12 @@
                 feedOrder = savedOrder;
             }
         } catch (e) {}
+        try {
+            var savedAutoNext = localStorage.getItem(FEED_AUTONEXT_STORAGE_KEY);
+            if (savedAutoNext === '1' || savedAutoNext === '0') {
+                feedAutoNext = savedAutoNext === '1';
+            }
+        } catch (e) {}
         feedSessionSeed = String(Date.now()) + '_' + String(Math.floor(Math.random() * 1000000));
         if (mediaHomeMode === 'feed') {
             $('#videoGrid').hide();
@@ -819,6 +868,7 @@
             bindFeedKeyboard();
             bindFeedWheelNavigation();
             bindFeedControls();
+            bindFeedFullscreen();
             updateFeedButtons();
         }
         findList(page);
@@ -1054,6 +1104,16 @@
                             hydrateFeedItems();
                             initFeedAutoPlay();
                             renderFeedPlaylist();
+                            renderFeedAuthorDrawer();
+                            if (feedPendingAutoNextIndex >= 0 && feedPendingAutoNextIndex < feedAllItems.length) {
+                                var targetIndex = feedPendingAutoNextIndex;
+                                feedPendingAutoNextIndex = -1;
+                                setTimeout(function() {
+                                    if (!feedFullscreenTransitioning && Date.now() >= feedSuppressAutoNextUntil) {
+                                        jumpToFeedAbsIndex(targetIndex);
+                                    }
+                                }, 80);
+                            }
                         } else {
                             $('#videoGrid').append(html);
                             initLazyLoading();
@@ -1115,6 +1175,9 @@
         }
         feedObserver = new IntersectionObserver(function(entries) {
             entries.forEach(function(entry) {
+                if (feedFullscreenTransitioning) {
+                    return;
+                }
                 if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
                     prewarmFeedWindow(entry.target);
                     var video = entry.target.querySelector('.feed-video');
@@ -1254,7 +1317,7 @@
             if (!target) {
                 return;
             }
-            requestFeedFullscreen(target);
+            toggleFeedFullscreen(target);
         });
         $('#videoFeed .feed-progress-track').on('click', function(e) {
             if (feedProgressDrag) {
@@ -1782,6 +1845,9 @@
 
     function bindFeedScroll() {
         $('#videoFeed').on('scroll', function() {
+            if (feedFullscreenTransitioning) {
+                return;
+            }
             var el = this;
             var scrollTop = el.scrollTop || 0;
             var itemHeight = el.clientHeight || 1;
@@ -1883,6 +1949,9 @@
             if (mediaHomeMode !== 'feed') {
                 return;
             }
+            if (feedFullscreenTransitioning) {
+                return;
+            }
             var container = $('#videoFeed')[0];
             if (!container) {
                 return;
@@ -1901,6 +1970,9 @@
     function bindFeedWheelNavigation() {
         document.addEventListener('wheel', function(e) {
             if (mediaHomeMode !== 'feed') {
+                return;
+            }
+            if (feedFullscreenTransitioning) {
                 return;
             }
             var container = document.getElementById('videoFeed');
@@ -1938,7 +2010,8 @@
         });
 
         $('#feedAuthorBtn').on('click', function() {
-            openFeedAuthorSelector();
+            $('#feedAuthorDrawer').toggleClass('open');
+            renderFeedAuthorDrawer();
         });
 
         $('#feedMuteBtn').on('click', function() {
@@ -1949,6 +2022,12 @@
             });
             updateFeedButtons();
             renderAllFeedControls();
+        });
+
+        $('#feedAutoNextBtn').on('click', function() {
+            feedAutoNext = !feedAutoNext;
+            persistFeedAutoNext();
+            updateFeedButtons();
         });
 
         $('#feedPlaylistBtn').on('click', function() {
@@ -1966,6 +2045,17 @@
                 return;
             }
             jumpToFeedAbsIndex(abs);
+        });
+
+        $('#feedAuthorClose').on('click', function() {
+            $('#feedAuthorDrawer').removeClass('open');
+        });
+
+        $('#feedAuthorList').on('click', '.feed-author-item', function() {
+            feedAuthor = ($(this).data('author') || '').toString().trim();
+            $('#feedAuthorDrawer').removeClass('open');
+            updateFeedButtons();
+            reloadFeed();
         });
 
         $('#videoFeed').on('click', '.feed-author-chip', function(e) {
@@ -2027,6 +2117,17 @@
                 return;
             }
             if (drawer.contains(e.target) || (e.target.closest && e.target.closest('#feedPlaylistBtn'))) {
+                return;
+            }
+            drawer.classList.remove('open');
+        });
+
+        $(document).on('click.feedAuthorOutside', function(e) {
+            var drawer = document.getElementById('feedAuthorDrawer');
+            if (!drawer || !drawer.classList.contains('open')) {
+                return;
+            }
+            if (drawer.contains(e.target) || (e.target.closest && e.target.closest('#feedAuthorBtn'))) {
                 return;
             }
             drawer.classList.remove('open');
@@ -2204,6 +2305,32 @@
                 syncFeedControlFromVideo(videoEl);
             });
         });
+        videoEl.addEventListener('ended', function() {
+            syncFeedControlFromVideo(videoEl);
+            if (!feedAutoNext) {
+                return;
+            }
+            if (feedFullscreenTransitioning) {
+                return;
+            }
+            if (Date.now() < feedSuppressAutoNextUntil) {
+                return;
+            }
+            var currentIndex = Number(videoEl.getAttribute('data-feed-index') || '-1');
+            if (currentIndex < 0) {
+                return;
+            }
+            if (feedCurrentAbsIndex >= 0 && currentIndex !== feedCurrentAbsIndex) {
+                return;
+            }
+            if (currentIndex + 1 >= feedAllItems.length && hasMore && !isLoading) {
+                feedPendingAutoNextIndex = currentIndex + 1;
+                page++;
+                findList(page);
+                return;
+            }
+            jumpToFeedAbsIndex(currentIndex + 1);
+        });
     }
 
     function seekFeedByTrack(trackEl, clientX) {
@@ -2243,6 +2370,59 @@
         }
     }
 
+    function exitFeedFullscreen() {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+            return;
+        }
+        if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+            return;
+        }
+        if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        }
+    }
+
+    function isFeedFullscreenTarget(target) {
+        var active = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+        if (!active || !target) {
+            return false;
+        }
+        return active === target;
+    }
+
+    function toggleFeedFullscreen(target) {
+        if (!target) {
+            return;
+        }
+        if (isFeedFullscreenTarget(target)) {
+            feedSuppressAutoNextUntil = Date.now() + 1200;
+            exitFeedFullscreen();
+            return;
+        }
+        feedFullscreenTarget = target;
+        requestFeedFullscreen(target);
+    }
+
+    function bindFeedFullscreen() {
+        ['fullscreenchange', 'webkitfullscreenchange', 'msfullscreenchange'].forEach(function(evt) {
+            document.addEventListener(evt, function() {
+                feedFullscreenTransitioning = true;
+                var active = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+                feedFullscreenTarget = active || null;
+                if (!active) {
+                    feedSuppressAutoNextUntil = Date.now() + 1200;
+                    feedFullscreenTarget = null;
+                }
+                setTimeout(function() {
+                    feedFullscreenTransitioning = false;
+                }, 420);
+                renderAllFeedControls();
+            });
+        });
+    }
+
     function isControlElement(target) {
         return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip'));
     }
@@ -2256,6 +2436,12 @@
     function persistFeedMuted() {
         try {
             localStorage.setItem(FEED_MUTED_STORAGE_KEY, feedMuted ? '1' : '0');
+        } catch (e) {}
+    }
+
+    function persistFeedAutoNext() {
+        try {
+            localStorage.setItem(FEED_AUTONEXT_STORAGE_KEY, feedAutoNext ? '1' : '0');
         } catch (e) {}
     }
 
@@ -2277,6 +2463,7 @@
             feedSessionSeed = String(Date.now()) + '_' + String(Math.floor(Math.random() * 1000000));
         }
         renderFeedPlaylist();
+        renderFeedAuthorDrawer();
         findList(page);
     }
 
@@ -2312,6 +2499,9 @@
         if (!container) {
             return;
         }
+        if (absIndex < 0 || absIndex >= feedAllItems.length) {
+            return;
+        }
         var itemHeight = container.clientHeight || 1;
         var targetTop = absIndex * itemHeight;
         container.scrollTo({ top: targetTop, behavior: 'smooth' });
@@ -2342,6 +2532,20 @@
         }
         if (!html) {
             html = '<div style="padding:12px;color:#cbd5e1;font-size:12px;">暂无播放项</div>';
+        }
+        wrap.html(html);
+    }
+
+    function renderFeedAuthorDrawer() {
+        var wrap = $('#feedAuthorList');
+        if (!wrap.length) {
+            return;
+        }
+        var authors = Object.keys(feedAuthorSet).sort();
+        var html = '<button type="button" class="feed-author-item' + (!feedAuthor ? ' active' : '') + '" data-author="">全部作者</button>';
+        for (var i = 0; i < authors.length; i++) {
+            var activeCls = feedAuthor === authors[i] ? ' active' : '';
+            html += '<button type="button" class="feed-author-item' + activeCls + '" data-author="' + escapeHtml(authors[i]) + '">' + escapeHtml(authors[i]) + '</button>';
         }
         wrap.html(html);
     }
@@ -2390,34 +2594,6 @@
         }
     }
 
-    function openFeedAuthorSelector() {
-        var authors = Object.keys(feedAuthorSet).sort();
-        var html = '<div class="author-sheet">';
-        html += '<div class="author-sheet-header">选择作者</div>';
-        html += '<button type="button" class="btn btn-sm btn-outline-primary feed-author-option author-chip" data-author="">全部作者</button>';
-        for (var i = 0; i < authors.length; i++) {
-            html += '<button type="button" class="btn btn-sm btn-outline-secondary feed-author-option author-chip" data-author="' + escapeHtml(authors[i]) + '">' + escapeHtml(authors[i]) + '</button>';
-        }
-        html += '</div>';
-        authorSheetIndex = layer.open({
-            type: 1,
-            title: false,
-            closeBtn: 1,
-            shadeClose: true,
-            area: ['100%', '68vh'],
-            offset: 'b',
-            skin: 'layui-layer-rim',
-            content: html
-        });
-        $(document).off('click.feedAuthorOption').on('click.feedAuthorOption', '.feed-author-option', function() {
-            feedAuthor = ($(this).data('author') || '').toString().trim();
-            updateFeedButtons();
-            reloadFeed();
-            layer.close(authorSheetIndex);
-            $(document).off('click.feedAuthorOption');
-        });
-    }
-
     function updateFeedButtons() {
         var orderText = feedOrder === 'asc' ? '顺序' : (feedOrder === 'random' ? '随机' : '倒序');
         $('#feedOrderBtn span').text(orderText);
@@ -2428,6 +2604,8 @@
         $('#feedAuthorBtn span').text(authorText);
         $('#feedMuteBtn i').attr('class', feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high');
         $('#feedMuteBtn span').text(feedMuted ? '静音' : '有声');
+        $('#feedAutoNextBtn i').attr('class', feedAutoNext ? 'mdi mdi-skip-next-circle' : 'mdi mdi-pause-circle-outline');
+        $('#feedAutoNextBtn span').text(feedAutoNext ? '自动' : '停留');
     }
 
     function escapeHtml(text) {

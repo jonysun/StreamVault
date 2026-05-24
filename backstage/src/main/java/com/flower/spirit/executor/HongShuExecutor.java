@@ -47,6 +47,12 @@ public class HongShuExecutor {
 	@Autowired
 	private GraphicContentDao graphicContentDao;
 
+	@Autowired
+	private com.flower.spirit.service.AuthorProfileService authorProfileService;
+
+	@Autowired
+	private com.flower.spirit.service.BlockedWorkService blockedWorkService;
+
 	public void dataExecutor(String detectedPlatform,String url) throws IOException, InterruptedException {
 		ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, url, detectedPlatform);
 		//返回为空则尝试图文
@@ -67,23 +73,33 @@ public class HongShuExecutor {
 		String type = note.getString("type");  //type   normal  video   video  要判断images 如果多个 认为是图文
 		//如果视频时长超过1分钟 算视频
 		String desc = note.getString("desc");
-		String nickname = note.getJSONObject("user").getString("nickname");
+		JSONObject user = note.getJSONObject("user");
+		String nickname = user.getString("nickname");
+		String userId = user.getString("userId");
+		String avatar = user.getString("avatar");
+		authorProfileService.upsertAuthor("小红书", userId, userId, nickname, avatar, url);
 		JSONArray imageList = note.getJSONArray("imageList");
 		List<String> images = getImages(imageList);
 		String filename = FileNameTemplateUtil.resolveFileName(title, keyid, nickname, time, "小红书");
 		/*markroute  图文用**/
 		String markroute = FileUtil.generateDir(true, Global.platform.rednote.name(), filename, null, null,0); 
 		if(type.equals("normal")) {
+			if (blockedWorkService.isBlocked("小红书", keyid, "graphic")) {
+				return;
+			}
 			//判重复
 			Optional<GraphicContentEntity> byVideoidAndPlatform = graphicContentDao.findByVideoidAndPlatform(keyid,  Global.platform.rednote.name());
 			if(byVideoidAndPlatform.isPresent()) {
 				logger.info(url+"地址已存在,不处理");
 				return;
 			}
-			downImages(images,null, filename, header, keyid, url, title, markroute, desc, nickname, saveProcess);
-			return;
+				downImages(images,null, filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
+				return;
 		}
 		if(type.equals("video")) {
+			if (blockedWorkService.isBlocked("小红书", keyid, images.size() > 1 ? "graphic" : "video")) {
+				return;
+			}
 			//混合 判断images 是否超过1个  判断视频时长是否超过60s 超过60s 算视频 
 			JSONObject videoData = note.getJSONObject("video");
 			JSONArray h264Data = videoData.getJSONObject("media").getJSONObject("stream").getJSONArray("h264");
@@ -94,12 +110,12 @@ public class HongShuExecutor {
 					logger.info(url+"地址已存在,不处理");
 					return;
 				}
-				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, saveProcess);
+				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
 				return;
 			}
 			if(h264Data.size()>1) {
 				//数据超 进图文
-				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, saveProcess);
+				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
 				return;
 			}
 			if(h264Data.size() == 1) {
@@ -133,6 +149,10 @@ public class HongShuExecutor {
 							videounrealaddr, url);
 					videoDataEntity.setPublishtime(DateUtils.formatDateTime(new Date(Long.parseLong(time)*1000)));
 					videoDataEntity.setVideoauthor(nickname);
+					videoDataEntity.setAuthoruid(userId);
+					videoDataEntity.setAuthorusername(userId);
+					videoDataEntity.setAuthoravatar(avatar);
+					videoDataEntity.setSourceurl(url);
 					videoDataDao.save(videoDataEntity);
 					processHistoryService.saveProcess(saveProcess.getId(), url,  "小红书");
 					sendNotify.sendNotifyData(title+"(视频)", url,  "小红书");
@@ -145,7 +165,7 @@ public class HongShuExecutor {
 						return;
 					}
 					//进图文
-					downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, saveProcess);
+					downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
 					return;
 				}
 			}
@@ -154,7 +174,7 @@ public class HongShuExecutor {
 	
 	
 	
-	public void downImages(List<String> images,List<String> videos,String filename,Map<String, String> header,String keyid,String url,String title,String markroute,String desc,String nickname,ProcessHistoryEntity saveProcess) throws IOException {
+	public void downImages(List<String> images,List<String> videos,String filename,Map<String, String> header,String keyid,String url,String title,String markroute,String desc,String nickname,String userId,String avatar,ProcessHistoryEntity saveProcess) throws IOException {
 		JSONArray imageurl=  new JSONArray();
 		for(int i =0;i<images.size();i++) {
 			 String storage = FileUtil.generateDir(true, Global.platform.rednote.name(), filename, null, null,i);
@@ -179,6 +199,10 @@ public class HongShuExecutor {
 		graphicContentEntity.setContent(desc);
 		graphicContentEntity.setImages(imageurl.toJSONString());
 		graphicContentEntity.setAuthor(nickname);
+		graphicContentEntity.setAuthoruid(userId);
+		graphicContentEntity.setAuthorusername(userId);
+		graphicContentEntity.setAuthoravatar(avatar);
+		graphicContentEntity.setSourceurl(url);
 		graphicContentEntity.setPublishtime(null);
 		graphicContentEntity.setCreatetime(new Date());
 		graphicContentDao.save(graphicContentEntity);

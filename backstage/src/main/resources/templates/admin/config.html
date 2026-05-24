@@ -178,6 +178,14 @@
                                         <option value="1" th:selected="${config.danmudown} eq '1'">是</option>
                                     </select>
                                 </div>
+                                <div class="form-group">
+                                    <label>收藏任务之间间隔(ms)</label>
+                                    <input class="form-control" type="number" id="collecttaskintervalms" name="collecttaskintervalms" placeholder="默认3000" th:value="${config.collecttaskintervalms}">
+                                </div>
+                                <div class="form-group">
+                                    <label>收藏任务内子项间隔(ms)</label>
+                                    <input class="form-control" type="number" id="collectitemintervalms" name="collectitemintervalms" placeholder="默认2500" th:value="${config.collectitemintervalms}">
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -773,6 +781,8 @@
               option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
               option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
               option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
+              option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
+              option['collectitemintervalms'] = $("#collectitemintervalms").val();
               option['mediahomemode'] = $("#mediahomemode").val();
               option['mediafeedmuted'] = $("#mediafeedmuted").val();
               option['mediafeedsource'] = $("#mediafeedsource").val();
@@ -949,6 +959,8 @@
             option['f2logmasksensitive'] = $("#f2logmasksensitive").val();
             option['f2logmaxpreview'] = $("#f2logmaxpreview").val();
             option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
+            option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
+            option['collectitemintervalms'] = $("#collectitemintervalms").val();
             option['mediahomemode'] = $("#mediahomemode").val();
             option['mediafeedmuted'] = $("#mediafeedmuted").val();
             option['mediafeedsource'] = $("#mediafeedsource").val();

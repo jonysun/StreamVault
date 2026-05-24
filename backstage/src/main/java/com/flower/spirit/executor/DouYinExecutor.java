@@ -45,15 +45,27 @@ public class DouYinExecutor {
 	
 	@Autowired
 	private ProcessHistoryService processHistoryService;
+
+	@Autowired
+	private com.flower.spirit.service.AuthorProfileService authorProfileService;
+
+	@Autowired
+	private com.flower.spirit.service.BlockedWorkService blockedWorkService;
 	
     private static GraphicContentDao staticGraphicContentDao;
     
     private static ProcessHistoryService staticprocessHistoryService;
 
+    private static com.flower.spirit.service.AuthorProfileService staticAuthorProfileService;
+
+    private static com.flower.spirit.service.BlockedWorkService staticBlockedWorkService;
+
     @PostConstruct
     public void init() {
         staticGraphicContentDao = graphicContentDao;
         staticprocessHistoryService = processHistoryService;
+        staticAuthorProfileService = authorProfileService;
+        staticBlockedWorkService = blockedWorkService;
     }
 	
 	
@@ -72,6 +84,9 @@ public class DouYinExecutor {
 		
 		Optional<GraphicContentEntity> byVideoidAndPlatform = staticGraphicContentDao.findByVideoidAndPlatform(post,Global.platform.douyin.name());
 		if(byVideoidAndPlatform.isPresent()) {
+			return;
+		}
+		if (staticBlockedWorkService != null && staticBlockedWorkService.isBlocked("抖音", post, "graphic")) {
 			return;
 		}
 		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, post, "fetch_post_data", null, null, null, taskout);
@@ -145,8 +160,16 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			String uid = extractTaskUid(originaladdress);
+			graphicContentEntity.setAuthoruid(uid);
+			graphicContentEntity.setAuthorusername(aweme_detail.getJSONObject("author").getString("uid"));
+			graphicContentEntity.setAuthoravatar(aweme_detail.getJSONObject("author").getString("avatar_thumb"));
+			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
+			if (staticAuthorProfileService != null) {
+				staticAuthorProfileService.upsertAuthor("抖音", uid, aweme_detail.getJSONObject("author").getString("uid"), nickname,
+						aweme_detail.getJSONObject("author").getString("avatar_thumb"),
+						uid != null ? "https://www.douyin.com/user/" + uid : null);
+			}
 			if (uid != null) {
 				graphicContentEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + post);
 			}
@@ -173,6 +196,9 @@ public class DouYinExecutor {
 		
 		Optional<GraphicContentEntity> byVideoidAndPlatform = staticGraphicContentDao.findByVideoidAndPlatform(post,Global.platform.douyin.name());
 		if(byVideoidAndPlatform.isPresent()) {
+			return;
+		}
+		if (staticBlockedWorkService != null && staticBlockedWorkService.isBlocked("抖音", post, "graphic")) {
 			return;
 		}
 		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, post, "fetch_post_data", null, null, null, taskout);
@@ -246,8 +272,16 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			String uid = extractTaskUid(type);
+			graphicContentEntity.setAuthoruid(uid);
+			graphicContentEntity.setAuthorusername(aweme_detail.getJSONObject("author").getString("uid"));
+			graphicContentEntity.setAuthoravatar(aweme_detail.getJSONObject("author").getString("avatar_thumb"));
+			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
+			if (staticAuthorProfileService != null) {
+				staticAuthorProfileService.upsertAuthor("抖音", uid, aweme_detail.getJSONObject("author").getString("uid"), nickname,
+						aweme_detail.getJSONObject("author").getString("avatar_thumb"),
+						uid != null ? "https://www.douyin.com/user/" + uid : null);
+			}
 			if (uid != null) {
 				graphicContentEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + post);
 			}

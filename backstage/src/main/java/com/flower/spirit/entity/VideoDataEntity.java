@@ -46,6 +46,12 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	private String videoname;
 	
 	private String videoauthor;
+
+	private String authoruid;
+
+	private String authorusername;
+
+	private String authoravatar;
 	
 	private String videodesc;
 	
@@ -217,6 +223,30 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	public void setVideoauthor(String videoauthor) {
 		this.videoauthor = videoauthor;
 	}
+
+	public String getAuthoruid() {
+		return authoruid;
+	}
+
+	public void setAuthoruid(String authoruid) {
+		this.authoruid = authoruid;
+	}
+
+	public String getAuthorusername() {
+		return authorusername;
+	}
+
+	public void setAuthorusername(String authorusername) {
+		this.authorusername = authorusername;
+	}
+
+	public String getAuthoravatar() {
+		return authoravatar;
+	}
+
+	public void setAuthoravatar(String authoravatar) {
+		this.authoravatar = authoravatar;
+	}
 	
 	/**
 	 * 排除的平台（用于查询时排除特定平台的视频，不持久化到数据库）
@@ -241,6 +271,9 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	@Transient
 	private String hlsstatus;
+
+	@Transient
+	private String blockwork;
 
 	@Transient
 	private String randomMode;
@@ -302,6 +335,14 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setHlsstatus(String hlsstatus) {
 		this.hlsstatus = hlsstatus;
+	}
+
+	public String getBlockwork() {
+		return blockwork;
+	}
+
+	public void setBlockwork(String blockwork) {
+		this.blockwork = blockwork;
 	}
 
 	public String getRandomMode() {

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+	<title>拉黑作品列表</title>
+	<th:block th:insert="~{admin/include/header :: metaHeader}"></th:block>
+	<link href="../static/css/bootstrap.min.css" rel="stylesheet">
+	<link href="../static/css/materialdesignicons.min.css" rel="stylesheet">
+	<link href="../static/css/style.min.css" rel="stylesheet">
+	<link href="../static/js/skin/laypage.css" rel="stylesheet">
+	<style>
+		.toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+		.toolbar .form-control { min-width:180px; }
+		.mono { font-family: Consolas, monospace; font-size: 12px; }
+		.badge-blocked { display:inline-block; padding:2px 8px; border-radius:12px; background:#ef4444; color:#fff; font-size:12px; }
+		.text-ellipsis { max-width:240px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+	</style>
+</head>
+<body>
+<div class="lyear-layout-web"><div class="lyear-layout-container"><div th:insert="~{admin/include/common :: headermenu}"></div>
+<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索作品/作者/作品ID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button></div></div><div class="card-body"><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>类型</th><th>作品ID</th><th>标题</th><th>作者</th><th>作者UID</th><th>来源</th><th>状态</th><th>操作</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
+<script type="text/javascript" src="../static/js/jquery.min.js"></script>
+<script type="text/javascript" src="../static/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../static/js/laypage.js"></script>
+<script src="../static/js/layer/layer.js"></script>
+	<script>
+		function findList(page){
+			var option = { pageNo: page, pageSize: 15, keyword: $('#keyword').val(), platform: $('#platform').val(), status: 'blocked' };
+			$('#tableData').html('<tr><td colspan="10" class="text-center text-muted">加载中...</td></tr>');
+			$.post('/admin/api/findBlockedWorkList', option, function(res){
+				if(res.resCode !== '000001'){ layer.msg(res.message || '加载失败'); return; }
+				var record = res.record || {}; var list = record.content || []; var html='';
+				for(var i=0;i<list.length;i++){
+					var item = list[i];
+					html += '<tr><td>'+ (item.id||'') +'</td><td>'+ (item.platform||'') +'</td><td>'+ (item.worktype||'') +'</td><td class="mono">'+ (item.workid||'') +'</td><td class="text-ellipsis" title="'+ (item.title||'--') +'">'+ (item.title||'--') +'</td><td>'+ (item.authorname||'--') +'</td><td class="mono">'+ (item.authoruid||'--') +'</td><td>'+ (item.sourceurl ? '<a href="'+item.sourceurl+'" target="_blank">查看</a>' : '--') +'</td><td><span class="badge-blocked">'+ (item.status||'') +'</span></td><td><button class="btn btn-outline-success btn-sm restoreBtn" data-id="'+item.id+'">恢复</button></td></tr>';
+				}
+				$('#tableData').html(html || '<tr><td colspan="10" class="text-center text-muted">暂无拉黑作品</td></tr>');
+				$('.restoreBtn').click(function(){
+					var id = $(this).data('id');
+					$.get('/admin/api/restoreBlockedWork', { id:id }, function(r){
+						if(r.resCode==='000001'){
+							layer.msg('已恢复');
+							findList(page);
+						} else {
+							layer.msg(r.message || '恢复失败');
+						}
+					});
+				});
+				var pages = record.totalPages || (record.page && record.page.totalPages) || 1;
+				laypage({ cont:'pager', pages: pages, curr: page, jump:function(obj,first){ if(!first){ findList(obj.curr); } } });
+			});
+		}
+		$('#searchBtn').click(function(){ findList(1); });
+		$('#resetBtn').click(function(){ $('#keyword').val(''); $('#platform').val(''); findList(1); });
+		$('#keyword, #platform').on('keydown', function(e){ if(e.key === 'Enter'){ findList(1); } });
+		$(function(){ findList(1); });
+	</script>
+</body></html>

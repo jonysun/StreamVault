@@ -190,6 +190,16 @@ public class PageController {
 		return "admin/graphicContent";
 	}
 
+	@RequestMapping(value = "/authorList")
+	public String authorList() {
+		return "admin/authorList";
+	}
+
+	@RequestMapping(value = "/blockedWorkList")
+	public String blockedWorkList() {
+		return "admin/blockedWorkList";
+	}
+
 	/**
 	 * 线程池监控页面
 	 * 

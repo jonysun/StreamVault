@@ -56,6 +56,12 @@ public class ConfigService {
 		if (cfg.getMediapreviewlimit() == null || cfg.getMediapreviewlimit().trim().isEmpty()) {
 			cfg.setMediapreviewlimit("6");
 		}
+		if (cfg.getCollecttaskintervalms() == null || cfg.getCollecttaskintervalms().trim().isEmpty()) {
+			cfg.setCollecttaskintervalms("3000");
+		}
+		if (cfg.getCollectitemintervalms() == null || cfg.getCollectitemintervalms().trim().isEmpty()) {
+			cfg.setCollectitemintervalms("2500");
+		}
 		if (cfg.getMediahomemode() == null || cfg.getMediahomemode().trim().isEmpty()) {
 			cfg.setMediahomemode("grid");
 		}
@@ -202,6 +208,20 @@ public class ConfigService {
 				Global.mediaPreviewLimit = Integer.parseInt(configEntity.getMediapreviewlimit().trim());
 			} catch (NumberFormatException e) {
 				logger.warn("mediapreviewlimit配置非法，保持原值: {}", Global.mediaPreviewLimit);
+			}
+		}
+		if (configEntity.getCollecttaskintervalms() != null && !configEntity.getCollecttaskintervalms().trim().isEmpty()) {
+			try {
+				Global.collectTaskIntervalMs = Math.max(0, Integer.parseInt(configEntity.getCollecttaskintervalms().trim()));
+			} catch (NumberFormatException e) {
+				logger.warn("collecttaskintervalms配置非法，保持原值: {}", Global.collectTaskIntervalMs);
+			}
+		}
+		if (configEntity.getCollectitemintervalms() != null && !configEntity.getCollectitemintervalms().trim().isEmpty()) {
+			try {
+				Global.collectItemIntervalMs = Math.max(0, Integer.parseInt(configEntity.getCollectitemintervalms().trim()));
+			} catch (NumberFormatException e) {
+				logger.warn("collectitemintervalms配置非法，保持原值: {}", Global.collectItemIntervalMs);
 			}
 		}
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);

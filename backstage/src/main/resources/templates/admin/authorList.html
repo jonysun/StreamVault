@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+	<title>作者列表</title>
+	<th:block th:insert="~{admin/include/header :: metaHeader}"></th:block>
+	<link href="../static/css/bootstrap.min.css" rel="stylesheet">
+	<link href="../static/css/materialdesignicons.min.css" rel="stylesheet">
+	<link href="../static/css/style.min.css" rel="stylesheet">
+	<link href="../static/js/skin/laypage.css" rel="stylesheet">
+	<style>
+		.toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+		.toolbar .form-control { min-width:180px; }
+		.avatar { width:40px; height:40px; border-radius:20px; object-fit:cover; background:#f3f4f6; }
+		.mono { font-family: Consolas, monospace; font-size: 12px; }
+		.text-ellipsis { max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+	</style>
+</head>
+<body>
+<div class="lyear-layout-web"><div class="lyear-layout-container"><div th:insert="~{admin/include/common :: headermenu}"></div>
+<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索名称/用户名/UID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button></div></div><div class="card-body"><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>头像</th><th>当前显示名</th><th>用户名</th><th>UID</th><th>主页</th><th>更新时间</th><th>历史名</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
+<script type="text/javascript" src="../static/js/jquery.min.js"></script>
+<script type="text/javascript" src="../static/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../static/js/laypage.js"></script>
+<script src="../static/js/layer/layer.js"></script>
+	<script>
+		var currentPage = 1;
+		function findList(page){
+			var option = { pageNo: page, pageSize: 15, keyword: $('#keyword').val(), platform: $('#platform').val() };
+			$('#tableData').html('<tr><td colspan="9" class="text-center text-muted">加载中...</td></tr>');
+			$.post('/admin/api/findAuthorProfileList', option, function(res){
+				if(res.resCode !== '000001'){ layer.msg(res.message || '加载失败'); return; }
+				var record = res.record || {}; var list = record.content || []; var html='';
+				for(var i=0;i<list.length;i++){
+				var item = list[i];
+				html += '<tr>';
+				html += '<td>'+ (item.id||'') +'</td>';
+				html += '<td>'+ (item.platform||'') +'</td>';
+				html += '<td>'+ (item.avatar ? '<img src="'+item.avatar+'" class="avatar">' : '--') +'</td>';
+				html += '<td class="text-ellipsis" title="'+ (item.displayname||'--') +'">'+ (item.displayname||'--') +'</td>';
+				html += '<td class="mono">'+ (item.username||'--') +'</td>';
+				html += '<td class="mono">'+ (item.authoruid||'--') +'</td>';
+				html += '<td>'+ (item.homepage ? '<a href="'+item.homepage+'" target="_blank">主页</a>' : '--') +'</td>';
+				html += '<td>'+ (item.updatetime || '') +'</td>';
+					html += '<td><button class="btn btn-outline-info btn-sm historyBtn" data-id="'+item.id+'">查看</button></td>';
+					html += '</tr>';
+				}
+				$('#tableData').html(html || '<tr><td colspan="9" class="text-center text-muted">暂无作者档案数据</td></tr>');
+			$('.historyBtn').click(function(){
+				var id = $(this).data('id');
+				$.get('/admin/api/findAuthorNameHistory', { authorProfileId:id }, function(r){
+				if(r.resCode !== '000001'){ layer.msg(r.message || '加载失败'); return; }
+					var arr = r.record || []; var text = '<div style="padding:12px;line-height:1.8;">';
+					text += '<div style="margin-bottom:8px;color:#666;">共 ' + arr.length + ' 条历史名称</div>';
+					for(var j=0;j<arr.length;j++){
+						text += '<div><strong>'+ (arr[j].displayname || '--') +'</strong><div style="font-size:12px;color:#999;">首次：'+ (arr[j].firstseentime || '--') +' / 最近：'+ (arr[j].lastseentime || '--') +'</div></div>';
+					}
+					if(arr.length === 0){ text += '<div class="text-muted">暂无历史名称</div>'; }
+					text += '</div>'; layer.open({type:1,title:'历史名称',area:['420px','320px'],content:text});
+				});
+			});
+			var pages = record.totalPages || (record.page && record.page.totalPages) || 1;
+			laypage({ cont:'pager', pages: pages, curr: page, jump:function(obj,first){ if(!first){ currentPage=obj.curr; findList(obj.curr); } } });
+		});
+	}
+	$('#searchBtn').click(function(){ currentPage = 1; findList(1); });
+	$('#resetBtn').click(function(){ $('#keyword').val(''); $('#platform').val(''); currentPage = 1; findList(1); });
+	$('#keyword, #platform').on('keydown', function(e){ if(e.key === 'Enter'){ currentPage = 1; findList(1); } });
+	$(function(){ findList(1); });
+	</script>
+</body></html>
