@@ -1874,7 +1874,6 @@
                 }
                 prewarmFeedIndexWindow(items, warmIndex, direction);
                 pruneFeedDom(items, currentAbsIndex, itemHeight);
-                trimFutureFeedDom(currentAbsIndex, direction);
                 var remaining = feedAllItems.length - 1 - warmIndex;
                 if (remaining <= feedPrefetchPageThreshold && hasMore && !isLoading) {
                     page++;
@@ -1911,36 +1910,6 @@
         if (removed > 0) {
             feedTrimmedHeadCount += removed;
             $('#feedTopSpacer').css('height', (feedTrimmedHeadCount * itemHeight) + 'px');
-        }
-    }
-
-    function trimFutureFeedDom(currentAbsIndex, direction) {
-        var items = Array.prototype.slice.call(document.querySelectorAll('#videoFeed .feed-item'));
-        if (items.length <= feedMaxDomItems) {
-            return;
-        }
-        for (var i = 0; i < items.length; i++) {
-            var abs = Number(items[i].getAttribute('data-abs-index') || '-1');
-            if (direction === 'up') {
-                if (abs > currentAbsIndex + 6) {
-                    items[i].remove();
-                }
-                continue;
-            }
-            if (abs > currentAbsIndex + 8) {
-                items[i].remove();
-            }
-        }
-        items = Array.prototype.slice.call(document.querySelectorAll('#videoFeed .feed-item'));
-        if (items.length <= feedMaxDomItems) {
-            return;
-        }
-        for (var j = items.length - 1; j >= 0 && items.length > feedMaxDomItems; j--) {
-            var tailAbs = Number(items[j].getAttribute('data-abs-index') || '-1');
-            if (tailAbs > currentAbsIndex + 4) {
-                items[j].remove();
-                items.splice(j, 1);
-            }
         }
     }
 
@@ -2481,7 +2450,7 @@
         };
         if (mediaHomeMode === 'feed') {
             if (feedOrder === 'asc' || feedOrder === 'desc') {
-                option.sortField = 'createtime';
+                option.sortField = 'publishtime';
                 option.sortOrder = feedOrder;
             } else if (feedOrder === 'random') {
                 option.randomMode = '1';
