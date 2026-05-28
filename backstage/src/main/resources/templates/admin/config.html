@@ -186,6 +186,10 @@
                                     <label>收藏任务内子项间隔(ms)</label>
                                     <input class="form-control" type="number" id="collectitemintervalms" name="collectitemintervalms" placeholder="默认2500" th:value="${config.collectitemintervalms}">
                                 </div>
+								<div class="form-group">
+									<label>抖音解析API URL列表 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('每行一个API Base URL或完整接口URL。会依次尝试 /api/hybrid/video_data?url=... 和 /api/douyin/web/handler_user_profile?...，不需要配置token。支持占位符 {url}、{sec_uid}、{unique_id}。')"></i></label>
+									<textarea class="form-control" id="douyinapiurls" name="douyinapiurls" rows="4" placeholder="例如：https://example.com" th:text="${config.douyinapiurls}"></textarea>
+								</div>
                             </div>
                         </div>
                     </div>
@@ -783,6 +787,7 @@
               option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
               option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
               option['collectitemintervalms'] = $("#collectitemintervalms").val();
+			  option['douyinapiurls'] = $("#douyinapiurls").val();
               option['mediahomemode'] = $("#mediahomemode").val();
               option['mediafeedmuted'] = $("#mediafeedmuted").val();
               option['mediafeedsource'] = $("#mediafeedsource").val();
@@ -961,6 +966,7 @@
             option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
             option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
             option['collectitemintervalms'] = $("#collectitemintervalms").val();
+			option['douyinapiurls'] = $("#douyinapiurls").val();
             option['mediahomemode'] = $("#mediahomemode").val();
             option['mediafeedmuted'] = $("#mediafeedmuted").val();
             option['mediafeedsource'] = $("#mediafeedsource").val();

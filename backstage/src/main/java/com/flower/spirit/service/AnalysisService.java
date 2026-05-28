@@ -194,6 +194,7 @@ public class AnalysisService {
 						continue;
 					}
 					VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,detectedPlatform, coverdb, filename, videodb, url);
+					videoDataEntity.setVideoinfo(exec);
 					videoDataEntity.setVideoauthor(parseObject.getString("uploader"));
 					videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
 					videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
@@ -266,6 +267,7 @@ public class AnalysisService {
 				VideoDataEntity videoDataEntity = new VideoDataEntity(videoId, title, title, platform, coverunaddr,
 						videofile,
 						videounrealaddr, url);
+				videoDataEntity.setVideoinfo(JSONObject.toJSONString(video));
 				videoDataEntity.setVideoauthor(author);
 				videoDataEntity.setAuthoruid(video.getAuthorId());
 				videoDataEntity.setAuthorusername(video.getAuthorId());
@@ -742,20 +744,43 @@ public class AnalysisService {
 		HttpUtil.downloadFileWithOkHttp(cover, coverfile, coverdir, header);
 		VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, platform, coverunaddr, videofile+filename + ".mp4",
 				videounrealaddr, originaladdress);
-		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
+		String secUid = map.get("sec_uid");
+		String uniqueId = map.get("unique_id");
 		String uid = map.get("uid");
-		if (uid != null && !uid.trim().isEmpty()) {
-			videoDataEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + awemeId);
+		JSONObject profile = DouUtil.fetchUserProfile(secUid);
+		if (profile == null) {
+			profile = DouUtil.fetchUserProfileByUniqueId(uniqueId);
 		}
-		authorProfileService.upsertAuthor("抖音", uid, uid, nickname, map.get("avatar_thumb"),
-				uid != null && !uid.trim().isEmpty() ? "https://www.douyin.com/user/" + uid : null);
-		videoDataEntity.setAuthoruid(uid);
-		videoDataEntity.setAuthorusername(uid);
+		JSONObject profileAuthor = DouUtil.findAwemeDetail(profile);
+		if (profileAuthor == null && profile != null) {
+			profileAuthor = profile.getJSONObject("user");
+			if (profileAuthor == null && profile.getJSONObject("data") != null) {
+				JSONObject data = profile.getJSONObject("data");
+				profileAuthor = data.getJSONObject("user") != null ? data.getJSONObject("user") : data;
+			}
+		}
+		if (profileAuthor != null) {
+			secUid = firstNotBlank(profileAuthor.getString("sec_uid"), secUid);
+			uniqueId = firstNotBlank(profileAuthor.getString("unique_id"), uniqueId);
+			nickname = firstNotBlank(profileAuthor.getString("nickname"), nickname);
+			uid = firstNotBlank(profileAuthor.getString("uid"), uid);
+			map.put("avatar_thumb", firstNotBlank(DouUtil.extractAvatar(profileAuthor), map.get("avatar_thumb")));
+		}
+		String authorUidForSave = firstNotBlank(secUid, uid);
+		videoDataEntity.setVideoinfo(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
+		videoDataEntity.setJsonData(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
+		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
+		videoDataEntity.setSourceurl("https://www.douyin.com/follow?modal_id=" + awemeId);
+		authorProfileService.upsertAuthor("抖音", authorUidForSave, uid, nickname, map.get("avatar_thumb"),
+				authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
+		videoDataEntity.setAuthoruid(authorUidForSave);
+		videoDataEntity.setSecuid(secUid);
+		videoDataEntity.setAuthorusername(uniqueId);
+		videoDataEntity.setUniqueid(uniqueId);
 		videoDataEntity.setAuthoravatar(map.get("avatar_thumb"));
 		// 生成元数据
 		if (Global.getGeneratenfo) {
 			// 下载发布者头像
-			uid = map.get("uid");
 			String publisher = nickname + "-" + uid + ".png";
 			HttpUtil.downloadFileWithOkHttp(map.get("avatar_thumb"), publisher, coverdir, header);
 			if (null != Global.nfonetaddr && !"".equals(Global.nfonetaddr)) {
@@ -776,6 +801,13 @@ public class AnalysisService {
 
 		videoDataDao.save(videoDataEntity);
 		logger.info("下载流程结束");
+	}
+
+	private String firstNotBlank(String first, String second) {
+		if (first != null && !first.trim().isEmpty()) {
+			return first;
+		}
+		return second;
 	}
 
 	private String formatPublishTimeFromEpochSeconds(String epochSeconds) {

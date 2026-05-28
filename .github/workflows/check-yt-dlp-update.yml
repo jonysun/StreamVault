@@ -5,6 +5,10 @@ on:
     - cron: '0 18 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: check-yt-dlp-update
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -19,22 +23,49 @@ jobs:
       - name: Get current yt-dlp version from Dockerfile
         id: current_version
         run: |
+          set -euo pipefail
           CURRENT_VERSION=$(grep "ARG YT_DLP_VERSION=" backstage/src/main/docker/buildx/Dockerfile | cut -d'=' -f2)
+          CURRENT_VERSION=$(echo "$CURRENT_VERSION" | tr -d '[:space:]')
           echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
           echo "Current version: ${CURRENT_VERSION}"
 
       - name: Get latest yt-dlp version
         id: latest_version
         run: |
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          set -euo pipefail
+          RESPONSE=$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest)
+          LATEST_VERSION=$(echo "$RESPONSE" | jq -r '.tag_name // empty')
+          LATEST_VERSION=$(echo "$LATEST_VERSION" | tr -d '[:space:]')
+          if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
+            echo "latest_version_valid=false" >> $GITHUB_OUTPUT
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "Latest version unavailable (empty/null), keep current tag"
+            exit 0
+          fi
+          # yt-dlp 主发布格式通常为 YYYY.MM.DD，保留少量后缀兼容
+          if [[ ! "$LATEST_VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}([.-][0-9A-Za-z]+)?$ ]]; then
+            echo "latest_version_valid=false" >> $GITHUB_OUTPUT
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "Latest version format invalid: ${LATEST_VERSION}, keep current tag"
+            exit 0
+          fi
+          echo "latest_version_valid=true" >> $GITHUB_OUTPUT
           echo "version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
           echo "Latest version: ${LATEST_VERSION}"
 
       - name: Compare versions
         id: compare
         run: |
+          set -euo pipefail
           CURRENT="${{ steps.current_version.outputs.version }}"
           LATEST="${{ steps.latest_version.outputs.version }}"
+          LATEST_VALID="${{ steps.latest_version.outputs.latest_version_valid }}"
+
+          if [ "$LATEST_VALID" != "true" ]; then
+            echo "Latest version invalid/unavailable, skip update and keep current tag"
+            echo "has_update=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           
           if [ "$CURRENT" != "$LATEST" ]; then
             echo "New version available: ${LATEST}"
@@ -48,6 +79,7 @@ jobs:
       - name: Update Dockerfile with new version
         if: steps.compare.outputs.has_update == 'true'
         run: |
+          set -euo pipefail
           NEW_VERSION="${{ steps.compare.outputs.new_version }}"
           sed -i "s/ARG YT_DLP_VERSION=.*/ARG YT_DLP_VERSION=${NEW_VERSION}/" backstage/src/main/docker/buildx/Dockerfile
           echo "Updated Dockerfile to version ${NEW_VERSION}"
@@ -55,9 +87,14 @@ jobs:
       - name: Commit and push changes
         if: steps.compare.outputs.has_update == 'true'
         run: |
+          set -euo pipefail
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add backstage/src/main/docker/buildx/Dockerfile
+          if git diff --cached --quiet; then
+            echo "No Dockerfile changes to commit"
+            exit 0
+          fi
           git commit -m "chore: update yt-dlp to ${{ steps.compare.outputs.new_version }}"
           git push
 

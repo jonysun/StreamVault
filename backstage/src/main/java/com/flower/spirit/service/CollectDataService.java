@@ -353,6 +353,7 @@ public class CollectDataService {
 							VideoDataEntity videoDataEntity = new VideoDataEntity(findVideoStreaming.get("cid"),
 									findVideoStreaming.get("title"), findVideoStreaming.get("desc"), "哔哩",
 									codir + "/" + filename + ".jpg", findVideoStreaming.get("video"), videounaddr, bvid);
+							videoDataEntity.setVideoinfo(JSONObject.toJSONString(findVideoStreaming));
 							logger.info(vt + (i + 1) + "下载流程结束");
 
 							JSONObject owner = JSONObject.parseObject(map.get("owner"));
@@ -681,38 +682,53 @@ public class CollectDataService {
 					if (!localVideoExists) {
 						HttpUtil.downloadFileWithOkHttp(coveruri, filename + ".jpg", dir2, header);
 					}
+					String sourceUrl = "https://www.douyin.com/follow?modal_id=" + awemeId;
+					JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
+					String rawJsonData = hybridData == null ? detailJson : hybridData.toJSONString();
 					VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, "抖音", coverunaddr,
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
+					videoDataEntity.setJsonData(rawJsonData);
+					videoDataEntity.setVideoinfo(rawJsonData);
 					videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
+					JSONObject author = aweme_detail.getJSONObject("author");
 					String sourceUid = aweme_detail.getString("sec_uid");
-					if (sourceUid == null || sourceUid.trim().isEmpty()) {
-						sourceUid = aweme_detail.getString("uid");
+					String uniqueId = aweme_detail.getString("unique_id");
+					String authorUid = aweme_detail.getString("uid");
+					String avatar = aweme_detail.getString("avatar_thumb");
+					if (author != null) {
+						if (sourceUid == null || sourceUid.trim().isEmpty()) sourceUid = author.getString("sec_uid");
+						if (uniqueId == null || uniqueId.trim().isEmpty()) uniqueId = author.getString("unique_id");
+						if (authorUid == null || authorUid.trim().isEmpty()) authorUid = author.getString("uid");
+						if (avatar == null || avatar.trim().isEmpty()) avatar = author.getString("avatar_thumb");
 					}
-					if ((sourceUid == null || sourceUid.trim().isEmpty()) && aweme_detail.getJSONObject("author") != null) {
-						sourceUid = aweme_detail.getJSONObject("author").getString("sec_uid");
-						if (sourceUid == null || sourceUid.trim().isEmpty()) {
-							sourceUid = aweme_detail.getJSONObject("author").getString("uid");
-						}
+					JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(sourceUid));
+					if (profileUser == null) {
+						profileUser = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
 					}
-					if ((sourceUid == null || sourceUid.trim().isEmpty()) && !entity.getOriginaladdress().startsWith("fav-")) {
-						sourceUid = entity.getOriginaladdress().replaceFirst("^(post|like|recommend)", "");
+					if (profileUser != null) {
+						sourceUid = firstNotBlank(profileUser.getString("sec_uid"), sourceUid);
+						uniqueId = firstNotBlank(profileUser.getString("unique_id"), uniqueId);
+						authorUid = firstNotBlank(profileUser.getString("uid"), authorUid);
+						dyNickname = firstNotBlank(profileUser.getString("nickname"), dyNickname);
+						avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), avatar);
 					}
-					authorProfileService.upsertAuthor("抖音", sourceUid, aweme_detail.getString("uid"), dyNickname,
-							aweme_detail.getString("avatar_thumb"),
-							sourceUid != null && !sourceUid.trim().isEmpty() && !sourceUid.startsWith("fav-") ? "https://www.douyin.com/user/" + sourceUid : null);
-					videoDataEntity.setAuthoruid(sourceUid);
-					videoDataEntity.setAuthorusername(aweme_detail.getString("uid"));
-					videoDataEntity.setAuthoravatar(aweme_detail.getString("avatar_thumb"));
-					if (sourceUid != null && !sourceUid.trim().isEmpty() && !sourceUid.startsWith("fav-")) {
-						videoDataEntity.setSourceurl("https://www.douyin.com/user/" + sourceUid + "?modal_id=" + awemeId);
-					}
+					String authorUidForSave = firstNotBlank(sourceUid, authorUid);
+					authorProfileService.upsertAuthor("抖音", authorUidForSave, authorUid, dyNickname,
+							avatar,
+							authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
+					videoDataEntity.setAuthoruid(authorUidForSave);
+					videoDataEntity.setSecuid(sourceUid);
+					videoDataEntity.setAuthorusername(uniqueId);
+					videoDataEntity.setUniqueid(uniqueId);
+					videoDataEntity.setAuthoravatar(avatar);
+					videoDataEntity.setSourceurl(sourceUrl);
 					if (Global.getGeneratenfo) {
-						String uid = aweme_detail.getString("uid");
+						String uid = authorUid;
 						String publisher = dyNickname + "-" + uid + ".png";
 						String coverdir = FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename,
 								taskname, null);
-						HttpUtil.downloadFileWithOkHttp(aweme_detail.getString("avatar_thumb"), publisher, coverdir,
+						HttpUtil.downloadFileWithOkHttp(avatar, publisher, coverdir,
 								header);
 						if (null != Global.nfonetaddr && !"".equals(Global.nfonetaddr)) {
 							String publisherdir = FileUtil.generateDir(false, Global.platform.douyin.name(), false,
@@ -728,7 +744,7 @@ public class CollectDataService {
 						map.put("upname", aweme_detail.getString("nickname"));
 						map.put("ctime", aweme_detail.getString("create_time"));
 						map.put("piclocal", filename + ".jpg");
-						map.put("upmid", aweme_detail.getString("uid"));
+						map.put("upmid", authorUid);
 						map.put("cid", awemeId);
 						map.put("upface", publisher);
 						EmbyMetadataGenerator.createFavoriteEpisodeDouNfo(map, dir, i + 1, temporaryDirectory);
@@ -1434,6 +1450,26 @@ public class CollectDataService {
 
 	private void markCollectTaskFinished() {
 		lastCollectTaskFinishedAt = System.currentTimeMillis();
+	}
+
+	private String firstNotBlank(String first, String second) {
+		if (first != null && !first.trim().isEmpty()) {
+			return first;
+		}
+		return second;
+	}
+
+	private JSONObject extractProfileUser(JSONObject profile) {
+		if (profile == null) return null;
+		JSONObject user = profile.getJSONObject("user");
+		if (user != null) return user;
+		JSONObject data = profile.getJSONObject("data");
+		if (data != null) {
+			JSONObject dataUser = data.getJSONObject("user");
+			if (dataUser != null) return dataUser;
+			return data;
+		}
+		return profile;
 	}
 
 	public List<Map<String, Object>> authorDownloadStats() {

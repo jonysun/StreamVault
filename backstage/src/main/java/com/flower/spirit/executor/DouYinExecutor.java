@@ -160,19 +160,23 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			String uid = extractTaskUid(originaladdress);
-			graphicContentEntity.setAuthoruid(uid);
-			graphicContentEntity.setAuthorusername(aweme_detail.getJSONObject("author").getString("uid"));
-			graphicContentEntity.setAuthoravatar(aweme_detail.getJSONObject("author").getString("avatar_thumb"));
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname);
+			graphicContentEntity.setAuthor(authorSnapshot.nickname);
+			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
+			graphicContentEntity.setSecuid(authorSnapshot.secUid);
+			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
+			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
+			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
+			String sourceUrl = "https://www.douyin.com/follow?modal_id=" + post;
+			JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
+			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
-				staticAuthorProfileService.upsertAuthor("抖音", uid, aweme_detail.getJSONObject("author").getString("uid"), nickname,
-						aweme_detail.getJSONObject("author").getString("avatar_thumb"),
-						uid != null ? "https://www.douyin.com/user/" + uid : null);
+				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uid, authorSnapshot.nickname,
+						authorSnapshot.avatar,
+						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null);
 			}
-			if (uid != null) {
-				graphicContentEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + post);
-			}
+			graphicContentEntity.setSourceurl(sourceUrl);
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -272,19 +276,23 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			String uid = extractTaskUid(type);
-			graphicContentEntity.setAuthoruid(uid);
-			graphicContentEntity.setAuthorusername(aweme_detail.getJSONObject("author").getString("uid"));
-			graphicContentEntity.setAuthoravatar(aweme_detail.getJSONObject("author").getString("avatar_thumb"));
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname);
+			graphicContentEntity.setAuthor(authorSnapshot.nickname);
+			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
+			graphicContentEntity.setSecuid(authorSnapshot.secUid);
+			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
+			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
+			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
+			String sourceUrl = "https://www.douyin.com/follow?modal_id=" + post;
+			JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
+			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
-				staticAuthorProfileService.upsertAuthor("抖音", uid, aweme_detail.getJSONObject("author").getString("uid"), nickname,
-						aweme_detail.getJSONObject("author").getString("avatar_thumb"),
-						uid != null ? "https://www.douyin.com/user/" + uid : null);
+				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uid, authorSnapshot.nickname,
+						authorSnapshot.avatar,
+						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null);
 			}
-			if (uid != null) {
-				graphicContentEntity.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + post);
-			}
+			graphicContentEntity.setSourceurl(sourceUrl);
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -313,6 +321,56 @@ public class DouYinExecutor {
 		}
 		File file = new File(path);
 		return file.exists() && file.isFile() && file.length() > 0;
+	}
+
+	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, String fallbackName) {
+		JSONObject author = awemeDetail == null ? null : awemeDetail.getJSONObject("author");
+		AuthorSnapshot snapshot = new AuthorSnapshot();
+		snapshot.nickname = author == null ? fallbackName : firstNotBlank(author.getString("nickname"), fallbackName);
+		snapshot.secUid = author == null ? null : author.getString("sec_uid");
+		snapshot.uniqueId = author == null ? null : author.getString("unique_id");
+		snapshot.uid = author == null ? null : author.getString("uid");
+		snapshot.avatar = DouUtil.extractAvatar(author);
+		JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(snapshot.secUid));
+		if (profileUser == null) {
+			profileUser = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(snapshot.uniqueId));
+		}
+		if (profileUser != null) {
+			snapshot.nickname = firstNotBlank(profileUser.getString("nickname"), snapshot.nickname);
+			snapshot.secUid = firstNotBlank(profileUser.getString("sec_uid"), snapshot.secUid);
+			snapshot.uniqueId = firstNotBlank(profileUser.getString("unique_id"), snapshot.uniqueId);
+			snapshot.uid = firstNotBlank(profileUser.getString("uid"), snapshot.uid);
+			snapshot.avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), snapshot.avatar);
+		}
+		snapshot.authorUid = firstNotBlank(snapshot.secUid, snapshot.uid);
+		return snapshot;
+	}
+
+	private static JSONObject extractProfileUser(JSONObject profile) {
+		if (profile == null) return null;
+		JSONObject user = profile.getJSONObject("user");
+		if (user != null) return user;
+		JSONObject data = profile.getJSONObject("data");
+		if (data != null) {
+			JSONObject dataUser = data.getJSONObject("user");
+			if (dataUser != null) return dataUser;
+			return data;
+		}
+		return profile;
+	}
+
+	private static String firstNotBlank(String first, String second) {
+		if (first != null && !first.trim().isEmpty()) return first;
+		return second;
+	}
+
+	private static class AuthorSnapshot {
+		String nickname;
+		String authorUid;
+		String secUid;
+		String uniqueId;
+		String uid;
+		String avatar;
 	}
 
 	private static String formatPublishTimeFromEpochSeconds(String epochSeconds) {

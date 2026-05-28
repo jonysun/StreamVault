@@ -96,6 +96,8 @@ public class ConfigEntity implements Serializable {
 
 	private String collectitemintervalms; // 收藏任务内子项间隔（毫秒）
 
+	private String douyinapiurls; // 抖音解析API URL列表（多行）
+
 	public Integer getId() {
 		return id;
 	}
@@ -366,6 +368,14 @@ public class ConfigEntity implements Serializable {
 
 	public void setCollectitemintervalms(String collectitemintervalms) {
 		this.collectitemintervalms = collectitemintervalms;
+	}
+
+	public String getDouyinapiurls() {
+		return douyinapiurls;
+	}
+
+	public void setDouyinapiurls(String douyinapiurls) {
+		this.douyinapiurls = douyinapiurls;
 	}
 
 	// public String getYtdlpargs() {

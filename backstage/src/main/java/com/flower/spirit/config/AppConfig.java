@@ -62,6 +62,7 @@ public class AppConfig {
 		if(null!=data.getUseragent() && !"".equals(data.getUseragent())) {
 			Global.useragent = data.getUseragent();
 		}
+		Global.douyinApiUrls = data.getDouyinapiurls() == null ? "" : data.getDouyinapiurls();
 		BiliConfigEntity bili = biliConfigService.getData();
 		Global.bilicookies =bili.getBilicookies();
 		if(null != bili.getBigmember() && bili.getBigmember().equals("是")) {

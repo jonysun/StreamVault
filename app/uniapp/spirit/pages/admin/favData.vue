@@ -239,7 +239,7 @@ export default {
 						this.taskForm.douyinType = 'post'
 						this.douyinTypeIndex = 0
 						this.taskForm.originaladdress = res.data.record.secUserId || ''
-						const authorName = ((res.data.record.authorName || '') + '').trim()
+						const authorName = ((res.data.record.authorName || this.extractAuthorNameFromShareText(this.douyinShareText) || '') + '').trim()
 						if (authorName) {
 							this.taskForm.taskname = `${authorName}的抖音作品`
 						} else if (!this.taskForm.taskname || this.taskForm.taskname === '抖音作品任务') {
@@ -252,6 +252,22 @@ export default {
 				},
 				complete: () => uni.hideLoading()
 			})
+		},
+		extractAuthorNameFromShareText(text) {
+			const raw = (text || '').toString()
+			if (!raw) return ''
+			const patterns = [
+				/来自\s*([^\s，。！？!?:：]+)\s*的作品/,
+				/抖音号\s*[:：]?\s*([^\s，。！？!?:：]+)/,
+				/@([^\s，。！？!?:：]+)/
+			]
+			for (let i = 0; i < patterns.length; i++) {
+				const m = raw.match(patterns[i])
+				if (m && m[1]) {
+					return m[1].trim()
+				}
+			}
+			return ''
 		},
 		buildOriginalAddress() {
 			const base = (this.taskForm.originaladdress || '').trim()

@@ -7,7 +7,7 @@
 			<cover-view class="icon-btn" @tap="toggleInfoPanel">i</cover-view>
 		</cover-view>
 
-		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" :duration="swipeDuration" :skip-hidden-item-layout="true">
+		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" @animationfinish="onSwiperAnimationFinish" :duration="swipeDuration" :skip-hidden-item-layout="false" :easing-function="'easeOutCubic'">
 			<swiper-item v-for="(video, index) in playList" :key="video.id || video.videoid || index" class="swiper-cell">
 				<view class="video-wrapper">
 					<video
@@ -352,7 +352,7 @@
 					query.randomMode = '1'
 					query.randomSeed = this.sessionRandomSeed
 				} else {
-					query.sortField = 'createtime'
+					query.sortField = 'publishtime'
 					query.sortOrder = this.activeOrderMode === 'asc' ? 'asc' : 'desc'
 				}
 				if (this.selectedAuthor && this.selectedAuthor.trim()) {
@@ -407,7 +407,7 @@
 				this.playRequestToken++
 				this.baseList = []
 				this.playList = []
-				this.pageNo = 0
+				this.pageNo = 1
 				this.hasMore = true
 				this.currentIndex = 0
 				this.activePlayingIndex = -1
@@ -448,7 +448,7 @@
 					method: 'POST',
 					header: { 'content-type': 'application/x-www-form-urlencoded' },
 					data: this.buildFeedQuery(this.pageNo),
-						success: (res) => {
+					success: (res) => {
 						if (res.data && res.data.resCode === '000001' && res.data.record && res.data.record.content) {
 							const list = res.data.record.content || []
 							list.forEach(v => {
@@ -474,10 +474,10 @@
 					fail: () => {
 						uni.showToast({ title: '网络异常，请检查服务器', icon: 'none' })
 					},
-						complete: () => {
-							this.isLoading = false
-							if (typeof onDone === 'function') onDone()
-						}
+					complete: () => {
+						this.isLoading = false
+						if (typeof onDone === 'function') onDone()
+					}
 				})
 			},
 			refreshAuthorOptions() {
@@ -490,6 +490,7 @@
 			onSwiperChange(e) {
 				const next = Number(e && e.detail && e.detail.current)
 				if (Number.isNaN(next)) return
+				if (this.isResettingFeed) return
 				if (next === this.currentIndex) return
 				this.showControls = false
 				this.currentIndex = next
@@ -497,10 +498,22 @@
 					this.applyPendingOrder()
 					return
 				}
-				this.playCurrent()
 				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
-					this.loadVideos()
+					setTimeout(() => this.loadVideos(), 60)
 				}
+			},
+			onSwiperAnimationFinish(e) {
+				if (this.isResettingFeed) return
+				const next = Number(e && e.detail && e.detail.current)
+				if (Number.isNaN(next)) return
+				if (next !== this.currentIndex) {
+					this.currentIndex = next
+				}
+				if (this.pendingOrderMode && this.pendingOrderMode !== this.activeOrderMode) {
+					this.applyPendingOrder()
+					return
+				}
+				this.playCurrent()
 			},
 			playCurrent() {
 				const requestToken = ++this.playRequestToken

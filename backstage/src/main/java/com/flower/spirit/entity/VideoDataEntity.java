@@ -7,6 +7,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
@@ -52,6 +53,13 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	private String authorusername;
 
 	private String authoravatar;
+
+	private String secuid;
+
+	private String uniqueid;
+
+	@Lob
+	private String jsonData;
 	
 	private String videodesc;
 	
@@ -246,6 +254,30 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setAuthoravatar(String authoravatar) {
 		this.authoravatar = authoravatar;
+	}
+
+	public String getSecuid() {
+		return secuid;
+	}
+
+	public void setSecuid(String secuid) {
+		this.secuid = secuid;
+	}
+
+	public String getUniqueid() {
+		return uniqueid;
+	}
+
+	public void setUniqueid(String uniqueid) {
+		this.uniqueid = uniqueid;
+	}
+
+	public String getJsonData() {
+		return jsonData;
+	}
+
+	public void setJsonData(String jsonData) {
+		this.jsonData = jsonData;
 	}
 	
 	/**

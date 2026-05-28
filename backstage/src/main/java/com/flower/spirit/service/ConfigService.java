@@ -62,6 +62,9 @@ public class ConfigService {
 		if (cfg.getCollectitemintervalms() == null || cfg.getCollectitemintervalms().trim().isEmpty()) {
 			cfg.setCollectitemintervalms("2500");
 		}
+		if (cfg.getDouyinapiurls() == null) {
+			cfg.setDouyinapiurls("");
+		}
 		if (cfg.getMediahomemode() == null || cfg.getMediahomemode().trim().isEmpty()) {
 			cfg.setMediahomemode("grid");
 		}
@@ -224,6 +227,7 @@ public class ConfigService {
 				logger.warn("collectitemintervalms配置非法，保持原值: {}", Global.collectItemIntervalMs);
 			}
 		}
+		Global.douyinApiUrls = configEntity.getDouyinapiurls() == null ? "" : configEntity.getDouyinapiurls();
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);
 	}
 

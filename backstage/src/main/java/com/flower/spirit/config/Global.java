@@ -168,6 +168,8 @@ public class Global {
 
 	public static int collectItemIntervalMs = 2500;
 
+	public static String douyinApiUrls = "";
+
 	@Value("${file.save}")
 	public void setSavefile(String value) {
 		Global.savefile = value;

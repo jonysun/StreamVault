@@ -5,12 +5,14 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.URLEncoder;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,6 +48,59 @@ public class DouUtil {
 	
 	private static final Pattern NOTE_ID_PATTERN_V1 = Pattern.compile("(?<=/note/)([^/?]+)");
 	private static final Pattern NOTE_ID_PATTERN_V2 = Pattern.compile("/note/(\\d+)(?=[/?]|$)");
+
+	public static JSONObject fetchHybridVideoData(String rawUrl) {
+		return fetchDouyinApi("/api/hybrid/video_data", "url", rawUrl);
+	}
+
+	public static JSONObject fetchUserProfile(String secUid) {
+		return fetchDouyinApi("/api/douyin/web/handler_user_profile", "sec_user_id", secUid);
+	}
+
+	public static JSONObject fetchUserProfileByUniqueId(String uniqueId) {
+		return fetchDouyinApi("/api/douyin/web/handler_user_profile", "unique_id", uniqueId);
+	}
+
+	private static JSONObject fetchDouyinApi(String path, String key, String value) {
+		if (value == null || value.trim().isEmpty() || Global.douyinApiUrls == null || Global.douyinApiUrls.trim().isEmpty()) {
+			return null;
+		}
+		String[] bases = Global.douyinApiUrls.split("\\r?\\n");
+		for (String base : bases) {
+			if (base == null || base.trim().isEmpty()) continue;
+			try {
+				String url = buildApiUrl(base.trim(), path, key, value);
+				String response = HttpUtil.getPage(url, null, null);
+				if (response == null || response.trim().isEmpty()) continue;
+				JSONObject object = JSONObject.parseObject(response);
+				if (object != null) return object;
+			} catch (Exception e) {
+				logger.warn("douyin api request failed path={} base={}: {}", path, base, e.getMessage());
+			}
+		}
+		return null;
+	}
+
+	private static String buildApiUrl(String base, String path, String key, String value) {
+		String url = base;
+		if (url.contains("{url}")) {
+			return url.replace("{url}", encode(value));
+		}
+		if (url.contains("{sec_uid}")) {
+			return url.replace("{sec_uid}", encode(value));
+		}
+		if (url.contains("{unique_id}")) {
+			return url.replace("{unique_id}", encode(value));
+		}
+		if (!url.contains(path)) {
+			url = url.replaceAll("/+$", "") + path;
+		}
+		return url + (url.contains("?") ? "&" : "?") + key + "=" + encode(value);
+	}
+
+	private static String encode(String value) {
+		return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+	}
 	
 
 	/**
@@ -78,7 +133,7 @@ public class DouUtil {
 			logger.info("[DouyinSingle] extracted videoId={}", videoId);
 			
 			// 获取视频数据
-			Map<String, String> data = getBogus(videoId);
+			Map<String, String> data = getBogus(videoId, url);
 			if (data != null) {
 				logger.info("接口解析成功，数据: {}", data);
 				return data;
@@ -192,6 +247,15 @@ public class DouUtil {
 	 * @throws HttpException
 	 * @throws IOException
 	 */
+	public static Map<String, String> getBogus(String aweme_id, String rawUrl) throws HttpException, IOException {
+		Map<String, String> res = getBogus(aweme_id);
+		JSONObject hybrid = fetchHybridVideoData(rawUrl);
+		if (res != null && hybrid != null) {
+			mergeHybridData(res, hybrid);
+		}
+		return res;
+	}
+
 	public static  Map<String, String> getBogus(String aweme_id) throws HttpException, IOException {
 		 Map<String, String> res = new HashMap<String, String>();
 		 if(null !=Global.tiktokCookie && !"".equals(Global.tiktokCookie) ) {
@@ -232,6 +296,15 @@ public class DouUtil {
 			 String desc = data.getString("desc");
 			 String nickname = data.getString("nickname");
 			 String uid = data.getString("uid");
+			 String secUid = data.getString("sec_uid");
+			 String uniqueId = data.getString("unique_id");
+			 JSONObject author = data.getJSONObject("author");
+			 if (author != null) {
+				 if (nickname == null || nickname.trim().isEmpty()) nickname = author.getString("nickname");
+				 if (uid == null || uid.trim().isEmpty()) uid = author.getString("uid");
+				 secUid = firstNotBlank(secUid, author.getString("sec_uid"));
+				 uniqueId = firstNotBlank(uniqueId, author.getString("unique_id"));
+			 }
 			 String create_time = data.getString("create_time");
 			 res.put("awemeid", aweme_id);
 			 res.put("videoplay", videoplay);
@@ -240,12 +313,77 @@ public class DouUtil {
 			 res.put("type", "api");
 			 res.put("nickname", nickname);
 			 res.put("uid", uid);
+			 res.put("sec_uid", secUid);
+			 res.put("unique_id", uniqueId);
 			 res.put("create_time", create_time);
 			 res.put("avatar_thumb", data.getString("avatar_thumb"));
+			 res.put("jsonData", data.toJSONString());
 			 return res;
 		 }
 		 return null;
 
+	}
+
+	private static void mergeHybridData(Map<String, String> res, JSONObject hybrid) {
+		JSONObject detail = findAwemeDetail(hybrid);
+		if (detail == null) return;
+		JSONObject author = detail.getJSONObject("author");
+		if (author != null) {
+			res.put("nickname", firstNotBlank(author.getString("nickname"), res.get("nickname")));
+			res.put("uid", firstNotBlank(author.getString("uid"), res.get("uid")));
+			res.put("sec_uid", firstNotBlank(author.getString("sec_uid"), res.get("sec_uid")));
+			res.put("unique_id", firstNotBlank(author.getString("unique_id"), res.get("unique_id")));
+			res.put("signature", author.getString("signature"));
+			res.put("avatar_thumb", firstNotBlank(extractAvatar(author), res.get("avatar_thumb")));
+		}
+		res.put("desc", firstNotBlank(detail.getString("desc"), res.get("desc")));
+		res.put("create_time", firstNotBlank(detail.getString("create_time"), res.get("create_time")));
+		res.put("jsonData", hybrid.toJSONString());
+	}
+
+	public static JSONObject findAwemeDetail(JSONObject object) {
+		if (object == null) return null;
+		JSONObject direct = object.getJSONObject("aweme_detail");
+		if (direct != null) return direct;
+		JSONObject data = object.getJSONObject("data");
+		if (data != null) {
+			JSONObject fromData = data.getJSONObject("aweme_detail");
+			if (fromData != null) return fromData;
+			JSONObject item = data.getJSONObject("item");
+			if (item != null) return item;
+		}
+		JSONObject record = object.getJSONObject("record");
+		if (record != null) return findAwemeDetail(record);
+		return null;
+	}
+
+	public static String extractAvatar(JSONObject author) {
+		if (author == null) return null;
+		String[] keys = {"avatar_300x300", "avatar_medium", "avatar_thumb"};
+		for (String key : keys) {
+			Object value = author.get(key);
+			String url = extractUrl(value);
+			if (url != null && !url.trim().isEmpty()) return url;
+		}
+		return null;
+	}
+
+	private static String extractUrl(Object value) {
+		if (value == null) return null;
+		if (value instanceof String) return (String) value;
+		if (value instanceof JSONObject) {
+			JSONArray urls = ((JSONObject) value).getJSONArray("url_list");
+			if (urls != null && !urls.isEmpty()) return urls.getString(urls.size() - 1);
+		}
+		if (value instanceof JSONArray && !((JSONArray) value).isEmpty()) return ((JSONArray) value).getString(((JSONArray) value).size() - 1);
+		return null;
+	}
+
+	private static String firstNotBlank(String first, String second) {
+		if (first != null && !first.trim().isEmpty()) {
+			return first;
+		}
+		return second;
 	}
 
 	private static String previewOutput(String output) {

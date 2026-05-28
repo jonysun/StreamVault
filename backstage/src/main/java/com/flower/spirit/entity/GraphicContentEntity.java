@@ -7,6 +7,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
@@ -48,6 +49,13 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	private String authorusername;
 
 	private String authoravatar;
+
+	private String secuid;
+
+	private String uniqueid;
+
+	@Lob
+	private String jsonData;
 	
 	private String tags;
 	
@@ -159,6 +167,30 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	public void setAuthoravatar(String authoravatar) {
 		this.authoravatar = authoravatar;
+	}
+
+	public String getSecuid() {
+		return secuid;
+	}
+
+	public void setSecuid(String secuid) {
+		this.secuid = secuid;
+	}
+
+	public String getUniqueid() {
+		return uniqueid;
+	}
+
+	public void setUniqueid(String uniqueid) {
+		this.uniqueid = uniqueid;
+	}
+
+	public String getJsonData() {
+		return jsonData;
+	}
+
+	public void setJsonData(String jsonData) {
+		this.jsonData = jsonData;
 	}
 
 	public String getTags() {

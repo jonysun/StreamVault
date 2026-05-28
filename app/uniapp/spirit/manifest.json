@@ -2,8 +2,8 @@
     "name" : "StreamVault",
     "appid" : "__UNI__4D65104",
     "description" : "",
-    "versionName" : "2.8.5",
-    "versionCode" : 285,
+    "versionName" : "2.9.5",
+    "versionCode" : 295,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
