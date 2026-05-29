@@ -38,6 +38,7 @@ buildNumber.properties
 /app/desktop/StreamVault-tauri/src-tauri/Cargo.lock
 /backstage/src/main/docker/buildx/script/logs
 /db/
+/.worktrees/
 
 # extend - StreamVault CLI runtime files
 extend/**/config.json
