@@ -44,6 +44,7 @@ import com.flower.spirit.utils.BiliUtil;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
+import com.flower.spirit.utils.DouyinSourceUrlUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.FileNameTemplateUtil;
@@ -534,7 +535,7 @@ public class CollectDataService {
 					}
 					// 不支持
 					try {
-						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(),null);
+						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(), (String) null);
 						CollectDataDetailEntity collectDataDetailEntity = new CollectDataDetailEntity();
 						collectDataDetailEntity.setDataid(entity.getId());
 						collectDataDetailEntity.setVideoid(awemeId);
@@ -682,7 +683,7 @@ public class CollectDataService {
 					if (!localVideoExists) {
 						HttpUtil.downloadFileWithOkHttp(coveruri, filename + ".jpg", dir2, header);
 					}
-					String sourceUrl = "https://www.douyin.com/follow?modal_id=" + awemeId;
+					String sourceUrl = DouyinSourceUrlUtil.video(awemeId);
 					JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
 					String rawJsonData = hybridData == null ? detailJson : hybridData.toJSONString();
 					VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, "抖音", coverunaddr,
@@ -714,7 +715,7 @@ public class CollectDataService {
 						avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), avatar);
 					}
 					String authorUidForSave = firstNotBlank(sourceUid, authorUid);
-					authorProfileService.upsertAuthor("抖音", authorUidForSave, authorUid, dyNickname,
+					authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, dyNickname,
 							avatar,
 							authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
 					videoDataEntity.setAuthoruid(authorUidForSave);

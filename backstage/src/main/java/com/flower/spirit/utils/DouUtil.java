@@ -73,7 +73,10 @@ public class DouUtil {
 				String response = HttpUtil.getPage(url, null, null);
 				if (response == null || response.trim().isEmpty()) continue;
 				JSONObject object = JSONObject.parseObject(response);
-				if (object != null) return object;
+				if (object != null) {
+					logger.info("douyin api request success path={} base={} responseLength={}", path, base, response.length());
+					return object;
+				}
 			} catch (Exception e) {
 				logger.warn("douyin api request failed path={} base={}: {}", path, base, e.getMessage());
 			}
@@ -110,6 +113,10 @@ public class DouUtil {
 	 * @return 视频信息Map，包含视频ID、播放地址等
 	 */
 	public static Map<String, String> downVideo(String url) {
+		return downVideo(url, null);
+	}
+
+	public static Map<String, String> downVideo(String url, Integer historyId) {
 		try {
 			logger.info("[DouyinSingle] start rawUrl={}", url);
 			// 获取重定向后的真实URL
@@ -124,7 +131,7 @@ public class DouUtil {
 				String noteId = extractNoteId(baseUri);
 				logger.warn("[DouyinSingle] no videoId extracted, noteId={}", noteId);
 				if(noteId!= null) {
-					DouYinExecutor.ImageTextExecutor(url,noteId);
+					DouYinExecutor.ImageTextExecutor(url,noteId, historyId);
 				}
 				return null;
 			}
@@ -325,6 +332,7 @@ public class DouUtil {
 	}
 
 	private static void mergeHybridData(Map<String, String> res, JSONObject hybrid) {
+		res.put("jsonData", hybrid.toJSONString());
 		JSONObject detail = findAwemeDetail(hybrid);
 		if (detail == null) return;
 		JSONObject author = detail.getJSONObject("author");
@@ -338,7 +346,6 @@ public class DouUtil {
 		}
 		res.put("desc", firstNotBlank(detail.getString("desc"), res.get("desc")));
 		res.put("create_time", firstNotBlank(detail.getString("create_time"), res.get("create_time")));
-		res.put("jsonData", hybrid.toJSONString());
 	}
 
 	public static JSONObject findAwemeDetail(JSONObject object) {

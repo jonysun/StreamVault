@@ -24,6 +24,7 @@ import com.flower.spirit.entity.ProcessHistoryEntity;
 import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DouUtil;
+import com.flower.spirit.utils.DouyinSourceUrlUtil;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.HttpUtil;
@@ -75,8 +76,12 @@ public class DouYinExecutor {
 	 * @throws IOException 
 	 */
 	public static void ImageTextExecutor(String originaladdress,String post) throws IOException {
+		ImageTextExecutor(originaladdress, post, (Integer) null);
+	}
+
+	public static void ImageTextExecutor(String originaladdress,String post, Integer historyId) throws IOException {
 		logger.info("[DouyinImageText] start originaladdress={} postId={}", originaladdress, post);
-		ProcessHistoryEntity saveProcess = staticprocessHistoryService.saveProcess(null, originaladdress, "抖音");
+		ProcessHistoryEntity saveProcess = historyId == null ? staticprocessHistoryService.saveProcess(null, originaladdress, "抖音") : null;
 		String taskout = Global.apppath + "lot" +System.getProperty("file.separator") + "imageText_"+post + ".json";
 		GraphicContentEntity graphicContentEntity = new GraphicContentEntity();
 		graphicContentEntity.setVideoid(post);
@@ -167,12 +172,12 @@ public class DouYinExecutor {
 			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
 			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
 			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
-			String sourceUrl = "https://www.douyin.com/follow?modal_id=" + post;
+			String sourceUrl = DouyinSourceUrlUtil.note(post);
 			JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
-				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uid, authorSnapshot.nickname,
+				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uniqueId, authorSnapshot.nickname,
 						authorSnapshot.avatar,
 						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null);
 			}
@@ -181,7 +186,9 @@ public class DouYinExecutor {
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
 			sendNotify.sendNotifyData(filename, originaladdress, "抖音");
-			staticprocessHistoryService.saveProcess(saveProcess.getId(), originaladdress, "抖音");
+			if (historyId == null && saveProcess != null) {
+				staticprocessHistoryService.completeProcess(saveProcess.getId(), "任务执行完成");
+			}
 			logger.info("[DouyinImageText] finish postId={} savedCount={}", post, imageList.size());
 		}
 
@@ -283,12 +290,12 @@ public class DouYinExecutor {
 			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
 			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
 			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
-			String sourceUrl = "https://www.douyin.com/follow?modal_id=" + post;
+			String sourceUrl = DouyinSourceUrlUtil.note(post);
 			JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
-				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uid, authorSnapshot.nickname,
+				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uniqueId, authorSnapshot.nickname,
 						authorSnapshot.avatar,
 						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null);
 			}

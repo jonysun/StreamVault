@@ -1057,9 +1057,9 @@
         isLoading = true;
         $('#loading').show();
         
-        var option = mediaHomeMode === 'feed'
-            ? buildFeedRequestOption(page, feedPageSize)
-            : { pageNo: page, pageSize: 25 };
+		var option = mediaHomeMode === 'feed'
+			? buildFeedRequestOption(page, feedPageSize)
+			: { pageNo: page, pageSize: 25, sortField: 'publishtime', sortOrder: 'desc' };
         
         $.post("/admin/api/findVideoDataList", option, function(data, status) {
             if(data.resCode === "000001") {
@@ -1090,7 +1090,7 @@
                             html += '<div class="video-title'+(isPrivate ? ' is-private' : '')+'" title="'+(isPrivate ? '' : list[i].videoname)+'">'+(isPrivate ? '******' : list[i].videoname)+'</div>';
                             html += '<div class="video-meta">';
                             html += '<span class="video-platform badge-info">'+(isPrivate ? '****' : list[i].videoplatform)+'</span>';
-                            html += '<span class="video-time">'+formatTime(list[i].createtime)+'</span>';
+							html += '<span class="video-time">'+formatTime(list[i].publishtime || list[i].createtime)+'</span>';
                             html += '</div>';
                             html += '</div>';
                             html += '</div>';
@@ -1138,7 +1138,7 @@
         var safeTitle = isPrivate ? '******' : (item.videoname || '未命名视频');
         var safePlatform = isPrivate ? '****' : (item.videoplatform || '未知平台');
         var safeAuthor = isPrivate ? '****' : (item.videoauthor || '未知作者');
-        var timeText = formatTime(item.createtime);
+		var timeText = formatTime(item.publishtime || item.createtime);
         var itemKey = escapeHtml(getFeedItemKey(item));
         var html = '<div class="feed-item" data-private="' + isPrivate + '">';
         html += '<div class="feed-video-host" data-src="' + (item.playurl || item.videounrealaddr || '') + '" data-fallback="' + (item.videounrealaddr || '') + '" data-playurl="' + (item.playurl || '') + '" data-mp4="' + (item.videounrealaddr || item.playurl || '') + '"></div>';

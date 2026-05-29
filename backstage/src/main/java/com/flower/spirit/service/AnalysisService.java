@@ -34,6 +34,7 @@ import com.flower.spirit.utils.Aria2Util;
 import com.flower.spirit.utils.BiliUtil;
 import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
+import com.flower.spirit.utils.DouyinSourceUrlUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.FileNameTemplateUtil;
@@ -120,7 +121,7 @@ public class AnalysisService {
 		final Integer historyId = history != null ? history.getId() : null;
 		Map<String, Runnable> platformHandlers = new HashMap<>();
 		platformHandlers.put("哔哩", () -> executeTask(bilibili, historyId, "已入哔哩线程池队列", () -> this.bilivideo(platform, url)));
-		platformHandlers.put("抖音", () -> executeTask(domestic, historyId, "已入国内线程池队列", () -> this.dyvideo(platform, url)));
+		platformHandlers.put("抖音", () -> executeTask(domestic, historyId, "已入国内线程池队列", () -> this.dyvideo(platform, url, historyId)));
 		platformHandlers.put("YouTube", () -> executeTask(ytdlp, historyId, "已入yt-dlp线程池队列", () -> this.YouTube(platform, url)));
 		platformHandlers.put("instagram", () -> executeTask(ytdlp, historyId, "已入yt-dlp线程池队列", () -> this.instagram(platform, url)));
 		platformHandlers.put("twitter", () -> executeTask(ytdlp, historyId, "已入yt-dlp线程池队列", () -> this.twitter(platform, url)));
@@ -305,14 +306,10 @@ public class AnalysisService {
 		executor.execute(() -> {
 			try {
 				task.run();
-				if (historyId != null) {
-					processHistoryService.markProcessLog(historyId, "执行完毕", "任务执行完成");
-				}
+				processHistoryService.completeProcess(historyId, "任务执行完成");
 			} catch (Exception e) {
 				logger.error("任务执行失败: " + e.getMessage(), e);
-				if (historyId != null) {
-					processHistoryService.markProcessLog(historyId, "执行完毕", "任务执行失败: " + e.getMessage());
-				}
+				processHistoryService.completeProcess(historyId, "任务执行失败: " + e.getMessage());
 			}
 		});
 	}
@@ -676,15 +673,21 @@ public class AnalysisService {
 	 * @throws Exception
 	 */
 	public void dyvideo(String platform, String video) throws Exception {
+		dyvideo(platform, video, null);
+	}
+
+	public void dyvideo(String platform, String video, Integer historyId) throws Exception {
 		if (null != Global.tiktokCookie && !Global.tiktokCookie.equals("")) {
-			ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, video, platform);
-			Map<String, String> downVideo = DouUtil.downVideo(video);
+			Map<String, String> downVideo = DouUtil.downVideo(video, historyId);
 			if(downVideo!= null) {
 				this.putRecord(downVideo.get("awemeid"), downVideo.get("desc"), downVideo.get("videoplay"),
 						downVideo.get("cover"), platform, video, downVideo.get("type"), Global.tiktokCookie, downVideo);
 				System.gc();
 				sendNotify.sendNotifyData(downVideo.get("desc"), video, platform);
-				processHistoryService.saveProcess(saveProcess.getId(), video, platform);
+				if (historyId == null) {
+					ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, video, platform);
+					processHistoryService.completeProcess(saveProcess.getId(), "任务执行完成");
+				}
 			}
 		} else {
 			logger.info("抖音cookie未填 不处理");
@@ -770,8 +773,8 @@ public class AnalysisService {
 		videoDataEntity.setVideoinfo(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
 		videoDataEntity.setJsonData(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
 		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
-		videoDataEntity.setSourceurl("https://www.douyin.com/follow?modal_id=" + awemeId);
-		authorProfileService.upsertAuthor("抖音", authorUidForSave, uid, nickname, map.get("avatar_thumb"),
+		videoDataEntity.setSourceurl(DouyinSourceUrlUtil.video(awemeId));
+		authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, map.get("avatar_thumb"),
 				authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
 		videoDataEntity.setAuthoruid(authorUidForSave);
 		videoDataEntity.setSecuid(secUid);

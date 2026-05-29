@@ -19,6 +19,8 @@ public interface ProcessHistoryDao extends JpaRepository<ProcessHistoryEntity, I
 	
 	public List<ProcessHistoryEntity> findAll();
 
+	public List<ProcessHistoryEntity> findByVideoplatformOrderByIdDesc(String videoplatform);
+
 	
 
 }

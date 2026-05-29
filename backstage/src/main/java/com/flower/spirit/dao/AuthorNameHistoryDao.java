@@ -20,4 +20,6 @@ public interface AuthorNameHistoryDao extends JpaRepository<AuthorNameHistoryEnt
 	List<AuthorNameHistoryEntity> findByAuthorProfileIdOrderByLastSeen(@Param("authorProfileId") Integer authorProfileId);
 
 	long countByAuthorprofileid(Integer authorprofileid);
+
+	void deleteByAuthorprofileid(Integer authorprofileid);
 }

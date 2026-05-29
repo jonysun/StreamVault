@@ -15,6 +15,7 @@ import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DateUtils;
+import com.flower.spirit.utils.DouyinSourceUrlUtil;
 
 @Service
 public class PublishTimeBackfillService {
@@ -38,10 +39,7 @@ public class PublishTimeBackfillService {
 					String publishTime = formatPublishTimeFromEpochSeconds(data.getString("create_time"));
 					if (publishTime != null) {
 						video.setPublishtime(publishTime);
-						String uid = data.get("uid") == null ? null : data.get("uid").toString();
-						if (uid != null && !uid.trim().isEmpty()) {
-							video.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + video.getVideoid());
-						}
+						video.setSourceurl(DouyinSourceUrlUtil.video(video.getVideoid()));
 						videoDataDao.save(video);
 						videoUpdated++;
 						continue;
@@ -66,16 +64,7 @@ public class PublishTimeBackfillService {
 					String publishTime = awemeDetail == null ? null : formatPublishTimeFromEpochSeconds(awemeDetail.getString("create_time"));
 					if (publishTime != null) {
 						item.setPublishtime(publishTime);
-						if (awemeDetail != null) {
-							JSONObject author = awemeDetail.getJSONObject("author");
-							String uid = author == null ? null : author.getString("sec_uid");
-							if (uid == null || uid.trim().isEmpty()) {
-								uid = author == null ? null : author.getString("uid");
-							}
-							if (uid != null && !uid.trim().isEmpty()) {
-								item.setSourceurl("https://www.douyin.com/user/" + uid + "?modal_id=" + item.getVideoid());
-							}
-						}
+						item.setSourceurl(DouyinSourceUrlUtil.note(item.getVideoid()));
 						graphicContentDao.save(item);
 						graphicUpdated++;
 						continue;

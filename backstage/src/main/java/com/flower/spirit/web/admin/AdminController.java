@@ -514,6 +514,16 @@ public class AdminController {
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", authorProfileService.findNameHistory(authorProfileId));
 	}
 
+	@PostMapping(value = "/rebuildDouyinAuthors")
+	public AjaxEntity rebuildDouyinAuthors() {
+		return authorProfileService.rebuildDouyinAuthors();
+	}
+
+	@PostMapping(value = "/cleanupDuplicateDouyinHistory")
+	public AjaxEntity cleanupDuplicateDouyinHistory() {
+		return processHistoryService.cleanupDuplicateDouyinHistory();
+	}
+
 	@PostMapping(value = "/findBlockedWorkList")
 	public AjaxEntity findBlockedWorkList(BlockedWorkEntity blockedWorkEntity) {
 		return blockedWorkService.findPage(blockedWorkEntity);

@@ -2,7 +2,9 @@ package com.flower.spirit.service;
 
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
@@ -69,6 +71,23 @@ public class ProcessHistoryService {
 		processHistoryDao.save(item);
 	}
 
+	public void completeProcess(Integer id, String tasklog) {
+		if (!Global.openprocesshistory || id == null) {
+			return;
+		}
+		java.util.Optional<ProcessHistoryEntity> opt = processHistoryDao.findById(id);
+		if (!opt.isPresent()) {
+			return;
+		}
+		ProcessHistoryEntity item = opt.get();
+		item.setStatus("执行完毕");
+		if (tasklog != null) {
+			item.setTasklog(tasklog);
+		}
+		item.setCreatetime(DateUtils.formatDateTime(new Date()));
+		processHistoryDao.save(item);
+	}
+
 	 
 	public AjaxEntity findPage(ProcessHistoryEntity res) {
 	    PageRequest pageRequest = PageRequest.of(res.getPageNo(), res.getPageSize());
@@ -107,6 +126,31 @@ public class ProcessHistoryService {
 		PageRequest pageRequest = PageRequest.of(0, safeLimit, Sort.by(Sort.Direction.DESC, "id"));
 		Page<ProcessHistoryEntity> page = processHistoryDao.findAll(pageRequest);
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", page.getContent());
+	}
+
+	public AjaxEntity cleanupDuplicateDouyinHistory() {
+		List<ProcessHistoryEntity> histories = processHistoryDao.findByVideoplatformOrderByIdDesc("抖音");
+		Set<String> seen = new HashSet<>();
+		int deleted = 0;
+		for (ProcessHistoryEntity item : histories) {
+			if (item == null || item.getOriginaladdress() == null) {
+				continue;
+			}
+			String key = item.getOriginaladdress().trim();
+			if (key.isEmpty()) {
+				continue;
+			}
+			if (seen.contains(key)) {
+				processHistoryDao.deleteById(item.getId());
+				deleted++;
+			} else {
+				seen.add(key);
+			}
+		}
+		java.util.Map<String, Object> result = new java.util.HashMap<>();
+		result.put("scanned", histories.size());
+		result.put("deleted", deleted);
+		return new AjaxEntity(Global.ajax_success, "清理完成", result);
 	}
 	
 	
