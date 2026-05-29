@@ -39,6 +39,7 @@ import com.flower.spirit.service.BlockedWorkService;
 import com.flower.spirit.service.ConfigService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
+import com.flower.spirit.service.DouyinWorkMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
 import com.flower.spirit.service.HlsTranscodeService;
@@ -118,6 +119,9 @@ public class AdminController {
 
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
+
+	@Autowired
+	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
 	
 	/**  
 	
@@ -260,6 +264,11 @@ public class AdminController {
 	@PostMapping(value = "/updateVideoData")
 	public AjaxEntity updateVideoData(VideoDataEntity downloaderEntity,HttpServletRequest request) {
 		return videoDataService.updateVideoData(downloaderEntity);
+	}
+
+	@PostMapping(value = "/redownloadVideoData")
+	public AjaxEntity redownloadVideoData(Integer id) {
+		return videoDataService.redownloadVideoData(id);
 	}
 	
 	
@@ -519,6 +528,11 @@ public class AdminController {
 		return authorProfileService.rebuildDouyinAuthors();
 	}
 
+	@PostMapping(value = "/repairDouyinMetadata")
+	public AjaxEntity repairDouyinMetadata() {
+		return douyinWorkMaintenanceService.repairDouyinMetadata();
+	}
+
 	@PostMapping(value = "/cleanupDuplicateDouyinHistory")
 	public AjaxEntity cleanupDuplicateDouyinHistory() {
 		return processHistoryService.cleanupDuplicateDouyinHistory();
@@ -537,6 +551,11 @@ public class AdminController {
 	@GetMapping(value = "/deleteGraphicContent")
 	public AjaxEntity deleteGraphicContent(String id, String blockwork, HttpServletRequest request) {
 		return graphicContentService.deleteGraphicContent(id, blockwork);
+	}
+
+	@PostMapping(value = "/redownloadGraphicContent")
+	public AjaxEntity redownloadGraphicContent(Integer id) {
+		return graphicContentService.redownloadGraphicContent(id);
 	}
 
 	/**

@@ -35,6 +35,9 @@ public class GraphicContentService {
 
 	@Autowired
 	private BlockedWorkService blockedWorkService;
+
+	@Autowired
+	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
 	
 	
 	
@@ -119,6 +122,10 @@ public class GraphicContentService {
 			graphicContentDao.deleteById(Integer.valueOf(id));
 		}
 		return new AjaxEntity(Global.ajax_success, "操作成功", null);
+	}
+
+	public AjaxEntity redownloadGraphicContent(Integer id) {
+		return douyinWorkMaintenanceService.redownloadGraphic(id);
 	}
 
 

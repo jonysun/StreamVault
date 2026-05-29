@@ -388,13 +388,16 @@
 				}
 			},
 			copyOriginalLink(item) {
-				if (item.originaladdress) {
+				const link = item.sourceurl || item.originaladdress || ''
+				if (link) {
 					uni.setClipboardData({
-						data: item.originaladdress,
+						data: link,
 						success: () => {
-							uni.showToast({ title: '链接已复制', icon: 'success' });
+							uni.showToast({ title: '原作品链接已复制', icon: 'success' });
 						}
 					});
+				} else {
+					uni.showToast({ title: '暂无原作品链接', icon: 'none' });
 				}
 			}
 		}

@@ -56,7 +56,7 @@
 
 				<view class="form-row" v-if="taskForm.platform==='抖音'">
 					<text class="form-label">抖音用户链接</text>
-					<textarea class="form-textarea" v-model="douyinShareText" placeholder="粘贴抖音分享文案或短链"></textarea>
+					<textarea class="form-textarea" v-model="douyinShareText" placeholder="粘贴抖音分享文案或短链" @input="handleDouyinShareInput"></textarea>
 					<button class="parse-btn" @tap="resolveDouyinLink">解析抖音用户链接</button>
 				</view>
 
@@ -175,6 +175,16 @@ export default {
 			this.resetTaskForm()
 			this.$refs.taskPopup.open()
 		},
+		handleDouyinShareInput(e) {
+			const text = (e && e.detail && e.detail.value) || this.douyinShareText || ''
+			if (text.indexOf('打开抖音搜索，查看TA的更多作品。') !== -1) {
+				this.taskForm.platform = '抖音'
+				this.platformIndex = 0
+				this.taskForm.douyinType = 'post'
+				this.douyinTypeIndex = 0
+				this.douyinShareText = text
+			}
+		},
 		closeAddTask() {
 			this.$refs.taskPopup.close()
 		},
@@ -239,11 +249,11 @@ export default {
 						this.taskForm.douyinType = 'post'
 						this.douyinTypeIndex = 0
 						this.taskForm.originaladdress = res.data.record.secUserId || ''
-						const authorName = ((res.data.record.authorName || this.extractAuthorNameFromShareText(this.douyinShareText) || '') + '').trim()
-						if (authorName) {
-							this.taskForm.taskname = `${authorName}的抖音作品`
+						const nickname = ((res.data.record.nickname || res.data.record.authorName || this.extractAuthorNameFromShareText(this.douyinShareText) || '') + '').trim()
+						if (nickname) {
+							this.taskForm.taskname = `${nickname}的作品`
 						} else if (!this.taskForm.taskname || this.taskForm.taskname === '抖音作品任务') {
-							this.taskForm.taskname = '抖音作者作品任务'
+							this.taskForm.taskname = '抖音作者的作品'
 						}
 						uni.showToast({ title: '解析成功', icon: 'success' })
 					} else {
