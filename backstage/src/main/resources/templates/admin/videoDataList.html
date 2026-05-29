@@ -1544,6 +1544,7 @@
                                 webPlay = list[i].videounrealaddr || webPlay;
                             }
                             html += '<a data-id="' + list[i].id + '" data-video="' + webPlay + '" data-videoprivacy="' + list[i].videoprivacy + '" class="btn btn-outline-success btn-sm playVideo" href="#!" title="播放" data-toggle="tooltip"><i class="mdi mdi-play"></i> 播放</a>';
+                            html += '<a data-id="' + list[i].id + '" class="btn btn-outline-primary btn-sm redownloadVideo" href="#!" title="重新下载" data-toggle="tooltip"><i class="mdi mdi-download"></i> 重下</a>';
                             html += '<a data-id="' + list[i].id + '" class="btn btn-outline-warning btn-sm refreshDanmu" href="#!" title="刷新弹幕" data-toggle="tooltip"><i class="mdi mdi-refresh"></i> 弹幕</a>';
                             html += '<a data-id="' + list[i].id + '" class="btn btn-outline-danger btn-sm deleteData" href="#!" title="删除" data-toggle="tooltip"><i class="mdi mdi-delete"></i> 删除</a>';
                             html += '</div>';
@@ -1555,6 +1556,7 @@
                         playVideo();
                         deleteData();
                         updateData();
+                        redownloadVideo();
                         refreshDanmu();
                         laypage({
                             cont: 'pager',
@@ -1573,6 +1575,28 @@
                     layer.close(loadIndex);
                     layer.msg('网络错误，请重试');
                 })
+        }
+
+        function redownloadVideo() {
+            $('.redownloadVideo').click(function () {
+                var id = $(this).attr('data-id');
+                layer.confirm('确定重新下载该视频吗？会更新当前行的文件和元数据，不会删除数据库行。', function (index) {
+                    layer.close(index);
+                    var loadIndex = layer.load(1, { shade: [0.3, '#000'] });
+                    $.post('/admin/api/redownloadVideoData', { id: id }, function (res) {
+                        layer.close(loadIndex);
+                        if (res.resCode === '000001') {
+                            layer.msg(res.message || '重新下载完成');
+                            findList($('#pager').find('.laypage_curr').text() || 1);
+                        } else {
+                            layer.alert(res.message || '重新下载失败');
+                        }
+                    }).fail(function () {
+                        layer.close(loadIndex);
+                        layer.msg('网络错误，请重试');
+                    });
+                });
+            });
         }
     </script>
 </body>

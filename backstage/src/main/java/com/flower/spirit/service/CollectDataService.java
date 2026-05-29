@@ -1085,12 +1085,16 @@ public class CollectDataService {
 			if (secUserId == null || secUserId.trim().isEmpty()) {
 				return new AjaxEntity(Global.ajax_uri_error, "未解析到抖音用户ID", null);
 			}
+			JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(secUserId));
+			String nickname = profileUser == null ? null : profileUser.getString("nickname");
 			Map<String, String> record = new HashMap<>();
 			record.put("platform", "抖音");
 			record.put("finalUrl", finalUrl);
 			record.put("secUserId", secUserId);
-			if (authorName != null && !authorName.trim().isEmpty()) {
-				record.put("authorName", authorName.trim());
+			String resolvedName = firstNotBlank(nickname, authorName);
+			if (resolvedName != null && !resolvedName.trim().isEmpty()) {
+				record.put("nickname", resolvedName.trim());
+				record.put("authorName", resolvedName.trim());
 			}
 			return new AjaxEntity(Global.ajax_success, "解析成功", record);
 		} catch (Exception e) {

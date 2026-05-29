@@ -64,6 +64,9 @@ public class VideoDataService {
 	@Autowired
 	private BlockedWorkService blockedWorkService;
 
+	@Autowired
+	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
+
 	private Logger logger = LoggerFactory.getLogger(VideoDataService.class);
 
 	public List<VideoDataEntity> findByVideoid(String videoid) {
@@ -240,6 +243,10 @@ public class VideoDataService {
 			videoDataDao.save(videoDataEntity);
 		}
 		return new AjaxEntity(Global.ajax_success, "操作成功", null);
+	}
+
+	public AjaxEntity redownloadVideoData(Integer id) {
+		return douyinWorkMaintenanceService.redownloadVideo(id);
 	}
 
 	public ResponseEntity<StreamingResponseBody> playVideo(HttpHeaders headers, String video) throws IOException {

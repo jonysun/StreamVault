@@ -18,6 +18,10 @@
 				<view class="title-section">
 					<text class="video-title">{{videoInfo.videoname}}</text>
 				</view>
+				<view class="author-row" v-if="displayAuthor">
+					<uni-icons type="person" size="16" color="#666"></uni-icons>
+					<text class="author-name">{{displayAuthor}}</text>
+				</view>
 				<view class="video-stats">
 					<text class="upload-time">发布时间：{{formatTime(videoInfo.publishtime || videoInfo.publishTime)}} ｜ 下载时间：{{formatTime(videoInfo.createTime || videoInfo.createtime)}}</text>
 				</view>
@@ -27,7 +31,11 @@
 			<view class="action-bar">
 				<view class="action-item" @tap="copyVideoLink">
 					<uni-icons type="link" size="20" color="#666"></uni-icons>
-					<text class="action-text">复制链接</text>
+					<text class="action-text">播放链接</text>
+				</view>
+				<view class="action-item" @tap="copyOriginalWorkLink" v-if="originalWorkLink">
+					<uni-icons type="paperclip" size="20" color="#666"></uni-icons>
+					<text class="action-text">原作品链接</text>
 				</view>
 				<button class="action-item share-btn" open-type="share">
 					<uni-icons type="redo" size="20" color="#666"></uni-icons>
@@ -55,6 +63,14 @@
 			return {
 				videoInfo: {},
 				isShare: false
+			}
+		},
+		computed: {
+			displayAuthor() {
+				return this.videoInfo.videoauthor || this.videoInfo.author || this.videoInfo.authorusername || ''
+			},
+			originalWorkLink() {
+				return this.videoInfo.sourceurl || this.videoInfo.originaladdress || ''
 			}
 		},
 		onLoad(options) {
@@ -107,6 +123,18 @@
 						}
 					});
 				}
+			},
+			copyOriginalWorkLink() {
+				if (!this.originalWorkLink) {
+					uni.showToast({ title: '暂无原作品链接', icon: 'none' });
+					return;
+				}
+				uni.setClipboardData({
+					data: this.originalWorkLink,
+					success: () => {
+						uni.showToast({ title: '原作品链接已复制', icon: 'success' });
+					}
+				});
 			}
 		}
 	}
@@ -146,6 +174,18 @@
 	line-height: 1.5;
 	display: block;
 	margin-bottom: 12rpx;
+}
+
+.author-row {
+	display: flex;
+	align-items: center;
+	gap: 8rpx;
+	margin-bottom: 12rpx;
+}
+
+.author-name {
+	font-size: 26rpx;
+	color: #666;
 }
 
 .video-stats {

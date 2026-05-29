@@ -27,6 +27,8 @@ public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, I
 
 	Optional<GraphicContentEntity> findByOriginaladdressAndPlatform(String url, String name);
 
+	List<GraphicContentEntity> findByPlatform(String platform);
+
 	/**
 	 * 按平台分组统计图文内容数量
 	 * 
