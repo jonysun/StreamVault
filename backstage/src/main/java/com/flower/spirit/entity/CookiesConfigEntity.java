@@ -28,6 +28,10 @@ public class CookiesConfigEntity implements Serializable{
 	private String twittercookies;
 	
 	private String kuaishouCookie;
+
+	private String kuaishouCookiePool;
+
+	private String kuaishouCookieStrategy;
 	
 	private String weibocookie;
 	
@@ -65,6 +69,22 @@ public class CookiesConfigEntity implements Serializable{
 
 	public void setKuaishouCookie(String kuaishouCookie) {
 		this.kuaishouCookie = kuaishouCookie;
+	}
+
+	public String getKuaishouCookiePool() {
+		return kuaishouCookiePool;
+	}
+
+	public void setKuaishouCookiePool(String kuaishouCookiePool) {
+		this.kuaishouCookiePool = kuaishouCookiePool;
+	}
+
+	public String getKuaishouCookieStrategy() {
+		return kuaishouCookieStrategy;
+	}
+
+	public void setKuaishouCookieStrategy(String kuaishouCookieStrategy) {
+		this.kuaishouCookieStrategy = kuaishouCookieStrategy;
 	}
 
 	public String getWeibocookie() {

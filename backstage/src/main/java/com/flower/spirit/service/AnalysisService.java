@@ -85,6 +85,9 @@ public class AnalysisService {
 	private AuthorProfileService authorProfileService;
 
 	@Autowired
+	private PlatformCookieService platformCookieService;
+
+	@Autowired
 	private BlockedWorkService blockedWorkService;
 
 
@@ -219,11 +222,12 @@ public class AnalysisService {
 
 	private void kuaishou(String platform, String url) {
 		logger.info("平台归属:" + platform);
-		if (null != Global.cookie_manage && null != Global.cookie_manage.getKuaishouCookie()
-				&& !"".equals(Global.cookie_manage.getKuaishouCookie())) {
+		String kuaishouCookie = platformCookieService.currentKuaishouCookie("single_video");
+		if (null != kuaishouCookie && !"".equals(kuaishouCookie)) {
 			ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, url, platform);
 			try {
-				VideoInfo video = KuaishouParser.parseVideo(url, Global.cookie_manage.getKuaishouCookie());
+				VideoInfo video = KuaishouParser.parseVideo(url, kuaishouCookie);
+				platformCookieService.reportSuccess("快手", kuaishouCookie);
 				String title = video.getTitle();
 				String coverUrl = video.getCoverUrl();
 				String h265Url = video.getH265Url();
@@ -244,10 +248,10 @@ public class AnalysisService {
 							Aria2Util.createDouparameter(h265Url,
 									FileUtil.generateDir(Global.down_path, Global.platform.kuaishou.name(), true,
 											filename, null, null),
-									filename + ".mp4", Global.a2_token, Global.cookie_manage.getKuaishouCookie()));
+									filename + ".mp4", Global.a2_token, kuaishouCookie));
 				}
 				header.put("User-Agent", KuaishouParser.USER_AGENT);
-				header.put("cookie", Global.cookie_manage.getKuaishouCookie());
+				header.put("cookie", kuaishouCookie);
 				if (Global.downtype.equals("http")) {
 					// 内置下载器
 					videofile = FileUtil.generateDir(true, Global.platform.kuaishou.name(), true, filename, null, null);
@@ -283,6 +287,9 @@ public class AnalysisService {
 				sendNotify.sendNotifyData(title, url, platform);
 				logger.info("下载流程结束");
 			} catch (IOException e) {
+				if (platformCookieService.isRiskSignal(e.getMessage())) {
+					platformCookieService.reportRisk("快手", kuaishouCookie, e.getMessage());
+				}
 				// 失败
 				sendNotify.sendNotifyError(url, platform, e.getMessage());
 			}
@@ -677,17 +684,22 @@ public class AnalysisService {
 	}
 
 	public void dyvideo(String platform, String video, Integer historyId) throws Exception {
-		if (null != Global.tiktokCookie && !Global.tiktokCookie.equals("")) {
-			Map<String, String> downVideo = DouUtil.downVideo(video, historyId);
+		String cookie = platformCookieService.currentDouyinCookie("single_video");
+		if (null != cookie && !cookie.equals("")) {
+			Map<String, String> downVideo = DouUtil.downVideo(video, historyId, cookie);
 			if(downVideo!= null) {
+				platformCookieService.reportSuccess("抖音", cookie);
 				this.putRecord(downVideo.get("awemeid"), downVideo.get("desc"), downVideo.get("videoplay"),
-						downVideo.get("cover"), platform, video, downVideo.get("type"), Global.tiktokCookie, downVideo);
+						downVideo.get("cover"), platform, video, downVideo.get("type"), cookie, downVideo);
 				System.gc();
 				sendNotify.sendNotifyData(downVideo.get("desc"), video, platform);
 				if (historyId == null) {
 					ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, video, platform);
 					processHistoryService.completeProcess(saveProcess.getId(), "任务执行完成");
 				}
+			}
+			if (downVideo == null) {
+				platformCookieService.reportRisk("抖音", cookie, "single video parse failed");
 			}
 		} else {
 			logger.info("抖音cookie未填 不处理");
@@ -731,7 +743,7 @@ public class AnalysisService {
 		HashMap<String, String> header = new HashMap<String, String>();
 		header.put("Referer", "https://www.douyin.com/");
 		header.put("User-Agent", DouUtil.ua);
-		header.put("cookie", Global.tiktokCookie);
+		header.put("cookie", cookie);
 		if (Global.downtype.equals("http")) {
 			// 内置下载器
 			videofile = FileUtil.generateDir(true, Global.platform.douyin.name(), true, filename, null, null);
@@ -928,10 +940,13 @@ public class AnalysisService {
 			
 			// 3. 如果是抖音平台，使用 DouUtil
 			if (platform.equals("抖音")) {
-				Map<String, String> douData = DouUtil.downVideo(url);
+				String cookie = platformCookieService.currentDouyinCookie("direct_parse");
+				Map<String, String> douData = DouUtil.downVideo(url, null, cookie);
 				if (douData == null) {
+					platformCookieService.reportRisk("抖音", cookie, "direct parse failed");
 					return new AjaxEntity(Global.ajax_uri_error, "解析失败", null);
 				}
+				platformCookieService.reportSuccess("抖音", cookie);
 				
 				result.put("platform", "抖音");
 				result.put("videoUrl", douData.get("videoplay"));
@@ -944,10 +959,7 @@ public class AnalysisService {
 				
 			} else if (platform.equals("快手")) {
 				// 4. 快手平台使用 KuaishouParser
-				String kuaishouCookie = null;
-				if (Global.cookie_manage != null) {
-					kuaishouCookie = Global.cookie_manage.getKuaishouCookie();
-				}
+				String kuaishouCookie = platformCookieService.currentKuaishouCookie("direct_parse");
 				
 				KuaishouParser.VideoInfo videoInfo = KuaishouParser.parseVideo(url, kuaishouCookie);
 				

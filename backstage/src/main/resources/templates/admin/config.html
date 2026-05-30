@@ -412,8 +412,15 @@
                                 <form action="#" method="post" onsubmit="return false;">
                                     <input type="hidden" class="tiktok" th:value="${tiktok.id}" />
                                     <div class="form-group">
-                                        <label>抖音Cookie(使用抖音必填)</label>
-                                        <input type="text" name="tiktokcookies" autocomplete="off" class="form-control tiktokcookies" th:value="${tiktok.cookies}">
+                                        <label>抖音Cookie(使用抖音必填，每行一个；风控转移冷却10分钟)</label>
+                                        <textarea name="tiktokcookiepool" autocomplete="off" class="form-control tiktokcookiepool" rows="4" th:text="${tiktok.cookiepool != null && !#strings.isEmpty(tiktok.cookiepool) ? tiktok.cookiepool : tiktok.cookies}"></textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>抖音Cookie模式</label>
+                                        <select class="form-control tiktokcookiestrategy">
+                                            <option value="round_robin" th:selected="${tiktok.cookiestrategy == null || tiktok.cookiestrategy == 'round_robin'}">轮询</option>
+                                            <option value="risk_shift" th:selected="${tiktok.cookiestrategy == 'risk_shift'}">故障转移</option>
+                                        </select>
                                     </div>
                                     <div class="form-group">
                                         <button class="btn btn-primary saveTikTokConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
@@ -424,8 +431,15 @@
                                         <form action="#" method="post" onsubmit="return false;">
                                             <input type="hidden" class="cookiesid" th:value="${cookies.id}" />
                                             <div class="form-group">
-                                                <label>快手Cookie</label>
-                                                <input type="text" name="kuaishouCookie" autocomplete="off" class="form-control kuaishouCookie" th:value="${cookies.kuaishouCookie}">
+                                                <label>快手Cookie(每行一个；风控转移冷却10分钟)</label>
+                                                <textarea name="kuaishouCookiePool" autocomplete="off" class="form-control kuaishouCookiePool" rows="4" th:text="${cookies.kuaishouCookiePool != null && !#strings.isEmpty(cookies.kuaishouCookiePool) ? cookies.kuaishouCookiePool : cookies.kuaishouCookie}"></textarea>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>快手Cookie模式</label>
+                                                <select class="form-control kuaishouCookieStrategy">
+                                                    <option value="round_robin" th:selected="${cookies.kuaishouCookieStrategy == null || cookies.kuaishouCookieStrategy == 'round_robin'}">轮询</option>
+                                                    <option value="risk_shift" th:selected="${cookies.kuaishouCookieStrategy == 'risk_shift'}">故障转移</option>
+                                                </select>
                                             </div>
                                         </form>
                                     </div>
@@ -817,7 +831,9 @@
             var appid = $('.cookiesid').val();
             var option = {};
             option['id'] = appid;
-            option['kuaishouCookie'] = $('.kuaishouCookie').val();
+            option['kuaishouCookiePool'] = $('.kuaishouCookiePool').val();
+            option['kuaishouCookie'] = firstNonEmptyLine($('.kuaishouCookiePool').val());
+            option['kuaishouCookieStrategy'] = $('.kuaishouCookieStrategy').val();
             option['weibocookie'] = $('.weibocookie').val();
             option['rednotecookie'] = $('.rednotecookie').val();
             option['cookiecloud'] = $('.cookiecloud').val();
@@ -838,11 +854,13 @@
     function saveTikTokConfig(){
         $('.saveTikTokConfig').click(function(){
             var appid = $('.tiktok').val();
-            var cookies = $('.tiktokcookies').val();
+            var cookiepool = $('.tiktokcookiepool').val();
             var analysisserver = $('.analysisserver').val();
             var option = {};
             option['id'] = appid;
-            option['cookies'] = cookies;
+            option['cookiepool'] = cookiepool;
+            option['cookies'] = firstNonEmptyLine(cookiepool);
+            option['cookiestrategy'] = $('.tiktokcookiestrategy').val();
             option['analysisserver'] = analysisserver;
             $.post("/admin/api/updateTikTokConfig",option,function(data,status){
                 if(data.resCode =="000001"){
@@ -858,6 +876,15 @@
                 }
             })
         })
+    }
+
+    function firstNonEmptyLine(text) {
+        var lines = (text || '').split(/\r?\n/);
+        for (var i = 0; i < lines.length; i++) {
+            var line = (lines[i] || '').replace(/^\s+|\s+$/g, '');
+            if (line) return line;
+        }
+        return '';
     }
     function scanQRend(){
         $('.scanQRend').click(function(){

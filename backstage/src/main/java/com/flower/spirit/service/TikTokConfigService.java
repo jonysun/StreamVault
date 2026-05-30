@@ -31,11 +31,28 @@ public class TikTokConfigService {
 	}
 
 	public AjaxEntity updateTikTokConfig(TikTokConfigEntity tikTokConfigEntity) {
+		if (isBlank(tikTokConfigEntity.getCookies()) && !isBlank(tikTokConfigEntity.getCookiepool())) {
+			tikTokConfigEntity.setCookies(firstCookie(tikTokConfigEntity.getCookiepool()));
+		}
 		tikTokConfigDao.save(tikTokConfigEntity);
 		if(null != tikTokConfigEntity.getCookies() && !"".equals(tikTokConfigEntity.getCookies())) {
 			Global.tiktokCookie = tikTokConfigEntity.getCookies();
 		}
 		return new AjaxEntity(Global.ajax_success, "操作成功", tikTokConfigEntity);
+	}
+
+	private String firstCookie(String pool) {
+		String[] lines = pool.split("\\r?\\n");
+		for (String line : lines) {
+			if (!isBlank(line)) {
+				return line.trim();
+			}
+		}
+		return "";
+	}
+
+	private boolean isBlank(String value) {
+		return value == null || value.trim().isEmpty();
 	}
 
 }

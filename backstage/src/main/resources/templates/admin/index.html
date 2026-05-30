@@ -747,8 +747,8 @@
                                     <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
                                         <i class="mdi mdi-volume-off"></i><span>静音</span>
                                     </button>
-                                    <button type="button" class="feed-control-btn" id="feedAutoNextBtn" title="自动播放">
-                                        <i class="mdi mdi-skip-next-circle"></i><span>自动</span>
+                                    <button type="button" class="feed-control-btn" id="feedAutoNextBtn" title="播放模式">
+                                        <i class="mdi mdi-skip-next-circle"></i><span>自动下一条</span>
                                     </button>
                                     <button type="button" class="feed-control-btn" id="feedPlaylistBtn" title="播放列表">
                                         <i class="mdi mdi-format-list-bulleted"></i><span>列表</span>
@@ -826,7 +826,8 @@
     var FEED_ORDER_STORAGE_KEY = 'streamv.admin.feedOrder';
     var FEED_MUTED_STORAGE_KEY = 'streamv.admin.feedMuted';
     var FEED_AUTONEXT_STORAGE_KEY = 'streamv.admin.feedAutoNext';
-    var feedAutoNext = true;
+    var FEED_PLAYBACK_MODE_STORAGE_KEY = 'streamv.admin.feedPlaybackMode';
+    var feedPlaybackMode = 'auto_next';
     var feedFullscreenTransitioning = false;
     var feedFullscreenTarget = null;
     var feedSuppressAutoNextUntil = 0;
@@ -853,9 +854,15 @@
             }
         } catch (e) {}
         try {
-            var savedAutoNext = localStorage.getItem(FEED_AUTONEXT_STORAGE_KEY);
-            if (savedAutoNext === '1' || savedAutoNext === '0') {
-                feedAutoNext = savedAutoNext === '1';
+            var savedPlaybackMode = localStorage.getItem(FEED_PLAYBACK_MODE_STORAGE_KEY);
+            if (savedPlaybackMode === 'auto_next' || savedPlaybackMode === 'single_loop') {
+                feedPlaybackMode = savedPlaybackMode;
+            } else {
+                var savedAutoNext = localStorage.getItem(FEED_AUTONEXT_STORAGE_KEY);
+                if (savedAutoNext === '1' || savedAutoNext === '0') {
+                    feedPlaybackMode = savedAutoNext === '1' ? 'auto_next' : 'single_loop';
+                    persistFeedPlaybackMode();
+                }
             }
         } catch (e) {}
         feedSessionSeed = String(Date.now()) + '_' + String(Math.floor(Math.random() * 1000000));
@@ -1994,8 +2001,8 @@
         });
 
         $('#feedAutoNextBtn').on('click', function() {
-            feedAutoNext = !feedAutoNext;
-            persistFeedAutoNext();
+            feedPlaybackMode = feedPlaybackMode === 'auto_next' ? 'single_loop' : 'auto_next';
+            persistFeedPlaybackMode();
             updateFeedButtons();
         });
 
@@ -2276,7 +2283,9 @@
         });
         videoEl.addEventListener('ended', function() {
             syncFeedControlFromVideo(videoEl);
-            if (!feedAutoNext) {
+            if (feedPlaybackMode === 'single_loop') {
+                try { videoEl.currentTime = 0; } catch (e) {}
+                playWithSync(videoEl);
                 return;
             }
             if (feedFullscreenTransitioning) {
@@ -2408,9 +2417,10 @@
         } catch (e) {}
     }
 
-    function persistFeedAutoNext() {
+    function persistFeedPlaybackMode() {
         try {
-            localStorage.setItem(FEED_AUTONEXT_STORAGE_KEY, feedAutoNext ? '1' : '0');
+            localStorage.setItem(FEED_PLAYBACK_MODE_STORAGE_KEY, feedPlaybackMode);
+            localStorage.setItem(FEED_AUTONEXT_STORAGE_KEY, feedPlaybackMode === 'auto_next' ? '1' : '0');
         } catch (e) {}
     }
 
@@ -2573,8 +2583,9 @@
         $('#feedAuthorBtn span').text(authorText);
         $('#feedMuteBtn i').attr('class', feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high');
         $('#feedMuteBtn span').text(feedMuted ? '静音' : '有声');
-        $('#feedAutoNextBtn i').attr('class', feedAutoNext ? 'mdi mdi-skip-next-circle' : 'mdi mdi-pause-circle-outline');
-        $('#feedAutoNextBtn span').text(feedAutoNext ? '自动' : '停留');
+        var autoNext = feedPlaybackMode === 'auto_next';
+        $('#feedAutoNextBtn i').attr('class', autoNext ? 'mdi mdi-skip-next-circle' : 'mdi mdi-repeat-once');
+        $('#feedAutoNextBtn span').text(autoNext ? '自动下一条' : '单个循环');
     }
 
     function escapeHtml(text) {
