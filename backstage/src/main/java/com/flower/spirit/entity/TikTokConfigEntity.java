@@ -24,6 +24,10 @@ public class TikTokConfigEntity implements Serializable {
     private Integer id;
 	
 	private String cookies;
+
+	private String cookiepool;
+
+	private String cookiestrategy;
 	
 	/**
 	 * 解析server
@@ -44,6 +48,22 @@ public class TikTokConfigEntity implements Serializable {
 
 	public void setCookies(String cookies) {
 		this.cookies = cookies;
+	}
+
+	public String getCookiepool() {
+		return cookiepool;
+	}
+
+	public void setCookiepool(String cookiepool) {
+		this.cookiepool = cookiepool;
+	}
+
+	public String getCookiestrategy() {
+		return cookiestrategy;
+	}
+
+	public void setCookiestrategy(String cookiestrategy) {
+		this.cookiestrategy = cookiestrategy;
 	}
 
 	public String getAnalysisserver() {

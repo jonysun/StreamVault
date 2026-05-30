@@ -46,6 +46,9 @@ public class DouyinWorkMaintenanceService {
 	@Autowired
 	private AuthorProfileService authorProfileService;
 
+	@Autowired
+	private PlatformCookieService platformCookieService;
+
 	public AjaxEntity redownloadVideo(Integer id) {
 		if (id == null) {
 			return new AjaxEntity(Global.ajax_uri_error, "视频ID不能为空", null);
@@ -62,7 +65,13 @@ public class DouyinWorkMaintenanceService {
 		if (isBlank(source)) {
 			return new AjaxEntity(Global.ajax_uri_error, "缺少原作品链接，无法重新下载", null);
 		}
-		Map<String, String> data = DouUtil.downVideo(source, null);
+		String cookie = platformCookieService.currentDouyinCookie("redownload_video");
+		Map<String, String> data = DouUtil.downVideo(source, null, cookie);
+		if (data == null) {
+			platformCookieService.reportRisk("抖音", cookie, "redownload video parse failed");
+		} else {
+			platformCookieService.reportSuccess("抖音", cookie);
+		}
 		if (data == null) {
 			return new AjaxEntity(Global.ajax_uri_error, "抖音视频解析失败", null);
 		}
@@ -219,10 +228,11 @@ public class DouyinWorkMaintenanceService {
 		String coverUnrealAddr = FileUtil.generateDir(false, Global.platform.douyin.name(), true, filename, null, "jpg");
 		String coverDir = FileUtil.generateDir(true, Global.platform.douyin.name(), true, filename, null, null);
 
-		Map<String, String> header = douyinHeaders();
+		String cookie = platformCookieService.currentDouyinCookie("redownload_video_download");
+		Map<String, String> header = douyinHeaders(cookie);
 		if ("a2".equals(Global.downtype)) {
 			Aria2Util.sendMessage(Global.a2_link,
-					Aria2Util.createDouparameter(playApi, videoDir, filename + ".mp4", Global.a2_token, Global.tiktokCookie));
+					Aria2Util.createDouparameter(playApi, videoDir, filename + ".mp4", Global.a2_token, cookie));
 		} else {
 			videoDir = FileUtil.generateDir(true, Global.platform.douyin.name(), true, filename, null, null);
 			if (Global.RangeNumber == 1) {
@@ -279,7 +289,13 @@ public class DouyinWorkMaintenanceService {
 
 	private void applyGraphicDownload(GraphicContentEntity target, String source, String postId) throws IOException {
 		String taskout = Global.apppath + "lot" + File.separator + "imageText_" + postId + ".json";
-		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, postId, "fetch_post_data", null, null, null, taskout);
+		String cookie = platformCookieService.currentDouyinCookie("redownload_graphic");
+		String f2cmd = CommandUtil.f2cmd(cookie, postId, "fetch_post_data", null, null, null, taskout);
+		if (f2cmd != null && f2cmd.contains("stream-vault-ok")) {
+			platformCookieService.reportSuccess("抖音", cookie);
+		} else if (platformCookieService.isRiskSignal(f2cmd)) {
+			platformCookieService.reportRisk("抖音", cookie, "redownload graphic failed");
+		}
 		if (f2cmd == null || !f2cmd.contains("stream-vault-ok")) {
 			throw new IOException("fetch_post_data failed");
 		}
@@ -299,7 +315,7 @@ public class DouyinWorkMaintenanceService {
 		String filename = FileNameTemplateUtil.resolveFileName(desc, postId, nickname, detail.getString("create_time"), "抖音");
 		String markroute = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null, 0);
 		JSONArray imageList = new JSONArray();
-		Map<String, String> header = douyinHeaders();
+		Map<String, String> header = douyinHeaders(cookie);
 		for (int i = 0; i < images.size(); i++) {
 			JSONObject image = images.getJSONObject(i);
 			JSONObject video = image.getJSONObject("video");
@@ -426,11 +442,11 @@ public class DouyinWorkMaintenanceService {
 		return profile;
 	}
 
-	private Map<String, String> douyinHeaders() {
+	private Map<String, String> douyinHeaders(String cookie) {
 		Map<String, String> header = new HashMap<>();
 		header.put("Referer", "https://www.douyin.com/");
 		header.put("User-Agent", DouUtil.ua);
-		header.put("cookie", Global.tiktokCookie);
+		header.put("cookie", cookie);
 		return header;
 	}
 

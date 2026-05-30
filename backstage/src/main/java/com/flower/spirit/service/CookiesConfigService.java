@@ -36,6 +36,9 @@ public class CookiesConfigService {
 	@Autowired
 	private WeiBoExecutor weiBoExecutor;
 
+	@Autowired
+	private PlatformCookieService platformCookieService;
+
 	public CookiesConfigEntity getData() {
 		List<CookiesConfigEntity> findAll = cookiesConfigDao.findAll();
 		if (findAll.size() == 0) {
@@ -50,10 +53,24 @@ public class CookiesConfigService {
 	public AjaxEntity updateCookie(CookiesConfigEntity entity) {
 		// CookiesConfigEntity cookiesConfigEntity =
 		// cookiesConfigDao.findById(entity.getId()).get();
+		if ((entity.getKuaishouCookie() == null || entity.getKuaishouCookie().trim().isEmpty())
+				&& entity.getKuaishouCookiePool() != null && !entity.getKuaishouCookiePool().trim().isEmpty()) {
+			entity.setKuaishouCookie(firstCookie(entity.getKuaishouCookiePool()));
+		}
 		Global.cookie_manage = entity;
 		cookiesConfigDao.save(entity);
 		return new AjaxEntity(Global.ajax_success, "更新成功", null);
 
+	}
+
+	private String firstCookie(String pool) {
+		String[] lines = pool.split("\\r?\\n");
+		for (String line : lines) {
+			if (line != null && !line.trim().isEmpty()) {
+				return line.trim();
+			}
+		}
+		return "";
 	}
 
 	// 向本地写入cookie
@@ -118,10 +135,13 @@ public class CookiesConfigService {
 		VideoDataEntity randomByVideoplatform = videoDataService.findRandomByVideoplatform("抖音");
 		if(randomByVideoplatform!=null) {
 			try {
-				Map<String, String> bogus = DouUtil.getBogus(randomByVideoplatform.getVideoid());
+				String cookie = platformCookieService.currentDouyinCookie("cookie_check");
+				Map<String, String> bogus = DouUtil.getBogusWithCookie(randomByVideoplatform.getVideoid(), cookie);
 				if(bogus!=null) {
+					platformCookieService.reportSuccess("抖音", cookie);
 					message =message+ "抖音:正常\n";
 				}else {
+					platformCookieService.reportRisk("抖音", cookie, "cookie status check failed");
 					message =message+ "抖音:失效\n";
 				}
 			} catch (HttpException e) {message = message+"抖音:检测失败\n";} catch (Exception e) {message =message+ "抖音:检测失败\n";}
