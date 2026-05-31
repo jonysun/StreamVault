@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 public class SecurityUtil {
     private static final ConcurrentHashMap<String, AtomicInteger> loginAttempts = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, LocalDateTime> ipBlockTime = new ConcurrentHashMap<>();
+    private static final int MAX_LOGIN_ATTEMPT_IPS = 10000;
 
     // XSS字符转义
     public static String escapeXSS(String input) {
@@ -36,9 +37,13 @@ public class SecurityUtil {
 
     // 登录失败次数检查
     public static boolean isLoginAllowed(String ip) {
+        cleanupExpiredBlocks();
         LocalDateTime blockedUntil = ipBlockTime.get(ip);
         if (blockedUntil != null && blockedUntil.isAfter(LocalDateTime.now())) {
             return false;
+        }
+        if (blockedUntil != null) {
+            resetLoginAttempts(ip);
         }
 
         AtomicInteger attempts = loginAttempts.computeIfAbsent(ip, k -> new AtomicInteger(0));
@@ -47,6 +52,10 @@ public class SecurityUtil {
 
     // 记录登录失败
     public static void recordLoginFailure(String ip) {
+        cleanupExpiredBlocks();
+        if (!loginAttempts.containsKey(ip) && loginAttempts.size() >= MAX_LOGIN_ATTEMPT_IPS) {
+            return;
+        }
         AtomicInteger attempts = loginAttempts.computeIfAbsent(ip, k -> new AtomicInteger(0));
         if (attempts.incrementAndGet() >= 5) {
             // 超过5次失败，锁定15分钟
@@ -58,6 +67,17 @@ public class SecurityUtil {
     public static void resetLoginAttempts(String ip) {
         loginAttempts.remove(ip);
         ipBlockTime.remove(ip);
+    }
+
+    private static void cleanupExpiredBlocks() {
+        LocalDateTime now = LocalDateTime.now();
+        ipBlockTime.entrySet().removeIf(entry -> {
+            boolean expired = !entry.getValue().isAfter(now);
+            if (expired) {
+                loginAttempts.remove(entry.getKey());
+            }
+            return expired;
+        });
     }
 
     // 验证用户名格式

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.config.Global;
+import com.flower.spirit.dao.CookiesConfigDao;
 import com.flower.spirit.entity.CookiesConfigEntity;
 import com.flower.spirit.entity.TikTokConfigEntity;
 
@@ -31,7 +32,7 @@ public class PlatformCookieService {
 	private TikTokConfigService tikTokConfigService;
 
 	@Autowired(required = false)
-	private CookiesConfigService cookiesConfigService;
+	private CookiesConfigDao cookiesConfigDao;
 
 	public String currentDouyinCookie(String purpose) {
 		TikTokConfigEntity config = tikTokConfigService == null ? null : tikTokConfigService.getData();
@@ -46,11 +47,22 @@ public class PlatformCookieService {
 	}
 
 	public String currentKuaishouCookie(String purpose) {
-		CookiesConfigEntity config = cookiesConfigService == null ? Global.cookie_manage : cookiesConfigService.getData();
+		CookiesConfigEntity config = loadCookiesConfig();
 		String pool = config == null ? null : config.getKuaishouCookiePool();
 		String legacy = config == null ? null : config.getKuaishouCookie();
 		String strategy = config == null ? null : config.getKuaishouCookieStrategy();
 		return selectCookie("快手", strategy, pool, legacy, purpose);
+	}
+
+	private CookiesConfigEntity loadCookiesConfig() {
+		if (cookiesConfigDao == null) {
+			return Global.cookie_manage;
+		}
+		List<CookiesConfigEntity> configs = cookiesConfigDao.findAll();
+		if (configs.isEmpty()) {
+			return Global.cookie_manage;
+		}
+		return configs.get(0);
 	}
 
 	public String selectCookie(String platform, String strategy, String cookiePool, String legacyCookie, String purpose) {
@@ -72,7 +84,9 @@ public class PlatformCookieService {
 		if (isBlank(platform) || isBlank(cookie)) {
 			return;
 		}
-		riskUntil.put(riskKey(platform, cookie), System.currentTimeMillis() + RISK_COOLDOWN_MS);
+		long now = System.currentTimeMillis();
+		purgeExpiredRisks(now);
+		riskUntil.put(riskKey(platform, cookie), now + RISK_COOLDOWN_MS);
 		logger.warn("platform cookie risk platform={} reason={} cooldownMs={}", platform, reason, RISK_COOLDOWN_MS);
 	}
 
@@ -92,6 +106,7 @@ public class PlatformCookieService {
 	public Map<String, Object> cookieStatus(String platform) {
 		Map<String, Object> status = new HashMap<>();
 		long now = System.currentTimeMillis();
+		purgeExpiredRisks(now);
 		int cooling = 0;
 		for (Map.Entry<String, Long> entry : riskUntil.entrySet()) {
 			if (entry.getKey().startsWith(platform + ":") && entry.getValue() > now) {
@@ -105,6 +120,7 @@ public class PlatformCookieService {
 
 	private String selectRiskShift(String platform, List<String> cookies) {
 		long now = System.currentTimeMillis();
+		purgeExpiredRisks(now);
 		AtomicInteger cursor = cursors.computeIfAbsent(platform + ":" + STRATEGY_RISK_SHIFT, key -> new AtomicInteger(0));
 		int start = Math.floorMod(cursor.getAndIncrement(), cookies.size());
 		long earliestUntil = Long.MAX_VALUE;
@@ -140,6 +156,10 @@ public class PlatformCookieService {
 
 	private String riskKey(String platform, String cookie) {
 		return platform + ":" + cookie.hashCode();
+	}
+
+	private void purgeExpiredRisks(long now) {
+		riskUntil.entrySet().removeIf(entry -> entry.getValue() <= now);
 	}
 
 	private String firstNotBlank(String first, String second) {

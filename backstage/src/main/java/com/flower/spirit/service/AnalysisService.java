@@ -8,10 +8,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.commons.io.FilenameUtils;
@@ -49,6 +50,7 @@ import com.flower.spirit.utils.YtDlpUtil;
 import com.flower.spirit.utils.sendNotify;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.annotation.PreDestroy;
 /**
  * @author flower
  *         废弃 重写
@@ -63,17 +65,23 @@ public class AnalysisService {
 	private HlsTranscodeService hlsTranscodeService;
 
 	private Logger logger = LoggerFactory.getLogger(AnalysisService.class);
+	private static final int DOMESTIC_QUEUE_CAPACITY = 100;
+	private static final int BILIBILI_QUEUE_CAPACITY = 50;
+	private static final int YTDLP_QUEUE_CAPACITY = 100;
 
 	@Autowired
 	private ProcessHistoryService processHistoryService;
 
 	// private ExecutorService steamcmd = Executors.newFixedThreadPool(1);
 
-	private ExecutorService domestic = new ThreadPoolExecutor(1,5, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+	private ExecutorService domestic = new ThreadPoolExecutor(1, 5, 60L, TimeUnit.SECONDS,
+			new ArrayBlockingQueue<>(DOMESTIC_QUEUE_CAPACITY));
 
-	private ExecutorService bilibili = new ThreadPoolExecutor(1, 3, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+	private ExecutorService bilibili = new ThreadPoolExecutor(1, 3, 60L, TimeUnit.SECONDS,
+			new ArrayBlockingQueue<>(BILIBILI_QUEUE_CAPACITY));
 
-	private ExecutorService ytdlp = new ThreadPoolExecutor(1, 5, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+	private ExecutorService ytdlp = new ThreadPoolExecutor(1, 5, 60L, TimeUnit.SECONDS,
+			new ArrayBlockingQueue<>(YTDLP_QUEUE_CAPACITY));
 	
 	@Autowired
 	private WeiBoExecutor weiBoExecutor;
@@ -143,7 +151,7 @@ public class AnalysisService {
 				if (historyId != null) {
 					processHistoryService.markProcessLog(historyId, "已提交未执行", "平台未命中内置解析，已转交yt-dlp全量模式队列");
 				}
-				ytdlp.submit(() -> {
+			executeTask(ytdlp, historyId, null, () -> {
 					try {
 						processByYtdlp(url);
 					} catch (Exception e) {
@@ -310,15 +318,43 @@ public class AnalysisService {
 		if (historyId != null && StringUtils.isNotBlank(queueLog)) {
 			processHistoryService.markProcessLog(historyId, "已提交未执行", queueLog);
 		}
-		executor.execute(() -> {
-			try {
-				task.run();
-				processHistoryService.completeProcess(historyId, "任务执行完成");
-			} catch (Exception e) {
-				logger.error("任务执行失败: " + e.getMessage(), e);
-				processHistoryService.completeProcess(historyId, "任务执行失败: " + e.getMessage());
+		try {
+			executor.execute(() -> {
+				try {
+					task.run();
+					processHistoryService.completeProcess(historyId, "任务执行完成");
+				} catch (Exception e) {
+					logger.error("任务执行失败: " + e.getMessage(), e);
+					processHistoryService.completeProcess(historyId, "任务执行失败: " + e.getMessage());
+				}
+			});
+		} catch (RejectedExecutionException e) {
+			logger.warn("任务队列已满，拒绝新任务 historyId={}", historyId);
+			processHistoryService.completeProcess(historyId, "任务队列已满，请稍后重试");
+		}
+	}
+
+	@PreDestroy
+	public void shutdownExecutors() {
+		shutdownExecutor(domestic, "domestic");
+		shutdownExecutor(bilibili, "bilibili");
+		shutdownExecutor(ytdlp, "ytdlp");
+	}
+
+	private void shutdownExecutor(ExecutorService executor, String name) {
+		if (executor == null) {
+			return;
+		}
+		executor.shutdown();
+		try {
+			if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+				executor.shutdownNow();
 			}
-		});
+		} catch (InterruptedException e) {
+			executor.shutdownNow();
+			Thread.currentThread().interrupt();
+			logger.warn("线程池关闭被中断: {}", name);
+		}
 	}
 
 	/**

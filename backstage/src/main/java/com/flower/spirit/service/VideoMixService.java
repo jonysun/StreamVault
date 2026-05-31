@@ -2,7 +2,10 @@ package com.flower.spirit.service;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.Date;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,8 +19,6 @@ import jakarta.persistence.criteria.*;
 import org.springframework.transaction.annotation.Transactional;
 import java.io.File;
 import java.io.FileWriter;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import com.flower.spirit.entity.VideoMixEntity;
 import com.flower.spirit.entity.VideoMixSegmentEntity;
 import com.flower.spirit.utils.FileUtil;
@@ -27,11 +28,14 @@ import com.flower.spirit.dao.VideoMixSegmentDao;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
+import jakarta.annotation.PreDestroy;
 
 @Service
 public class VideoMixService {
 
-	private ExecutorService ffmpeg = Executors.newFixedThreadPool(1);
+	private static final int MIX_QUEUE_CAPACITY = 20;
+	private ExecutorService ffmpeg = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+			new ArrayBlockingQueue<>(MIX_QUEUE_CAPACITY));
 
 	@Autowired
 	private VideoMixDao videoMixDao;
@@ -126,7 +130,8 @@ public class VideoMixService {
 					.findByVideomixidOrderBySegmentNoAsc(Integer.parseInt(id));
 			// System.out.println(fileDir);
 			// 3. 在线程池中处理视频
-			ffmpeg.submit(() -> {
+			try {
+				ffmpeg.submit(() -> {
 				try {
 					// 创建临时目录
 					String tempDir = fileDir + "temp/";
@@ -158,41 +163,14 @@ public class VideoMixService {
 							    tempFile
 							);
 
-							Process process = null;
-							BufferedReader errorReader = null;
 							try {
-								// 执行FFmpeg命令
-								process = Runtime.getRuntime().exec(ffmpegCmd);
-
-								// 读取错误流
-								errorReader = new BufferedReader(
-										new InputStreamReader(process.getErrorStream()));
-								StringBuilder errorOutput = new StringBuilder();
-								String errorLine;
-								while ((errorLine = errorReader.readLine()) != null) {
-									errorOutput.append(errorLine).append("\n");
-								}
-
-								process.waitFor();
-
-								// 检查命令执行结果
-								if (process.exitValue() != 0) {
-									throw new RuntimeException("FFmpeg处理失败: " + errorOutput.toString());
+								int exitCode = runFfmpegCommand(ffmpegCmd, 30, TimeUnit.MINUTES);
+								if (exitCode != 0) {
+									throw new RuntimeException("FFmpeg处理失败，退出码: " + exitCode);
 								}
 
 								// 写入文件列表
 								writer.write("file '" + tempFile + "'\n");
-							} finally {
-								if (errorReader != null) {
-									try {
-										errorReader.close();
-									} catch (Exception e) {
-										// 忽略关闭异常
-									}
-								}
-								if (process != null) {
-									process.destroy();
-								}
 							}
 						}
 					} finally {
@@ -207,26 +185,15 @@ public class VideoMixService {
 
 					// 合并所有视频片段（不包含音频）
 					String outputFile = fileDir + mix.getMixName() + ".mp4";
-					Process mergeProcess = null;
-					BufferedReader mergeErrorReader = null;
 					try {
 						String mergeCmd = String.format(
 								"ffmpeg -y -f concat -safe 0 -i %s -c copy -threads 4 %s",
 								listFile,
 								outputFile);
 
-						mergeProcess = Runtime.getRuntime().exec(mergeCmd);
-						mergeErrorReader = new BufferedReader(new InputStreamReader(mergeProcess.getErrorStream()));
-						StringBuilder errorOutput = new StringBuilder();
-						String errorLine;
-						while ((errorLine = mergeErrorReader.readLine()) != null) {
-							errorOutput.append(errorLine).append("\n");
-						}
-
-						mergeProcess.waitFor();
-
-						if (mergeProcess.exitValue() != 0) {
-							throw new RuntimeException("视频合并失败: " + errorOutput.toString());
+						int mergeExitCode = runFfmpegCommand(mergeCmd, 30, TimeUnit.MINUTES);
+						if (mergeExitCode != 0) {
+							throw new RuntimeException("视频合并失败，退出码: " + mergeExitCode);
 						}
 
 						// 更新状态为完成
@@ -243,10 +210,9 @@ public class VideoMixService {
 									outputFile,
 									thumbnailPath);
 
-							Process thumbnailProcess = Runtime.getRuntime().exec(thumbnailCmd);
-							thumbnailProcess.waitFor();
+							int thumbnailExitCode = runFfmpegCommand(thumbnailCmd, 5, TimeUnit.MINUTES);
 
-							if (thumbnailProcess.exitValue() == 0) {
+							if (thumbnailExitCode == 0) {
 								mix.setThumbnailPath(thumbnailPath);
 								videoMixDao.save(mix);
 							}
@@ -277,17 +243,6 @@ public class VideoMixService {
 						VideoDataEntity videoDataEntity = new VideoDataEntity(vid, mix.getMixName(), mix.getMixName(), "StreamVault", coverunaddr, outputFile,
 								videounrealaddr, "合并任务无地址");
 						videoDataDao.save(videoDataEntity);
-					} finally {
-						if (mergeErrorReader != null) {
-							try {
-								mergeErrorReader.close();
-							} catch (Exception e) {
-								// 忽略关闭异常
-							}
-						}
-						if (mergeProcess != null) {
-							mergeProcess.destroy();
-						}
 					}
 
 				} catch (Exception e) {
@@ -299,11 +254,54 @@ public class VideoMixService {
 					// 记录错误日志
 					e.printStackTrace();
 				}
-			});
+				});
+			} catch (RejectedExecutionException e) {
+				mix.setStatus("失败");
+				mix.setUpdateTime(new Date());
+				videoMixDao.save(mix);
+				return new AjaxEntity(Global.ajax_uri_error, "混剪队列已满，请稍后重试", null);
+			}
 
 			return new AjaxEntity(Global.ajax_success, "开始处理混剪", null);
 		} catch (Exception e) {
 			return new AjaxEntity(Global.ajax_uri_error, "处理失败：" + e.getMessage(), null);
+		}
+	}
+
+	private int runFfmpegCommand(String command, long timeout, TimeUnit unit) throws Exception {
+		ProcessBuilder processBuilder;
+		if (System.getProperty("os.name").toLowerCase().contains("win")) {
+			processBuilder = new ProcessBuilder("cmd.exe", "/c", command);
+		} else {
+			processBuilder = new ProcessBuilder("/bin/sh", "-c", command);
+		}
+		processBuilder.redirectErrorStream(true);
+		processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+		Process process = processBuilder.start();
+		try {
+			if (!process.waitFor(timeout, unit)) {
+				process.destroyForcibly();
+				process.waitFor();
+				throw new RuntimeException("FFmpeg执行超时");
+			}
+			return process.exitValue();
+		} finally {
+			if (process.isAlive()) {
+				process.destroyForcibly();
+			}
+		}
+	}
+
+	@PreDestroy
+	public void shutdown() {
+		ffmpeg.shutdown();
+		try {
+			if (!ffmpeg.awaitTermination(10, TimeUnit.SECONDS)) {
+				ffmpeg.shutdownNow();
+			}
+		} catch (InterruptedException e) {
+			ffmpeg.shutdownNow();
+			Thread.currentThread().interrupt();
 		}
 	}
 
