@@ -163,15 +163,13 @@ public class VideoMixService {
 							    tempFile
 							);
 
-							try {
-								int exitCode = runFfmpegCommand(ffmpegCmd, 30, TimeUnit.MINUTES);
-								if (exitCode != 0) {
-									throw new RuntimeException("FFmpeg处理失败，退出码: " + exitCode);
-								}
-
-								// 写入文件列表
-								writer.write("file '" + tempFile + "'\n");
+							int exitCode = runFfmpegCommand(ffmpegCmd, 30, TimeUnit.MINUTES);
+							if (exitCode != 0) {
+								throw new RuntimeException("FFmpeg处理失败，退出码: " + exitCode);
 							}
+
+							// 写入文件列表
+							writer.write("file '" + tempFile + "'\n");
 						}
 					} finally {
 						if (writer != null) {
@@ -185,16 +183,15 @@ public class VideoMixService {
 
 					// 合并所有视频片段（不包含音频）
 					String outputFile = fileDir + mix.getMixName() + ".mp4";
-					try {
-						String mergeCmd = String.format(
-								"ffmpeg -y -f concat -safe 0 -i %s -c copy -threads 4 %s",
-								listFile,
-								outputFile);
+					String mergeCmd = String.format(
+							"ffmpeg -y -f concat -safe 0 -i %s -c copy -threads 4 %s",
+							listFile,
+							outputFile);
 
-						int mergeExitCode = runFfmpegCommand(mergeCmd, 30, TimeUnit.MINUTES);
-						if (mergeExitCode != 0) {
-							throw new RuntimeException("视频合并失败，退出码: " + mergeExitCode);
-						}
+					int mergeExitCode = runFfmpegCommand(mergeCmd, 30, TimeUnit.MINUTES);
+					if (mergeExitCode != 0) {
+						throw new RuntimeException("视频合并失败，退出码: " + mergeExitCode);
+					}
 
 						// 更新状态为完成
 						mix.setStatus("完成");
@@ -243,8 +240,6 @@ public class VideoMixService {
 						VideoDataEntity videoDataEntity = new VideoDataEntity(vid, mix.getMixName(), mix.getMixName(), "StreamVault", coverunaddr, outputFile,
 								videounrealaddr, "合并任务无地址");
 						videoDataDao.save(videoDataEntity);
-					}
-
 				} catch (Exception e) {
 					// 发生错误时更新状态为"失败"
 					mix.setStatus("失败");
