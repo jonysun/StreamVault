@@ -1,7 +1,6 @@
 package com.flower.spirit.utils;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.util.concurrent.TimeUnit;
 
 import com.flower.spirit.config.Global;
 
@@ -44,27 +43,31 @@ public class EncoderUtil {
     }
 
     private static boolean isHardwareAcceleratedEncoderSupported(String encoderName) {
+        Process process = null;
         try {
             // 执行 ffmpeg 命令来检查是否支持硬件加速编码器
-            Process process = Runtime.getRuntime().exec(buildFFmpegCommand(encoderName));
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            boolean isSupported = false;
+            ProcessBuilder processBuilder = new ProcessBuilder("/bin/sh", "-c", buildFFmpegCommand(encoderName));
+            if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                processBuilder = new ProcessBuilder("cmd.exe", "/c", buildFFmpegCommand(encoderName));
+            }
+            processBuilder.redirectErrorStream(true);
+            processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            process = processBuilder.start();
 
-            while ((line = reader.readLine()) != null) {
-                if (line.contains("output.mp4")) {
-                    isSupported = true;
-                    break;
-                }
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor();
+                return false;
             }
 
-            reader.close();
-            process.waitFor();
-
-            return isSupported;
+            return process.exitValue() == 0;
         } catch (Exception e) {
             e.printStackTrace();
             return false;
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
         }
     }
 

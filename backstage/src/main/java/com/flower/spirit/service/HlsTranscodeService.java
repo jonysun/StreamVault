@@ -28,6 +28,7 @@ public class HlsTranscodeService {
 	private static final Logger logger = LoggerFactory.getLogger(HlsTranscodeService.class);
 	private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
 	private static final String HLS_FLAGS = "independent_segments+temp_file";
+	private static final int MAX_QUEUE_SIZE = 1000;
 
 	@Autowired
 	private VideoDataDao videoDataDao;
@@ -223,6 +224,10 @@ public class HlsTranscodeService {
 
 	private synchronized boolean enqueue(Integer id, boolean forceRebuild) {
 		if (id == null || dedupe.contains(id)) {
+			return false;
+		}
+		if (queue.size() >= MAX_QUEUE_SIZE) {
+			logger.warn("[HLS] enqueue rejected because queue is full size={} id={}", queue.size(), id);
 			return false;
 		}
 		Optional<VideoDataEntity> opt = videoDataDao.findById(id);

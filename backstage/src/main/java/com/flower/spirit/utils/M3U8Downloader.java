@@ -10,8 +10,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -57,23 +58,34 @@ public class M3U8Downloader {
         List<String> segmentUrls = extractSegmentUrls(m3u8Content, m3u8Url);
 
         // 使用线程池下载片段
-        ExecutorService executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+        ExecutorService executor = new ThreadPoolExecutor(THREAD_POOL_SIZE, THREAD_POOL_SIZE, 0L,
+                TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(THREAD_POOL_SIZE * 2),
+                new ThreadPoolExecutor.CallerRunsPolicy());
         List<Path> segmentFiles = new ArrayList<>();
 
-        for (int i = 0; i < segmentUrls.size(); i++) {
-            final int index = i;
-            final String segmentUrl = segmentUrls.get(i);
-            final Path segmentFile = outputDir.resolve(String.format("%05d.ts", index));
-
-            executor.submit(() -> {
-                downloadSegment(segmentUrl, segmentFile);
+        try {
+            for (int i = 0; i < segmentUrls.size(); i++) {
+                final int index = i;
+                final String segmentUrl = segmentUrls.get(i);
+                final Path segmentFile = outputDir.resolve(String.format("%05d.ts", index));
                 segmentFiles.add(segmentFile);
-            });
-        }
 
-        // 等待所有下载完成
-        executor.shutdown();
-        executor.awaitTermination(1, TimeUnit.HOURS);
+                executor.submit(() -> {
+                    downloadSegment(segmentUrl, segmentFile);
+                });
+            }
+
+            // 等待所有下载完成
+            executor.shutdown();
+            if (!executor.awaitTermination(1, TimeUnit.HOURS)) {
+                executor.shutdownNow();
+                throw new RuntimeException("M3U8 segment download timed out");
+            }
+        } finally {
+            if (!executor.isTerminated()) {
+                executor.shutdownNow();
+            }
+        }
 
         // 合并片段
         Path mergedFile = outputDir.resolve("merged.ts");
@@ -155,9 +167,16 @@ public class M3U8Downloader {
                 "-c:v", "copy",
                 "-c:a", "aac",
                 outputPath);
+        pb.redirectErrorStream(true);
+        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
 
         Process process = pb.start();
-        int exitCode = process.waitFor();
+        if (!process.waitFor(30, TimeUnit.MINUTES)) {
+            process.destroyForcibly();
+            process.waitFor();
+            throw new RuntimeException("FFmpeg merge timed out");
+        }
+        int exitCode = process.exitValue();
 
         if (exitCode != 0) {
             throw new RuntimeException("FFmpeg merge failed with exit code: " + exitCode);
