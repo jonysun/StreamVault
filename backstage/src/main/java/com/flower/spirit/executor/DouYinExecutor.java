@@ -21,6 +21,7 @@ import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.ProcessHistoryEntity;
+import com.flower.spirit.service.AuthorProfileService;
 import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DouUtil;
@@ -349,7 +350,8 @@ public class DouYinExecutor {
 			snapshot.uid = firstNotBlank(profileUser.getString("uid"), snapshot.uid);
 			snapshot.avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), snapshot.avatar);
 		}
-		snapshot.authorUid = firstNotBlank(snapshot.secUid, snapshot.uid);
+		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid, snapshot.uid);
+		snapshot.secUid = snapshot.authorUid;
 		return snapshot;
 	}
 

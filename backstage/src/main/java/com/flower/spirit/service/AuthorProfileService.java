@@ -48,6 +48,12 @@ public class AuthorProfileService {
 		}
 		String safePlatform = platform.trim();
 		String safeUid = authoruid.trim();
+		if (isDouyinPlatformValue(safePlatform)) {
+			safeUid = preferDouyinAuthorUid(safeUid, null);
+			if (safeUid == null) {
+				return;
+			}
+		}
 		Date now = new Date();
 		Optional<AuthorProfileEntity> opt = authorProfileDao.findByPlatformAndAuthoruid(safePlatform, safeUid);
 		AuthorProfileEntity entity = opt.orElseGet(AuthorProfileEntity::new);
@@ -149,7 +155,7 @@ public class AuthorProfileService {
 			} else {
 				apiFailed++;
 			}
-			String authorUid = firstNotBlank(video.getSecuid(), video.getAuthoruid());
+			String authorUid = preferDouyinAuthorUid(video.getSecuid(), video.getAuthoruid());
 			String username = firstNotBlank(video.getUniqueid(), video.getAuthorusername());
 			if (authorUid != null && !authorUid.trim().isEmpty()) {
 				video.setAuthoruid(authorUid);
@@ -183,7 +189,7 @@ public class AuthorProfileService {
 			} else {
 				apiFailed++;
 			}
-			String authorUid = firstNotBlank(item.getSecuid(), item.getAuthoruid());
+			String authorUid = preferDouyinAuthorUid(item.getSecuid(), item.getAuthoruid());
 			String username = firstNotBlank(item.getUniqueid(), item.getAuthorusername());
 			if (authorUid != null && !authorUid.trim().isEmpty()) {
 				item.setAuthoruid(authorUid);
@@ -219,8 +225,8 @@ public class AuthorProfileService {
 		String uniqueId = author.getString("unique_id");
 		String nickname = author.getString("nickname");
 		String avatar = DouUtil.extractAvatar(author);
-		video.setAuthoruid(firstNotBlank(secUid, video.getAuthoruid()));
-		video.setSecuid(firstNotBlank(secUid, video.getSecuid()));
+		video.setAuthoruid(preferDouyinAuthorUid(secUid, video.getAuthoruid()));
+		video.setSecuid(preferDouyinAuthorUid(secUid, video.getSecuid()));
 		video.setAuthorusername(firstNotBlank(uniqueId, video.getAuthorusername()));
 		video.setUniqueid(firstNotBlank(uniqueId, video.getUniqueid()));
 		video.setVideoauthor(firstNotBlank(nickname, video.getVideoauthor()));
@@ -237,8 +243,8 @@ public class AuthorProfileService {
 		String uniqueId = author.getString("unique_id");
 		String nickname = author.getString("nickname");
 		String avatar = DouUtil.extractAvatar(author);
-		item.setAuthoruid(firstNotBlank(secUid, item.getAuthoruid()));
-		item.setSecuid(firstNotBlank(secUid, item.getSecuid()));
+		item.setAuthoruid(preferDouyinAuthorUid(secUid, item.getAuthoruid()));
+		item.setSecuid(preferDouyinAuthorUid(secUid, item.getSecuid()));
 		item.setAuthorusername(firstNotBlank(uniqueId, item.getAuthorusername()));
 		item.setUniqueid(firstNotBlank(uniqueId, item.getUniqueid()));
 		item.setAuthor(firstNotBlank(nickname, item.getAuthor()));
@@ -246,7 +252,31 @@ public class AuthorProfileService {
 	}
 
 	private boolean isDouyinPlatform(String platform) {
+		return isDouyinPlatformValue(platform);
+	}
+
+	public static String preferDouyinAuthorUid(String secUid, String fallback) {
+		String safeSecUid = trimToNull(secUid);
+		if (isDouyinSecUid(safeSecUid)) {
+			return safeSecUid;
+		}
+		String safeFallback = trimToNull(fallback);
+		return isDouyinSecUid(safeFallback) ? safeFallback : null;
+	}
+
+	public static boolean isDouyinPlatformValue(String platform) {
 		return "抖音".equals(platform) || "douyin".equalsIgnoreCase(platform);
+	}
+
+	private static boolean isDouyinSecUid(String value) {
+		return value != null && value.startsWith("MS4");
+	}
+
+	private static String trimToNull(String value) {
+		if (value == null || value.trim().isEmpty()) {
+			return null;
+		}
+		return value.trim();
 	}
 
 	private String firstNotBlank(String first, String second) {
