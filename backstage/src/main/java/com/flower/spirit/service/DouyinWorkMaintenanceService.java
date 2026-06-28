@@ -257,7 +257,7 @@ public class DouyinWorkMaintenanceService {
 			uid = firstNotBlank(author.getString("uid"), uid);
 			avatar = firstNotBlank(DouUtil.extractAvatar(author), avatar);
 		}
-		String authorUidForSave = firstNotBlank(secUid, uid);
+		String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(secUid, uid);
 		String jsonData = firstNotBlank(map.get("jsonData"), JSONObject.toJSONString(map));
 
 		target.setVideoid(awemeId);
@@ -276,7 +276,7 @@ public class DouyinWorkMaintenanceService {
 		target.setSourceurl(DouyinSourceUrlUtil.video(awemeId));
 		target.setVideoauthor(nickname);
 		target.setAuthoruid(authorUidForSave);
-		target.setSecuid(secUid);
+		target.setSecuid(authorUidForSave);
 		target.setAuthorusername(uniqueId);
 		target.setUniqueid(uniqueId);
 		target.setAuthoravatar(avatar);
@@ -417,7 +417,8 @@ public class DouyinWorkMaintenanceService {
 			snapshot.uid = firstNotBlank(profile.getString("uid"), snapshot.uid);
 			snapshot.avatar = firstNotBlank(DouUtil.extractAvatar(profile), snapshot.avatar);
 		}
-		snapshot.authorUid = firstNotBlank(snapshot.secUid, snapshot.uid);
+		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid, snapshot.uid);
+		snapshot.secUid = snapshot.authorUid;
 		return snapshot;
 	}
 

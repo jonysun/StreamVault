@@ -681,6 +681,7 @@ public class CollectDataService {
 							errorCode = "DOWNLOAD_RISK_OR_FAIL";
 							errorMsg = "内置下载返回1";
 							appendLog(processLog, "download", "http downloader returned 1");
+							failedThisRun++;
 							logger.error("[CollectTask] risk triggered taskId={} awemeId={} output={}", entity.getId(), awemeId,
 									downloadFileWithOkHttp);
 							break;
@@ -720,12 +721,12 @@ public class CollectDataService {
 						dyNickname = firstNotBlank(profileUser.getString("nickname"), dyNickname);
 						avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), avatar);
 					}
-					String authorUidForSave = firstNotBlank(sourceUid, authorUid);
+					String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(sourceUid, authorUid);
 					authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, dyNickname,
 							avatar,
 							authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
 					videoDataEntity.setAuthoruid(authorUidForSave);
-					videoDataEntity.setSecuid(sourceUid);
+					videoDataEntity.setSecuid(authorUidForSave);
 					videoDataEntity.setAuthorusername(uniqueId);
 					videoDataEntity.setUniqueid(uniqueId);
 					videoDataEntity.setAuthoravatar(avatar);
@@ -828,13 +829,7 @@ public class CollectDataService {
 		if (totalCount > 0) {
 		    sendNotify.sendMessage(totalCount, entity.getTaskname());
 		}
-		entity.setTaskstatus("处理完成");
-		if (risk.equals("1")) {
-			entity.setTaskstatus("可能触发风控本次已终止");
-		}
-		if (allDYData == null) {
-			entity.setTaskstatus("执行失败(抓取异常)");
-		}
+		entity.setTaskstatus(resolveDouyinCollectStatus(risk, allDYData == null, successThisRun, failedThisRun, skippedThisRun));
 		entity.setEndtime(DateUtils.formatDateTime(new Date()));
 		collectdDataDao.save(entity);
 		markCollectTaskFinished();
@@ -842,6 +837,17 @@ public class CollectDataService {
 		logger.info("任务结束" + entity.getOriginaladdress());
 		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} failedThisRun={} skippedThisRun={} finalStatus={} carriedout={}",
 				entity.getId(), videoaddcount, graphiccount, totalCount, successThisRun, targetSuccess, failedThisRun, skippedThisRun, entity.getTaskstatus(), entity.getCarriedout());
+	}
+
+	static String resolveDouyinCollectStatus(String risk, boolean fetchFailed, int successThisRun, int failedThisRun, int skippedThisRun) {
+		if (fetchFailed) {
+			return "执行失败(抓取异常)";
+		}
+		boolean onlySkippedExistingItems = successThisRun == 0 && failedThisRun == 0 && skippedThisRun > 0;
+		if ("1".equals(risk) && !onlySkippedExistingItems) {
+			return "可能触发风控本次已终止";
+		}
+		return "处理完成";
 	}
 
 	private String buildFetchSnapshot(JSONArray allData) {

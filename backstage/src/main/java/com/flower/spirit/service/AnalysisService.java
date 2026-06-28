@@ -817,7 +817,7 @@ public class AnalysisService {
 			uid = firstNotBlank(profileAuthor.getString("uid"), uid);
 			map.put("avatar_thumb", firstNotBlank(DouUtil.extractAvatar(profileAuthor), map.get("avatar_thumb")));
 		}
-		String authorUidForSave = firstNotBlank(secUid, uid);
+		String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(secUid, uid);
 		videoDataEntity.setVideoinfo(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
 		videoDataEntity.setJsonData(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
 		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
@@ -825,7 +825,7 @@ public class AnalysisService {
 		authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, map.get("avatar_thumb"),
 				authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
 		videoDataEntity.setAuthoruid(authorUidForSave);
-		videoDataEntity.setSecuid(secUid);
+		videoDataEntity.setSecuid(authorUidForSave);
 		videoDataEntity.setAuthorusername(uniqueId);
 		videoDataEntity.setUniqueid(uniqueId);
 		videoDataEntity.setAuthoravatar(map.get("avatar_thumb"));
