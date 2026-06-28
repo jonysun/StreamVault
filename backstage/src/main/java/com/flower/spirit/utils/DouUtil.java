@@ -113,10 +113,14 @@ public class DouUtil {
 	 * @return 视频信息Map，包含视频ID、播放地址等
 	 */
 	public static Map<String, String> downVideo(String url) {
-		return downVideo(url, null);
+		return downVideo(url, null, Global.tiktokCookie);
 	}
 
 	public static Map<String, String> downVideo(String url, Integer historyId) {
+		return downVideo(url, historyId, Global.tiktokCookie);
+	}
+
+	public static Map<String, String> downVideo(String url, Integer historyId, String cookie) {
 		try {
 			logger.info("[DouyinSingle] start rawUrl={}", url);
 			// 获取重定向后的真实URL
@@ -140,7 +144,7 @@ public class DouUtil {
 			logger.info("[DouyinSingle] extracted videoId={}", videoId);
 			
 			// 获取视频数据
-			Map<String, String> data = getBogus(videoId, url);
+			Map<String, String> data = getBogusWithSource(videoId, url, cookie);
 			if (data != null) {
 				logger.info("接口解析成功，数据: {}", data);
 				return data;
@@ -255,7 +259,7 @@ public class DouUtil {
 	 * @throws IOException
 	 */
 	public static Map<String, String> getBogus(String aweme_id, String rawUrl) throws HttpException, IOException {
-		Map<String, String> res = getBogus(aweme_id);
+		Map<String, String> res = getBogusWithCookie(aweme_id, Global.tiktokCookie);
 		JSONObject hybrid = fetchHybridVideoData(rawUrl);
 		if (res != null && hybrid != null) {
 			mergeHybridData(res, hybrid);
@@ -264,11 +268,24 @@ public class DouUtil {
 	}
 
 	public static  Map<String, String> getBogus(String aweme_id) throws HttpException, IOException {
+		return getBogusWithCookie(aweme_id, Global.tiktokCookie);
+	}
+
+	public static Map<String, String> getBogusWithSource(String aweme_id, String rawUrl, String cookie) throws HttpException, IOException {
+		Map<String, String> res = getBogusWithCookie(aweme_id, cookie);
+		JSONObject hybrid = fetchHybridVideoData(rawUrl);
+		if (res != null && hybrid != null) {
+			mergeHybridData(res, hybrid);
+		}
+		return res;
+	}
+
+	public static  Map<String, String> getBogusWithCookie(String aweme_id, String cookie) throws HttpException, IOException {
 		 Map<String, String> res = new HashMap<String, String>();
-		 if(null !=Global.tiktokCookie && !"".equals(Global.tiktokCookie) ) {
+		 if(null !=cookie && !"".equals(cookie) ) {
 			 logger.info("[DouyinSingle] fetch_video start awemeId={}", aweme_id);
 		
-			 String httpget = CommandUtil.f2cmd(Global.tiktokCookie,aweme_id,"fetch_video",null,null,null,null);
+			 String httpget = CommandUtil.f2cmd(cookie,aweme_id,"fetch_video",null,null,null,null);
 			 Integer exitCode = CommandUtil.getLastF2ExitCode();
 			 Long durationMs = CommandUtil.getLastF2DurationMs();
 			 logger.info("[DouyinSingle] fetch_video outputLength={}", httpget == null ? 0 : httpget.length());

@@ -19,7 +19,7 @@
 </head>
 <body>
 <div class="lyear-layout-web"><div class="lyear-layout-container"><div th:insert="~{admin/include/common :: headermenu}"></div>
-<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索名称/用户名/UID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button><button id="repairDouyinMetadataBtn" class="btn btn-info btn-sm"><i class="mdi mdi-auto-fix"></i> 修复抖音元数据</button><button id="rebuildDouyinBtn" class="btn btn-warning btn-sm"><i class="mdi mdi-account-convert"></i> 重建抖音作者资料</button><button id="cleanupHistoryBtn" class="btn btn-danger btn-sm"><i class="mdi mdi-delete-sweep"></i> 清理重复处理历史</button></div></div><div class="card-body"><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>头像</th><th>当前显示名</th><th>用户名</th><th>UID</th><th>主页</th><th>更新时间</th><th>历史名</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
+<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索名称/用户名/UID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button><button id="repairDouyinMetadataBtn" class="btn btn-info btn-sm"><i class="mdi mdi-auto-fix"></i> 修复抖音元数据</button><button id="rebuildDouyinBtn" class="btn btn-warning btn-sm"><i class="mdi mdi-account-convert"></i> 重建抖音作者资料(API优先)</button><button id="cleanupHistoryBtn" class="btn btn-danger btn-sm"><i class="mdi mdi-delete-sweep"></i> 清理重复处理历史</button></div></div><div class="card-body"><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>头像</th><th>当前显示名</th><th>用户名</th><th>UID</th><th>主页</th><th>更新时间</th><th>历史名</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
 <script type="text/javascript" src="../static/js/jquery.min.js"></script>
 <script type="text/javascript" src="../static/js/bootstrap.min.js"></script>
 <script type="text/javascript" src="../static/js/laypage.js"></script>
@@ -79,14 +79,14 @@
 		});
 	});
 	$('#rebuildDouyinBtn').click(function(){
-		layer.confirm('将删除旧的抖音作者档案和历史名，并按现有视频/图文修复作者资料与原链接。不会删除作品本身，是否继续？', {title:'确认重建'}, function(index){
+		layer.confirm('将删除旧的抖音作者档案和历史名，并优先通过API重新获取作者资料；API失败时才使用数据库字段兜底。不会删除作品本身，是否继续？', {title:'确认重建'}, function(index){
 			layer.close(index);
 			var loading = layer.load(1, {shade:[0.2, '#000']});
 			$.post('/admin/api/rebuildDouyinAuthors', {}, function(res){
 				layer.close(loading);
 				if(res.resCode !== '000001'){ layer.msg(res.message || '重建失败'); return; }
 				var r = res.record || {};
-				layer.alert('重建完成<br>删除旧作者：'+(r.deletedAuthors||0)+'<br>扫描视频：'+(r.scannedVideos||0)+'，更新：'+(r.updatedVideos||0)+'<br>扫描图文：'+(r.scannedGraphics||0)+'，更新：'+(r.updatedGraphics||0)+'<br>API成功：'+(r.apiSuccess||0)+'，失败：'+(r.apiFailed||0)+'<br>重建作者：'+(r.rebuiltAuthors||0));
+				layer.alert('重建完成<br>删除旧作者：'+(r.deletedAuthors||0)+'<br>扫描视频：'+(r.scannedVideos||0)+'，更新：'+(r.updatedVideos||0)+'<br>扫描图文：'+(r.scannedGraphics||0)+'，更新：'+(r.updatedGraphics||0)+'<br>Hybrid API成功：'+(r.hybridApiSuccess||0)+'<br>用户资料API成功：'+(r.profileApiSuccess||0)+'<br>API失败：'+(r.apiFailed||0)+'<br>数据库兜底：'+(r.fallbackUsed||0)+'<br>缺少作者UID跳过：'+(r.skippedNoAuthorUid||0)+'<br>重建作者：'+(r.rebuiltAuthors||0));
 				findList(currentPage);
 			}).fail(function(){ layer.close(loading); layer.msg('请求失败'); });
 		});

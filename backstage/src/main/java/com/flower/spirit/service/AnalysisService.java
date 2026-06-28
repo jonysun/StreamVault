@@ -8,10 +8,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.commons.io.FilenameUtils;
@@ -49,6 +50,7 @@ import com.flower.spirit.utils.YtDlpUtil;
 import com.flower.spirit.utils.sendNotify;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.annotation.PreDestroy;
 /**
  * @author flower
  *         废弃 重写
@@ -63,17 +65,23 @@ public class AnalysisService {
 	private HlsTranscodeService hlsTranscodeService;
 
 	private Logger logger = LoggerFactory.getLogger(AnalysisService.class);
+	private static final int DOMESTIC_QUEUE_CAPACITY = 100;
+	private static final int BILIBILI_QUEUE_CAPACITY = 50;
+	private static final int YTDLP_QUEUE_CAPACITY = 100;
 
 	@Autowired
 	private ProcessHistoryService processHistoryService;
 
 	// private ExecutorService steamcmd = Executors.newFixedThreadPool(1);
 
-	private ExecutorService domestic = new ThreadPoolExecutor(1,5, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+	private ExecutorService domestic = new ThreadPoolExecutor(1, 5, 60L, TimeUnit.SECONDS,
+			new ArrayBlockingQueue<>(DOMESTIC_QUEUE_CAPACITY));
 
-	private ExecutorService bilibili = new ThreadPoolExecutor(1, 3, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+	private ExecutorService bilibili = new ThreadPoolExecutor(1, 3, 60L, TimeUnit.SECONDS,
+			new ArrayBlockingQueue<>(BILIBILI_QUEUE_CAPACITY));
 
-	private ExecutorService ytdlp = new ThreadPoolExecutor(1, 5, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+	private ExecutorService ytdlp = new ThreadPoolExecutor(1, 5, 60L, TimeUnit.SECONDS,
+			new ArrayBlockingQueue<>(YTDLP_QUEUE_CAPACITY));
 	
 	@Autowired
 	private WeiBoExecutor weiBoExecutor;
@@ -83,6 +91,9 @@ public class AnalysisService {
 
 	@Autowired
 	private AuthorProfileService authorProfileService;
+
+	@Autowired
+	private PlatformCookieService platformCookieService;
 
 	@Autowired
 	private BlockedWorkService blockedWorkService;
@@ -140,7 +151,7 @@ public class AnalysisService {
 				if (historyId != null) {
 					processHistoryService.markProcessLog(historyId, "已提交未执行", "平台未命中内置解析，已转交yt-dlp全量模式队列");
 				}
-				ytdlp.submit(() -> {
+			executeTask(ytdlp, historyId, null, () -> {
 					try {
 						processByYtdlp(url);
 					} catch (Exception e) {
@@ -219,11 +230,12 @@ public class AnalysisService {
 
 	private void kuaishou(String platform, String url) {
 		logger.info("平台归属:" + platform);
-		if (null != Global.cookie_manage && null != Global.cookie_manage.getKuaishouCookie()
-				&& !"".equals(Global.cookie_manage.getKuaishouCookie())) {
+		String kuaishouCookie = platformCookieService.currentKuaishouCookie("single_video");
+		if (null != kuaishouCookie && !"".equals(kuaishouCookie)) {
 			ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, url, platform);
 			try {
-				VideoInfo video = KuaishouParser.parseVideo(url, Global.cookie_manage.getKuaishouCookie());
+				VideoInfo video = KuaishouParser.parseVideo(url, kuaishouCookie);
+				platformCookieService.reportSuccess("快手", kuaishouCookie);
 				String title = video.getTitle();
 				String coverUrl = video.getCoverUrl();
 				String h265Url = video.getH265Url();
@@ -244,10 +256,10 @@ public class AnalysisService {
 							Aria2Util.createDouparameter(h265Url,
 									FileUtil.generateDir(Global.down_path, Global.platform.kuaishou.name(), true,
 											filename, null, null),
-									filename + ".mp4", Global.a2_token, Global.cookie_manage.getKuaishouCookie()));
+									filename + ".mp4", Global.a2_token, kuaishouCookie));
 				}
 				header.put("User-Agent", KuaishouParser.USER_AGENT);
-				header.put("cookie", Global.cookie_manage.getKuaishouCookie());
+				header.put("cookie", kuaishouCookie);
 				if (Global.downtype.equals("http")) {
 					// 内置下载器
 					videofile = FileUtil.generateDir(true, Global.platform.kuaishou.name(), true, filename, null, null);
@@ -283,6 +295,9 @@ public class AnalysisService {
 				sendNotify.sendNotifyData(title, url, platform);
 				logger.info("下载流程结束");
 			} catch (IOException e) {
+				if (platformCookieService.isRiskSignal(e.getMessage())) {
+					platformCookieService.reportRisk("快手", kuaishouCookie, e.getMessage());
+				}
 				// 失败
 				sendNotify.sendNotifyError(url, platform, e.getMessage());
 			}
@@ -303,15 +318,43 @@ public class AnalysisService {
 		if (historyId != null && StringUtils.isNotBlank(queueLog)) {
 			processHistoryService.markProcessLog(historyId, "已提交未执行", queueLog);
 		}
-		executor.execute(() -> {
-			try {
-				task.run();
-				processHistoryService.completeProcess(historyId, "任务执行完成");
-			} catch (Exception e) {
-				logger.error("任务执行失败: " + e.getMessage(), e);
-				processHistoryService.completeProcess(historyId, "任务执行失败: " + e.getMessage());
+		try {
+			executor.execute(() -> {
+				try {
+					task.run();
+					processHistoryService.completeProcess(historyId, "任务执行完成");
+				} catch (Exception e) {
+					logger.error("任务执行失败: " + e.getMessage(), e);
+					processHistoryService.completeProcess(historyId, "任务执行失败: " + e.getMessage());
+				}
+			});
+		} catch (RejectedExecutionException e) {
+			logger.warn("任务队列已满，拒绝新任务 historyId={}", historyId);
+			processHistoryService.completeProcess(historyId, "任务队列已满，请稍后重试");
+		}
+	}
+
+	@PreDestroy
+	public void shutdownExecutors() {
+		shutdownExecutor(domestic, "domestic");
+		shutdownExecutor(bilibili, "bilibili");
+		shutdownExecutor(ytdlp, "ytdlp");
+	}
+
+	private void shutdownExecutor(ExecutorService executor, String name) {
+		if (executor == null) {
+			return;
+		}
+		executor.shutdown();
+		try {
+			if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+				executor.shutdownNow();
 			}
-		});
+		} catch (InterruptedException e) {
+			executor.shutdownNow();
+			Thread.currentThread().interrupt();
+			logger.warn("线程池关闭被中断: {}", name);
+		}
 	}
 
 	/**
@@ -677,17 +720,22 @@ public class AnalysisService {
 	}
 
 	public void dyvideo(String platform, String video, Integer historyId) throws Exception {
-		if (null != Global.tiktokCookie && !Global.tiktokCookie.equals("")) {
-			Map<String, String> downVideo = DouUtil.downVideo(video, historyId);
+		String cookie = platformCookieService.currentDouyinCookie("single_video");
+		if (null != cookie && !cookie.equals("")) {
+			Map<String, String> downVideo = DouUtil.downVideo(video, historyId, cookie);
 			if(downVideo!= null) {
+				platformCookieService.reportSuccess("抖音", cookie);
 				this.putRecord(downVideo.get("awemeid"), downVideo.get("desc"), downVideo.get("videoplay"),
-						downVideo.get("cover"), platform, video, downVideo.get("type"), Global.tiktokCookie, downVideo);
+						downVideo.get("cover"), platform, video, downVideo.get("type"), cookie, downVideo);
 				System.gc();
 				sendNotify.sendNotifyData(downVideo.get("desc"), video, platform);
 				if (historyId == null) {
 					ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, video, platform);
 					processHistoryService.completeProcess(saveProcess.getId(), "任务执行完成");
 				}
+			}
+			if (downVideo == null) {
+				platformCookieService.reportRisk("抖音", cookie, "single video parse failed");
 			}
 		} else {
 			logger.info("抖音cookie未填 不处理");
@@ -731,7 +779,7 @@ public class AnalysisService {
 		HashMap<String, String> header = new HashMap<String, String>();
 		header.put("Referer", "https://www.douyin.com/");
 		header.put("User-Agent", DouUtil.ua);
-		header.put("cookie", Global.tiktokCookie);
+		header.put("cookie", cookie);
 		if (Global.downtype.equals("http")) {
 			// 内置下载器
 			videofile = FileUtil.generateDir(true, Global.platform.douyin.name(), true, filename, null, null);
@@ -928,10 +976,13 @@ public class AnalysisService {
 			
 			// 3. 如果是抖音平台，使用 DouUtil
 			if (platform.equals("抖音")) {
-				Map<String, String> douData = DouUtil.downVideo(url);
+				String cookie = platformCookieService.currentDouyinCookie("direct_parse");
+				Map<String, String> douData = DouUtil.downVideo(url, null, cookie);
 				if (douData == null) {
+					platformCookieService.reportRisk("抖音", cookie, "direct parse failed");
 					return new AjaxEntity(Global.ajax_uri_error, "解析失败", null);
 				}
+				platformCookieService.reportSuccess("抖音", cookie);
 				
 				result.put("platform", "抖音");
 				result.put("videoUrl", douData.get("videoplay"));
@@ -944,10 +995,7 @@ public class AnalysisService {
 				
 			} else if (platform.equals("快手")) {
 				// 4. 快手平台使用 KuaishouParser
-				String kuaishouCookie = null;
-				if (Global.cookie_manage != null) {
-					kuaishouCookie = Global.cookie_manage.getKuaishouCookie();
-				}
+				String kuaishouCookie = platformCookieService.currentKuaishouCookie("direct_parse");
 				
 				KuaishouParser.VideoInfo videoInfo = KuaishouParser.parseVideo(url, kuaishouCookie);
 				

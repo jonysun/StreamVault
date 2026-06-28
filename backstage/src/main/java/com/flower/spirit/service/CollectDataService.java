@@ -80,6 +80,9 @@ public class CollectDataService {
 	@Autowired
 	private BlockedWorkService blockedWorkService;
 
+	@Autowired
+	private PlatformCookieService platformCookieService;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -182,7 +185,8 @@ public class CollectDataService {
 
 		}
 		if (null != collectDataEntity.getPlatform() && collectDataEntity.getPlatform().equals("抖音")) {
-			if (null == Global.tiktokCookie || Global.tiktokCookie.equals("")) {
+			String submitCookie = platformCookieService.currentDouyinCookie("submit_collect");
+			if (null == submitCookie || submitCookie.equals("")) {
 				logger.error("[CollectTask] douyin cookie missing id={} name={}", collectDataEntity.getId(), collectDataEntity.getTaskname());
 				return new AjaxEntity(Global.ajax_uri_error, "此功能必须填写ck", null);
 			}
@@ -474,6 +478,7 @@ public class CollectDataService {
 		if (allDYData == null) {
 			logger.error("[CollectTask] getDYData returned null id={} name={} originaladdress={}",
 					entity.getId(), entity.getTaskname(), entity.getOriginaladdress());
+			recordFetchFailureDetail(entity, "FETCH_DY_DATA_FAIL", "用户作品列表抓取失败", getLastF2Context());
 		}
 		// System.out.println(allDYData.size());
 		String risk = "0";
@@ -644,14 +649,15 @@ public class CollectDataService {
 						planItem.put("decision", "video-local-hit");
 					}
 					logger.info("已使用批量下载,下载器类型为:" + Global.downtype);
+					String itemCookie = platformCookieService.currentDouyinCookie("collect_item_download");
 					if (!localVideoExists && Global.downtype.equals("a2")) {
 						appendLog(processLog, "download", "using aria2");
 						Aria2Util.sendMessage(Global.a2_link, Aria2Util.createDouparameter(videoplay, dir,
-								filename + ".mp4", Global.a2_token, Global.tiktokCookie));
+								filename + ".mp4", Global.a2_token, itemCookie));
 					}
 					HashMap<String, String> header = new HashMap<String, String>();
 					header.put("User-Agent", DouUtil.ua);
-					header.put("cookie", Global.tiktokCookie);
+					header.put("cookie", itemCookie);
 					header.put("Referer", "https://www.douyin.com/");
 					if (!localVideoExists && Global.downtype.equals("http")) {
 						appendLog(processLog, "download", "using http builtin");
@@ -897,8 +903,10 @@ public class CollectDataService {
 
 		if (entity.getOriginaladdress().startsWith("post")) {
 			logger.info("[CollectTask] getDYData mode=post uid={} maxc={} out={}", sec_user_id, maxc, taskout);
-			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_post_videos", sec_user_id, null,
+			String cookie = platformCookieService.currentDouyinCookie("fetch_user_post_videos");
+			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_post_videos", sec_user_id, null,
 					maxc, taskout);
+			reportF2CookieResult("抖音", cookie, f2cmd);
 			logF2Result("post", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
@@ -909,8 +917,10 @@ public class CollectDataService {
 		}
 		if (entity.getOriginaladdress().startsWith("like")) {
 			logger.info("[CollectTask] getDYData mode=like uid={} maxc={} out={}", sec_user_id, maxc, taskout);
-			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_like_videos", sec_user_id, null,
+			String cookie = platformCookieService.currentDouyinCookie("fetch_user_like_videos");
+			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_like_videos", sec_user_id, null,
 					maxc, taskout);
+			reportF2CookieResult("抖音", cookie, f2cmd);
 			logF2Result("like", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
@@ -927,8 +937,10 @@ public class CollectDataService {
 			String content = entity.getOriginaladdress().substring(startIndex, endIndex).trim();
 			sec_user_id = sec_user_id.replaceAll(startTag + content + endTag, "");
 			logger.info("[CollectTask] getDYData mode=fav cid={} maxc={} out={}", content, maxc, taskout);
-			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_collects_videos", null, content,
+			String cookie = platformCookieService.currentDouyinCookie("fetch_user_collects_videos");
+			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_collects_videos", null, content,
 					maxc, taskout);
+			reportF2CookieResult("抖音", cookie, f2cmd);
 			logF2Result("fav", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
@@ -940,8 +952,10 @@ public class CollectDataService {
 		if (entity.getOriginaladdress().startsWith("recommend")) {
 			sec_user_id = entity.getOriginaladdress().replaceAll("recommend", "");
 			logger.info("[CollectTask] getDYData mode=recommend uid={} out={}", sec_user_id, taskout);
-			String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_feed_videos", sec_user_id, null,
+			String cookie = platformCookieService.currentDouyinCookie("fetch_user_feed_videos");
+			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_feed_videos", sec_user_id, null,
 					maxc, taskout);
+			reportF2CookieResult("抖音", cookie, f2cmd);
 			logF2Result("recommend", f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
@@ -969,6 +983,70 @@ public class CollectDataService {
 		} else {
 			logger.info("[CollectTask] getDYData output file exists={} path={}", Files.exists(Paths.get(taskout)), taskout);
 		}
+	}
+
+	private void reportF2CookieResult(String platform, String cookie, String f2cmd) {
+		if (f2cmd != null && f2cmd.contains("stream-vault-ok")) {
+			platformCookieService.reportSuccess(platform, cookie);
+			return;
+		}
+		if (platformCookieService.isRiskSignal(f2cmd)) {
+			platformCookieService.reportRisk(platform, cookie, previewOutput(f2cmd));
+		}
+	}
+
+	private void recordFetchFailureDetail(CollectDataEntity entity, String errorCode, String errorMsg, JSONObject detailJson) {
+		if (entity == null || entity.getId() == null) {
+			return;
+		}
+		CollectDataDetailEntity existing = collectDataDetailService.findByVideoAndDataid("__FETCH__", entity.getId());
+		CollectDataDetailEntity detail = existing == null ? new CollectDataDetailEntity() : existing;
+		detail.setDataid(entity.getId());
+		detail.setVideoid("__FETCH__");
+		detail.setVideoname("用户作品列表抓取失败");
+		detail.setOriginaladdress(entity.getOriginaladdress());
+		detail.setStatus("执行失败");
+		detail.setMediatype("task");
+		detail.setErrorcode(errorCode);
+		detail.setErrormsg(errorMsg);
+		StringBuilder processLog = new StringBuilder();
+		appendLog(processLog, "getDYData", "originaladdress=" + entity.getOriginaladdress());
+		appendLog(processLog, "f2", "exitCode=" + CommandUtil.getLastF2ExitCode() + ", durationMs=" + CommandUtil.getLastF2DurationMs());
+		detail.setProcesslog(processLog.toString());
+		JSONObject context = new JSONObject();
+		context.put("taskId", entity.getId());
+		context.put("taskName", entity.getTaskname());
+		context.put("originaladdress", entity.getOriginaladdress());
+		context.put("error", errorMsg);
+		if (detailJson != null) {
+			context.put("detail", detailJson);
+		}
+		detail.setDetailjson(context.toJSONString());
+		detail.setCreatetime(DateUtils.formatDateTime(new Date()));
+		collectDataDetailService.save(detail);
+
+		JSONArray planItems = new JSONArray();
+		JSONObject planItem = new JSONObject();
+		planItem.put("stage", "getDYData");
+		planItem.put("decision", "fetch-fail");
+		planItem.put("errorcode", errorCode);
+		planItem.put("errormsg", errorMsg);
+		planItem.put("exitCode", CommandUtil.getLastF2ExitCode());
+		planItem.put("durationMs", CommandUtil.getLastF2DurationMs());
+		planItems.add(planItem);
+		entity.setTaskstatus("执行失败(抓取异常)");
+		entity.setEndtime(DateUtils.formatDateTime(new Date()));
+		entity.setCount("0");
+		entity.setLastplanitems(planItems.toJSONString());
+		entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
+		collectdDataDao.save(entity);
+	}
+
+	private JSONObject getLastF2Context() {
+		JSONObject context = new JSONObject();
+		context.put("exitCode", CommandUtil.getLastF2ExitCode());
+		context.put("durationMs", CommandUtil.getLastF2DurationMs());
+		return context;
 	}
 
 	private long safeFileSize(String path) {
@@ -1047,7 +1125,8 @@ public class CollectDataService {
 		String xbogus = XbogusUtil.getXBogus(newsign);
 		apiaddt = apiaddt + "&X-Bogus=" + xbogus;
 		System.out.println(apiaddt);
-		String httpget = DouUtil.httpget(apiaddt, Global.tiktokCookie);
+		String cookie = platformCookieService.currentDouyinCookie("legacy_aweme_page");
+		String httpget = DouUtil.httpget(apiaddt, cookie);
 		JSONObject parseObject = JSONObject.parseObject(httpget);
 		JSONArray jsonArray = parseObject.getJSONArray("aweme_list");
 		max_cursor = parseObject.getString("max_cursor");
@@ -1062,7 +1141,9 @@ public class CollectDataService {
 	}
 
 	public AjaxEntity loadDouFav(String uid) {
-		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, null, "fetch_user_collects", uid, null, null, null);
+		String cookie = platformCookieService.currentDouyinCookie("load_collects");
+		String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_collects", uid, null, null, null);
+		reportF2CookieResult("抖音", cookie, f2cmd);
 		String startTag = "stream-vault-start-collects";
 		String endTag = "stream-vault-end-collects";
 		int startIndex = f2cmd.indexOf(startTag) + startTag.length();

@@ -134,8 +134,11 @@ public class AuthorProfileService {
 
 		int scannedVideos = 0;
 		int updatedVideos = 0;
-		int apiSuccess = 0;
+		int hybridApiSuccess = 0;
+		int profileApiSuccess = 0;
 		int apiFailed = 0;
+		int fallbackUsed = 0;
+		int skippedNoAuthorUid = 0;
 		for (VideoDataEntity video : videoDataDao.findAll()) {
 			if (video == null || !"抖音".equals(video.getVideoplatform())) {
 				continue;
@@ -146,13 +149,20 @@ public class AuthorProfileService {
 				sourceUrl = DouyinSourceUrlUtil.video(video.getVideoid());
 				video.setSourceurl(sourceUrl);
 			}
-			JSONObject hybrid = DouUtil.fetchHybridVideoData(sourceUrl);
+			JSONObject hybrid = DouUtil.fetchHybridVideoData(firstNotBlank(video.getOriginaladdress(), sourceUrl));
+			JSONObject hybridAuthor = null;
 			if (hybrid != null) {
-				apiSuccess++;
+				hybridApiSuccess++;
 				video.setJsonData(hybrid.toJSONString());
 				video.setVideoinfo(hybrid.toJSONString());
-				applyVideoAuthorFromHybrid(video, hybrid);
-			} else {
+				hybridAuthor = findHybridAuthor(hybrid);
+				applyVideoAuthorFromAuthor(video, hybridAuthor);
+			}
+			JSONObject profileAuthor = resolveProfileAuthor(firstNotBlank(video.getSecuid(), video.getAuthoruid()), firstNotBlank(video.getUniqueid(), video.getAuthorusername()));
+			if (profileAuthor != null) {
+				profileApiSuccess++;
+				applyVideoAuthorFromAuthor(video, profileAuthor);
+			} else if (hybridAuthor == null) {
 				apiFailed++;
 			}
 			String authorUid = preferDouyinAuthorUid(video.getSecuid(), video.getAuthoruid());
@@ -164,6 +174,11 @@ public class AuthorProfileService {
 				video.setUniqueid(username);
 				upsertAuthor("抖音", authorUid, username, video.getVideoauthor(), video.getAuthoravatar(),
 						"https://www.douyin.com/user/" + authorUid);
+				if (profileAuthor == null && hybridAuthor == null) {
+					fallbackUsed++;
+				}
+			} else {
+				skippedNoAuthorUid++;
 			}
 			videoDataDao.save(video);
 			updatedVideos++;
@@ -181,12 +196,19 @@ public class AuthorProfileService {
 				sourceUrl = DouyinSourceUrlUtil.note(item.getVideoid());
 				item.setSourceurl(sourceUrl);
 			}
-			JSONObject hybrid = DouUtil.fetchHybridVideoData(sourceUrl);
+			JSONObject hybrid = DouUtil.fetchHybridVideoData(firstNotBlank(item.getOriginaladdress(), sourceUrl));
+			JSONObject hybridAuthor = null;
 			if (hybrid != null) {
-				apiSuccess++;
+				hybridApiSuccess++;
 				item.setJsonData(hybrid.toJSONString());
-				applyGraphicAuthorFromHybrid(item, hybrid);
-			} else {
+				hybridAuthor = findHybridAuthor(hybrid);
+				applyGraphicAuthorFromAuthor(item, hybridAuthor);
+			}
+			JSONObject profileAuthor = resolveProfileAuthor(firstNotBlank(item.getSecuid(), item.getAuthoruid()), firstNotBlank(item.getUniqueid(), item.getAuthorusername()));
+			if (profileAuthor != null) {
+				profileApiSuccess++;
+				applyGraphicAuthorFromAuthor(item, profileAuthor);
+			} else if (hybridAuthor == null) {
 				apiFailed++;
 			}
 			String authorUid = preferDouyinAuthorUid(item.getSecuid(), item.getAuthoruid());
@@ -198,6 +220,11 @@ public class AuthorProfileService {
 				item.setUniqueid(username);
 				upsertAuthor("抖音", authorUid, username, item.getAuthor(), item.getAuthoravatar(),
 						"https://www.douyin.com/user/" + authorUid);
+				if (profileAuthor == null && hybridAuthor == null) {
+					fallbackUsed++;
+				}
+			} else {
+				skippedNoAuthorUid++;
 			}
 			graphicContentDao.save(item);
 			updatedGraphics++;
@@ -209,22 +236,23 @@ public class AuthorProfileService {
 		result.put("updatedVideos", updatedVideos);
 		result.put("scannedGraphics", scannedGraphics);
 		result.put("updatedGraphics", updatedGraphics);
-		result.put("apiSuccess", apiSuccess);
+		result.put("hybridApiSuccess", hybridApiSuccess);
+		result.put("profileApiSuccess", profileApiSuccess);
 		result.put("apiFailed", apiFailed);
+		result.put("fallbackUsed", fallbackUsed);
+		result.put("skippedNoAuthorUid", skippedNoAuthorUid);
 		result.put("rebuiltAuthors", authorProfileDao.findByPlatform("抖音").size());
 		return new AjaxEntity(Global.ajax_success, "重建完成", result);
 	}
 
-	private void applyVideoAuthorFromHybrid(VideoDataEntity video, JSONObject hybrid) {
-		JSONObject detail = DouUtil.findAwemeDetail(hybrid);
-		JSONObject author = detail == null ? null : detail.getJSONObject("author");
+	private void applyVideoAuthorFromAuthor(VideoDataEntity video, JSONObject author) {
 		if (author == null) {
 			return;
 		}
 		String secUid = author.getString("sec_uid");
 		String uniqueId = author.getString("unique_id");
 		String nickname = author.getString("nickname");
-		String avatar = DouUtil.extractAvatar(author);
+		String avatar = firstNotBlank(DouUtil.extractAvatar(author), author.getString("avatar_thumb"));
 		video.setAuthoruid(preferDouyinAuthorUid(secUid, video.getAuthoruid()));
 		video.setSecuid(preferDouyinAuthorUid(secUid, video.getSecuid()));
 		video.setAuthorusername(firstNotBlank(uniqueId, video.getAuthorusername()));
@@ -233,22 +261,56 @@ public class AuthorProfileService {
 		video.setAuthoravatar(firstNotBlank(avatar, video.getAuthoravatar()));
 	}
 
-	private void applyGraphicAuthorFromHybrid(GraphicContentEntity item, JSONObject hybrid) {
-		JSONObject detail = DouUtil.findAwemeDetail(hybrid);
-		JSONObject author = detail == null ? null : detail.getJSONObject("author");
+	private void applyGraphicAuthorFromAuthor(GraphicContentEntity item, JSONObject author) {
 		if (author == null) {
 			return;
 		}
 		String secUid = author.getString("sec_uid");
 		String uniqueId = author.getString("unique_id");
 		String nickname = author.getString("nickname");
-		String avatar = DouUtil.extractAvatar(author);
+		String avatar = firstNotBlank(DouUtil.extractAvatar(author), author.getString("avatar_thumb"));
 		item.setAuthoruid(preferDouyinAuthorUid(secUid, item.getAuthoruid()));
 		item.setSecuid(preferDouyinAuthorUid(secUid, item.getSecuid()));
 		item.setAuthorusername(firstNotBlank(uniqueId, item.getAuthorusername()));
 		item.setUniqueid(firstNotBlank(uniqueId, item.getUniqueid()));
 		item.setAuthor(firstNotBlank(nickname, item.getAuthor()));
 		item.setAuthoravatar(firstNotBlank(avatar, item.getAuthoravatar()));
+	}
+
+	private JSONObject findHybridAuthor(JSONObject hybrid) {
+		JSONObject detail = DouUtil.findAwemeDetail(hybrid);
+		return detail == null ? null : detail.getJSONObject("author");
+	}
+
+	private JSONObject resolveProfileAuthor(String secUid, String uniqueId) {
+		JSONObject profile = extractProfileUser(DouUtil.fetchUserProfile(secUid));
+		if (profile == null) {
+			profile = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
+		}
+		return profile;
+	}
+
+	private JSONObject extractProfileUser(JSONObject profile) {
+		if (profile == null) return null;
+		JSONObject user = profile.getJSONObject("user");
+		if (isProfileUser(user)) return user;
+		JSONObject data = profile.getJSONObject("data");
+		if (data != null) {
+			JSONObject dataUser = data.getJSONObject("user");
+			if (isProfileUser(dataUser)) return dataUser;
+			if (isProfileUser(data)) return data;
+		}
+		return isProfileUser(profile) ? profile : null;
+	}
+
+	private boolean isProfileUser(JSONObject object) {
+		if (object == null) return false;
+		return hasText(object.getString("sec_uid")) || hasText(object.getString("unique_id"))
+				|| hasText(object.getString("nickname"));
+	}
+
+	private boolean hasText(String value) {
+		return value != null && !value.trim().isEmpty();
 	}
 
 	private boolean isDouyinPlatform(String platform) {

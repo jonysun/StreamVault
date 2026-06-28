@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,9 @@ public class Steamcmd {
 		try {
 			//清除挂掉的screen会话
 			ProcessBuilder wipe = new ProcessBuilder("screen", "-wipe");
-			wipe.start();
+			wipe.redirectErrorStream(true);
+			Process wipeProcess = wipe.start();
+			wipeProcess.waitFor(10, TimeUnit.SECONDS);
 			//向指定名称的screen 会话执行
             List<String> command = new ArrayList<>();
             command.add("screen");
@@ -35,16 +38,23 @@ public class Steamcmd {
             command.add("stuff");
             command.add("workshop_download_item 431960 "+wallpaper+"\r");
             ProcessBuilder processBuilder = new ProcessBuilder(command);
+			processBuilder.redirectErrorStream(true);
 			Process process = processBuilder.start();
-            InputStream inputStream = process.getInputStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-            String line;
-            while ((line = reader.readLine()) != null) {
-            	System.out.println(line);
-            	if(line.contains("No screen")) {
-            		return false;
-            	}
-            }
+			try (InputStream inputStream = process.getInputStream();
+					BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+				String line;
+				while ((line = reader.readLine()) != null) {
+					System.out.println(line);
+					if(line.contains("No screen")) {
+						process.waitFor(10, TimeUnit.SECONDS);
+						return false;
+					}
+				}
+			}
+			if (!process.waitFor(10, TimeUnit.SECONDS)) {
+				process.destroyForcibly();
+				return false;
+			}
 	        return true;
 		} catch (Exception e) {
 			return false;

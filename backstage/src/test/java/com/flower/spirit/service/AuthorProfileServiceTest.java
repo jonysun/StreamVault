@@ -5,12 +5,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.lang.reflect.Method;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.dao.AuthorNameHistoryDao;
 import com.flower.spirit.dao.AuthorProfileDao;
 import com.flower.spirit.entity.AuthorProfileEntity;
@@ -46,5 +49,30 @@ class AuthorProfileServiceTest {
 		service.upsertAuthor("抖音", "84583932458", "unique-id", "display", null, null);
 
 		verify(authorProfileDao, never()).save(any(AuthorProfileEntity.class));
+	}
+
+	@Test
+	void extractProfileUserReturnsNullForNonUserPayload() throws Exception {
+		JSONObject payload = JSONObject.parseObject("{\"status_code\":1,\"message\":\"error\"}");
+
+		JSONObject user = invokeExtractProfileUser(service, payload);
+
+		assertThat(user).isNull();
+	}
+
+	@Test
+	void extractProfileUserAcceptsDataUserPayload() throws Exception {
+		JSONObject payload = JSONObject.parseObject("{\"data\":{\"user\":{\"sec_uid\":\"sec\",\"unique_id\":\"name\"}}}");
+
+		JSONObject user = invokeExtractProfileUser(service, payload);
+
+		assertThat(user.getString("sec_uid")).isEqualTo("sec");
+		assertThat(user.getString("unique_id")).isEqualTo("name");
+	}
+
+	private JSONObject invokeExtractProfileUser(AuthorProfileService service, JSONObject payload) throws Exception {
+		Method method = AuthorProfileService.class.getDeclaredMethod("extractProfileUser", JSONObject.class);
+		method.setAccessible(true);
+		return (JSONObject) method.invoke(service, payload);
 	}
 }

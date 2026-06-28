@@ -25,10 +25,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -1068,7 +1070,8 @@ public class HttpUtil {
 			raf.setLength(totalLength);
 		}
 		long partSize = totalLength / threadCount;
-		ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+		ExecutorService executor = new ThreadPoolExecutor(threadCount, threadCount, 0L, TimeUnit.MILLISECONDS,
+				new ArrayBlockingQueue<>(threadCount), new ThreadPoolExecutor.CallerRunsPolicy());
 		ScheduledExecutorService progressExecutor = Executors.newSingleThreadScheduledExecutor();
 		CountDownLatch latch = new CountDownLatch(threadCount);
 
@@ -1081,82 +1084,92 @@ public class HttpUtil {
 		}
 		final long finalTotalLength = totalLength;
 		final long[] lastBytes = new long[threadCount];
-		progressExecutor.scheduleAtFixedRate(() -> {
-			StringBuilder sb = new StringBuilder("\n--- 下载进度报告 ---\n");
+		try {
+			progressExecutor.scheduleAtFixedRate(() -> {
+				StringBuilder sb = new StringBuilder("\n--- 下载进度报告 ---\n");
+				for (int i = 0; i < threadCount; i++) {
+					if (finished[i]) {
+						sb.append(String.format("分片 %d: 已完成; ", i));
+						continue;
+					}
+					long current = downloadedBytes[i].get();
+					long thisPartSize = (i == threadCount - 1) ? (finalTotalLength - partSize * i) : partSize;
+					double progress = (current * 100.0) / thisPartSize;
+					double speed = (current - lastBytes[i]) / 1024.0 / 15.0;
+					lastBytes[i] = current;
+					sb.append(String.format("分片 %d: %.2f%%, 速度: %.2f KB/s; ", i, Math.min(progress, 100.0), speed));
+				}
+				logger.info(sb.toString());
+			}, 15, 15, TimeUnit.SECONDS);
 			for (int i = 0; i < threadCount; i++) {
-				if (finished[i]) {
-					sb.append(String.format("分片 %d: 已完成; ", i));
-					continue;
-				}
-				long current = downloadedBytes[i].get();
-				long thisPartSize = (i == threadCount - 1) ? (finalTotalLength - partSize * i) : partSize;
-				double progress = (current * 100.0) / thisPartSize;
-				double speed = (current - lastBytes[i]) / 1024.0 / 15.0;
-				lastBytes[i] = current;
-				sb.append(String.format("分片 %d: %.2f%%, 速度: %.2f KB/s; ", i, Math.min(progress, 100.0), speed));
-			}
-			logger.info(sb.toString());
-		}, 15, 15, TimeUnit.SECONDS);
-		for (int i = 0; i < threadCount; i++) {
-			final int part = i;
-			final long start = part * partSize;
-			final long end = (part == threadCount - 1) ? totalLength - 1 : (start + partSize - 1);
-			executor.execute(() -> {
-				try {
-					Thread.sleep(part * 2000L);
-				} catch (InterruptedException ignored) {
-				}
-
-				int retry = 0;
-				boolean success = false;
-				while (retry < 5 && !success) {
-					downloadedBytes[part].set(0);
+				final int part = i;
+				final long start = part * partSize;
+				final long end = (part == threadCount - 1) ? totalLength - 1 : (start + partSize - 1);
+				executor.execute(() -> {
 					try {
-						Request.Builder requestBuilder = new Request.Builder().url(urlStr).addHeader("Range",
-								"bytes=" + start + "-" + end);
+						Thread.sleep(part * 2000L);
+					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
+						latch.countDown();
+						return;
+					}
 
-						if (headers != null) {
-							for (Map.Entry<String, String> entry : headers.entrySet()) {
-								requestBuilder.addHeader(entry.getKey(), entry.getValue());
-							}
-						}
-						try (Response response = client.newCall(requestBuilder.build()).execute()) {
-							if (!response.isSuccessful()) {
-								throw new IOException("HTTP Error: " + response.code());
-							}
-							try (BufferedInputStream bis = new BufferedInputStream(response.body().byteStream());
-									RandomAccessFile raf = new RandomAccessFile(tmpFile, "rw")) {
-								raf.seek(start);
-								byte[] buffer = new byte[128 * 1024];
-								int len;
-								while ((len = bis.read(buffer)) != -1) {
-									raf.write(buffer, 0, len);
-									downloadedBytes[part].addAndGet(len);
+					int retry = 0;
+					boolean success = false;
+					while (retry < 5 && !success && !Thread.currentThread().isInterrupted()) {
+						downloadedBytes[part].set(0);
+						try {
+							Request.Builder requestBuilder = new Request.Builder().url(urlStr).addHeader("Range",
+									"bytes=" + start + "-" + end);
+
+							if (headers != null) {
+								for (Map.Entry<String, String> entry : headers.entrySet()) {
+									requestBuilder.addHeader(entry.getKey(), entry.getValue());
 								}
 							}
-							success = true;
-							finished[part] = true;
-							logger.info("分片 {} 下载成功", part);
-						}
-					} catch (Exception e) {
-						retry++;
-						logger.warn("分片 {} 第 {} 次异常: {}", part, retry, e.getMessage());
-						try {
-							Thread.sleep(5000);
-						} catch (InterruptedException ignored) {
+							try (Response response = client.newCall(requestBuilder.build()).execute()) {
+								if (!response.isSuccessful()) {
+									throw new IOException("HTTP Error: " + response.code());
+								}
+								try (BufferedInputStream bis = new BufferedInputStream(response.body().byteStream());
+										RandomAccessFile raf = new RandomAccessFile(tmpFile, "rw")) {
+									raf.seek(start);
+									byte[] buffer = new byte[128 * 1024];
+									int len;
+									while ((len = bis.read(buffer)) != -1) {
+										raf.write(buffer, 0, len);
+										downloadedBytes[part].addAndGet(len);
+									}
+								}
+								success = true;
+								finished[part] = true;
+								logger.info("分片 {} 下载成功", part);
+							}
+						} catch (Exception e) {
+							retry++;
+							logger.warn("分片 {} 第 {} 次异常: {}", part, retry, e.getMessage());
+							try {
+								Thread.sleep(5000);
+							} catch (InterruptedException interrupted) {
+								Thread.currentThread().interrupt();
+							}
 						}
 					}
-				}
 
-				if (!success) {
-					allPartsSuccess.set(false);
-				}
-				latch.countDown();
-			});
+					if (!success) {
+						allPartsSuccess.set(false);
+					}
+					latch.countDown();
+				});
+			}
+			latch.await();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			allPartsSuccess.set(false);
+		} finally {
+			executor.shutdownNow();
+			progressExecutor.shutdownNow();
 		}
-		latch.await();
-		executor.shutdown();
-		progressExecutor.shutdownNow();
 		if (!allPartsSuccess.get()) {
 			logger.error("多线程下载失败：部分分片未能完成任务");
 			return "1";

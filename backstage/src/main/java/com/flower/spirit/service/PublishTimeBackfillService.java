@@ -28,6 +28,9 @@ public class PublishTimeBackfillService {
 	@Autowired
 	private GraphicContentDao graphicContentDao;
 
+	@Autowired
+	private PlatformCookieService platformCookieService;
+
 	public void backfillDouyinPublishTime() {
 		int videoUpdated = 0;
 		int videoFailed = 0;
@@ -86,11 +89,14 @@ public class PublishTimeBackfillService {
 		if (awemeId == null || awemeId.trim().isEmpty()) {
 			return null;
 		}
-		String output = CommandUtil.f2cmd(com.flower.spirit.config.Global.tiktokCookie, awemeId, "fetch_video", null, null, null, null);
+		String cookie = platformCookieService.currentDouyinCookie("publish_backfill_video");
+		String output = CommandUtil.f2cmd(cookie, awemeId, "fetch_video", null, null, null, null);
 		if (output == null || output.isBlank()) {
+			platformCookieService.reportRisk("抖音", cookie, "publish backfill fetch_video empty");
 			return null;
 		}
 		try {
+			platformCookieService.reportSuccess("抖音", cookie);
 			return JSONObject.parseObject(output);
 		} catch (Exception e) {
 			logger.warn("[PublishBackfill] fetch_video parse failed awemeId={}", awemeId);
@@ -103,11 +109,14 @@ public class PublishTimeBackfillService {
 			return null;
 		}
 		String out = "/tmp/backfill_" + awemeId + ".json";
-		String output = CommandUtil.f2cmd(com.flower.spirit.config.Global.tiktokCookie, awemeId, "fetch_post_data", null, null, null, out);
+		String cookie = platformCookieService.currentDouyinCookie("publish_backfill_graphic");
+		String output = CommandUtil.f2cmd(cookie, awemeId, "fetch_post_data", null, null, null, out);
 		if (output == null || output.isBlank()) {
+			platformCookieService.reportRisk("抖音", cookie, "publish backfill fetch_post_data empty");
 			return null;
 		}
 		try {
+			platformCookieService.reportSuccess("抖音", cookie);
 			return JSONObject.parseObject(com.flower.spirit.utils.FileUtil.readJson(out));
 		} catch (Exception e) {
 			logger.warn("[PublishBackfill] fetch_post_data parse failed awemeId={}", awemeId);

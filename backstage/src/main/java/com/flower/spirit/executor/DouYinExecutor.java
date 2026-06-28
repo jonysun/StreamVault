@@ -53,6 +53,9 @@ public class DouYinExecutor {
 
 	@Autowired
 	private com.flower.spirit.service.BlockedWorkService blockedWorkService;
+
+	@Autowired
+	private com.flower.spirit.service.PlatformCookieService platformCookieService;
 	
     private static GraphicContentDao staticGraphicContentDao;
     
@@ -62,12 +65,15 @@ public class DouYinExecutor {
 
     private static com.flower.spirit.service.BlockedWorkService staticBlockedWorkService;
 
+    private static com.flower.spirit.service.PlatformCookieService staticPlatformCookieService;
+
     @PostConstruct
     public void init() {
         staticGraphicContentDao = graphicContentDao;
         staticprocessHistoryService = processHistoryService;
         staticAuthorProfileService = authorProfileService;
         staticBlockedWorkService = blockedWorkService;
+        staticPlatformCookieService = platformCookieService;
     }
 	
 	
@@ -95,7 +101,9 @@ public class DouYinExecutor {
 		if (staticBlockedWorkService != null && staticBlockedWorkService.isBlocked("抖音", post, "graphic")) {
 			return;
 		}
-		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, post, "fetch_post_data", null, null, null, taskout);
+		String cookie = staticPlatformCookieService.currentDouyinCookie("image_text");
+		String f2cmd = CommandUtil.f2cmd(cookie, post, "fetch_post_data", null, null, null, taskout);
+		reportCookieResult(cookie, f2cmd);
 		logger.info("[DouyinImageText] fetch_post_data outputLength={} containsSuccessMarker={}",
 				f2cmd == null ? 0 : f2cmd.length(), f2cmd != null && f2cmd.contains("stream-vault-ok"));
 		if (f2cmd == null || !f2cmd.contains("stream-vault-ok")) {
@@ -114,7 +122,7 @@ public class DouYinExecutor {
 			HashMap<String, String> header = new HashMap<String, String>();
 			header.put("Referer", "https://www.douyin.com/");
 			header.put("User-Agent", DouUtil.ua);
-			header.put("cookie", Global.tiktokCookie);
+			header.put("cookie", cookie);
 			String filename = FileNameTemplateUtil.resolveFileName(desc, post, nickname, aweme_detail.getString("create_time"), "抖音");
 			String markroute = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,0);
 			for(int i = 0;i<images.size();i++) {
@@ -213,7 +221,9 @@ public class DouYinExecutor {
 		if (staticBlockedWorkService != null && staticBlockedWorkService.isBlocked("抖音", post, "graphic")) {
 			return;
 		}
-		String f2cmd = CommandUtil.f2cmd(Global.tiktokCookie, post, "fetch_post_data", null, null, null, taskout);
+		String cookie = staticPlatformCookieService.currentDouyinCookie("image_text_alt");
+		String f2cmd = CommandUtil.f2cmd(cookie, post, "fetch_post_data", null, null, null, taskout);
+		reportCookieResult(cookie, f2cmd);
 		logger.info("[DouyinImageText] fetch_post_data outputLength={} containsSuccessMarker={}",
 				f2cmd == null ? 0 : f2cmd.length(), f2cmd != null && f2cmd.contains("stream-vault-ok"));
 		if (f2cmd == null || !f2cmd.contains("stream-vault-ok")) {
@@ -232,7 +242,7 @@ public class DouYinExecutor {
 			HashMap<String, String> header = new HashMap<String, String>();
 			header.put("Referer", "https://www.douyin.com/");
 			header.put("User-Agent", DouUtil.ua);
-			header.put("cookie", Global.tiktokCookie);
+			header.put("cookie", cookie);
 			String filename = FileNameTemplateUtil.resolveFileName(desc, post, nickname, aweme_detail.getString("create_time"), "抖音");
 			String markroute = FileUtil.generateDir(true, Global.platform.douyin.name(), filename, null, null,0);
 			for(int i = 0;i<images.size();i++) {
@@ -321,6 +331,19 @@ public class DouYinExecutor {
 			return normalized.substring(0, 1000);
 		}
 		return normalized;
+	}
+
+	private static void reportCookieResult(String cookie, String f2cmd) {
+		if (staticPlatformCookieService == null) {
+			return;
+		}
+		if (f2cmd != null && f2cmd.contains("stream-vault-ok")) {
+			staticPlatformCookieService.reportSuccess("抖音", cookie);
+			return;
+		}
+		if (staticPlatformCookieService.isRiskSignal(f2cmd)) {
+			staticPlatformCookieService.reportRisk("抖音", cookie, previewOutput(f2cmd));
+		}
 	}
 
 	private static boolean isExistingNonEmptyFile(String path) {
