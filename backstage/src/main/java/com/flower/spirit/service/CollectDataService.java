@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.io.File;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.transaction.Transactional;
 import org.quartz.JobDataMap;
@@ -56,6 +58,9 @@ import com.flower.spirit.utils.sendNotify;
 @Service
 public class CollectDataService {
 
+	private static final Pattern PYTHON_EXCEPTION_PATTERN = Pattern.compile("(?m)^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\\s*(.+)$");
+	private static final Pattern PYTHON_FILE_PATTERN = Pattern.compile("File \"([^\"]+)\", line (\\d+), in ([^\\r\\n]+)");
+
 	@Autowired
 	private CollectdDataDao collectdDataDao;
 
@@ -89,6 +94,7 @@ public class CollectDataService {
 	private QuartzTaskService quartzTaskService;
 
 	private volatile long lastCollectTaskFinishedAt = 0L;
+	private final ThreadLocal<F2FailureDiagnosis> lastF2FailureDiagnosis = new ThreadLocal<>();
 
 	/**
 	 * 文件储存真实路径
@@ -478,7 +484,12 @@ public class CollectDataService {
 		if (allDYData == null) {
 			logger.error("[CollectTask] getDYData returned null id={} name={} originaladdress={}",
 					entity.getId(), entity.getTaskname(), entity.getOriginaladdress());
-			recordFetchFailureDetail(entity, "FETCH_DY_DATA_FAIL", "用户作品列表抓取失败", getLastF2Context());
+			F2FailureDiagnosis diagnosis = lastF2FailureDiagnosis.get();
+			recordFetchFailureDetail(entity,
+					diagnosis == null ? "FETCH_DY_DATA_FAIL" : diagnosis.errorCode(),
+					diagnosis == null ? "用户作品列表抓取失败" : diagnosis.rootCause(),
+					getLastF2Context(diagnosis));
+			lastF2FailureDiagnosis.remove();
 		}
 		// System.out.println(allDYData.size());
 		String risk = "0";
@@ -869,6 +880,7 @@ public class CollectDataService {
 	}
 
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {
+		lastF2FailureDiagnosis.remove();
 		String taskout = Global.apppath + "lot" + System.getProperty("file.separator") + entity.getId() + "_"
 				+ entity.getTaskname() + ".json";
 		logger.info("[CollectTask] getDYData start id={} name={} originaladdress={} monitor={} tempFile={}",
@@ -907,7 +919,7 @@ public class CollectDataService {
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_post_videos", sec_user_id, null,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("post", f2cmd, taskout);
+			logF2Result(entity, "post", sec_user_id, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=post", jsonFromFile == null ? 0 : jsonFromFile.size());
@@ -921,7 +933,7 @@ public class CollectDataService {
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_like_videos", sec_user_id, null,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("like", f2cmd, taskout);
+			logF2Result(entity, "like", sec_user_id, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=like", jsonFromFile == null ? 0 : jsonFromFile.size());
@@ -941,7 +953,7 @@ public class CollectDataService {
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_collects_videos", null, content,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("fav", f2cmd, taskout);
+			logF2Result(entity, "fav", content, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=fav", jsonFromFile == null ? 0 : jsonFromFile.size());
@@ -956,7 +968,7 @@ public class CollectDataService {
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_feed_videos", sec_user_id, null,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("recommend", f2cmd, taskout);
+			logF2Result(entity, "recommend", sec_user_id, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=recommend", jsonFromFile == null ? 0 : jsonFromFile.size());
@@ -969,20 +981,90 @@ public class CollectDataService {
 		return null;
 	}
 
-	private void logF2Result(String mode, String f2cmd, String taskout) {
+	private void logF2Result(CollectDataEntity entity, String mode, String sourceId, int maxc, String f2cmd, String taskout) {
 		boolean success = f2cmd != null && f2cmd.contains("stream-vault-ok");
 		Integer exitCode = CommandUtil.getLastF2ExitCode();
 		Long durationMs = CommandUtil.getLastF2DurationMs();
 		logger.info("[CollectTask] getDYData f2 outputLength={} containsSuccessMarker={} exitCode={} durationMs={}",
 				f2cmd == null ? 0 : f2cmd.length(), success, exitCode, durationMs);
 		if (!success) {
-			logger.error("[CollectTask] getDYData f2 failed mode={} outputPreview={}", mode, previewOutput(f2cmd));
+			boolean outFileExists = Files.exists(Paths.get(taskout));
+			long outFileSize = outFileExists ? safeFileSize(taskout) : -1;
+			F2FailureDiagnosis diagnosis = analyzeF2Failure(mode, entity.getOriginaladdress(), sourceId, maxc, taskout,
+					outFileExists, outFileSize, exitCode, durationMs, f2cmd);
+			lastF2FailureDiagnosis.set(diagnosis);
+			logger.error("[CollectTask] getDYData f2 rootCause {}", diagnosis.toLogMessage());
+			logger.error("[CollectTask] getDYData f2 failed mode={} sourceId={} outputPreview={}", mode, sourceId, previewOutput(f2cmd));
 			logger.error("[CollectTask] getDYData f2 failed mode={} outPath={} outFileExists={} outFileSize={}",
-					mode, taskout, Files.exists(Paths.get(taskout)),
-					Files.exists(Paths.get(taskout)) ? safeFileSize(taskout) : -1);
+					mode, taskout, outFileExists, outFileSize);
 		} else {
 			logger.info("[CollectTask] getDYData output file exists={} path={}", Files.exists(Paths.get(taskout)), taskout);
 		}
+	}
+
+	static F2FailureDiagnosis analyzeF2Failure(String mode, String originaladdress, String sourceId, int maxc,
+			String outPath, boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String output) {
+		String normalized = output == null ? "" : output;
+		String exceptionType = null;
+		String exceptionMessage = null;
+		Matcher exceptionMatcher = PYTHON_EXCEPTION_PATTERN.matcher(normalized);
+		while (exceptionMatcher.find()) {
+			exceptionType = exceptionMatcher.group(1);
+			exceptionMessage = exceptionMatcher.group(2);
+		}
+		String stackTop = extractStackTop(normalized);
+		String errorCode = classifyF2Failure(exceptionType, exceptionMessage, normalized, outFileExists, exitCode);
+		String rootCause = buildRootCause(errorCode, exceptionType, exceptionMessage, normalized);
+		return new F2FailureDiagnosis(mode, originaladdress, sourceId, maxc, outPath, outFileExists, outFileSize,
+				exitCode, durationMs, errorCode, exceptionType, exceptionMessage, stackTop, rootCause);
+	}
+
+	private static String extractStackTop(String output) {
+		Matcher matcher = PYTHON_FILE_PATTERN.matcher(output == null ? "" : output);
+		String stackTop = null;
+		while (matcher.find()) {
+			stackTop = matcher.group(1) + ":" + matcher.group(2) + " in " + matcher.group(3).trim();
+		}
+		return stackTop;
+	}
+
+	private static String classifyF2Failure(String exceptionType, String exceptionMessage, String output,
+			boolean outFileExists, Integer exitCode) {
+		String text = ((exceptionType == null ? "" : exceptionType) + "\n"
+				+ (exceptionMessage == null ? "" : exceptionMessage) + "\n"
+				+ (output == null ? "" : output)).toLowerCase();
+		if (text.contains("nickname_raw") && text.contains("unboundlocalerror")) {
+			return "F2_INTERNAL_NICKNAME_RAW_UNBOUND";
+		}
+		if (text.contains("login") || text.contains("cookie") || text.contains("passport") || text.contains("verify")) {
+			return "F2_COOKIE_OR_VERIFY_REQUIRED";
+		}
+		if (text.contains("captcha") || text.contains("风控") || text.contains("risk")) {
+			return "F2_RISK_CONTROL";
+		}
+		if (text.contains("timeout") || text.contains("timed out")) {
+			return "F2_TIMEOUT";
+		}
+		if (!outFileExists && exitCode != null && exitCode != 0) {
+			return "F2_PROCESS_FAILED_NO_OUTPUT";
+		}
+		if (exitCode != null && exitCode != 0) {
+			return "F2_PROCESS_FAILED";
+		}
+		return "F2_UNKNOWN_FAILURE";
+	}
+
+	private static String buildRootCause(String errorCode, String exceptionType, String exceptionMessage, String output) {
+		if ("F2_INTERNAL_NICKNAME_RAW_UNBOUND".equals(errorCode)) {
+			return "f2 douyin fetch failed before nickname_raw was initialized; likely first-page response abnormal, cookie/risk-control, or upstream response schema changed";
+		}
+		if (exceptionType != null && exceptionMessage != null) {
+			return exceptionType + ": " + exceptionMessage;
+		}
+		if (output == null || output.trim().isEmpty()) {
+			return "f2 returned no stdout/stderr, so no root exception could be extracted";
+		}
+		return "f2 did not return stream-vault-ok success marker";
 	}
 
 	private void reportF2CookieResult(String platform, String cookie, String f2cmd) {
@@ -1033,6 +1115,17 @@ public class CollectDataService {
 		planItem.put("errormsg", errorMsg);
 		planItem.put("exitCode", CommandUtil.getLastF2ExitCode());
 		planItem.put("durationMs", CommandUtil.getLastF2DurationMs());
+		if (detailJson != null) {
+			planItem.put("rootCause", detailJson.getString("rootCause"));
+			planItem.put("mode", detailJson.getString("mode"));
+			planItem.put("sourceId", detailJson.getString("sourceId"));
+			planItem.put("outPath", detailJson.getString("outPath"));
+			planItem.put("outFileExists", detailJson.get("outFileExists"));
+			planItem.put("outFileSize", detailJson.get("outFileSize"));
+			planItem.put("exceptionType", detailJson.getString("exceptionType"));
+			planItem.put("exceptionMessage", detailJson.getString("exceptionMessage"));
+			planItem.put("stackTop", detailJson.getString("stackTop"));
+		}
 		planItems.add(planItem);
 		entity.setTaskstatus("执行失败(抓取异常)");
 		entity.setEndtime(DateUtils.formatDateTime(new Date()));
@@ -1042,11 +1135,46 @@ public class CollectDataService {
 		collectdDataDao.save(entity);
 	}
 
-	private JSONObject getLastF2Context() {
+	private JSONObject getLastF2Context(F2FailureDiagnosis diagnosis) {
 		JSONObject context = new JSONObject();
 		context.put("exitCode", CommandUtil.getLastF2ExitCode());
 		context.put("durationMs", CommandUtil.getLastF2DurationMs());
+		if (diagnosis != null) {
+			context.put("errorCode", diagnosis.errorCode());
+			context.put("rootCause", diagnosis.rootCause());
+			context.put("mode", diagnosis.mode());
+			context.put("originaladdress", diagnosis.originaladdress());
+			context.put("sourceId", diagnosis.sourceId());
+			context.put("maxc", diagnosis.maxc());
+			context.put("outPath", diagnosis.outPath());
+			context.put("outFileExists", diagnosis.outFileExists());
+			context.put("outFileSize", diagnosis.outFileSize());
+			context.put("exceptionType", diagnosis.exceptionType());
+			context.put("exceptionMessage", diagnosis.exceptionMessage());
+			context.put("stackTop", diagnosis.stackTop());
+		}
 		return context;
+	}
+
+	static record F2FailureDiagnosis(String mode, String originaladdress, String sourceId, int maxc, String outPath,
+			boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String errorCode,
+			String exceptionType, String exceptionMessage, String stackTop, String rootCause) {
+		String toLogMessage() {
+			return "errorCode=" + errorCode
+					+ " rootCause=" + rootCause
+					+ " exceptionType=" + exceptionType
+					+ " exceptionMessage=" + exceptionMessage
+					+ " stackTop=" + stackTop
+					+ " mode=" + mode
+					+ " originaladdress=" + originaladdress
+					+ " sourceId=" + sourceId
+					+ " maxc=" + maxc
+					+ " exitCode=" + exitCode
+					+ " durationMs=" + durationMs
+					+ " outPath=" + outPath
+					+ " outFileExists=" + outFileExists
+					+ " outFileSize=" + outFileSize;
+		}
 	}
 
 	private long safeFileSize(String path) {
