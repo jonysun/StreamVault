@@ -82,6 +82,8 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	private String publishtime;
 
 	private String sourceurl;
+
+	private String favorite;
 	
 	
 	
@@ -222,6 +224,14 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setSourceurl(String sourceurl) {
 		this.sourceurl = sourceurl;
+	}
+
+	public String getFavorite() {
+		return favorite;
+	}
+
+	public void setFavorite(String favorite) {
+		this.favorite = favorite;
 	}
 
 	public String getVideoauthor() {
