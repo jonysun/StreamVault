@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.flower.spirit.common.AjaxEntity;
@@ -240,8 +241,11 @@ public class AdminController {
 	 * @return
 	 */
 	@PostMapping(value = "/findVideoDataList")
-	public AjaxEntity findVideoDataList(VideoDataEntity videoDataEntity,HttpServletRequest request) {
-		return videoDataService.findPage(videoDataEntity);
+	public AjaxEntity findVideoDataList(VideoDataEntity videoDataEntity,
+			@RequestParam(name = "lite", defaultValue = "0") String lite,
+			HttpServletRequest request) {
+		boolean liteMode = "1".equals(lite) || "true".equalsIgnoreCase(lite);
+		return videoDataService.findPage(videoDataEntity, liteMode);
 	}
 	
 	/**
