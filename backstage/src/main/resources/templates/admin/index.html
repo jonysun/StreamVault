@@ -831,6 +831,57 @@
     var feedFullscreenTarget = null;
     var feedSuppressAutoNextUntil = 0;
     var feedPendingAutoNextIndex = -1;
+
+    function nowMs() {
+        return (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : Date.now();
+    }
+
+    function shouldLogVideoPerf(videoEl) {
+        if (!videoEl) {
+            return false;
+        }
+        if (videoEl._poolRole && videoEl._poolRole !== 'current') {
+            return false;
+        }
+        var ownerIndex = Number(videoEl.getAttribute('data-feed-index') || '-1');
+        return ownerIndex < 0 || feedCurrentAbsIndex < 0 || ownerIndex === feedCurrentAbsIndex;
+    }
+
+    function markVideoPerf(videoEl, eventName, details) {
+        if (!shouldLogVideoPerf(videoEl)) {
+            return;
+        }
+        var startedAt = videoEl._perfStartedAt || nowMs();
+        var host = videoEl.parentNode;
+        var payload = {
+            event: eventName,
+            elapsedMs: Math.round(nowMs() - startedAt),
+            sourceType: videoEl.getAttribute('data-source-type') || '',
+            src: videoEl.currentSrc || videoEl.getAttribute('data-bound-src') || videoEl.src || '',
+            fallbackSrc: videoEl.getAttribute('data-fallback') || (host ? (host.getAttribute('data-fallback') || '') : ''),
+            didFallback: videoEl.getAttribute('data-did-fallback') === '1',
+            readyState: videoEl.readyState,
+            networkState: videoEl.networkState,
+            feedIndex: videoEl.getAttribute('data-feed-index') || '',
+            poolRole: videoEl._poolRole || ''
+        };
+        if (details) {
+            payload.details = details;
+        }
+        console.log('[AdminIndexPerf] playback', payload);
+    }
+
+    function bindVideoPerfEvents(videoEl) {
+        if (!videoEl || videoEl._perfEventsBound) {
+            return;
+        }
+        videoEl._perfEventsBound = true;
+        ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting', 'stalled', 'error'].forEach(function(eventName) {
+            videoEl.addEventListener(eventName, function() {
+                markVideoPerf(videoEl, eventName);
+            });
+        });
+    }
     
     $(function(){
         var rawMode = $('#mediaHomeMode').val();
@@ -1060,10 +1111,20 @@
 		var option = mediaHomeMode === 'feed'
 			? buildFeedRequestOption(page, feedPageSize)
 			: { pageNo: page, pageSize: 25, sortField: 'publishtime', sortOrder: 'desc' };
+        option.lite = '1';
+        var listRequestStart = nowMs();
         
         $.post("/admin/api/findVideoDataList", option, function(data, status) {
             if(data.resCode === "000001") {
                 var list = data.record.content;
+                console.log('[AdminIndexPerf] list response', {
+                    elapsedMs: Math.round(nowMs() - listRequestStart),
+                    page: page,
+                    mode: mediaHomeMode,
+                    count: list.length,
+                    last: data.record.last,
+                    status: status
+                });
                 
                 // 检查是否还有更多数据
                 hasMore = list.length > 0 && !data.record.last;
@@ -1128,7 +1189,14 @@
             
             isLoading = false;
             $('#loading').hide();
-        }).fail(function() {
+        }).fail(function(xhr, status, error) {
+            console.warn('[AdminIndexPerf] list response failed', {
+                elapsedMs: Math.round(nowMs() - listRequestStart),
+                page: page,
+                mode: mediaHomeMode,
+                status: status,
+                error: error
+            });
             isLoading = false;
             $('#loading').hide();
         });
@@ -1353,11 +1421,15 @@
         if (!videoEl || !src) {
             return;
         }
+        bindVideoPerfEvents(videoEl);
+        videoEl._perfStartedAt = nowMs();
+        videoEl.removeAttribute('data-did-fallback');
         var host = videoEl.parentNode;
         var sourcePack = resolveFeedSource(host, src);
         src = sourcePack.src;
         var sourceType = sourcePack.type;
         var fallback = sourcePack.fallback;
+        markVideoPerf(videoEl, 'source-selected', { requestedSrc: src, sourceType: sourceType, fallback: fallback });
         var current = videoEl.getAttribute('data-bound-src');
         if (current === src) {
             if (autoPlayWhenReady) {
@@ -1393,6 +1465,8 @@
                 return;
             }
             feedMetrics.fallbackToMp4++;
+            videoEl.setAttribute('data-did-fallback', '1');
+            markVideoPerf(videoEl, 'fallback-to-mp4', { reason: reason });
             console.warn('[HLS] fallback to mp4:', reason);
             try {
                 if (videoEl._hlsIns) {
@@ -1405,7 +1479,9 @@
             videoEl.src = fallback;
             var p = videoEl.play();
             if (p && typeof p.catch === 'function') {
-                p.catch(function() {});
+                p.catch(function(error) {
+                    markVideoPerf(videoEl, 'play-rejected', { reason: 'fallback', error: error ? (error.name || error.message || String(error)) : '' });
+                });
             }
         }
 
@@ -1441,6 +1517,7 @@
             bindStallGuard(videoEl);
 
             hls.on(window.Hls.Events.MANIFEST_PARSED, function() {
+                markVideoPerf(videoEl, 'manifest-parsed');
                 playWithSync(videoEl);
             });
 
@@ -1461,6 +1538,7 @@
             });
             hls.on(window.Hls.Events.ERROR, function(event, data) {
                 if (data && data.fatal) {
+                    markVideoPerf(videoEl, 'hls-fatal', { type: data.type, details: data.details });
                     console.warn('[HLS] fatal error', data.type, data.details);
                     if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && networkRecoverCount < 2) {
                         networkRecoverCount++;
@@ -1520,7 +1598,9 @@
         if (videoEl.readyState >= 2 && (videoEl.videoWidth > 0 || !videoEl.currentSrc || !/\.m3u8(\?|$)/i.test(videoEl.currentSrc))) {
             var p = videoEl.play();
             if (p && typeof p.catch === 'function') {
-                p.catch(function() {});
+                p.catch(function(error) {
+                    markVideoPerf(videoEl, 'play-rejected', { reason: 'ready-play', error: error ? (error.name || error.message || String(error)) : '' });
+                });
             }
             return;
         }
@@ -1530,7 +1610,9 @@
             feedMetrics.firstFrameHits++;
             var p = videoEl.play();
             if (p && typeof p.catch === 'function') {
-                p.catch(function() {});
+                p.catch(function(error) {
+                    markVideoPerf(videoEl, 'play-rejected', { reason: 'deferred-play', error: error ? (error.name || error.message || String(error)) : '' });
+                });
             }
         };
         videoEl.addEventListener('loadeddata', once);

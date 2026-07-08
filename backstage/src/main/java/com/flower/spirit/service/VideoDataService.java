@@ -15,8 +15,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.Tuple;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 
@@ -39,6 +43,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.VideoDataDao;
+import com.flower.spirit.dto.AdminVideoListItem;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.utils.BiliUtil;
 import com.flower.spirit.utils.CommandUtil;
@@ -58,6 +63,9 @@ public class VideoDataService {
 	@Autowired
 	private VideoDataDao videoDataDao;
 
+	@PersistenceContext
+	private EntityManager entityManager;
+
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
 
@@ -75,14 +83,235 @@ public class VideoDataService {
 	
 	
 	public AjaxEntity findPage(VideoDataEntity res) {
-	    int pageNo = res == null ? 0 : Math.max(0, res.getPageNo());
-	    int pageSize = res == null ? 25 : Math.max(1, res.getPageSize());
-	    PageRequest of = PageRequest.of(pageNo, pageSize);
-	    boolean randomMode = res != null && "1".equals(String.valueOf(res.getRandomMode()));
-	    String randomSeed = res == null ? null : res.getRandomSeed();
+		return findPage(res, false);
+	}
 
-	    Specification<VideoDataEntity> specification = (root, query, cb) -> {
-	        List<Predicate> predicates = new ArrayList<>();
+	public AjaxEntity findPage(VideoDataEntity res, boolean lite) {
+		if (lite) {
+			return findLitePage(res);
+		}
+		int pageNo = res == null ? 0 : Math.max(0, res.getPageNo());
+		int pageSize = res == null ? 25 : Math.max(1, res.getPageSize());
+		PageRequest of = PageRequest.of(pageNo, pageSize);
+		boolean randomMode = res != null && "1".equals(String.valueOf(res.getRandomMode()));
+		String randomSeed = res == null ? null : res.getRandomSeed();
+		Specification<VideoDataEntity> specification = buildFindSpecification(res, randomMode);
+
+		Page<VideoDataEntity> findAll;
+		if (randomMode) {
+			List<VideoDataEntity> all = videoDataDao.findAll(specification);
+			stabilizeRandomSourceOrder(all);
+			long seed = randomSeed == null ? System.nanoTime() : randomSeed.hashCode();
+			java.util.Random random = new java.util.Random(seed);
+			java.util.Collections.shuffle(all, random);
+			int from = Math.min(pageNo * pageSize, all.size());
+			int to = Math.min(from + pageSize, all.size());
+			List<VideoDataEntity> pageList = from >= to ? new ArrayList<>() : all.subList(from, to);
+			findAll = new PageImpl<>(pageList, of, all.size());
+		} else {
+			findAll = videoDataDao.findAll(specification, of);
+		}
+		if (findAll != null && findAll.getContent() != null) {
+			enrichVideoItems(findAll.getContent());
+		}
+		if (lite) {
+			List<AdminVideoListItem> lightweightItems = findAll.getContent().stream()
+					.map(AdminVideoListItem::from)
+					.toList();
+			Page<AdminVideoListItem> lightweightPage = new PageImpl<>(lightweightItems, of, findAll.getTotalElements());
+			return new AjaxEntity(Global.ajax_success, "数据获取成功", lightweightPage);
+		}
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", findAll);
+	}
+
+	private AjaxEntity findLitePage(VideoDataEntity res) {
+		int pageNo = res == null ? 0 : Math.max(0, res.getPageNo());
+		int pageSize = res == null ? 25 : Math.max(1, res.getPageSize());
+		PageRequest pageRequest = PageRequest.of(pageNo, pageSize);
+		boolean randomMode = res != null && "1".equals(String.valueOf(res.getRandomMode()));
+		String randomSeed = res == null ? null : res.getRandomSeed();
+
+		List<VideoDataEntity> pageItems;
+		long totalElements;
+		if (randomMode) {
+			List<VideoDataEntity> allItems = findLiteItems(res, randomMode, null, null);
+			stabilizeRandomSourceOrder(allItems);
+			long seed = randomSeed == null ? System.nanoTime() : randomSeed.hashCode();
+			java.util.Collections.shuffle(allItems, new java.util.Random(seed));
+			int from = Math.min(pageNo * pageSize, allItems.size());
+			int to = Math.min(from + pageSize, allItems.size());
+			pageItems = from >= to ? new ArrayList<>() : new ArrayList<>(allItems.subList(from, to));
+			totalElements = allItems.size();
+		} else {
+			totalElements = countLiteItems(res);
+			pageItems = findLiteItems(res, randomMode, pageNo * pageSize, pageSize);
+		}
+
+		enrichVideoItems(pageItems);
+		List<AdminVideoListItem> lightweightItems = pageItems.stream()
+				.map(AdminVideoListItem::from)
+				.toList();
+		Page<AdminVideoListItem> lightweightPage = new PageImpl<>(lightweightItems, pageRequest, totalElements);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", lightweightPage);
+	}
+
+	private List<VideoDataEntity> findLiteItems(VideoDataEntity res, boolean randomMode, Integer offset, Integer limit) {
+		CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+		CriteriaQuery<Tuple> query = cb.createTupleQuery();
+		Root<VideoDataEntity> root = query.from(VideoDataEntity.class);
+		query.multiselect(
+				root.get("id").alias("id"),
+				root.get("videoid").alias("videoid"),
+				root.get("videoname").alias("videoname"),
+				root.get("videodesc").alias("videodesc"),
+				root.get("videoplatform").alias("videoplatform"),
+				root.get("videocover").alias("videocover"),
+				root.get("videounrealaddr").alias("videounrealaddr"),
+				root.get("videoprivacy").alias("videoprivacy"),
+				root.get("videotag").alias("videotag"),
+				root.get("videoauthor").alias("videoauthor"),
+				root.get("authoruid").alias("authoruid"),
+				root.get("authorusername").alias("authorusername"),
+				root.get("publishtime").alias("publishtime"),
+				root.get("createtime").alias("createtime"),
+				root.get("sourceurl").alias("sourceurl"),
+				root.get("favorite").alias("favorite"),
+				root.get("originaladdress").alias("originaladdress"),
+				root.get("videoaddr").alias("videoaddr"));
+		query.where(buildLitePredicates(res, root, cb));
+		if (!randomMode) {
+			query.orderBy(buildLiteOrders(res, root, cb));
+		}
+		var typedQuery = entityManager.createQuery(query);
+		if (offset != null) {
+			typedQuery.setFirstResult(offset);
+		}
+		if (limit != null) {
+			typedQuery.setMaxResults(limit);
+		}
+		return new ArrayList<>(typedQuery.getResultList().stream()
+				.map(this::toLiteVideoEntity)
+				.toList());
+	}
+
+	private long countLiteItems(VideoDataEntity res) {
+		CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+		CriteriaQuery<Long> query = cb.createQuery(Long.class);
+		Root<VideoDataEntity> root = query.from(VideoDataEntity.class);
+		query.select(cb.count(root));
+		query.where(buildLitePredicates(res, root, cb));
+		return entityManager.createQuery(query).getSingleResult();
+	}
+
+	private Predicate[] buildLitePredicates(VideoDataEntity res, Root<VideoDataEntity> root, CriteriaBuilder cb) {
+		List<Predicate> predicates = new ArrayList<>();
+		if (res == null) {
+			return predicates.toArray(new Predicate[0]);
+		}
+		if (StringUtil.isString(res.getVideoname()) && StringUtil.isString(res.getVideodesc())) {
+			predicates.add(cb.or(
+					cb.like(root.get("videoname"), "%" + res.getVideoname() + "%"),
+					cb.like(root.get("videodesc"), "%" + res.getVideodesc() + "%")));
+		} else if (StringUtil.isString(res.getVideoname())) {
+			predicates.add(cb.like(root.get("videoname"), "%" + res.getVideoname() + "%"));
+		} else if (StringUtil.isString(res.getVideodesc())) {
+			predicates.add(cb.like(root.get("videodesc"), "%" + res.getVideodesc() + "%"));
+		}
+		if (StringUtil.isString(res.getVideoplatform())) {
+			predicates.add(cb.like(root.get("videoplatform"), "%" + res.getVideoplatform() + "%"));
+		}
+		if (StringUtil.isString(res.getExcludePlatform())) {
+			String[] excludePlatforms = res.getExcludePlatform().split(",");
+			for (String platform : excludePlatforms) {
+				String trimmedPlatform = platform != null ? platform.trim() : "";
+				if (!trimmedPlatform.isEmpty()) {
+					predicates.add(cb.notLike(cb.lower(root.get("videoplatform")), "%" + trimmedPlatform.toLowerCase() + "%"));
+				}
+			}
+		}
+		if (StringUtil.isString(res.getVideotag())) {
+			predicates.add(cb.like(root.get("videotag"), "%" + res.getVideotag() + "%"));
+		}
+		if (StringUtil.isString(res.getVideoauthor())) {
+			String[] authors = res.getVideoauthor().split(",");
+			List<Predicate> authorPredicates = new ArrayList<>();
+			for (String author : authors) {
+				String trimmed = author == null ? "" : author.trim();
+				if (!trimmed.isEmpty()) {
+					authorPredicates.add(cb.like(root.get("videoauthor"), "%" + trimmed + "%"));
+				}
+			}
+			if (!authorPredicates.isEmpty()) {
+				predicates.add(cb.or(authorPredicates.toArray(new Predicate[0])));
+			}
+		}
+		if (StringUtil.isString(res.getPublishStart())) {
+			predicates.add(cb.greaterThanOrEqualTo(root.get("publishtime"), res.getPublishStart().trim() + " 00:00:00"));
+		}
+		if (StringUtil.isString(res.getPublishEnd())) {
+			predicates.add(cb.lessThanOrEqualTo(root.get("publishtime"), res.getPublishEnd().trim() + " 23:59:59"));
+		}
+		if ("1".equals(res.getFavorite())) {
+			predicates.add(cb.equal(root.get("favorite"), "1"));
+		}
+		return predicates.toArray(new Predicate[0]);
+	}
+
+	private List<Order> buildLiteOrders(VideoDataEntity res, Root<VideoDataEntity> root, CriteriaBuilder cb) {
+		String sortField = res == null ? null : res.getSortField();
+		String sortOrder = res == null ? null : res.getSortOrder();
+		String actualSortField = null;
+		if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
+			actualSortField = sortField;
+		}
+		if (actualSortField == null) {
+			return List.of(cb.desc(root.get("id")));
+		}
+		if ("asc".equalsIgnoreCase(sortOrder)) {
+			return List.of(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
+		}
+		return List.of(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
+	}
+
+	private VideoDataEntity toLiteVideoEntity(Tuple tuple) {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(tuple.get("id", Integer.class));
+		video.setVideoid(tuple.get("videoid", String.class));
+		video.setVideoname(tuple.get("videoname", String.class));
+		video.setVideodesc(tuple.get("videodesc", String.class));
+		video.setVideoplatform(tuple.get("videoplatform", String.class));
+		video.setVideocover(tuple.get("videocover", String.class));
+		video.setVideounrealaddr(tuple.get("videounrealaddr", String.class));
+		video.setVideoprivacy(tuple.get("videoprivacy", String.class));
+		video.setVideotag(tuple.get("videotag", String.class));
+		video.setVideoauthor(tuple.get("videoauthor", String.class));
+		video.setAuthoruid(tuple.get("authoruid", String.class));
+		video.setAuthorusername(tuple.get("authorusername", String.class));
+		video.setPublishtime(tuple.get("publishtime", String.class));
+		video.setCreatetime(tuple.get("createtime", Date.class));
+		video.setSourceurl(tuple.get("sourceurl", String.class));
+		video.setFavorite(tuple.get("favorite", String.class));
+		video.setOriginaladdress(tuple.get("originaladdress", String.class));
+		video.setVideoaddr(tuple.get("videoaddr", String.class));
+		return video;
+	}
+
+	public AjaxEntity findAll(VideoDataEntity res) {
+		boolean randomMode = res != null && "1".equals(String.valueOf(res.getRandomMode()));
+		String randomSeed = res == null ? null : res.getRandomSeed();
+		List<VideoDataEntity> list = videoDataDao.findAll(buildFindSpecification(res, randomMode));
+		if (randomMode) {
+			stabilizeRandomSourceOrder(list);
+			long seed = randomSeed == null ? System.nanoTime() : randomSeed.hashCode();
+			java.util.Collections.shuffle(list, new java.util.Random(seed));
+		}
+		enrichVideoItems(list);
+		return new AjaxEntity(Global.ajax_success, "查询成功", list);
+	}
+
+	private Specification<VideoDataEntity> buildFindSpecification(VideoDataEntity res, boolean randomMode) {
+		return (root, query, cb) -> {
+			List<Predicate> predicates = new ArrayList<>();
 
 	        if (res != null) {
 	            if (StringUtil.isString(res.getVideoname()) && StringUtil.isString(res.getVideodesc())) {
@@ -133,71 +362,83 @@ public class VideoDataService {
 	            if (StringUtil.isString(res.getPublishEnd())) {
 	            	predicates.add(cb.lessThanOrEqualTo(root.get("publishtime"), res.getPublishEnd().trim() + " 23:59:59"));
 	            }
+	            if ("1".equals(res.getFavorite())) {
+					predicates.add(cb.equal(root.get("favorite"), "1"));
+	            }
 	        }
 
-	        if (!randomMode) {
-	        	String sortField = res == null ? null : res.getSortField();
-	        	String sortOrder = res == null ? null : res.getSortOrder();
-	        	String actualSortField = null;
-	        	if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
-	        		actualSortField = sortField;
-	        	}
-	        	if (actualSortField != null) {
-	        		if ("asc".equalsIgnoreCase(sortOrder)) {
-	        			query.orderBy(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
-	        		} else {
-	        			query.orderBy(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
-	        		}
-	        	} else {
-	        		query.orderBy(cb.desc(root.get("id")));
-	        	}
-	        }
-	        return cb.and(predicates.toArray(new Predicate[0]));
-	    };
+			if (!randomMode) {
+				String sortField = res == null ? null : res.getSortField();
+				String sortOrder = res == null ? null : res.getSortOrder();
+				String actualSortField = null;
+				if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
+					actualSortField = sortField;
+				}
+				if (actualSortField != null) {
+					if ("asc".equalsIgnoreCase(sortOrder)) {
+						query.orderBy(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
+					} else {
+						query.orderBy(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
+					}
+				} else {
+					query.orderBy(cb.desc(root.get("id")));
+				}
+			}
+			return cb.and(predicates.toArray(new Predicate[0]));
+		};
+	}
 
-	    Page<VideoDataEntity> findAll;
-	    if (randomMode) {
-	    	List<VideoDataEntity> all = videoDataDao.findAll(specification);
-	    	long seed = randomSeed == null ? System.nanoTime() : randomSeed.hashCode();
-	    	java.util.Random random = new java.util.Random(seed);
-	    	java.util.Collections.shuffle(all, random);
-	    	int from = Math.min(pageNo * pageSize, all.size());
-	    	int to = Math.min(from + pageSize, all.size());
-	    	List<VideoDataEntity> pageList = from >= to ? new ArrayList<>() : all.subList(from, to);
-	    	findAll = new PageImpl<>(pageList, of, all.size());
-	    } else {
-	    	findAll = videoDataDao.findAll(specification, of);
-	    }
-	    if (findAll != null && findAll.getContent() != null) {
-	    	java.util.Set<Integer> queuedIds = hlsTranscodeService.queuedIdsSnapshot();
-	    	Integer runningId = hlsTranscodeService.runningVideoIdSnapshot();
-	    	for (VideoDataEntity item : findAll.getContent()) {
-	    		if (item == null) {
-	    			continue;
-	    		}
-	    		String playUrl = item.getVideounrealaddr();
-	    		boolean hasHls = Global.hlsEnable && hlsTranscodeService.hasHls(item);
-	    		if (hasHls) {
-	    			String hls = hlsTranscodeService.buildHlsPlayUrl(item);
-	    			if (hls != null && !hls.trim().isEmpty()) {
-	    				playUrl = hls;
-	    			}
-	    		}
-	    		item.setPlayurl(playUrl);
-	    		if (!Global.hlsEnable) {
-	    			item.setHlsstatus("关闭");
-	    		} else if (hasHls) {
-	    			item.setHlsstatus("已完成");
-	    		} else if (item.getId() != null && runningId != null && item.getId().intValue() == runningId.intValue()) {
-	    			item.setHlsstatus("转码中");
-	    		} else if (item.getId() != null && queuedIds.contains(item.getId())) {
-	    			item.setHlsstatus("排队中");
-	    		} else {
-	    			item.setHlsstatus("未完成");
-	    		}
-	    	}
-	    }
-	    return new AjaxEntity(Global.ajax_success, "数据获取成功", findAll);
+	private void stabilizeRandomSourceOrder(List<VideoDataEntity> items) {
+		if (items == null) {
+			return;
+		}
+		items.sort((left, right) -> {
+			Integer leftId = left == null ? null : left.getId();
+			Integer rightId = right == null ? null : right.getId();
+			if (leftId == null && rightId == null) {
+				return 0;
+			}
+			if (leftId == null) {
+				return 1;
+			}
+			if (rightId == null) {
+				return -1;
+			}
+			return rightId.compareTo(leftId);
+		});
+	}
+
+	private void enrichVideoItems(List<VideoDataEntity> items) {
+		if (items == null) {
+			return;
+		}
+		java.util.Set<Integer> queuedIds = hlsTranscodeService.queuedIdsSnapshot();
+		Integer runningId = hlsTranscodeService.runningVideoIdSnapshot();
+		for (VideoDataEntity item : items) {
+			if (item == null) {
+				continue;
+			}
+			String playUrl = item.getVideounrealaddr();
+			boolean hasHls = Global.hlsEnable && hlsTranscodeService.hasHls(item);
+			if (hasHls) {
+				String hls = hlsTranscodeService.buildHlsPlayUrl(item);
+				if (hls != null && !hls.trim().isEmpty()) {
+					playUrl = hls;
+				}
+			}
+			item.setPlayurl(playUrl);
+			if (!Global.hlsEnable) {
+				item.setHlsstatus("关闭");
+			} else if (hasHls) {
+				item.setHlsstatus("已完成");
+			} else if (item.getId() != null && runningId != null && item.getId().intValue() == runningId.intValue()) {
+				item.setHlsstatus("转码中");
+			} else if (item.getId() != null && queuedIds.contains(item.getId())) {
+				item.setHlsstatus("排队中");
+			} else {
+				item.setHlsstatus("未完成");
+			}
+		}
 	}
 
 	/**
@@ -243,6 +484,20 @@ public class VideoDataService {
 			videoDataDao.save(videoDataEntity);
 		}
 		return new AjaxEntity(Global.ajax_success, "操作成功", null);
+	}
+
+	public AjaxEntity updateVideoFavorite(Integer id, String favorite) {
+		if (id == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "视频id不能为空", null);
+		}
+		Optional<VideoDataEntity> findById = videoDataDao.findById(id);
+		if (findById.isPresent()) {
+			VideoDataEntity videoDataEntity = findById.get();
+			videoDataEntity.setFavorite("1".equals(favorite) ? "1" : "0");
+			videoDataDao.save(videoDataEntity);
+			return new AjaxEntity(Global.ajax_success, "操作成功", videoDataEntity);
+		}
+		return new AjaxEntity(Global.ajax_uri_error, "视频不存在", null);
 	}
 
 	public AjaxEntity redownloadVideoData(Integer id) {
