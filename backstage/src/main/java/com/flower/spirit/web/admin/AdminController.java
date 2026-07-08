@@ -44,6 +44,7 @@ import com.flower.spirit.service.DouyinWorkMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
 import com.flower.spirit.service.HlsTranscodeService;
+import com.flower.spirit.service.MediaFeedService;
 import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.service.SystemService;
 import com.flower.spirit.service.TikTokConfigService;
@@ -114,6 +115,9 @@ public class AdminController {
 	
 	@Autowired
 	private GraphicContentService graphicContentService;
+
+	@Autowired
+	private MediaFeedService mediaFeedService;
 	
 	@Autowired
 	private AnalysisService analysisService;
@@ -246,6 +250,11 @@ public class AdminController {
 			HttpServletRequest request) {
 		boolean liteMode = "1".equals(lite) || "true".equalsIgnoreCase(lite);
 		return videoDataService.findPage(videoDataEntity, liteMode);
+	}
+
+	@PostMapping(value = "/findMediaFeedList")
+	public AjaxEntity findMediaFeedList(VideoDataEntity videoDataEntity, HttpServletRequest request) {
+		return mediaFeedService.findPage(videoDataEntity);
 	}
 	
 	/**
