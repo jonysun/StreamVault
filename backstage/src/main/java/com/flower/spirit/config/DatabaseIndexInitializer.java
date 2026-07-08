@@ -52,6 +52,9 @@ public class DatabaseIndexInitializer {
 				"CREATE INDEX IF NOT EXISTS idx_collect_detail_dataid_status ON biz_collect_data_detail(dataid, status)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_detail_dataid_mediatype_status ON biz_collect_data_detail(dataid, mediatype, status)",
 				"CREATE INDEX IF NOT EXISTS idx_author_profile_platform_authoruid ON biz_author_profile(platform, authoruid)",
-				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platform_videoid ON biz_graphic_content(platform, videoid)");
+				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platform_videoid ON biz_graphic_content(platform, videoid)",
+				"CREATE INDEX IF NOT EXISTS idx_graphic_content_publishtime_id ON biz_graphic_content(publishtime, id)",
+				"CREATE INDEX IF NOT EXISTS idx_graphic_content_createtime_id ON biz_graphic_content(createtime, id)",
+				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author ON biz_graphic_content(author)");
 	}
 }
