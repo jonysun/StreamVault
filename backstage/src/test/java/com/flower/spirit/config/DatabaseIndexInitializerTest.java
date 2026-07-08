@@ -16,13 +16,17 @@ class DatabaseIndexInitializerTest {
 	void defaultIndexStatementsAreIdempotentCreateIndexStatements() {
 		List<String> statements = DatabaseIndexInitializer.defaultIndexSqlStatements();
 
-		assertThat(statements).hasSize(12);
+		assertThat(statements).hasSize(15);
 		assertThat(statements)
 				.allMatch(sql -> sql.startsWith("CREATE INDEX IF NOT EXISTS "))
 				.anyMatch(sql -> sql.contains("idx_biz_video_publishtime_id"))
 				.anyMatch(sql -> sql.contains("idx_biz_video_favorite_id"))
 				.anyMatch(sql -> sql.contains("idx_collect_detail_dataid_videoid"))
-				.anyMatch(sql -> sql.contains("idx_author_profile_platform_authoruid"));
+				.anyMatch(sql -> sql.contains("idx_author_profile_platform_authoruid"))
+				.anyMatch(sql -> sql.contains("idx_graphic_content_platform_videoid"))
+				.anyMatch(sql -> sql.contains("idx_graphic_content_publishtime_id"))
+				.anyMatch(sql -> sql.contains("idx_graphic_content_createtime_id"))
+				.anyMatch(sql -> sql.contains("idx_graphic_content_author"));
 	}
 
 	@Test
