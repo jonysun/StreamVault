@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +15,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
@@ -23,6 +25,7 @@ import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.dto.AdminAuthorProfileSummary;
 import com.flower.spirit.dto.AdminMediaFeedItem;
+import com.flower.spirit.dto.AdminMediaSlide;
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
@@ -35,6 +38,9 @@ import jakarta.persistence.criteria.Predicate;
 @Service
 public class AuthorProfileService {
 
+	private static final List<String> IMAGE_EXTENSIONS = List.of(".jpg", ".jpeg", ".png", ".webp", ".gif");
+	private static final List<String> VIDEO_EXTENSIONS = List.of(".mp4", ".webm", ".mov", ".m4v");
+
 	@Autowired
 	private AuthorProfileDao authorProfileDao;
 
@@ -46,9 +52,6 @@ public class AuthorProfileService {
 
 	@Autowired
 	private GraphicContentDao graphicContentDao;
-
-	@Autowired
-	private MediaFeedService mediaFeedService;
 
 	public void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar, String homepage) {
 		if (platform == null || platform.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
@@ -166,7 +169,7 @@ public class AuthorProfileService {
 					PageRequest.of(0, fetchSize, mediaSort()));
 			totalElements += videos.getTotalElements();
 			for (VideoDataEntity video : videos.getContent()) {
-				items.add(mediaFeedService.toVideoFeedItemForTest(video));
+				items.add(toVideoFeedItem(video));
 			}
 		}
 		if (!"video".equalsIgnoreCase(type)) {
@@ -174,7 +177,7 @@ public class AuthorProfileService {
 					PageRequest.of(0, fetchSize, mediaSort()));
 			totalElements += graphics.getTotalElements();
 			for (GraphicContentEntity graphic : graphics.getContent()) {
-				AdminMediaFeedItem item = mediaFeedService.toGraphicFeedItemForTest(graphic);
+				AdminMediaFeedItem item = toGraphicFeedItem(graphic);
 				if (!item.getSlides().isEmpty()) {
 					items.add(item);
 				}
@@ -190,6 +193,119 @@ public class AuthorProfileService {
 
 	public long countNameHistory(Integer authorProfileId) {
 		return authorNameHistoryDao.countByAuthorprofileid(authorProfileId);
+	}
+
+	private AdminMediaFeedItem toVideoFeedItem(VideoDataEntity video) {
+		AdminMediaFeedItem item = new AdminMediaFeedItem();
+		if (video == null) {
+			return item;
+		}
+		item.setType("video");
+		item.setId(video.getId());
+		item.setMediaKey("video:" + video.getId());
+		item.setVideoid(video.getVideoid());
+		item.setPlatform(video.getVideoplatform());
+		item.setAuthor(video.getVideoauthor());
+		item.setAuthoruid(video.getAuthoruid());
+		item.setAuthorusername(video.getAuthorusername());
+		item.setAuthoravatar(video.getAuthoravatar());
+		item.setTitle(video.getVideoname());
+		item.setDesc(video.getVideodesc());
+		item.setPublishTime(video.getPublishtime());
+		item.setCreateTime(video.getCreatetime());
+		item.setCover(video.getVideocover());
+		item.setPlayurl(video.getPlayurl());
+		item.setFallbackUrl(video.getVideounrealaddr());
+		item.setHlsstatus(video.getHlsstatus());
+		item.setSourceurl(video.getSourceurl());
+		item.setOriginaladdress(video.getOriginaladdress());
+		item.setFavorite(video.getFavorite());
+		item.setPrivacy(video.getVideoprivacy());
+		return item;
+	}
+
+	private AdminMediaFeedItem toGraphicFeedItem(GraphicContentEntity graphic) {
+		AdminMediaFeedItem item = new AdminMediaFeedItem();
+		if (graphic == null) {
+			return item;
+		}
+		List<AdminMediaSlide> slides = parseGraphicSlides(graphic.getImages());
+		item.setType("graphic");
+		item.setId(graphic.getId());
+		item.setMediaKey("graphic:" + graphic.getId());
+		item.setVideoid(graphic.getVideoid());
+		item.setPlatform(graphic.getPlatform());
+		item.setAuthor(graphic.getAuthor());
+		item.setAuthoruid(graphic.getAuthoruid());
+		item.setAuthorusername(graphic.getAuthorusername());
+		item.setAuthoravatar(graphic.getAuthoravatar());
+		item.setTitle(graphic.getTitle());
+		item.setDesc(graphic.getContent());
+		item.setPublishTime(graphic.getPublishtime());
+		item.setCreateTime(graphic.getCreatetime());
+		item.setCover(slides.isEmpty() ? null : slides.get(0).getUrl());
+		item.setSourceurl(graphic.getSourceurl());
+		item.setOriginaladdress(graphic.getOriginaladdress());
+		item.setSlides(slides);
+		return item;
+	}
+
+	private List<AdminMediaSlide> parseGraphicSlides(String rawImages) {
+		List<AdminMediaSlide> slides = new ArrayList<>();
+		if (rawImages == null || rawImages.trim().isEmpty()) {
+			return slides;
+		}
+		try {
+			List<String> urls = JSON.parseArray(rawImages, String.class);
+			if (urls == null) {
+				return slides;
+			}
+			for (String url : urls) {
+				String type = detectSlideType(url);
+				if (type != null) {
+					slides.add(new AdminMediaSlide(type, url));
+				}
+			}
+		} catch (Exception e) {
+			return List.of();
+		}
+		return slides;
+	}
+
+	private String detectSlideType(String url) {
+		if (url == null || url.trim().isEmpty()) {
+			return null;
+		}
+		String lower = stripQuery(url).toLowerCase(Locale.ROOT);
+		if (hasAnyExtension(lower, IMAGE_EXTENSIONS)) {
+			return "image";
+		}
+		if (hasAnyExtension(lower, VIDEO_EXTENSIONS)) {
+			return "video";
+		}
+		return null;
+	}
+
+	private boolean hasAnyExtension(String value, List<String> extensions) {
+		for (String extension : extensions) {
+			if (value.endsWith(extension)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private String stripQuery(String url) {
+		int queryIndex = url.indexOf('?');
+		int hashIndex = url.indexOf('#');
+		int end = url.length();
+		if (queryIndex >= 0) {
+			end = Math.min(end, queryIndex);
+		}
+		if (hashIndex >= 0) {
+			end = Math.min(end, hashIndex);
+		}
+		return url.substring(0, end);
 	}
 
 	private AuthorProfileEntity findBestProfile(String platform, String authoruid, String authorusername, String author) {
