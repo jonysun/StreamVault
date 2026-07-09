@@ -19,6 +19,7 @@ public class AdminVideoListItem {
 	private String videoauthor;
 	private String authoruid;
 	private String authorusername;
+	private String authoravatar;
 	private String publishtime;
 	private Date createtime;
 	private String hlsstatus;
@@ -44,6 +45,7 @@ public class AdminVideoListItem {
 		item.setVideoauthor(video.getVideoauthor());
 		item.setAuthoruid(video.getAuthoruid());
 		item.setAuthorusername(video.getAuthorusername());
+		item.setAuthoravatar(video.getAuthoravatar());
 		item.setPublishtime(video.getPublishtime());
 		item.setCreatetime(video.getCreatetime());
 		item.setHlsstatus(video.getHlsstatus());
@@ -155,6 +157,14 @@ public class AdminVideoListItem {
 
 	public void setAuthorusername(String authorusername) {
 		this.authorusername = authorusername;
+	}
+
+	public String getAuthoravatar() {
+		return authoravatar;
+	}
+
+	public void setAuthoravatar(String authoravatar) {
+		this.authoravatar = authoravatar;
 	}
 
 	public String getPublishtime() {

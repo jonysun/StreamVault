@@ -194,6 +194,478 @@
             transform: translateX(0);
         }
 
+        .feed-author-profile-drawer {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: min(430px, 92vw);
+            z-index: 12;
+            background: rgba(8, 8, 8, 0.96);
+            color: #fff;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border-left: 1px solid rgba(255, 255, 255, 0.12);
+            transform: translateX(102%);
+            transition: transform .22s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .feed-author-profile-drawer.open {
+            transform: translateX(0);
+        }
+
+        .feed-author-profile-header {
+            padding: 18px 16px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .feed-author-profile-top {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .feed-author-profile-avatar,
+        .feed-author-action-avatar {
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.16);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: 700;
+        }
+
+        .feed-author-profile-avatar {
+            width: 64px;
+            height: 64px;
+            font-size: 22px;
+        }
+
+        .feed-author-profile-avatar img,
+        .feed-author-action-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .feed-author-profile-name {
+            font-size: 19px;
+            font-weight: 700;
+            line-height: 1.25;
+        }
+
+        .feed-author-profile-sub {
+            margin-top: 4px;
+            color: rgba(255,255,255,0.72);
+            font-size: 12px;
+            word-break: break-all;
+        }
+
+        .feed-author-profile-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .feed-author-profile-stat {
+            border-radius: 10px;
+            background: rgba(255,255,255,0.08);
+            padding: 9px 8px;
+            text-align: center;
+        }
+
+        .feed-author-profile-stat strong {
+            display: block;
+            font-size: 16px;
+        }
+
+        .feed-author-profile-stat span {
+            display: block;
+            margin-top: 2px;
+            color: rgba(255,255,255,0.68);
+            font-size: 11px;
+        }
+
+        .feed-author-profile-tabs {
+            display: flex;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .feed-author-profile-tab {
+            flex: 1;
+            border: 0;
+            background: transparent;
+            color: rgba(255,255,255,0.7);
+            padding: 12px 6px;
+            font-size: 13px;
+        }
+
+        .feed-author-profile-tab.active {
+            color: #fff;
+            box-shadow: inset 0 -2px 0 #fff;
+        }
+
+        .feed-author-profile-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .feed-author-work-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .feed-author-work-card {
+            border: 0;
+            padding: 0;
+            overflow: hidden;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.08);
+            color: #fff;
+            text-align: left;
+        }
+
+        .feed-author-work-cover {
+            aspect-ratio: 3 / 4;
+            background: #111;
+            position: relative;
+        }
+
+        .feed-author-work-cover img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .feed-author-work-type {
+            position: absolute;
+            left: 6px;
+            top: 6px;
+            border-radius: 999px;
+            background: rgba(0,0,0,0.58);
+            padding: 2px 6px;
+            font-size: 10px;
+        }
+
+        .feed-author-work-title {
+            padding: 6px;
+            font-size: 11px;
+            line-height: 1.35;
+            min-height: 36px;
+        }
+
+        .feed-author-action-rail {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .feed-author-avatar-btn {
+            width: 48px;
+            height: 48px;
+            border: 2px solid rgba(255,255,255,0.82);
+            border-radius: 999px;
+            padding: 0;
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            overflow: hidden;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.32);
+        }
+
+        .feed-author-action-avatar {
+            width: 100%;
+            height: 100%;
+            font-size: 16px;
+        }
+
+        .feed-author-profile-drawer {
+            background: #111320;
+            border-left: 0;
+            width: min(500px, 100vw);
+            overflow: hidden;
+        }
+
+        .feed-author-profile-drawer .feed-playlist-header {
+            display: none;
+        }
+
+        .feed-author-profile-shell {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            background: #111320;
+        }
+
+        .feed-author-profile-hero {
+            position: relative;
+            height: 198px;
+            background: linear-gradient(135deg, #215ecf 0%, #62a8df 48%, #1a1d2b 100%);
+            overflow: hidden;
+        }
+
+        .feed-author-profile-hero::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-image: var(--author-hero-image);
+            background-size: cover;
+            background-position: center;
+            filter: blur(10px) saturate(1.1);
+            transform: scale(1.08);
+            opacity: .72;
+        }
+
+        .feed-author-profile-hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(17,19,32,0.04) 0%, rgba(17,19,32,0.28) 56%, #111320 100%);
+        }
+
+        .feed-author-profile-nav {
+            position: absolute;
+            left: 12px;
+            right: 12px;
+            top: 10px;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .feed-author-profile-iconbar {
+            display: flex;
+            gap: 10px;
+        }
+
+        .feed-author-profile-icon {
+            width: 34px;
+            height: 34px;
+            border: 0;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.48);
+            color: #fff;
+            font-size: 17px;
+            padding: 0;
+        }
+
+        .feed-author-profile-avatar-wrap {
+            position: absolute;
+            left: 18px;
+            bottom: -2px;
+            z-index: 3;
+            display: flex;
+            align-items: flex-end;
+            gap: 14px;
+        }
+
+        .feed-author-profile-avatar {
+            width: 104px;
+            height: 104px;
+            border: 4px solid #fff;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.32);
+            background: #303545;
+            font-size: 34px;
+        }
+
+        .feed-author-profile-titleblock {
+            padding-bottom: 18px;
+            min-width: 0;
+        }
+
+        .feed-author-profile-name {
+            font-size: 22px;
+            font-weight: 800;
+            color: #fff;
+            text-shadow: 0 2px 8px rgba(0,0,0,.4);
+        }
+
+        .feed-author-profile-sub {
+            color: rgba(255,255,255,0.78);
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .feed-author-profile-header {
+            padding: 18px 18px 0;
+            border-bottom: 0;
+            background: #111320;
+        }
+
+        .feed-author-profile-bio {
+            margin-top: 12px;
+            color: #fff;
+            font-size: 13px;
+            line-height: 1.55;
+            white-space: pre-line;
+        }
+
+        .feed-author-profile-ip {
+            display: inline-flex;
+            margin-top: 10px;
+            padding: 3px 7px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.08);
+            color: rgba(255,255,255,.72);
+            font-size: 11px;
+        }
+
+        .feed-author-profile-stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 14px;
+        }
+
+        .feed-author-profile-stat {
+            background: transparent;
+            padding: 0;
+            text-align: left;
+            border-radius: 0;
+        }
+
+        .feed-author-profile-stat strong {
+            display: inline;
+            font-size: 17px;
+            margin-right: 4px;
+        }
+
+        .feed-author-profile-stat span {
+            display: inline;
+            font-size: 12px;
+            color: rgba(255,255,255,.8);
+        }
+
+        .feed-author-profile-actions {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .feed-author-profile-action {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            min-width: 0;
+            padding: 10px 8px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.08);
+            color: #fff;
+        }
+
+        .feed-author-profile-action i {
+            width: 28px;
+            height: 28px;
+            border-radius: 5px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,0.08);
+            flex: 0 0 auto;
+        }
+
+        .feed-author-profile-action strong {
+            display: block;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .feed-author-profile-action span {
+            display: block;
+            margin-top: 2px;
+            font-size: 11px;
+            color: rgba(255,255,255,.72);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .feed-author-profile-follow {
+            margin-top: 16px;
+            width: 100%;
+            height: 36px;
+            border: 0;
+            border-radius: 4px;
+            background: #ff2f5f;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .feed-author-profile-tabs {
+            margin-top: 18px;
+            border-bottom: 1px solid rgba(255,255,255,.1);
+            background: #111320;
+        }
+
+        .feed-author-profile-tab {
+            font-weight: 700;
+        }
+
+        .feed-author-profile-tab.active {
+            box-shadow: inset 0 -2px 0 #fff;
+        }
+
+        .feed-author-profile-body {
+            padding: 0;
+            overflow: visible;
+        }
+
+        .feed-author-work-grid {
+            gap: 2px;
+            background: #05060a;
+        }
+
+        .feed-author-work-card {
+            border-radius: 0;
+            background: #05060a;
+        }
+
+        .feed-author-work-cover {
+            aspect-ratio: 1 / 1.22;
+        }
+
+        .feed-author-work-title {
+            display: none;
+        }
+
+        .feed-author-work-type {
+            left: 6px;
+            top: 6px;
+            border-radius: 2px;
+            background: #f8e71c;
+            color: #111;
+            font-weight: 700;
+            font-size: 11px;
+        }
+
+        .feed-author-work-count {
+            position: absolute;
+            left: 6px;
+            bottom: 6px;
+            color: #fff;
+            font-size: 12px;
+            text-shadow: 0 1px 4px rgba(0,0,0,.7);
+        }
+
         .feed-author-list {
             overflow-y: auto;
             padding: 10px;
@@ -830,6 +1302,17 @@
                                     <div class="feed-playlist-header"><span>选择作者</span><button type="button" class="feed-playlist-close" id="feedAuthorClose" aria-label="关闭"><i class="mdi mdi-close"></i></button></div>
                                     <div class="feed-author-list" id="feedAuthorList"></div>
                                 </div>
+                                <div class="feed-author-profile-drawer" id="feedAuthorProfileDrawer">
+                                    <div class="feed-author-profile-shell">
+                                        <div class="feed-author-profile-header" id="feedAuthorProfileHeader"></div>
+                                        <div class="feed-author-profile-tabs" id="feedAuthorProfileTabs">
+                                            <button type="button" class="feed-author-profile-tab active" data-type="">作品</button>
+                                            <button type="button" class="feed-author-profile-tab" data-type="video">视频</button>
+                                            <button type="button" class="feed-author-profile-tab" data-type="graphic">图文</button>
+                                        </div>
+                                        <div class="feed-author-profile-body" id="feedAuthorProfileBody"></div>
+                                    </div>
+                                </div>
                                 <div class="loading" id="loading" style="display: none;">
                                     <i class="mdi mdi-loading mdi-spin"></i> 加载中...
                                 </div>
@@ -896,6 +1379,8 @@
     var feedFullscreenTarget = null;
     var feedSuppressAutoNextUntil = 0;
     var feedPendingAutoNextIndex = -1;
+    var feedAuthorProfileQuery = null;
+    var feedAuthorProfileType = '';
 
     function nowMs() {
         return (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : Date.now();
@@ -1346,6 +1831,38 @@
         return html;
     }
 
+    function buildFeedAuthorActionHtml(item, isPrivate, authorValue) {
+        if (isPrivate) {
+            return '';
+        }
+        var authorUid = item.authoruid || '';
+        var authorUsername = item.authorusername || '';
+        var rawAuthor = authorValue || item.author || item.videoauthor || '';
+        if (!rawAuthor && !authorUid && !authorUsername) {
+            return '';
+        }
+        var authorName = rawAuthor || 'Unknown';
+        var avatar = item.authoravatar || item.authorAvatar || '';
+        var avatarHtml = avatar
+            ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(authorName) + '" onerror="this.parentNode.textContent=\'' + escapeHtml(authorInitial(authorName)) + '\'">'
+            : escapeHtml(authorInitial(authorName));
+        var html = '<div class="feed-author-action-rail">';
+        html += '<button type="button" class="feed-author-avatar-btn" title="作者主页"'
+            + ' data-platform="' + escapeHtml(item.platform || item.videoplatform || '') + '"'
+            + ' data-author="' + escapeHtml(authorName || '') + '"'
+            + ' data-authoruid="' + escapeHtml(authorUid) + '"'
+            + ' data-authorusername="' + escapeHtml(authorUsername) + '"'
+            + ' data-authoravatar="' + escapeHtml(avatar || '') + '">';
+        html += '<span class="feed-author-action-avatar">' + avatarHtml + '</span>';
+        html += '</button></div>';
+        return html;
+    }
+
+    function authorInitial(name) {
+        var value = (name || '').trim();
+        return value ? value.charAt(0).toUpperCase() : '?';
+    }
+
     function buildGraphicFeedItemHtml(item, isPrivate, titleValue, platformValue, authorValue, timeValue) {
         var slides = normalizeGraphicSlides(item);
         var itemKey = escapeHtml(getFeedItemKey(item));
@@ -1377,6 +1894,7 @@
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
         html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue);
+        html += buildFeedAuthorActionHtml(item, isPrivate, authorValue);
         html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '"></div>';
         html += '<div class="feed-bottom-hover-zone"></div>';
         html += '</div>';
@@ -1417,6 +1935,7 @@
         html += '<button type="button" class="feed-debug-btn" title="鎾斁淇℃伅"><i class="mdi mdi-information-outline"></i></button>';
         html += '<div class="feed-debug-panel"></div>';
         html += '<div class="feed-source-badge"><i class="mdi mdi-file-video"></i><span>MP4</span></div>';
+        html += buildFeedAuthorActionHtml(item, isPrivate, authorValue);
         html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '">';
         html += '<div class="feed-controls-topline"><span class="feed-controls-time">0:00 / 0:00</span><div class="feed-controls-actions"><button type="button" class="feed-inline-btn feed-play-toggle" title="鎾斁/鏆傚仠"><i class="mdi mdi-play"></i></button><button type="button" class="feed-inline-btn feed-mute-toggle" title="闈欓煶"><i class="mdi mdi-volume-' + (feedMuted ? 'off' : 'high') + '"></i></button><button type="button" class="feed-inline-btn feed-fullscreen-toggle" title="鍏ㄥ睆"><i class="mdi mdi-fullscreen"></i></button></div></div>';
         html += '<div class="feed-progress-track"><div class="feed-progress-buffer"></div><div class="feed-progress-played"></div><div class="feed-progress-thumb"></div></div>';
@@ -2456,6 +2975,46 @@
             jumpToFeedAbsIndex(abs);
         });
 
+        $('#videoFeed').on('click', '.feed-author-avatar-btn', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            openFeedAuthorProfile({
+                platform: this.getAttribute('data-platform') || '',
+                author: this.getAttribute('data-author') || '',
+                authoruid: this.getAttribute('data-authoruid') || '',
+                authorusername: this.getAttribute('data-authorusername') || '',
+                authoravatar: this.getAttribute('data-authoravatar') || ''
+            });
+        });
+
+        $('#feedAuthorProfileClose').on('click', function() {
+            $('#feedAuthorProfileDrawer').removeClass('open');
+        });
+
+        $('#feedAuthorProfileTabs').on('click', '.feed-author-profile-tab', function() {
+            if (!feedAuthorProfileQuery) {
+                return;
+            }
+            feedAuthorProfileType = this.getAttribute('data-type') || '';
+            $('#feedAuthorProfileTabs .feed-author-profile-tab').removeClass('active');
+            $(this).addClass('active');
+            loadFeedAuthorProfileWorks();
+        });
+
+        $('#feedAuthorProfileBody').on('click', '.feed-author-work-card', function() {
+            var mediaKey = this.getAttribute('data-media-key') || '';
+            if (!mediaKey) {
+                return;
+            }
+            for (var i = 0; i < feedAllItems.length; i++) {
+                if (getFeedItemKey(feedAllItems[i]) === mediaKey) {
+                    jumpToFeedAbsIndex(i);
+                    $('#feedAuthorProfileDrawer').removeClass('open');
+                    return;
+                }
+            }
+        });
+
         $('#feedAuthorClose').on('click', function() {
             $('#feedAuthorDrawer').removeClass('open');
         });
@@ -2541,6 +3100,197 @@
             }
             drawer.classList.remove('open');
         });
+
+        $(document).on('click.feedAuthorProfileOutside', function(e) {
+            var drawer = document.getElementById('feedAuthorProfileDrawer');
+            if (!drawer || !drawer.classList.contains('open')) {
+                return;
+            }
+            if (drawer.contains(e.target) || (e.target.closest && e.target.closest('.feed-author-avatar-btn'))) {
+                return;
+            }
+            drawer.classList.remove('open');
+        });
+    }
+
+    function openFeedAuthorProfile(query) {
+        feedAuthorProfileQuery = query || {};
+        feedAuthorProfileType = '';
+        $('#feedAuthorProfileTabs .feed-author-profile-tab').removeClass('active');
+        $('#feedAuthorProfileTabs .feed-author-profile-tab[data-type=""]').addClass('active');
+        $('#feedAuthorProfileDrawer').addClass('open');
+        $('#feedAuthorProfileHeader').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
+        $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
+        $.get('/admin/api/authorProfileSummary', feedAuthorProfileQuery, function(res) {
+            if (res && res.resCode === '000001') {
+                renderFeedAuthorProfileHeader(res.record || {}, feedAuthorProfileQuery);
+            } else {
+                renderFeedAuthorProfileHeader({}, feedAuthorProfileQuery);
+            }
+        }).fail(function() {
+            renderFeedAuthorProfileHeader({}, feedAuthorProfileQuery);
+        });
+        loadFeedAuthorProfileWorks();
+    }
+
+    function loadFeedAuthorProfileWorks() {
+        if (!feedAuthorProfileQuery) {
+            return;
+        }
+        var option = $.extend({}, feedAuthorProfileQuery, {
+            type: feedAuthorProfileType,
+            pageNo: 0,
+            pageSize: 24
+        });
+        $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
+        $.get('/admin/api/authorProfileWorks', option, function(res) {
+            if (res && res.resCode === '000001') {
+                renderFeedAuthorProfileWorks(res.record && res.record.content ? res.record.content : []);
+                return;
+            }
+            $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">No works</div>');
+        }).fail(function() {
+            $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Load failed</div>');
+        });
+    }
+
+    function renderFeedAuthorProfileHeader(summary, fallback) {
+        fallback = fallback || {};
+        var name = summary.displayname || fallback.author || 'Unknown';
+        var username = summary.username || fallback.authorusername || '';
+        var uid = summary.authoruid || fallback.authoruid || '';
+        var platform = summary.platform || fallback.platform || '';
+        var avatar = summary.avatar || fallback.authoravatar || '';
+        var homepage = summary.homepage || '';
+        var avatarHtml = avatar ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(name) + '">' : escapeHtml(authorInitial(name));
+        var html = '<div class="feed-author-profile-top">';
+        html += '<div class="feed-author-profile-avatar">' + avatarHtml + '</div>';
+        html += '<div style="min-width:0;flex:1;">';
+        html += '<div class="feed-author-profile-name">' + escapeHtml(name) + '</div>';
+        html += '<div class="feed-author-profile-sub">' + escapeHtml(platform || 'Unknown') + (username ? ' · @' + escapeHtml(username) : '') + '</div>';
+        if (uid) {
+            html += '<div class="feed-author-profile-sub">UID ' + escapeHtml(uid) + '</div>';
+        }
+        if (homepage) {
+            html += '<div class="feed-author-profile-sub"><a href="' + escapeHtml(homepage) + '" target="_blank" style="color:#fff;">主页</a></div>';
+        }
+        html += '</div></div>';
+        html += '<div class="feed-author-profile-stats">';
+        html += '<div class="feed-author-profile-stat"><strong>' + Number(summary.totalCount || 0) + '</strong><span>全部</span></div>';
+        html += '<div class="feed-author-profile-stat"><strong>' + Number(summary.videoCount || 0) + '</strong><span>视频</span></div>';
+        html += '<div class="feed-author-profile-stat"><strong>' + Number(summary.graphicCount || 0) + '</strong><span>图文</span></div>';
+        html += '</div>';
+        $('#feedAuthorProfileHeader').html(html);
+    }
+
+    function renderFeedAuthorProfileWorks(list) {
+        var html = '<div class="feed-author-work-grid">';
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i] || {};
+            var title = item.title || item.videoname || 'Untitled';
+            var cover = item.cover || item.videocover || '/static/images/noimage.jpg';
+            var typeLabel = item.type === 'graphic' ? '图文' : '视频';
+            html += '<button type="button" class="feed-author-work-card" data-media-key="' + escapeHtml(getFeedItemKey(item)) + '">';
+            html += '<div class="feed-author-work-cover"><img src="' + escapeHtml(cover) + '" alt="' + escapeHtml(title) + '" onerror="this.src=\'/static/images/noimage.jpg\'"><span class="feed-author-work-type">' + typeLabel + '</span></div>';
+            html += '<div class="feed-author-work-title">' + escapeHtml(title) + '</div>';
+            html += '</button>';
+        }
+        html += '</div>';
+        if (!list.length) {
+            html = '<div style="padding:12px;color:#cbd5e1;">No works</div>';
+        }
+        $('#feedAuthorProfileBody').html(html);
+    }
+
+    function renderFeedAuthorProfileHeader(summary, fallback) {
+        fallback = fallback || {};
+        var name = summary.displayname || fallback.author || 'Unknown';
+        var username = summary.username || fallback.authorusername || '';
+        var uid = summary.authoruid || fallback.authoruid || '';
+        var platform = summary.platform || fallback.platform || '';
+        var avatar = summary.avatar || fallback.authoravatar || '';
+        var homepage = summary.homepage || '';
+        var heroImage = avatar ? 'url("' + cssUrlEscape(avatar) + '")' : 'none';
+        var avatarHtml = avatar ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(name) + '">' : escapeHtml(authorInitial(name));
+        var html = '<div class="feed-author-profile-hero" style="--author-hero-image:' + heroImage + ';">';
+        html += '<div class="feed-author-profile-nav">';
+        html += '<button type="button" class="feed-author-profile-icon" id="feedAuthorProfileBack" aria-label="Back"><i class="mdi mdi-chevron-left"></i></button>';
+        html += '<div class="feed-author-profile-iconbar"><button type="button" class="feed-author-profile-icon" aria-label="Search"><i class="mdi mdi-magnify"></i></button><button type="button" class="feed-author-profile-icon" aria-label="More"><i class="mdi mdi-dots-horizontal"></i></button></div>';
+        html += '</div>';
+        html += '<div class="feed-author-profile-avatar-wrap"><div class="feed-author-profile-avatar">' + avatarHtml + '</div><div class="feed-author-profile-titleblock">';
+        html += '<div class="feed-author-profile-name">' + escapeHtml(name) + '</div>';
+        html += '<div class="feed-author-profile-sub">' + escapeHtml(platform || 'Unknown') + (username ? ' · @' + escapeHtml(username) : '') + '</div>';
+        html += '</div></div></div>';
+        html += '<div class="feed-author-profile-stats">';
+        html += '<div class="feed-author-profile-stat"><strong>' + compactCount(summary.totalCount || 0) + '</strong><span>作品</span></div>';
+        html += '<div class="feed-author-profile-stat"><strong>' + compactCount(summary.videoCount || 0) + '</strong><span>视频</span></div>';
+        html += '<div class="feed-author-profile-stat"><strong>' + compactCount(summary.graphicCount || 0) + '</strong><span>图文</span></div>';
+        html += '</div>';
+        html += '<div class="feed-author-profile-bio">';
+        html += escapeHtml(name) + '\n';
+        if (uid) {
+            html += 'UID: ' + escapeHtml(uid) + '\n';
+        }
+        if (username) {
+            html += '账号: ' + escapeHtml(username) + '\n';
+        }
+        html += '</div>';
+        if (platform) {
+            html += '<div class="feed-author-profile-ip">平台：' + escapeHtml(platform) + '</div>';
+        }
+        html += '<div class="feed-author-profile-actions">';
+        html += '<div class="feed-author-profile-action"><i class="mdi mdi-view-grid"></i><div><strong>作品</strong><span>' + compactCount(summary.totalCount || 0) + ' 件内容</span></div></div>';
+        html += '<div class="feed-author-profile-action"><i class="mdi mdi-account-group"></i><div><strong>作者档案</strong><span>' + (uid ? escapeHtml(uid) : '本地资料') + '</span></div></div>';
+        html += '<div class="feed-author-profile-action"><i class="mdi mdi-link-variant"></i><div><strong>主页</strong><span>' + (homepage ? '打开原站' : '暂无链接') + '</span></div></div>';
+        html += '</div>';
+        html += homepage ? '<button type="button" class="feed-author-profile-follow" onclick="window.open(\'' + escapeJsString(homepage) + '\', \'_blank\')">进入主页</button>' : '<button type="button" class="feed-author-profile-follow">+ 关注</button>';
+        $('#feedAuthorProfileHeader').html(html);
+        $('#feedAuthorProfileBack').off('click').on('click', function() {
+            $('#feedAuthorProfileDrawer').removeClass('open');
+        });
+    }
+
+    function renderFeedAuthorProfileWorks(list) {
+        var html = '<div class="feed-author-work-grid">';
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i] || {};
+            var title = item.title || item.videoname || 'Untitled';
+            var cover = item.cover || item.videocover || '/static/images/noimage.jpg';
+            var typeLabel = item.type === 'graphic' ? '图文' : '视频';
+            html += '<button type="button" class="feed-author-work-card" data-media-key="' + escapeHtml(getFeedItemKey(item)) + '" title="' + escapeHtml(title) + '">';
+            html += '<div class="feed-author-work-cover"><img src="' + escapeHtml(cover) + '" alt="' + escapeHtml(title) + '" onerror="this.src=\'/static/images/noimage.jpg\'"><span class="feed-author-work-type">' + typeLabel + '</span><span class="feed-author-work-count"><i class="mdi mdi-heart-outline"></i> ' + compactCount(item.favorite === '1' ? 1 : 0) + '</span></div>';
+            html += '</button>';
+        }
+        html += '</div>';
+        if (!list.length) {
+            html = '<div style="padding:18px;color:#cbd5e1;">暂无作品</div>';
+        }
+        $('#feedAuthorProfileBody').html(html);
+        if (list.length) {
+            var firstCover = (list[0] && (list[0].cover || list[0].videocover)) || '';
+            if (firstCover) {
+                $('#feedAuthorProfileHeader .feed-author-profile-hero').css('--author-hero-image', 'url("' + cssUrlEscape(firstCover) + '")');
+            }
+        }
+    }
+
+    function compactCount(value) {
+        var n = Number(value || 0);
+        if (n >= 100000000) {
+            return (n / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
+        }
+        if (n >= 10000) {
+            return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+        }
+        return String(n);
+    }
+
+    function cssUrlEscape(value) {
+        return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    }
+
+    function escapeJsString(value) {
+        return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '');
     }
 
     function buildFeedDebugText(video) {
@@ -2829,7 +3579,7 @@
     }
 
     function isControlElement(target) {
-        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip'));
+        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-author-profile-drawer'));
     }
 
     function persistFeedOrder() {
