@@ -1,13 +1,16 @@
 package com.flower.spirit.service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +21,8 @@ import com.flower.spirit.dao.AuthorNameHistoryDao;
 import com.flower.spirit.dao.AuthorProfileDao;
 import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
+import com.flower.spirit.dto.AdminAuthorProfileSummary;
+import com.flower.spirit.dto.AdminMediaFeedItem;
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
@@ -41,6 +46,9 @@ public class AuthorProfileService {
 
 	@Autowired
 	private GraphicContentDao graphicContentDao;
+
+	@Autowired
+	private MediaFeedService mediaFeedService;
 
 	public void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar, String homepage) {
 		if (platform == null || platform.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
@@ -119,8 +127,193 @@ public class AuthorProfileService {
 		return authorNameHistoryDao.findByAuthorProfileIdOrderByLastSeen(authorProfileId);
 	}
 
+	public AjaxEntity findProfileSummary(String platform, String authoruid, String authorusername, String author) {
+		Specification<VideoDataEntity> videoSpec = buildVideoAuthorSpec(platform, authoruid, authorusername, author);
+		Specification<GraphicContentEntity> graphicSpec = buildGraphicAuthorSpec(platform, authoruid, authorusername, author);
+		long videoCount = videoDataDao.count(videoSpec);
+		long graphicCount = graphicContentDao.count(graphicSpec);
+		AuthorProfileEntity profile = findBestProfile(platform, authoruid, authorusername, author);
+		AdminAuthorProfileSummary summary = new AdminAuthorProfileSummary();
+		if (profile != null) {
+			summary.setId(profile.getId());
+			summary.setPlatform(profile.getPlatform());
+			summary.setAuthoruid(profile.getAuthoruid());
+			summary.setUsername(profile.getUsername());
+			summary.setDisplayname(profile.getDisplayname());
+			summary.setAvatar(profile.getAvatar());
+			summary.setHomepage(profile.getHomepage());
+			summary.setUpdatetime(profile.getUpdatetime());
+		}
+		summary.setPlatform(firstNotBlank(summary.getPlatform(), platform));
+		summary.setAuthoruid(firstNotBlank(summary.getAuthoruid(), authoruid));
+		summary.setUsername(firstNotBlank(summary.getUsername(), authorusername));
+		summary.setDisplayname(firstNotBlank(summary.getDisplayname(), author));
+		summary.setVideoCount(videoCount);
+		summary.setGraphicCount(graphicCount);
+		summary.setTotalCount(videoCount + graphicCount);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", summary);
+	}
+
+	public AjaxEntity findProfileWorks(String platform, String authoruid, String authorusername, String author,
+			String type, Integer pageNo, Integer pageSize) {
+		int actualPageNo = pageNo == null ? 0 : Math.max(0, pageNo.intValue());
+		int actualPageSize = pageSize == null ? 24 : Math.max(1, Math.min(100, pageSize.intValue()));
+		int fetchSize = Math.max(actualPageSize, (actualPageNo + 1) * actualPageSize);
+		List<AdminMediaFeedItem> items = new ArrayList<>();
+		long totalElements = 0;
+		if (!"graphic".equalsIgnoreCase(type)) {
+			Page<VideoDataEntity> videos = videoDataDao.findAll(buildVideoAuthorSpec(platform, authoruid, authorusername, author),
+					PageRequest.of(0, fetchSize, mediaSort()));
+			totalElements += videos.getTotalElements();
+			for (VideoDataEntity video : videos.getContent()) {
+				items.add(mediaFeedService.toVideoFeedItemForTest(video));
+			}
+		}
+		if (!"video".equalsIgnoreCase(type)) {
+			Page<GraphicContentEntity> graphics = graphicContentDao.findAll(buildGraphicAuthorSpec(platform, authoruid, authorusername, author),
+					PageRequest.of(0, fetchSize, mediaSort()));
+			totalElements += graphics.getTotalElements();
+			for (GraphicContentEntity graphic : graphics.getContent()) {
+				AdminMediaFeedItem item = mediaFeedService.toGraphicFeedItemForTest(graphic);
+				if (!item.getSlides().isEmpty()) {
+					items.add(item);
+				}
+			}
+		}
+		items.sort(feedComparator());
+		int from = Math.min(actualPageNo * actualPageSize, items.size());
+		int to = Math.min(from + actualPageSize, items.size());
+		List<AdminMediaFeedItem> pageItems = from >= to ? List.of() : new ArrayList<>(items.subList(from, to));
+		Page<AdminMediaFeedItem> page = new PageImpl<>(pageItems, PageRequest.of(actualPageNo, actualPageSize), totalElements);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);
+	}
+
 	public long countNameHistory(Integer authorProfileId) {
 		return authorNameHistoryDao.countByAuthorprofileid(authorProfileId);
+	}
+
+	private AuthorProfileEntity findBestProfile(String platform, String authoruid, String authorusername, String author) {
+		String safePlatform = trimToNull(platform);
+		String safeUid = trimToNull(authoruid);
+		if (safePlatform != null && safeUid != null) {
+			Optional<AuthorProfileEntity> byUid = authorProfileDao.findByPlatformAndAuthoruid(safePlatform, safeUid);
+			if (byUid.isPresent()) {
+				return byUid.get();
+			}
+		}
+		List<AuthorProfileEntity> candidates = authorProfileDao.findAll((root, query, cb) -> {
+			List<Predicate> predicates = new ArrayList<>();
+			if (safePlatform != null) {
+				predicates.add(cb.equal(root.get("platform"), safePlatform));
+			}
+			List<Predicate> identity = new ArrayList<>();
+			String safeUsername = trimToNull(authorusername);
+			String safeAuthor = trimToNull(author);
+			if (safeUid != null) {
+				identity.add(cb.equal(root.get("authoruid"), safeUid));
+			}
+			if (safeUsername != null) {
+				identity.add(cb.equal(root.get("username"), safeUsername));
+			}
+			if (safeAuthor != null) {
+				identity.add(cb.equal(root.get("displayname"), safeAuthor));
+			}
+			if (!identity.isEmpty()) {
+				predicates.add(cb.or(identity.toArray(new Predicate[0])));
+			}
+			query.orderBy(cb.desc(root.get("updatetime")), cb.desc(root.get("id")));
+			return cb.and(predicates.toArray(new Predicate[0]));
+		}, PageRequest.of(0, 1)).getContent();
+		return candidates.isEmpty() ? null : candidates.get(0);
+	}
+
+	private Specification<VideoDataEntity> buildVideoAuthorSpec(String platform, String authoruid, String authorusername, String author) {
+		return (root, query, cb) -> {
+			List<Predicate> predicates = new ArrayList<>();
+			if (trimToNull(platform) != null) {
+				predicates.add(cb.equal(root.get("videoplatform"), platform.trim()));
+			}
+			List<Predicate> identity = new ArrayList<>();
+			String safeUid = trimToNull(authoruid);
+			String safeUsername = trimToNull(authorusername);
+			String safeAuthor = trimToNull(author);
+			if (safeUid != null) {
+				identity.add(cb.equal(root.get("authoruid"), safeUid));
+				identity.add(cb.equal(root.get("secuid"), safeUid));
+			}
+			if (safeUsername != null) {
+				identity.add(cb.equal(root.get("authorusername"), safeUsername));
+				identity.add(cb.equal(root.get("uniqueid"), safeUsername));
+			}
+			if (safeAuthor != null) {
+				identity.add(cb.equal(root.get("videoauthor"), safeAuthor));
+			}
+			if (!identity.isEmpty()) {
+				predicates.add(cb.or(identity.toArray(new Predicate[0])));
+			}
+			return cb.and(predicates.toArray(new Predicate[0]));
+		};
+	}
+
+	private Specification<GraphicContentEntity> buildGraphicAuthorSpec(String platform, String authoruid, String authorusername, String author) {
+		return (root, query, cb) -> {
+			List<Predicate> predicates = new ArrayList<>();
+			if (trimToNull(platform) != null) {
+				predicates.add(cb.equal(root.get("platform"), platform.trim()));
+			}
+			List<Predicate> identity = new ArrayList<>();
+			String safeUid = trimToNull(authoruid);
+			String safeUsername = trimToNull(authorusername);
+			String safeAuthor = trimToNull(author);
+			if (safeUid != null) {
+				identity.add(cb.equal(root.get("authoruid"), safeUid));
+				identity.add(cb.equal(root.get("secuid"), safeUid));
+			}
+			if (safeUsername != null) {
+				identity.add(cb.equal(root.get("authorusername"), safeUsername));
+				identity.add(cb.equal(root.get("uniqueid"), safeUsername));
+			}
+			if (safeAuthor != null) {
+				identity.add(cb.equal(root.get("author"), safeAuthor));
+			}
+			if (!identity.isEmpty()) {
+				predicates.add(cb.or(identity.toArray(new Predicate[0])));
+			}
+			return cb.and(predicates.toArray(new Predicate[0]));
+		};
+	}
+
+	private Sort mediaSort() {
+		return Sort.by(Sort.Direction.DESC, "publishtime")
+				.and(Sort.by(Sort.Direction.DESC, "createtime"))
+				.and(Sort.by(Sort.Direction.DESC, "id"));
+	}
+
+	private Comparator<AdminMediaFeedItem> feedComparator() {
+		return (left, right) -> {
+			int publishCompare = compareNullable(left.getPublishTime(), right.getPublishTime());
+			if (publishCompare != 0) {
+				return publishCompare;
+			}
+			int createCompare = compareNullable(left.getCreateTime(), right.getCreateTime());
+			if (createCompare != 0) {
+				return createCompare;
+			}
+			return compareNullable(left.getId(), right.getId());
+		};
+	}
+
+	private <T extends Comparable<T>> int compareNullable(T left, T right) {
+		if (left == null && right == null) {
+			return 0;
+		}
+		if (left == null) {
+			return 1;
+		}
+		if (right == null) {
+			return -1;
+		}
+		return -left.compareTo(right);
 	}
 
 	public AjaxEntity rebuildDouyinAuthors() {

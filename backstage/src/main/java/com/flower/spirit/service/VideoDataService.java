@@ -172,6 +172,7 @@ public class VideoDataService {
 				root.get("videoauthor").alias("videoauthor"),
 				root.get("authoruid").alias("authoruid"),
 				root.get("authorusername").alias("authorusername"),
+				root.get("authoravatar").alias("authoravatar"),
 				root.get("publishtime").alias("publishtime"),
 				root.get("createtime").alias("createtime"),
 				root.get("sourceurl").alias("sourceurl"),
@@ -287,6 +288,7 @@ public class VideoDataService {
 		video.setVideoauthor(tuple.get("videoauthor", String.class));
 		video.setAuthoruid(tuple.get("authoruid", String.class));
 		video.setAuthorusername(tuple.get("authorusername", String.class));
+		video.setAuthoravatar(tuple.get("authoravatar", String.class));
 		video.setPublishtime(tuple.get("publishtime", String.class));
 		video.setCreatetime(tuple.get("createtime", Date.class));
 		video.setSourceurl(tuple.get("sourceurl", String.class));

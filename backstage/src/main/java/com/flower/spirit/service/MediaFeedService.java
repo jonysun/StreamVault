@@ -131,6 +131,7 @@ public class MediaFeedService {
 		item.setAuthor(graphic.getAuthor());
 		item.setAuthoruid(graphic.getAuthoruid());
 		item.setAuthorusername(graphic.getAuthorusername());
+		item.setAuthoravatar(graphic.getAuthoravatar());
 		item.setTitle(graphic.getTitle());
 		item.setDesc(graphic.getContent());
 		item.setPublishTime(graphic.getPublishtime());
@@ -157,6 +158,7 @@ public class MediaFeedService {
 			item.setAuthor(video.getVideoauthor());
 			item.setAuthoruid(video.getAuthoruid());
 			item.setAuthorusername(video.getAuthorusername());
+			item.setAuthoravatar(video.getAuthoravatar());
 			item.setTitle(video.getVideoname());
 			item.setDesc(video.getVideodesc());
 			item.setPublishTime(video.getPublishtime());
