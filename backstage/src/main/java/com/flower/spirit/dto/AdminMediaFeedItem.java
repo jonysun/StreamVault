@@ -14,6 +14,7 @@ public class AdminMediaFeedItem {
 	private String author;
 	private String authoruid;
 	private String authorusername;
+	private String authoravatar;
 	private String title;
 	private String desc;
 	private String publishTime;
@@ -90,6 +91,14 @@ public class AdminMediaFeedItem {
 
 	public void setAuthorusername(String authorusername) {
 		this.authorusername = authorusername;
+	}
+
+	public String getAuthoravatar() {
+		return authoravatar;
+	}
+
+	public void setAuthoravatar(String authoravatar) {
+		this.authoravatar = authoravatar;
 	}
 
 	public String getTitle() {

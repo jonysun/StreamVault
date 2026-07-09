@@ -536,6 +536,17 @@ public class AdminController {
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", authorProfileService.findNameHistory(authorProfileId));
 	}
 
+	@GetMapping(value = "/authorProfileSummary")
+	public AjaxEntity authorProfileSummary(String platform, String authoruid, String authorusername, String author) {
+		return authorProfileService.findProfileSummary(platform, authoruid, authorusername, author);
+	}
+
+	@GetMapping(value = "/authorProfileWorks")
+	public AjaxEntity authorProfileWorks(String platform, String authoruid, String authorusername, String author,
+			String type, Integer pageNo, Integer pageSize) {
+		return authorProfileService.findProfileWorks(platform, authoruid, authorusername, author, type, pageNo, pageSize);
+	}
+
 	@PostMapping(value = "/rebuildDouyinAuthors")
 	public AjaxEntity rebuildDouyinAuthors() {
 		return authorProfileService.rebuildDouyinAuthors();
