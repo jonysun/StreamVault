@@ -3280,7 +3280,7 @@
                             }
                             feedAuthorContextTargetKey = '';
                             setTimeout(function() {
-                                jumpToFeedAbsIndex(targetIndex >= 0 ? targetIndex : 0);
+                                jumpToFeedAbsIndex(targetIndex >= 0 ? targetIndex : 0, true);
                             }, 80);
                         }
                     });
@@ -3780,7 +3780,7 @@
         return option;
     }
 
-    function jumpToFeedAbsIndex(absIndex) {
+    function jumpToFeedAbsIndex(absIndex, forcePlay) {
         var container = $('#videoFeed')[0];
         if (!container) {
             return;
@@ -3795,6 +3795,37 @@
         var items = Array.prototype.slice.call(document.querySelectorAll('#videoFeed .feed-item'));
         prewarmFeedIndexWindow(items, absIndex, 'down');
         renderFeedPlaylist();
+        if (forcePlay) {
+            setTimeout(function() {
+                playFeedItemByAbsIndex(absIndex, 0);
+            }, 120);
+        }
+    }
+
+    function playFeedItemByAbsIndex(absIndex, retryCount) {
+        var item = document.querySelector('#videoFeed .feed-item[data-abs-index="' + absIndex + '"]');
+        if (!item) {
+            if ((retryCount || 0) < 4) {
+                setTimeout(function() {
+                    playFeedItemByAbsIndex(absIndex, (retryCount || 0) + 1);
+                }, 120);
+            }
+            return;
+        }
+        if (item.getAttribute('data-feed-type') === 'graphic') {
+            startGraphicSlideshow(item);
+            return;
+        }
+        var video = item.querySelector('.feed-video');
+        if (!video) {
+            if ((retryCount || 0) < 4) {
+                setTimeout(function() {
+                    playFeedItemByAbsIndex(absIndex, (retryCount || 0) + 1);
+                }, 120);
+            }
+            return;
+        }
+        playWithSync(video);
     }
 
     function renderFeedPlaylist() {
