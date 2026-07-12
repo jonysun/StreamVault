@@ -2,6 +2,8 @@ package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import org.junit.jupiter.api.Test;
 
 class CollectDataServiceStatusTest {
@@ -43,5 +45,47 @@ class CollectDataServiceStatusTest {
 		assertThat(diagnosis.stackTop()).contains("handler.py:455");
 		assertThat(diagnosis.toLogMessage()).contains("mode=post", "sourceId=MS4abc", "exitCode=1",
 				"outFileExists=false");
+	}
+
+	@Test
+	void sortDouyinItemsByPublishTimeMovesNewestReturnedItemFirst() {
+		CollectDataService service = new CollectDataService();
+		JSONArray items = new JSONArray();
+		items.add(douyinItem("old-pin", "2023-12-01 12-18-42"));
+		items.add(douyinItem("new-work", "2026-07-05 23-28-46"));
+		items.add(douyinItem("middle-work", "2026-06-29 12-13-06"));
+
+		JSONArray sorted = service.sortDouyinItemsByPublishTime(items);
+
+		assertThat(sorted.getJSONObject(0).getString("aweme_id")).isEqualTo("new-work");
+		assertThat(sorted.getJSONObject(1).getString("aweme_id")).isEqualTo("middle-work");
+		assertThat(sorted.getJSONObject(2).getString("aweme_id")).isEqualTo("old-pin");
+	}
+
+	@Test
+	void buildFetchSnapshotIncludesRawAndNormalizedPublishTime() {
+		CollectDataService service = new CollectDataService();
+		JSONArray items = new JSONArray();
+		items.add(douyinItem("new-work", "2026-07-05 23-28-46"));
+
+		JSONArray snapshot = JSONArray.parseArray(service.buildFetchSnapshot(items));
+
+		JSONObject item = snapshot.getJSONObject(0);
+		assertThat(item.getInteger("index")).isEqualTo(1);
+		assertThat(item.getString("aweme_id")).isEqualTo("new-work");
+		assertThat(item.getString("create_time")).isEqualTo("2026-07-05 23-28-46");
+		assertThat(item.getString("publish_time")).isEqualTo("2026-07-05 23:28:46");
+		assertThat(item.getBoolean("has_video_play_addr")).isTrue();
+	}
+
+	private static JSONObject douyinItem(String awemeId, String createTime) {
+		JSONObject item = new JSONObject();
+		item.put("aweme_id", awemeId);
+		item.put("desc", awemeId + " desc");
+		item.put("create_time", createTime);
+		JSONArray playUrls = new JSONArray();
+		playUrls.add("https://example.test/" + awemeId + ".mp4");
+		item.put("video_play_addr", playUrls);
+		return item;
 	}
 }

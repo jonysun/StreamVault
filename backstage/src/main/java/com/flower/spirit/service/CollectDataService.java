@@ -6,6 +6,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -35,6 +36,7 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.dao.CollectdDataDetailDao;
+import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.CollectDataDetailEntity;
 import com.flower.spirit.entity.CollectDataEntity;
@@ -75,6 +77,9 @@ public class CollectDataService {
 
 	@Autowired
 	private VideoDataDao videoDataDao;
+
+	@Autowired
+	private GraphicContentDao graphicContentDao;
 
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
@@ -474,6 +479,7 @@ public class CollectDataService {
 		logger.info("任务开始" + entity.getOriginaladdress());
 		JSONArray allDYData = this.getDYData(entity, monitor);
 		if (allDYData != null) {
+			allDYData = sortDouyinItemsByPublishTime(allDYData);
 			entity.setLastfetchcount(allDYData.size());
 			entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
 			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData));
@@ -512,9 +518,13 @@ public class CollectDataService {
 				StringBuilder processLog = new StringBuilder();
 				JSONObject aweme_detail = allDYData.getJSONObject(i);
 				String awemeId = aweme_detail.getString("aweme_id");
+				String awemeCreateTime = aweme_detail.getString("create_time");
+				String awemePublishTime = formatPublishTimeFromEpochSeconds(awemeCreateTime);
 				JSONObject planItem = new JSONObject();
 				planItem.put("aweme_id", awemeId);
 				planItem.put("desc", aweme_detail.getString("desc"));
+				planItem.put("create_time", awemeCreateTime);
+				planItem.put("publish_time", awemePublishTime);
 				planItem.put("index", i + 1);
 				String desc = aweme_detail.getString("desc");
 				String displayName = safeDisplayName(desc, awemeId, "视频");
@@ -543,16 +553,21 @@ public class CollectDataService {
 					}
 					CollectDataDetailEntity existingDetail = collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId());
 					if (existingDetail != null) {
-						appendLog(processLog, "skip", "detail exists in collect_data_detail");
-						skippedThisRun++;
-						planItem.put("decision", "skip-detail-exists");
-						planItems.add(planItem);
-						continue;
+						boolean graphicExists = graphicContentDao.findByVideoidAndPlatform(awemeId, Global.platform.douyin.name()).isPresent();
+						if (graphicExists) {
+							appendLog(processLog, "skip", "detail exists in collect_data_detail and graphic exists");
+							skippedThisRun++;
+							planItem.put("decision", "skip-detail-exists");
+							planItems.add(planItem);
+							continue;
+						}
+						appendLog(processLog, "repair", "detail exists but graphic content missing, retry imageText executor");
+						planItem.put("decision", "image-retry-missing-graphic");
 					}
 					// 不支持
 					try {
 						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(), (String) null);
-						CollectDataDetailEntity collectDataDetailEntity = new CollectDataDetailEntity();
+						CollectDataDetailEntity collectDataDetailEntity = existingDetail == null ? new CollectDataDetailEntity() : existingDetail;
 						collectDataDetailEntity.setDataid(entity.getId());
 						collectDataDetailEntity.setVideoid(awemeId);
 						collectDataDetailEntity.setOriginaladdress(awemeId);
@@ -568,10 +583,12 @@ public class CollectDataService {
 						collectDataDetailEntity.setCreatetime(DateUtils.formatDateTime(new Date()));
 						sleepCollectItemInterval();
 						collectDataDetailService.save(collectDataDetailEntity);
-						String carriedout = entity.getCarriedout() == null ? "1"
-								: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
-						entity.setCarriedout(carriedout);
-						collectdDataDao.save(entity);
+						if (existingDetail == null) {
+							String carriedout = entity.getCarriedout() == null ? "1"
+									: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
+							entity.setCarriedout(carriedout);
+							collectdDataDao.save(entity);
+						}
 						graphiccount++;
 						successThisRun++;
 						planItem.put("decision", "image-success");
@@ -861,14 +878,18 @@ public class CollectDataService {
 		return "处理完成";
 	}
 
-	private String buildFetchSnapshot(JSONArray allData) {
+	String buildFetchSnapshot(JSONArray allData) {
 		JSONArray arr = new JSONArray();
 		for (int i = 0; i < allData.size(); i++) {
 			JSONObject src = allData.getJSONObject(i);
+			String createTime = src.getString("create_time");
+			String publishTime = formatPublishTimeFromEpochSeconds(createTime);
 			JSONObject item = new JSONObject();
 			item.put("index", i + 1);
 			item.put("aweme_id", src.getString("aweme_id"));
 			item.put("desc", src.getString("desc"));
+			item.put("create_time", createTime);
+			item.put("publish_time", publishTime);
 			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
 			arr.add(item);
 		}
@@ -877,6 +898,59 @@ public class CollectDataService {
 			return text.substring(0, 200000) + "...(truncated)";
 		}
 		return text;
+	}
+
+	JSONArray sortDouyinItemsByPublishTime(JSONArray allData) {
+		if (allData == null || allData.size() < 2) {
+			return allData;
+		}
+		List<JSONObject> items = new ArrayList<>();
+		for (int i = 0; i < allData.size(); i++) {
+			items.add(allData.getJSONObject(i));
+		}
+		items.sort(Comparator
+				.comparing((JSONObject item) -> publishTimeMillis(item.getString("create_time")),
+						Comparator.nullsLast(Comparator.reverseOrder()))
+				.thenComparing(item -> item.getString("aweme_id"), Comparator.nullsLast(Comparator.reverseOrder())));
+		JSONArray sorted = new JSONArray();
+		for (JSONObject item : items) {
+			sorted.add(item);
+		}
+		if (!sameAwemeOrder(allData, sorted)) {
+			logger.info("[CollectTask] sorted F2 result by publish time size={} firstBefore={} firstAfter={}",
+					allData.size(), firstAwemeId(allData), firstAwemeId(sorted));
+		}
+		return sorted;
+	}
+
+	private boolean sameAwemeOrder(JSONArray left, JSONArray right) {
+		if (left == null || right == null || left.size() != right.size()) {
+			return false;
+		}
+		for (int i = 0; i < left.size(); i++) {
+			String leftId = left.getJSONObject(i).getString("aweme_id");
+			String rightId = right.getJSONObject(i).getString("aweme_id");
+			if (leftId == null ? rightId != null : !leftId.equals(rightId)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private String firstAwemeId(JSONArray data) {
+		if (data == null || data.isEmpty()) {
+			return null;
+		}
+		return data.getJSONObject(0).getString("aweme_id");
+	}
+
+	private Long publishTimeMillis(String rawCreateTime) {
+		String publishTime = formatPublishTimeFromEpochSeconds(rawCreateTime);
+		if (publishTime == null) {
+			return null;
+		}
+		Date date = DateUtils.parseDate(publishTime);
+		return date == null ? null : date.getTime();
 	}
 
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {
@@ -919,20 +993,6 @@ public class CollectDataService {
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_post_videos", sec_user_id, null,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result(entity, "post", sec_user_id, maxc, f2cmd, taskout);
-			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
-				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
-				logger.info("[CollectTask] getDYData parsed count={} mode=post", jsonFromFile == null ? 0 : jsonFromFile.size());
-				Files.deleteIfExists(Paths.get(taskout));
-				return jsonFromFile;
-			}
-		}
-		if (entity.getOriginaladdress().startsWith("like")) {
-			logger.info("[CollectTask] getDYData mode=like uid={} maxc={} out={}", sec_user_id, maxc, taskout);
-			String cookie = platformCookieService.currentDouyinCookie("fetch_user_like_videos");
-			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_like_videos", sec_user_id, null,
-					maxc, taskout);
-			reportF2CookieResult("抖音", cookie, f2cmd);
 			logF2Result(entity, "like", sec_user_id, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
@@ -951,21 +1011,6 @@ public class CollectDataService {
 			logger.info("[CollectTask] getDYData mode=fav cid={} maxc={} out={}", content, maxc, taskout);
 			String cookie = platformCookieService.currentDouyinCookie("fetch_user_collects_videos");
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_collects_videos", null, content,
-					maxc, taskout);
-			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result(entity, "fav", content, maxc, f2cmd, taskout);
-			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
-				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
-				logger.info("[CollectTask] getDYData parsed count={} mode=fav", jsonFromFile == null ? 0 : jsonFromFile.size());
-				Files.deleteIfExists(Paths.get(taskout));
-				return jsonFromFile;
-			}
-		}
-		if (entity.getOriginaladdress().startsWith("recommend")) {
-			sec_user_id = entity.getOriginaladdress().replaceAll("recommend", "");
-			logger.info("[CollectTask] getDYData mode=recommend uid={} out={}", sec_user_id, taskout);
-			String cookie = platformCookieService.currentDouyinCookie("fetch_user_feed_videos");
-			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_feed_videos", sec_user_id, null,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
 			logF2Result(entity, "recommend", sec_user_id, maxc, f2cmd, taskout);
