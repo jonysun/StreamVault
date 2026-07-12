@@ -1391,6 +1391,8 @@
     var feedPendingAutoNextIndex = -1;
     var feedAuthorProfileQuery = null;
     var feedAuthorProfileType = '';
+    var feedAuthorContext = null;
+    var feedAuthorContextTargetKey = '';
 
     function nowMs() {
         return (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : Date.now();
@@ -1671,6 +1673,10 @@
     
     function findList(page) {
         if(isLoading || !hasMore) return;
+        if (mediaHomeMode === 'feed' && feedAuthorContext) {
+            findAuthorContextList(page);
+            return;
+        }
         isLoading = true;
         $('#loading').show();
         
@@ -1825,6 +1831,38 @@
         });
     }
 
+    function buildGraphicSlideMediaHtml(slide, fallbackUrl) {
+        var safeSlide = slide && slide.url ? slide : { type: 'image', url: fallbackUrl || '/static/images/noimage.jpg' };
+        var type = safeSlide.type === 'video' ? 'video' : 'image';
+        var url = escapeHtml(safeSlide.url || fallbackUrl || '/static/images/noimage.jpg');
+        if (type === 'video') {
+            return '<video class="feed-graphic-media" src="' + url + '" playsinline webkit-playsinline preload="metadata"></video>';
+        }
+        return '<img class="feed-graphic-media" src="' + url + '" alt="">';
+    }
+
+    function encodeGraphicSlides(slides) {
+        try {
+            return escapeHtml(JSON.stringify(slides || []));
+        } catch (e) {
+            return '[]';
+        }
+    }
+
+    function getGraphicSlides(host) {
+        if (!host) {
+            return [];
+        }
+        try {
+            var parsed = JSON.parse(host.getAttribute('data-slides') || '[]');
+            return Array.isArray(parsed) ? parsed.filter(function(slide) {
+                return slide && slide.url && (slide.type === 'image' || slide.type === 'video');
+            }) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
     function buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue) {
         var safeTitle = isPrivate ? '******' : escapeHtml(String(titleValue || 'Untitled'));
         var safePlatform = isPrivate ? '****' : escapeHtml(String(platformValue || 'Unknown'));
@@ -1876,29 +1914,16 @@
     function buildGraphicFeedItemHtml(item, isPrivate, titleValue, platformValue, authorValue, timeValue) {
         var slides = normalizeGraphicSlides(item);
         var itemKey = escapeHtml(getFeedItemKey(item));
+        var cover = item.cover || '/static/images/noimage.jpg';
         var html = '<div class="feed-item feed-graphic-item" data-private="' + isPrivate + '" data-feed-type="graphic">';
-        html += '<div class="feed-graphic-host" data-current-slide="0">';
+        html += '<div class="feed-graphic-host" data-current-slide="0" data-cover="' + escapeHtml(cover) + '" data-slides="' + encodeGraphicSlides(slides) + '">';
         html += '<div class="feed-graphic-progress">';
-        for (var p = 0; p < slides.length; p++) {
+        for (var p = 0; p < Math.max(1, slides.length); p++) {
             html += '<span' + (p === 0 ? ' class="active"' : '') + '></span>';
         }
         html += '</div>';
         html += '<div class="feed-graphic-badge">Graphic</div>';
-        if (slides.length === 0) {
-            html += '<div class="feed-graphic-slide active"><img src="' + escapeHtml(item.cover || '/static/images/noimage.jpg') + '" alt=""></div>';
-        }
-        for (var i = 0; i < slides.length; i++) {
-            var slide = slides[i];
-            var activeCls = i === 0 ? ' active' : '';
-            var url = escapeHtml(slide.url);
-            html += '<div class="feed-graphic-slide' + activeCls + '" data-slide-index="' + i + '" data-slide-type="' + escapeHtml(slide.type) + '">';
-            if (slide.type === 'video') {
-                html += '<video src="' + url + '" playsinline webkit-playsinline preload="metadata"></video>';
-            } else {
-                html += '<img src="' + url + '" alt="">';
-            }
-            html += '</div>';
-        }
+        html += '<div class="feed-graphic-slide active" data-slide-index="0">' + buildGraphicSlideMediaHtml(slides[0], cover) + '</div>';
         html += '</div>';
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
@@ -1956,17 +1981,20 @@
     }
 
     function activateGraphicSlide(host, index) {
-        var slides = Array.prototype.slice.call(host.querySelectorAll('.feed-graphic-slide'));
-        if (!slides.length) return;
-        var nextIndex = Math.max(0, Math.min(index, slides.length - 1));
-        slides.forEach(function(slide, i) {
-            var active = i === nextIndex;
-            slide.classList.toggle('active', active);
-            var video = slide.querySelector('video');
-            if (video && !active) {
-                try { video.pause(); } catch (e) {}
-            }
+        var slides = getGraphicSlides(host);
+        var slideCount = Math.max(1, slides.length);
+        var nextIndex = Math.max(0, Math.min(index, slideCount - 1));
+        var stage = host.querySelector('.feed-graphic-slide');
+        if (!stage) {
+            return;
+        }
+        stage.querySelectorAll('video').forEach(function(video) {
+            try { video.pause(); } catch (e) {}
         });
+        stage.classList.add('active');
+        stage.setAttribute('data-slide-index', String(nextIndex));
+        stage.setAttribute('data-slide-type', slides[nextIndex] ? slides[nextIndex].type : 'image');
+        stage.innerHTML = buildGraphicSlideMediaHtml(slides[nextIndex], host.getAttribute('data-cover') || '/static/images/noimage.jpg');
         Array.prototype.slice.call(host.querySelectorAll('.feed-graphic-progress span')).forEach(function(dot, i) {
             dot.classList.toggle('active', i === nextIndex);
         });
@@ -1986,12 +2014,14 @@
             return;
         }
         clearGraphicSlideshowTimer(itemEl);
-        var slides = Array.prototype.slice.call(host.querySelectorAll('.feed-graphic-slide'));
-        if (!slides.length) {
-            return;
-        }
+        var slides = getGraphicSlides(host);
+        var slideCount = Math.max(1, slides.length);
         var index = Number(host.getAttribute('data-current-slide') || '0');
-        var slide = slides[Math.max(0, Math.min(index, slides.length - 1))];
+        if (index < 0 || index >= slideCount) {
+            activateGraphicSlide(host, 0);
+            index = 0;
+        }
+        var slide = host.querySelector('.feed-graphic-slide');
         var video = slide ? slide.querySelector('video') : null;
         if (video) {
             video.muted = feedMuted;
@@ -2018,12 +2048,10 @@
         if (!host) {
             return;
         }
-        var slides = Array.prototype.slice.call(host.querySelectorAll('.feed-graphic-slide'));
-        if (!slides.length) {
-            return;
-        }
+        var slides = getGraphicSlides(host);
+        var slideCount = Math.max(1, slides.length);
         var current = Number(host.getAttribute('data-current-slide') || '0');
-        if (current < slides.length - 1) {
+        if (current < slideCount - 1) {
             activateGraphicSlide(host, current + 1);
             runCurrentGraphicSlide(itemEl);
             return;
@@ -2050,12 +2078,10 @@
         if (!host) {
             return;
         }
-        var slides = Array.prototype.slice.call(host.querySelectorAll('.feed-graphic-slide'));
-        if (!slides.length) {
-            return;
-        }
+        var slides = getGraphicSlides(host);
+        var slideCount = Math.max(1, slides.length);
         var current = Number(host.getAttribute('data-current-slide') || '0');
-        var next = (current + delta + slides.length) % slides.length;
+        var next = (current + delta + slideCount) % slideCount;
         activateGraphicSlide(host, next);
         if (itemEl.getAttribute('data-graphic-running') === '1') {
             runCurrentGraphicSlide(itemEl);
@@ -2074,8 +2100,8 @@
         itemEl.setAttribute('data-graphic-running', '1');
         pauseOtherFeedVideos(null);
         var host = itemEl.querySelector('.feed-graphic-host');
-        if (host && !host.getAttribute('data-current-slide')) {
-            activateGraphicSlide(host, 0);
+        if (host) {
+            activateGraphicSlide(host, Number(host.getAttribute('data-current-slide') || '0'));
         }
         runCurrentGraphicSlide(itemEl);
     }
@@ -3016,13 +3042,7 @@
             if (!mediaKey) {
                 return;
             }
-            for (var i = 0; i < feedAllItems.length; i++) {
-                if (getFeedItemKey(feedAllItems[i]) === mediaKey) {
-                    jumpToFeedAbsIndex(i);
-                    $('#feedAuthorProfileDrawer').removeClass('open');
-                    return;
-                }
-            }
+            switchToAuthorProfileFeed(mediaKey);
         });
 
         $('#feedAuthorClose').on('click', function() {
@@ -3030,6 +3050,7 @@
         });
 
         $('#feedAuthorList').on('click', '.feed-author-item', function() {
+            clearFeedAuthorContext();
             feedAuthor = ($(this).data('author') || '').toString().trim();
             $('#feedAuthorDrawer').removeClass('open');
             updateFeedButtons();
@@ -3161,6 +3182,117 @@
             $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">No works</div>');
         }).fail(function() {
             $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Load failed</div>');
+        });
+    }
+
+    function clearFeedAuthorContext() {
+        feedAuthorContext = null;
+        feedAuthorContextTargetKey = '';
+    }
+
+    function buildFeedAuthorContextLabel(query) {
+        query = query || {};
+        return (query.author || query.authorusername || query.authoruid || 'Author').toString();
+    }
+
+    function resetFeedRenderState() {
+        page = 0;
+        hasMore = true;
+        isLoading = false;
+        $('#videoFeed').empty();
+        feedAbsCounter = 0;
+        feedTrimmedHeadCount = 0;
+        ensureFeedSpacer();
+        feedAuthorSet = {};
+        feedAllItems = [];
+        feedRandomPool = [];
+        feedRandomCursor = 0;
+        feedRandomLoading = false;
+        feedCurrentAbsIndex = -1;
+        feedPendingAutoNextIndex = -1;
+        renderFeedPlaylist();
+        renderFeedAuthorDrawer();
+    }
+
+    function switchToAuthorProfileFeed(mediaKey) {
+        if (!feedAuthorProfileQuery) {
+            return;
+        }
+        feedAuthorContext = {
+            query: $.extend({}, feedAuthorProfileQuery),
+            type: feedAuthorProfileType || '',
+            label: buildFeedAuthorContextLabel(feedAuthorProfileQuery)
+        };
+        feedAuthorContextTargetKey = mediaKey || '';
+        $('#feedAuthorProfileDrawer').removeClass('open');
+        resetFeedRenderState();
+        updateFeedButtons();
+        findList(0);
+    }
+
+    function findAuthorContextList(pageNo) {
+        if (isLoading || !hasMore || !feedAuthorContext || !feedAuthorContext.query) {
+            return;
+        }
+        isLoading = true;
+        $('#loading').show();
+        var option = $.extend({}, feedAuthorContext.query, {
+            type: feedAuthorContext.type || '',
+            pageNo: pageNo,
+            pageSize: feedPageSize,
+            lite: '1'
+        });
+        var listRequestStart = nowMs();
+        $.get('/admin/api/authorProfileWorks', option, function(res, status) {
+            if (res && res.resCode === '000001') {
+                var record = res.record || {};
+                var list = record.content || [];
+                console.log('[AdminIndexPerf] author feed response', {
+                    elapsedMs: Math.round(nowMs() - listRequestStart),
+                    page: pageNo,
+                    count: list.length,
+                    last: record.last,
+                    status: status
+                });
+                hasMore = list.length > 0 && record.last !== true;
+                if (list.length > 0) {
+                    feedAllItems = feedAllItems.concat(list);
+                    appendFeedAuthorOptions(list);
+                    var html = '';
+                    for (var i = 0; i < list.length; i++) {
+                        var isPrivate = (list[i].privacy || list[i].videoprivacy) === '1';
+                        html += buildFeedItemHtml(list[i], isPrivate);
+                    }
+                    requestAnimationFrame(function() {
+                        $('#videoFeed').append(html);
+                        hydrateFeedItems();
+                        initFeedAutoPlay();
+                        renderFeedPlaylist();
+                        renderFeedAuthorDrawer();
+                        if (feedAuthorContextTargetKey) {
+                            var targetKey = feedAuthorContextTargetKey;
+                            var targetIndex = -1;
+                            for (var j = 0; j < feedAllItems.length; j++) {
+                                if (getFeedItemKey(feedAllItems[j]) === targetKey) {
+                                    targetIndex = j;
+                                    break;
+                                }
+                            }
+                            feedAuthorContextTargetKey = '';
+                            setTimeout(function() {
+                                jumpToFeedAbsIndex(targetIndex >= 0 ? targetIndex : 0);
+                            }, 80);
+                        }
+                    });
+                }
+            } else {
+                hasMore = false;
+            }
+        }).fail(function() {
+            hasMore = false;
+        }).always(function() {
+            isLoading = false;
+            $('#loading').hide();
         });
     }
 
@@ -3612,24 +3744,12 @@
     }
 
     function reloadFeed() {
-        page = 0;
-        hasMore = true;
-        isLoading = false;
-        $('#videoFeed').empty();
-        feedAbsCounter = 0;
-        feedTrimmedHeadCount = 0;
-        ensureFeedSpacer();
-        feedAuthorSet = {};
-        feedAllItems = [];
-        feedRandomPool = [];
-        feedRandomCursor = 0;
-        feedRandomLoading = false;
-        feedCurrentAbsIndex = -1;
+        clearFeedAuthorContext();
+        resetFeedRenderState();
         if (feedOrder === 'random') {
             feedSessionSeed = String(Date.now()) + '_' + String(Math.floor(Math.random() * 1000000));
         }
-        renderFeedPlaylist();
-        renderFeedAuthorDrawer();
+        updateFeedButtons();
         findList(page);
     }
 
@@ -3833,6 +3953,9 @@
         var orderText = feedOrder === 'asc' ? '顺序' : (feedOrder === 'random' ? '随机' : '倒序');
         $('#feedOrderBtn span').text(orderText);
         var authorText = feedAuthor && feedAuthor.trim() !== '' ? feedAuthor : '全部';
+        if (feedAuthorContext && feedAuthorContext.label) {
+            authorText = feedAuthorContext.label;
+        }
         if (authorText.length > 4) {
             authorText = authorText.substring(0, 4) + '…';
         }
