@@ -42,9 +42,10 @@ class CollectDataServiceStatusTest {
 		assertThat(diagnosis.errorCode()).isEqualTo("F2_INTERNAL_NICKNAME_RAW_UNBOUND");
 		assertThat(diagnosis.exceptionType()).isEqualTo("UnboundLocalError");
 		assertThat(diagnosis.rootCause()).contains("nickname_raw");
+		assertThat(diagnosis.outputPreview()).contains("UnboundLocalError");
 		assertThat(diagnosis.stackTop()).contains("handler.py:455");
 		assertThat(diagnosis.toLogMessage()).contains("mode=post", "sourceId=MS4abc", "exitCode=1",
-				"outFileExists=false");
+				"outFileExists=false", "outputPreview=");
 	}
 
 	@Test

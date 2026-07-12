@@ -1271,8 +1271,9 @@ public class CollectDataService {
 		String stackTop = extractStackTop(normalized);
 		String errorCode = classifyF2Failure(exceptionType, exceptionMessage, normalized, outFileExists, exitCode);
 		String rootCause = buildRootCause(errorCode, exceptionType, exceptionMessage, normalized);
+		String outputPreview = previewOutput(output);
 		return new F2FailureDiagnosis(mode, originaladdress, sourceId, maxc, outPath, outFileExists, outFileSize,
-				exitCode, durationMs, errorCode, exceptionType, exceptionMessage, stackTop, rootCause);
+				exitCode, durationMs, errorCode, exceptionType, exceptionMessage, stackTop, rootCause, outputPreview);
 	}
 
 	private static String extractStackTop(String output) {
@@ -1355,6 +1356,9 @@ public class CollectDataService {
 					+ ", sourceId=" + fetchContext.sourceId() + ", maxc=" + fetchContext.maxc());
 		}
 		appendLog(processLog, "f2", "exitCode=" + CommandUtil.getLastF2ExitCode() + ", durationMs=" + CommandUtil.getLastF2DurationMs());
+		if (detailJson != null && detailJson.getString("outputPreview") != null) {
+			appendLog(processLog, "f2-output", detailJson.getString("outputPreview"));
+		}
 		detail.setProcesslog(processLog.toString());
 		JSONObject context = new JSONObject();
 		context.put("taskId", entity.getId());
@@ -1399,6 +1403,8 @@ public class CollectDataService {
 			planItem.put("exceptionType", detailJson.getString("exceptionType"));
 			planItem.put("exceptionMessage", detailJson.getString("exceptionMessage"));
 			planItem.put("stackTop", detailJson.getString("stackTop"));
+			planItem.put("outputPreview", detailJson.getString("outputPreview"));
+			planItem.put("processlog", processLog.toString());
 		}
 		planItems.add(planItem);
 		entity.setTaskstatus("执行失败(抓取异常)");
@@ -1426,13 +1432,14 @@ public class CollectDataService {
 			context.put("exceptionType", diagnosis.exceptionType());
 			context.put("exceptionMessage", diagnosis.exceptionMessage());
 			context.put("stackTop", diagnosis.stackTop());
+			context.put("outputPreview", diagnosis.outputPreview());
 		}
 		return context;
 	}
 
 	static record F2FailureDiagnosis(String mode, String originaladdress, String sourceId, int maxc, String outPath,
 			boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String errorCode,
-			String exceptionType, String exceptionMessage, String stackTop, String rootCause) {
+			String exceptionType, String exceptionMessage, String stackTop, String rootCause, String outputPreview) {
 		String toLogMessage() {
 			return "errorCode=" + errorCode
 					+ " rootCause=" + rootCause
@@ -1447,7 +1454,8 @@ public class CollectDataService {
 					+ " durationMs=" + durationMs
 					+ " outPath=" + outPath
 					+ " outFileExists=" + outFileExists
-					+ " outFileSize=" + outFileSize;
+					+ " outFileSize=" + outFileSize
+					+ " outputPreview=" + outputPreview;
 		}
 	}
 
@@ -1464,7 +1472,7 @@ public class CollectDataService {
 		}
 	}
 
-	private String previewOutput(String output) {
+	private static String previewOutput(String output) {
 		if (output == null) {
 			return "null";
 		}
