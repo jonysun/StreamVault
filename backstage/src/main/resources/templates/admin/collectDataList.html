@@ -883,14 +883,22 @@
 	}
 
 	function showTextDialog(title, text){
-		var safeText = text || '';
+		var safeText = prettyJsonText(text || '');
 		layer.open({
 			type: 1,
 			title: title,
-			area: ['70%', '70%'],
+			area: ['80%', '75%'],
 			content: '<div style="padding:12px;"><pre style="white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow:auto;">'+
 			$('<div/>').text(safeText).html() + '</pre></div>'
 		});
+	}
+
+	function prettyJsonText(text){
+		try {
+			return JSON.stringify(JSON.parse(text), null, 2);
+		} catch (e) {
+			return text || '';
+		}
 	}
 </script>
 </body>

@@ -78,6 +78,25 @@ class CollectDataServiceStatusTest {
 		assertThat(item.getBoolean("has_video_play_addr")).isTrue();
 	}
 
+	@Test
+	void buildFetchSnapshotIncludesFetchRunContextWhenPresent() {
+		CollectDataService service = new CollectDataService();
+		JSONArray items = new JSONArray();
+		items.add(douyinItem("new-work", "2026-07-05 23-28-46"));
+		CollectDataService.FetchRunContext context = new CollectDataService.FetchRunContext("collect-1-123", 1,
+				"task", "postMS4abc", "Y", "post", "MS4abc", 120, 100, 80, 20, 20, "/tmp/out.json");
+
+		JSONArray snapshot = JSONArray.parseArray(service.buildFetchSnapshot(items, context));
+
+		JSONObject item = snapshot.getJSONObject(0);
+		assertThat(item.getString("runId")).isEqualTo("collect-1-123");
+		assertThat(item.getString("fetchMode")).isEqualTo("post");
+		assertThat(item.getString("sourceId")).isEqualTo("MS4abc");
+		assertThat(item.getInteger("maxc")).isEqualTo(120);
+		assertThat(item.getLong("existingDetailCount")).isEqualTo(100L);
+		assertThat(item.getLong("successDetailCount")).isEqualTo(80L);
+	}
+
 	private static JSONObject douyinItem(String awemeId, String createTime) {
 		JSONObject item = new JSONObject();
 		item.put("aweme_id", awemeId);
