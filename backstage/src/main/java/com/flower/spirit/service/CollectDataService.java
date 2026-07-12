@@ -887,6 +887,8 @@ public class CollectDataService {
 				addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 
 			}
+			planItems.add(0, buildRunSummaryPlanItem(runId, fetchContext, allDYData.size(), successThisRun,
+					failedThisRun, skippedThisRun, videoaddcount, graphiccount, targetSuccess));
 			entity.setLastplanitems(planItems.toJSONString());
 			collectdDataDao.save(entity);
 		}
@@ -994,6 +996,42 @@ public class CollectDataService {
 		String logText = processLog == null ? "" : processLog.toString();
 		planItem.put("processlog", logText.length() > 12000 ? logText.substring(0, 12000) + "...(truncated)" : logText);
 		planItems.add(planItem);
+		logger.info("[CollectTask] plan item runId={} awemeId={} index={} mediaType={} decision={} status={} reason={} errorCode={} log={}",
+				planItem.getString("runId"), planItem.getString("aweme_id"), planItem.get("index"),
+				planItem.getString("mediatype"), planItem.getString("decision"), planItem.getString("status"),
+				trimForLog(planItem.getString("reason"), 160), errorCode, trimForLog(logText, 500));
+	}
+
+	private JSONObject buildRunSummaryPlanItem(String runId, FetchRunContext context, int fetchedCount,
+			int successThisRun, int failedThisRun, int skippedThisRun, int addedVideo, int addedGraphic,
+			int targetSuccess) {
+		JSONObject summary = new JSONObject();
+		summary.put("stage", "run-summary");
+		summary.put("runId", runId);
+		if (context != null) {
+			summary.put("fetchMode", context.mode());
+			summary.put("sourceId", context.sourceId());
+			summary.put("maxc", context.maxc());
+			summary.put("existingDetailCount", context.existingDetailCount());
+			summary.put("successDetailCount", context.successDetailCount());
+			summary.put("originaladdress", context.originaladdress());
+		}
+		summary.put("fetchedCount", fetchedCount);
+		summary.put("targetSuccess", targetSuccess);
+		summary.put("successThisRun", successThisRun);
+		summary.put("failedThisRun", failedThisRun);
+		summary.put("skippedThisRun", skippedThisRun);
+		summary.put("addedVideo", addedVideo);
+		summary.put("addedGraphic", addedGraphic);
+		summary.put("decision", "run-summary");
+		summary.put("status", "run-summary");
+		summary.put("reason", "fetch/process summary");
+		summary.put("time", DateUtils.formatDateTime(new Date()));
+		logger.info("[CollectTask] run summary runId={} mode={} sourceId={} maxc={} fetched={} targetSuccess={} success={} failed={} skipped={} addedVideo={} addedGraphic={}",
+				runId, context == null ? null : context.mode(), context == null ? null : context.sourceId(),
+				context == null ? null : context.maxc(), fetchedCount, targetSuccess, successThisRun,
+				failedThisRun, skippedThisRun, addedVideo, addedGraphic);
+		return summary;
 	}
 
 	JSONArray sortDouyinItemsByPublishTime(JSONArray allData) {
