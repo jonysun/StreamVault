@@ -49,6 +49,24 @@ class CollectDataServiceStatusTest {
 	}
 
 	@Test
+	void analyzeF2FailureCarriesDiagnostics() {
+		JSONObject diagnostics = new JSONObject();
+		diagnostics.put("cookiePresent", true);
+		JSONObject profileDiagnostic = new JSONObject();
+		profileDiagnostic.put("success", false);
+		profileDiagnostic.put("error", "empty response");
+		diagnostics.put("profileDiagnostic", profileDiagnostic);
+
+		CollectDataService.F2FailureDiagnosis diagnosis = CollectDataService.analyzeF2Failure("post", "postMS4abc",
+				"MS4abc", 20, "/app/lot/79.json", false, -1, 1, 1515L,
+				"UnboundLocalError: cannot access local variable 'nickname_raw' where it is not associated with a value",
+				diagnostics);
+
+		assertThat(diagnosis.diagnostics()).isSameAs(diagnostics);
+		assertThat(diagnosis.toLogMessage()).contains("diagnostics=");
+	}
+
+	@Test
 	void sortDouyinItemsByPublishTimeMovesNewestReturnedItemFirst() {
 		CollectDataService service = new CollectDataService();
 		JSONArray items = new JSONArray();

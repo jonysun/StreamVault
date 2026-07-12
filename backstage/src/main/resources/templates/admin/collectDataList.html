@@ -968,6 +968,9 @@
 		if(row.outputPreview){
 			parts.push('[f2 output preview]\n'+row.outputPreview);
 		}
+		if(row.diagnostics){
+			parts.push('[diagnostics]\n'+JSON.stringify(row.diagnostics, null, 2));
+		}
 		return parts.join('\n\n');
 	}
 
