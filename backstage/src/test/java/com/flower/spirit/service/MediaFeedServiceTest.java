@@ -146,4 +146,35 @@ class MediaFeedServiceTest {
 
 		assertThat(page.getContent()).extracting("mediaKey").containsExactly("graphic:12", "video:11", "video:10");
 	}
+
+	@Test
+	void findPageIncludesNewestCreateTimeCandidatesWhenPublishTimeIsMissing() {
+		VideoDataEntity request = new VideoDataEntity();
+		request.setPageNo(1);
+		request.setPageSize(2);
+		request.setSortField("publishtime");
+		request.setSortOrder("desc");
+
+		AdminVideoListItem publishedVideo = new AdminVideoListItem();
+		publishedVideo.setId(20);
+		publishedVideo.setPublishtime("2026-07-08 10:00:00");
+		publishedVideo.setCreatetime(new Date(1_000L));
+
+		AdminVideoListItem freshMissingPublishTime = new AdminVideoListItem();
+		freshMissingPublishTime.setId(21);
+		freshMissingPublishTime.setCreatetime(Date.from(java.time.Instant.parse("2026-07-12T00:00:00Z")));
+
+		when(videoDataService.findPage(any(VideoDataEntity.class), eq(true)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success",
+						new PageImpl<>(List.of(publishedVideo), Pageable.ofSize(2), 2)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success",
+						new PageImpl<>(List.of(freshMissingPublishTime), Pageable.ofSize(2), 2)));
+		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)));
+
+		Page<?> page = (Page<?>) service.findPage(request).getRecord();
+
+		assertThat(page.getContent()).extracting("mediaKey").containsExactly("video:21", "video:20");
+	}
 }

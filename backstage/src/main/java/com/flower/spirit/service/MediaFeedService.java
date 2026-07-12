@@ -3,8 +3,14 @@ package com.flower.spirit.service;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +35,10 @@ public class MediaFeedService {
 	private static final Logger logger = LoggerFactory.getLogger(MediaFeedService.class);
 	private static final List<String> IMAGE_EXTENSIONS = List.of(".jpg", ".jpeg", ".png", ".webp", ".gif");
 	private static final List<String> VIDEO_EXTENSIONS = List.of(".mp4", ".webm", ".mov", ".m4v");
+	private static final List<DateTimeFormatter> PUBLISH_TIME_FORMATTERS = List.of(
+			DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+			DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"),
+			DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS"));
 
 	@Autowired
 	private VideoDataService videoDataService;
@@ -43,55 +53,95 @@ public class MediaFeedService {
 		int pageSize = Math.max(1, videoQuery.getPageSize());
 		int fetchSize = Math.max(pageSize, (pageNo + 1) * pageSize);
 		boolean randomMode = "1".equals(String.valueOf(videoQuery.getRandomMode()));
-		videoQuery.setPageNo(1);
-		videoQuery.setPageSize(fetchSize);
-		graphicQuery.setPageNo(1);
-		graphicQuery.setPageSize(fetchSize);
 
-		List<AdminMediaFeedItem> mergedItems = new ArrayList<>();
+		Map<String, AdminMediaFeedItem> mergedItems = new LinkedHashMap<>();
 		long totalElements = 0;
 
-		AjaxEntity videoResponse = videoDataService.findPage(videoQuery, true);
-		Page<?> videoPage = pageFrom(videoResponse);
-		if (videoPage != null) {
-			totalElements += videoPage.getTotalElements();
-			for (Object row : videoPage.getContent()) {
-				AdminMediaFeedItem item = toVideoFeedItem(row);
-				if (item != null) {
-					mergedItems.add(item);
-				}
-			}
+		totalElements += appendVideoCandidates(mergedItems, videoQuery, fetchSize, true);
+		if (shouldFetchCreateTimeCandidates(videoQuery)) {
+			appendVideoCandidates(mergedItems, videoQuery, fetchSize, false);
 		}
 
 		if (!"1".equals(videoQuery.getFavorite())) {
-			AjaxEntity graphicResponse = graphicContentService.findPage(graphicQuery);
-			Page<?> graphicPage = pageFrom(graphicResponse);
-			if (graphicPage != null) {
-				totalElements += graphicPage.getTotalElements();
-				for (Object row : graphicPage.getContent()) {
-					if (row instanceof GraphicContentEntity graphic) {
-						AdminMediaFeedItem item = toGraphicFeedItemForTest(graphic);
-						if (!item.getSlides().isEmpty()) {
-							mergedItems.add(item);
-						}
-					}
-				}
+			totalElements += appendGraphicCandidates(mergedItems, graphicQuery, fetchSize, true);
+			if (shouldFetchCreateTimeCandidates(videoQuery)) {
+				appendGraphicCandidates(mergedItems, graphicQuery, fetchSize, false);
 			}
 		}
 
+		List<AdminMediaFeedItem> orderedItems = new ArrayList<>(mergedItems.values());
+
 		if (randomMode) {
-			stabilizeRandomSourceOrder(mergedItems);
+			stabilizeRandomSourceOrder(orderedItems);
 			String randomSeed = videoQuery.getRandomSeed();
 			long seed = randomSeed == null ? System.nanoTime() : randomSeed.hashCode();
-			Collections.shuffle(mergedItems, new java.util.Random(seed));
+			Collections.shuffle(orderedItems, new java.util.Random(seed));
 		} else {
-			mergedItems.sort(feedComparator("asc".equalsIgnoreCase(videoQuery.getSortOrder())));
+			orderedItems.sort(feedComparator("asc".equalsIgnoreCase(videoQuery.getSortOrder())));
 		}
-		int from = Math.min(pageNo * pageSize, mergedItems.size());
-		int to = Math.min(from + pageSize, mergedItems.size());
-		List<AdminMediaFeedItem> pageItems = from >= to ? List.of() : new ArrayList<>(mergedItems.subList(from, to));
+		int from = Math.min(pageNo * pageSize, orderedItems.size());
+		int to = Math.min(from + pageSize, orderedItems.size());
+		List<AdminMediaFeedItem> pageItems = from >= to ? List.of() : new ArrayList<>(orderedItems.subList(from, to));
 		Page<AdminMediaFeedItem> page = new PageImpl<>(pageItems, PageRequest.of(pageNo, pageSize), totalElements);
 		return new AjaxEntity(Global.ajax_success, "success", page);
+	}
+
+	private long appendVideoCandidates(Map<String, AdminMediaFeedItem> mergedItems, VideoDataEntity baseQuery,
+			int fetchSize, boolean countTotal) {
+		VideoDataEntity query = copyVideoQuery(baseQuery);
+		query.setPageNo(1);
+		query.setPageSize(fetchSize);
+		if (!countTotal) {
+			query.setSortField("createtime");
+			query.setSortOrder("desc");
+		}
+		AjaxEntity videoResponse = videoDataService.findPage(query, true);
+		Page<?> videoPage = pageFrom(videoResponse);
+		if (videoPage == null) {
+			return 0;
+		}
+		for (Object row : videoPage.getContent()) {
+			AdminMediaFeedItem item = toVideoFeedItem(row);
+			putMediaItem(mergedItems, item);
+		}
+		return countTotal ? videoPage.getTotalElements() : 0;
+	}
+
+	private long appendGraphicCandidates(Map<String, AdminMediaFeedItem> mergedItems, GraphicContentEntity baseQuery,
+			int fetchSize, boolean countTotal) {
+		GraphicContentEntity query = copyGraphicQuery(baseQuery);
+		query.setPageNo(1);
+		query.setPageSize(fetchSize);
+		if (!countTotal) {
+			query.setSortField("createtime");
+			query.setSortOrder("desc");
+		}
+		AjaxEntity graphicResponse = graphicContentService.findPage(query);
+		Page<?> graphicPage = pageFrom(graphicResponse);
+		if (graphicPage == null) {
+			return 0;
+		}
+		for (Object row : graphicPage.getContent()) {
+			if (row instanceof GraphicContentEntity graphic) {
+				AdminMediaFeedItem item = toGraphicFeedItemForTest(graphic);
+				if (!item.getSlides().isEmpty()) {
+					putMediaItem(mergedItems, item);
+				}
+			}
+		}
+		return countTotal ? graphicPage.getTotalElements() : 0;
+	}
+
+	private void putMediaItem(Map<String, AdminMediaFeedItem> items, AdminMediaFeedItem item) {
+		if (item == null || item.getMediaKey() == null) {
+			return;
+		}
+		items.putIfAbsent(item.getMediaKey(), item);
+	}
+
+	private boolean shouldFetchCreateTimeCandidates(VideoDataEntity query) {
+		return query != null && !"1".equals(String.valueOf(query.getRandomMode()))
+				&& "publishtime".equals(query.getSortField());
 	}
 
 	public List<AdminMediaSlide> parseGraphicSlidesForTest(String rawImages) {
@@ -267,6 +317,22 @@ public class MediaFeedService {
 		return graphicQuery;
 	}
 
+	private GraphicContentEntity copyGraphicQuery(GraphicContentEntity source) {
+		GraphicContentEntity target = new GraphicContentEntity();
+		if (source == null) {
+			return target;
+		}
+		target.setTitle(source.getTitle());
+		target.setContent(source.getContent());
+		target.setPlatform(source.getPlatform());
+		target.setAuthor(source.getAuthor());
+		target.setPublishStart(source.getPublishStart());
+		target.setPublishEnd(source.getPublishEnd());
+		target.setSortField(source.getSortField());
+		target.setSortOrder(source.getSortOrder());
+		return target;
+	}
+
 	private String toGraphicSortField(String videoSortField) {
 		if ("videoauthor".equals(videoSortField)) {
 			return "author";
@@ -279,9 +345,9 @@ public class MediaFeedService {
 
 	private Comparator<AdminMediaFeedItem> feedComparator(boolean ascending) {
 		return (left, right) -> {
-			int publishCompare = compareNullable(left.getPublishTime(), right.getPublishTime(), ascending);
-			if (publishCompare != 0) {
-				return publishCompare;
+			int timeCompare = compareFeedTime(left, right, ascending);
+			if (timeCompare != 0) {
+				return timeCompare;
 			}
 			int createCompare = compareNullable(left.getCreateTime(), right.getCreateTime(), ascending);
 			if (createCompare != 0) {
@@ -289,6 +355,54 @@ public class MediaFeedService {
 			}
 			return compareNullable(left.getId(), right.getId(), ascending);
 		};
+	}
+
+	private int compareFeedTime(AdminMediaFeedItem left, AdminMediaFeedItem right, boolean ascending) {
+		Long leftTime = feedTimeMillis(left);
+		Long rightTime = feedTimeMillis(right);
+		if (leftTime == null && rightTime == null) {
+			return 0;
+		}
+		if (leftTime == null) {
+			return 1;
+		}
+		if (rightTime == null) {
+			return -1;
+		}
+		int result = leftTime.compareTo(rightTime);
+		return ascending ? result : -result;
+	}
+
+	private Long feedTimeMillis(AdminMediaFeedItem item) {
+		if (item == null) {
+			return null;
+		}
+		Long publishMillis = parsePublishTimeMillis(item.getPublishTime());
+		if (publishMillis != null) {
+			return publishMillis;
+		}
+		return item.getCreateTime() == null ? null : item.getCreateTime().getTime();
+	}
+
+	private Long parsePublishTimeMillis(String value) {
+		if (value == null || value.trim().isEmpty()) {
+			return null;
+		}
+		String text = value.trim();
+		try {
+			return Instant.parse(text).toEpochMilli();
+		} catch (Exception e) {
+		}
+		for (DateTimeFormatter formatter : PUBLISH_TIME_FORMATTERS) {
+			try {
+				return LocalDateTime.parse(text, formatter)
+						.atZone(ZoneId.systemDefault())
+						.toInstant()
+						.toEpochMilli();
+			} catch (Exception e) {
+			}
+		}
+		return null;
 	}
 
 	private <T extends Comparable<T>> int compareNullable(T left, T right, boolean ascending) {
