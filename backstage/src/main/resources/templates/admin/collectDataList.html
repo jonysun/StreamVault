@@ -867,7 +867,7 @@
 				layer.msg('暂无最近一次全量拉取数据');
 				return;
 			}
-			showTextDialog('最近一次全量拉取列表', content);
+			showJsonTableDialog('最近一次全量拉取列表', content, 'snapshot');
 		});
 	}
 
@@ -878,19 +878,163 @@
 				layer.msg('暂无最近一次计划下载数据');
 				return;
 			}
-			showTextDialog('最近一次计划下载列表', content);
+			showJsonTableDialog('最近一次计划下载列表', content, 'plan');
 		});
 	}
 
-	function showTextDialog(title, text){
-		var safeText = text || '';
+	function showJsonTableDialog(title, text, type){
+		var rows = parseJsonArray(text);
+		var content = rows ? (type === 'plan' ? renderPlanTable(rows) : renderSnapshotTable(rows)) : renderTextFallback(text);
 		layer.open({
 			type: 1,
 			title: title,
-			area: ['70%', '70%'],
-			content: '<div style="padding:12px;"><pre style="white-space:pre-wrap;word-break:break-all;max-height:60vh;overflow:auto;">'+
-			$('<div/>').text(safeText).html() + '</pre></div>'
+			area: ['92%', '82%'],
+			content: content
 		});
+	}
+
+	function parseJsonArray(text){
+		try {
+			var parsed = JSON.parse(text || '');
+			if($.isArray(parsed)){
+				return parsed;
+			}
+			return [parsed];
+		} catch (e) {
+			return null;
+		}
+	}
+
+	function renderSnapshotTable(rows){
+		var first = rows[0] || {};
+		var meta = 'runId: '+textnone(first.runId)+' | mode: '+textnone(first.fetchMode)+' | source: '+textnone(first.sourceId)+' | maxc: '+textnone(first.maxc)+' | count: '+rows.length;
+		var columns = [
+			{title:'序号', render:function(row, i){ return cell(row.index || row.sortedIndex || (i + 1)); }},
+			{title:'发布时间', render:function(row){ return cell(row.publish_time || row.create_time); }},
+			{title:'媒体', render:function(row){ return cell(row.has_video_play_addr ? '视频' : '图文'); }},
+			{title:'作者', render:function(row){ return cell(row.nickname || row.uid || row.sec_uid); }},
+			{title:'作品ID', render:function(row){ return codeCell(row.aweme_id); }},
+			{title:'标题/摘要', render:function(row){ return longCell(row.desc, 320); }},
+			{title:'抓取参数', render:function(row){ return smallCell('mode='+textnone(row.fetchMode)+'\nsource='+textnone(row.sourceId)+'\nmaxc='+textnone(row.maxc)); }}
+		];
+		return renderTableDialog(meta, columns, rows);
+	}
+
+	function renderPlanTable(rows){
+		var summary = findRunSummary(rows);
+		var meta = summary
+			? 'runId: '+textnone(summary.runId)+' | mode: '+textnone(summary.fetchMode)+' | source: '+textnone(summary.sourceId)+' | fetched: '+textnone(summary.fetchedCount)+' | success: '+textnone(summary.successThisRun)+' | failed: '+textnone(summary.failedThisRun)+' | skipped: '+textnone(summary.skippedThisRun)
+			: 'items: '+rows.length;
+		var columns = [
+			{title:'序号', render:function(row, i){ return cell(row.stage === 'run-summary' ? '汇总' : (row.index || i)); }},
+			{title:'媒体', render:function(row){ return cell(row.mediatype || row.stage || ''); }},
+			{title:'决策', render:function(row){ return badgeCell(row.decision); }},
+			{title:'原因', render:function(row){ return longCell(planReason(row), 260); }},
+			{title:'状态', render:function(row){ return cell(row.status); }},
+			{title:'错误', render:function(row){ return smallCell([row.errorcode, row.errormsg].filter(Boolean).join('\n')); }},
+			{title:'作品ID', render:function(row){ return codeCell(row.aweme_id); }},
+			{title:'标题/摘要', render:function(row){ return longCell(row.desc, 260); }},
+			{title:'过程日志', render:function(row){ return logCell(row.processlog); }}
+		];
+		return renderTableDialog(meta, columns, rows);
+	}
+
+	function findRunSummary(rows){
+		for(var i = 0; i < rows.length; i++){
+			if(rows[i] && rows[i].stage === 'run-summary'){
+				return rows[i];
+			}
+		}
+		return null;
+	}
+
+	function planReason(row){
+		if(row.stage === 'run-summary'){
+			return '目标成功 '+textnone(row.targetSuccess)+'；新增视频 '+textnone(row.addedVideo)+'；新增图文 '+textnone(row.addedGraphic)+'；已有成功基数 '+textnone(row.successDetailCount)+'；已有明细 '+textnone(row.existingDetailCount);
+		}
+		return row.reason || '';
+	}
+
+	function renderTableDialog(meta, columns, rows){
+		var html = '<div style="padding:12px;">'
+			+'<div style="margin-bottom:10px;color:#666;font-size:12px;word-break:break-all;">'+escapeHtml(meta)+'</div>'
+			+'<div style="max-height:66vh;overflow:auto;border:1px solid #eee;">'
+			+'<table class="table table-bordered table-hover table-sm" style="margin:0;font-size:12px;background:#fff;">'
+			+'<thead style="position:sticky;top:0;background:#f7f7f7;z-index:1;"><tr>';
+		for(var c = 0; c < columns.length; c++){
+			html += '<th style="white-space:nowrap;">'+escapeHtml(columns[c].title)+'</th>';
+		}
+		html += '</tr></thead><tbody>';
+		if(!rows.length){
+			html += '<tr><td colspan="'+columns.length+'" style="text-align:center;color:#999;">暂无数据</td></tr>';
+		}
+		for(var r = 0; r < rows.length; r++){
+			html += '<tr>';
+			for(var j = 0; j < columns.length; j++){
+				html += '<td style="vertical-align:top;">'+columns[j].render(rows[r] || {}, r)+'</td>';
+			}
+			html += '</tr>';
+		}
+		html += '</tbody></table></div></div>';
+		return html;
+	}
+
+	function renderTextFallback(text){
+		var safeText = prettyJsonText(text || '');
+		return '<div style="padding:12px;"><pre style="white-space:pre-wrap;word-break:break-all;max-height:68vh;overflow:auto;">'+
+			escapeHtml(safeText) + '</pre></div>';
+	}
+
+	function prettyJsonText(text){
+		try {
+			return JSON.stringify(JSON.parse(text), null, 2);
+		} catch (e) {
+			return text || '';
+		}
+	}
+
+	function cell(value){
+		return escapeHtml(textnone(value));
+	}
+
+	function smallCell(value){
+		return '<small style="color:#666;word-break:break-all;">'+escapeHtml(value || '').replace(/\n/g, '<br/>')+'</small>';
+	}
+
+	function codeCell(value){
+		if(!value){
+			return '';
+		}
+		return '<code style="white-space:normal;word-break:break-all;">'+escapeHtml(value)+'</code>';
+	}
+
+	function longCell(value, maxLength){
+		if(!value){
+			return '';
+		}
+		var text = String(value);
+		var display = text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+		return '<div title="'+escapeHtml(text)+'" style="min-width:180px;max-width:360px;word-break:break-all;">'+escapeHtml(display)+'</div>';
+	}
+
+	function badgeCell(value){
+		if(!value){
+			return '';
+		}
+		return '<span class="badge badge-info">'+escapeHtml(value)+'</span>';
+	}
+
+	function logCell(value){
+		if(!value){
+			return '';
+		}
+		return '<details><summary style="cursor:pointer;color:#337ab7;">查看日志</summary>'
+			+'<pre style="white-space:pre-wrap;word-break:break-all;max-width:460px;max-height:260px;overflow:auto;margin-top:6px;">'
+			+escapeHtml(value)+'</pre></details>';
+	}
+
+	function escapeHtml(value){
+		return $('<div/>').text(value == null ? '' : String(value)).html();
 	}
 </script>
 </body>

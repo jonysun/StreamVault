@@ -100,6 +100,7 @@ public class CollectDataService {
 
 	private volatile long lastCollectTaskFinishedAt = 0L;
 	private final ThreadLocal<F2FailureDiagnosis> lastF2FailureDiagnosis = new ThreadLocal<>();
+	private final ThreadLocal<FetchRunContext> lastFetchRunContext = new ThreadLocal<>();
 
 	/**
 	 * 文件储存真实路径
@@ -458,8 +459,9 @@ public class CollectDataService {
 
 	public void createDyData(CollectDataEntity entity, String monitor) throws Exception {
 		sleepCollectTaskIntervalIfNeeded();
-		logger.info("[CollectTask] createDyData start id={} name={} monitor={} originaladdress={}",
-				entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
+		String runId = buildCollectRunId(entity);
+		logger.info("[CollectTask] createDyData start runId={} id={} name={} monitor={} originaladdress={}",
+				runId, entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
 		String taskname = entity.getTaskname(); // 任务名称 作为tvshou.nfo元数据
 		// 生成tvshow.nfo元数据
 		String temporaryDirectory = FileUtil.generateDir(true, Global.platform.douyin.name(), false, null, taskname,
@@ -477,19 +479,21 @@ public class CollectDataService {
 		int failedThisRun = 0;
 		int skippedThisRun = 0;
 		logger.info("任务开始" + entity.getOriginaladdress());
-		JSONArray allDYData = this.getDYData(entity, monitor);
+		JSONArray allDYData = this.getDYData(entity, monitor, runId);
+		FetchRunContext fetchContext = lastFetchRunContext.get();
 		if (allDYData != null) {
 			allDYData = sortDouyinItemsByPublishTime(allDYData);
 			entity.setLastfetchcount(allDYData.size());
 			entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
-			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData));
+			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData, fetchContext));
 			collectdDataDao.save(entity);
+			logFetchSnapshotItems(entity, fetchContext, allDYData, "sorted");
 		}
-		logger.info("[CollectTask] getDYData result id={} isNull={} size={}", entity.getId(), allDYData == null,
-				allDYData == null ? 0 : allDYData.size());
+		logger.info("[CollectTask] getDYData result runId={} id={} isNull={} size={}", runId, entity.getId(),
+				allDYData == null, allDYData == null ? 0 : allDYData.size());
 		if (allDYData == null) {
-			logger.error("[CollectTask] getDYData returned null id={} name={} originaladdress={}",
-					entity.getId(), entity.getTaskname(), entity.getOriginaladdress());
+			logger.error("[CollectTask] getDYData returned null runId={} id={} name={} originaladdress={}",
+					runId, entity.getId(), entity.getTaskname(), entity.getOriginaladdress());
 			F2FailureDiagnosis diagnosis = lastF2FailureDiagnosis.get();
 			recordFetchFailureDetail(entity,
 					diagnosis == null ? "FETCH_DY_DATA_FAIL" : diagnosis.errorCode(),
@@ -521,6 +525,12 @@ public class CollectDataService {
 				String awemeCreateTime = aweme_detail.getString("create_time");
 				String awemePublishTime = formatPublishTimeFromEpochSeconds(awemeCreateTime);
 				JSONObject planItem = new JSONObject();
+				planItem.put("runId", runId);
+				if (fetchContext != null) {
+					planItem.put("fetchMode", fetchContext.mode());
+					planItem.put("sourceId", fetchContext.sourceId());
+					planItem.put("maxc", fetchContext.maxc());
+				}
 				planItem.put("aweme_id", awemeId);
 				planItem.put("desc", aweme_detail.getString("desc"));
 				planItem.put("create_time", awemeCreateTime);
@@ -529,6 +539,9 @@ public class CollectDataService {
 				String desc = aweme_detail.getString("desc");
 				String displayName = safeDisplayName(desc, awemeId, "视频");
 				String detailJson = safeDetailJson(aweme_detail);
+				appendLog(processLog, "run", "runId=" + runId + ", fetchMode=" + (fetchContext == null ? "" : fetchContext.mode())
+						+ ", sourceId=" + (fetchContext == null ? "" : fetchContext.sourceId())
+						+ ", maxc=" + (fetchContext == null ? "" : fetchContext.maxc()));
 				appendLog(processLog, "item-start", "awemeId=" + awemeId + ", desc=" + (desc == null ? "" : desc));
 				String coveruri = "";
 				JSONArray cover = aweme_detail.getJSONArray("cover");
@@ -541,28 +554,37 @@ public class CollectDataService {
 				if (jsonArray == null || jsonArray.isEmpty()) {
 					mediaType = "image";
 					planItem.put("mediatype", mediaType);
+					planItem.put("downloadUrlPresent", false);
 					planItem.put("decision", "image-branch");
+					planItem.put("reason", "video_play_addr empty");
 					displayName = safeDisplayName(desc, awemeId, "图文");
 					appendLog(processLog, "branch", "video_play_addr empty -> imageText executor");
-					if (blockedWorkService.isBlocked("抖音", awemeId, "graphic")) {
+					boolean blockedGraphic = blockedWorkService.isBlocked(Global.platform.douyin.name(), awemeId, "graphic");
+					planItem.put("blocked", blockedGraphic);
+					if (blockedGraphic) {
 						appendLog(processLog, "skip", "blocked work");
 						skippedThisRun++;
 						planItem.put("decision", "skip-blocked");
-						planItems.add(planItem);
+						planItem.put("reason", "blocked work");
+						addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 						continue;
 					}
 					CollectDataDetailEntity existingDetail = collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId());
+					planItem.put("detailExists", existingDetail != null);
 					if (existingDetail != null) {
 						boolean graphicExists = graphicContentDao.findByVideoidAndPlatform(awemeId, Global.platform.douyin.name()).isPresent();
+						planItem.put("graphicExists", graphicExists);
 						if (graphicExists) {
 							appendLog(processLog, "skip", "detail exists in collect_data_detail and graphic exists");
 							skippedThisRun++;
 							planItem.put("decision", "skip-detail-exists");
-							planItems.add(planItem);
+							planItem.put("reason", "detail and graphic content already exist");
+							addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 							continue;
 						}
 						appendLog(processLog, "repair", "detail exists but graphic content missing, retry imageText executor");
 						planItem.put("decision", "image-retry-missing-graphic");
+						planItem.put("reason", "detail exists but graphic content missing");
 					}
 					// 不支持
 					try {
@@ -592,6 +614,7 @@ public class CollectDataService {
 						graphiccount++;
 						successThisRun++;
 						planItem.put("decision", "image-success");
+						planItem.put("reason", "imageText executor success");
 					} catch (Exception e) {
 						logger.error("收藏类模块中抖音图集下载异常");
 						logger.error(e.getMessage());
@@ -617,8 +640,9 @@ public class CollectDataService {
 							collectDataDetailService.save(failed);
 						}
 						planItem.put("decision", "image-fail");
+						planItem.put("reason", trimMsg(e.getMessage()));
 					}
-					planItems.add(planItem);
+					addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 					continue;
 				}
 				mediaType = "video";
@@ -630,22 +654,30 @@ public class CollectDataService {
 					videoplay = jsonArray.getString(0);
 				}
 				appendLog(processLog, "branch", "video path selected");
+				planItem.put("downloadUrlPresent", videoplay != null && !videoplay.trim().isEmpty());
 				logger.info("[CollectTask] item start taskId={} index={} awemeId={} desc={}", entity.getId(), i,
 						awemeId, desc);
 
 				List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(awemeId);
-				if (blockedWorkService.isBlocked("抖音", awemeId, "video")) {
+				boolean blockedVideo = blockedWorkService.isBlocked(Global.platform.douyin.name(), awemeId, "video");
+				planItem.put("blocked", blockedVideo);
+				if (blockedVideo) {
 					appendLog(processLog, "skip", "blocked work");
 					skippedThisRun++;
 					planItem.put("decision", "skip-blocked");
-					planItems.add(planItem);
+					planItem.put("reason", "blocked work");
+					addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 					continue;
 				}
+				planItem.put("videoExists", findByVideoid.size() > 0);
 				if (findByVideoid.size() > 0) {
 					VideoDataEntity existsVideo = findByVideoid.get(0);
 					File vf = existsVideo.getVideoaddr() == null ? null : new File(existsVideo.getVideoaddr());
+					planItem.put("fileExists", vf != null && vf.exists());
+					planItem.put("existingVideoPath", existsVideo.getVideoaddr());
 					if (vf == null || !vf.exists()) {
 						appendLog(processLog, "dedup", "db exists but file missing, force redownload");
+						planItem.put("reason", "video db record exists but file missing");
 						findByVideoid = new ArrayList<>();
 					}
 				}
@@ -675,8 +707,11 @@ public class CollectDataService {
 						logger.info("[CollectTask] local file hit, skip download taskId={} awemeId={} path={}", entity.getId(),
 								awemeId, videofile);
 						planItem.put("decision", "video-local-hit");
+						planItem.put("reason", "local file exists before download");
 					}
 					logger.info("已使用批量下载,下载器类型为:" + Global.downtype);
+					planItem.put("fileExists", localVideoExists);
+					planItem.put("targetVideoPath", videofile);
 					String itemCookie = platformCookieService.currentDouyinCookie("collect_item_download");
 					if (!localVideoExists && Global.downtype.equals("a2")) {
 						appendLog(processLog, "download", "using aria2");
@@ -709,9 +744,11 @@ public class CollectDataService {
 							errorCode = "DOWNLOAD_RISK_OR_FAIL";
 							errorMsg = "内置下载返回1";
 							appendLog(processLog, "download", "http downloader returned 1");
+							planItem.put("reason", "http downloader returned 1");
 							failedThisRun++;
 							logger.error("[CollectTask] risk triggered taskId={} awemeId={} output={}", entity.getId(), awemeId,
 									downloadFileWithOkHttp);
+							addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 							break;
 						}
 					}
@@ -847,9 +884,11 @@ public class CollectDataService {
 					skippedThisRun++;
 					planItem.put("decision", "skip-detail-exists");
 				}
-				planItems.add(planItem);
+				addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 
 			}
+			planItems.add(0, buildRunSummaryPlanItem(runId, fetchContext, allDYData.size(), successThisRun,
+					failedThisRun, skippedThisRun, videoaddcount, graphiccount, targetSuccess));
 			entity.setLastplanitems(planItems.toJSONString());
 			collectdDataDao.save(entity);
 		}
@@ -865,6 +904,8 @@ public class CollectDataService {
 		logger.info("任务结束" + entity.getOriginaladdress());
 		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} failedThisRun={} skippedThisRun={} finalStatus={} carriedout={}",
 				entity.getId(), videoaddcount, graphiccount, totalCount, successThisRun, targetSuccess, failedThisRun, skippedThisRun, entity.getTaskstatus(), entity.getCarriedout());
+		lastF2FailureDiagnosis.remove();
+		lastFetchRunContext.remove();
 	}
 
 	static String resolveDouyinCollectStatus(String risk, boolean fetchFailed, int successThisRun, int failedThisRun, int skippedThisRun) {
@@ -879,6 +920,10 @@ public class CollectDataService {
 	}
 
 	String buildFetchSnapshot(JSONArray allData) {
+		return buildFetchSnapshot(allData, null);
+	}
+
+	String buildFetchSnapshot(JSONArray allData, FetchRunContext context) {
 		JSONArray arr = new JSONArray();
 		for (int i = 0; i < allData.size(); i++) {
 			JSONObject src = allData.getJSONObject(i);
@@ -886,10 +931,26 @@ public class CollectDataService {
 			String publishTime = formatPublishTimeFromEpochSeconds(createTime);
 			JSONObject item = new JSONObject();
 			item.put("index", i + 1);
+			item.put("sortedIndex", i + 1);
+			if (context != null) {
+				item.put("runId", context.runId());
+				item.put("taskId", context.taskId());
+				item.put("taskName", context.taskName());
+				item.put("fetchMode", context.mode());
+				item.put("sourceId", context.sourceId());
+				item.put("maxc", context.maxc());
+				item.put("existingDetailCount", context.existingDetailCount());
+				item.put("successDetailCount", context.successDetailCount());
+				item.put("originaladdress", context.originaladdress());
+			}
 			item.put("aweme_id", src.getString("aweme_id"));
 			item.put("desc", src.getString("desc"));
 			item.put("create_time", createTime);
 			item.put("publish_time", publishTime);
+			item.put("type", src.getString("type"));
+			item.put("nickname", src.getString("nickname"));
+			item.put("uid", src.getString("uid"));
+			item.put("sec_uid", src.getString("sec_uid"));
 			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
 			arr.add(item);
 		}
@@ -898,6 +959,79 @@ public class CollectDataService {
 			return text.substring(0, 200000) + "...(truncated)";
 		}
 		return text;
+	}
+
+	private String buildCollectRunId(CollectDataEntity entity) {
+		String taskId = entity == null || entity.getId() == null ? "unknown" : String.valueOf(entity.getId());
+		return "collect-" + taskId + "-" + System.currentTimeMillis();
+	}
+
+	private void logFetchSnapshotItems(CollectDataEntity entity, FetchRunContext context, JSONArray data, String order) {
+		if (data == null) {
+			logger.info("[CollectTask] fetch snapshot runId={} taskId={} order={} count=0",
+					context == null ? null : context.runId(), entity == null ? null : entity.getId(), order);
+			return;
+		}
+		logger.info("[CollectTask] fetch snapshot runId={} taskId={} mode={} sourceId={} maxc={} order={} count={} first={} last={}",
+				context == null ? null : context.runId(), entity == null ? null : entity.getId(),
+				context == null ? null : context.mode(), context == null ? null : context.sourceId(),
+				context == null ? null : context.maxc(), order, data.size(), firstAwemeId(data), lastAwemeId(data));
+		for (int i = 0; i < data.size(); i++) {
+			JSONObject item = data.getJSONObject(i);
+			logger.info("[CollectTask] fetched item runId={} taskId={} order={} index={} awemeId={} publishTime={} type={} hasVideo={} desc={}",
+					context == null ? null : context.runId(), entity == null ? null : entity.getId(), order, i + 1,
+					item.getString("aweme_id"), formatPublishTimeFromEpochSeconds(item.getString("create_time")),
+					item.getString("type"),
+					item.getJSONArray("video_play_addr") != null && !item.getJSONArray("video_play_addr").isEmpty(),
+					trimForLog(item.getString("desc"), 160));
+		}
+	}
+
+	private void addPlanItem(JSONArray planItems, JSONObject planItem, String status, String errorCode, String errorMsg,
+			StringBuilder processLog) {
+		planItem.put("status", status == null || status.trim().isEmpty() ? planItem.getString("decision") : status);
+		planItem.put("errorcode", errorCode);
+		planItem.put("errormsg", errorMsg);
+		planItem.put("time", DateUtils.formatDateTime(new Date()));
+		String logText = processLog == null ? "" : processLog.toString();
+		planItem.put("processlog", logText.length() > 12000 ? logText.substring(0, 12000) + "...(truncated)" : logText);
+		planItems.add(planItem);
+		logger.info("[CollectTask] plan item runId={} awemeId={} index={} mediaType={} decision={} status={} reason={} errorCode={} log={}",
+				planItem.getString("runId"), planItem.getString("aweme_id"), planItem.get("index"),
+				planItem.getString("mediatype"), planItem.getString("decision"), planItem.getString("status"),
+				trimForLog(planItem.getString("reason"), 160), errorCode, trimForLog(logText, 500));
+	}
+
+	private JSONObject buildRunSummaryPlanItem(String runId, FetchRunContext context, int fetchedCount,
+			int successThisRun, int failedThisRun, int skippedThisRun, int addedVideo, int addedGraphic,
+			int targetSuccess) {
+		JSONObject summary = new JSONObject();
+		summary.put("stage", "run-summary");
+		summary.put("runId", runId);
+		if (context != null) {
+			summary.put("fetchMode", context.mode());
+			summary.put("sourceId", context.sourceId());
+			summary.put("maxc", context.maxc());
+			summary.put("existingDetailCount", context.existingDetailCount());
+			summary.put("successDetailCount", context.successDetailCount());
+			summary.put("originaladdress", context.originaladdress());
+		}
+		summary.put("fetchedCount", fetchedCount);
+		summary.put("targetSuccess", targetSuccess);
+		summary.put("successThisRun", successThisRun);
+		summary.put("failedThisRun", failedThisRun);
+		summary.put("skippedThisRun", skippedThisRun);
+		summary.put("addedVideo", addedVideo);
+		summary.put("addedGraphic", addedGraphic);
+		summary.put("decision", "run-summary");
+		summary.put("status", "run-summary");
+		summary.put("reason", "fetch/process summary");
+		summary.put("time", DateUtils.formatDateTime(new Date()));
+		logger.info("[CollectTask] run summary runId={} mode={} sourceId={} maxc={} fetched={} targetSuccess={} success={} failed={} skipped={} addedVideo={} addedGraphic={}",
+				runId, context == null ? null : context.mode(), context == null ? null : context.sourceId(),
+				context == null ? null : context.maxc(), fetchedCount, targetSuccess, successThisRun,
+				failedThisRun, skippedThisRun, addedVideo, addedGraphic);
+		return summary;
 	}
 
 	JSONArray sortDouyinItemsByPublishTime(JSONArray allData) {
@@ -944,6 +1078,21 @@ public class CollectDataService {
 		return data.getJSONObject(0).getString("aweme_id");
 	}
 
+	private String lastAwemeId(JSONArray data) {
+		if (data == null || data.isEmpty()) {
+			return null;
+		}
+		return data.getJSONObject(data.size() - 1).getString("aweme_id");
+	}
+
+	private String trimForLog(String text, int maxLength) {
+		if (text == null) {
+			return null;
+		}
+		String normalized = text.replace("\r", " ").replace("\n", " ");
+		return normalized.length() > maxLength ? normalized.substring(0, maxLength) : normalized;
+	}
+
 	private Long publishTimeMillis(String rawCreateTime) {
 		String publishTime = formatPublishTimeFromEpochSeconds(rawCreateTime);
 		if (publishTime == null) {
@@ -954,12 +1103,18 @@ public class CollectDataService {
 	}
 
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {
+		return getDYData(entity, monitor, buildCollectRunId(entity));
+	}
+
+	public JSONArray getDYData(CollectDataEntity entity, String monitor, String runId) throws IOException {
 		lastF2FailureDiagnosis.remove();
+		lastFetchRunContext.remove();
 		String taskout = Global.apppath + "lot" + System.getProperty("file.separator") + entity.getId() + "_"
 				+ entity.getTaskname() + ".json";
-		logger.info("[CollectTask] getDYData start id={} name={} originaladdress={} monitor={} tempFile={}",
-				entity.getId(), entity.getTaskname(), entity.getOriginaladdress(), monitor, taskout);
-		String sec_user_id = entity.getOriginaladdress().replaceAll("post", "").replaceAll("like", "");
+		logger.info("[CollectTask] getDYData start runId={} id={} name={} originaladdress={} monitor={} tempFile={}",
+				runId, entity.getId(), entity.getTaskname(), entity.getOriginaladdress(), monitor, taskout);
+		String originaladdress = entity.getOriginaladdress() == null ? "" : entity.getOriginaladdress();
+		String sec_user_id = originaladdress.replaceFirst("^(post|like|recommend)", "");
 		int maxc = 80;
 
 		// if ("N".equals(monitor)) {
@@ -979,29 +1134,56 @@ public class CollectDataService {
 			long expanded = successCountByDataid + monitorWindow;
 			// 防止窗口无限膨胀导致单次抓取过大
 			maxc = (int) Math.min(expanded, 2000L);
-			logger.info("[CollectTask] monitor mode targetNew={} expandedFetchWindow={} (successProcessed={} + target={}, allDetail={})",
-					monitorWindow, maxc, successCountByDataid, monitorWindow, countByDataid);
+			logger.info("[CollectTask] monitor mode runId={} targetNew={} expandedFetchWindow={} (successProcessed={} + target={}, allDetail={})",
+					runId, monitorWindow, maxc, successCountByDataid, monitorWindow, countByDataid);
 		} else {
 			maxc = null != entity.getOmaxcur() ? entity.getOmaxcur() : 80;
 		}
-		logger.info("[CollectTask] getDYData resolved maxc={} existingDetailCount={} (omaxcur={}, maxcur={})",
-				maxc, countByDataid, entity.getOmaxcur(), entity.getMaxcur());
+		logger.info("[CollectTask] getDYData resolved runId={} maxc={} existingDetailCount={} successDetailCount={} (omaxcur={}, maxcur={})",
+				runId, maxc, countByDataid, successCountByDataid, entity.getOmaxcur(), entity.getMaxcur());
 
-		if (entity.getOriginaladdress().startsWith("post")) {
+		if (originaladdress.startsWith("post")) {
+			return executeDouyinListFetch(entity, runId, monitor, "post", sec_user_id, null,
+					"fetch_user_post_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+		if (originaladdress.startsWith("like")) {
+			return executeDouyinListFetch(entity, runId, monitor, "like", sec_user_id, null,
+					"fetch_user_like_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+		if (originaladdress.startsWith("recommend")) {
+			return executeDouyinListFetch(entity, runId, monitor, "recommend", sec_user_id, null,
+					"fetch_user_feed_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+		if (originaladdress.startsWith("fav-")) {
+			String startTag = "fav-";
+			String endTag = "-fav";
+			int startIndex = originaladdress.indexOf(startTag) + startTag.length();
+			int endIndex = originaladdress.indexOf(endTag);
+			if (startIndex < startTag.length() || endIndex <= startIndex) {
+				logger.error("[CollectTask] getDYData invalid fav address runId={} id={} originaladdress={}",
+						runId, entity.getId(), originaladdress);
+				return null;
+			}
+			String content = originaladdress.substring(startIndex, endIndex).trim();
+			return executeDouyinListFetch(entity, runId, monitor, "fav", content, content,
+					"fetch_user_collects_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+
+		if (originaladdress.startsWith("post")) {
 			logger.info("[CollectTask] getDYData mode=post uid={} maxc={} out={}", sec_user_id, maxc, taskout);
 			String cookie = platformCookieService.currentDouyinCookie("fetch_user_post_videos");
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_post_videos", sec_user_id, null,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result(entity, "like", sec_user_id, maxc, f2cmd, taskout);
+			logF2Result(entity, "post", sec_user_id, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
-				logger.info("[CollectTask] getDYData parsed count={} mode=like", jsonFromFile == null ? 0 : jsonFromFile.size());
+				logger.info("[CollectTask] getDYData parsed count={} mode=post", jsonFromFile == null ? 0 : jsonFromFile.size());
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
 		}
-		if (entity.getOriginaladdress().startsWith("fav-")) {
+		if (originaladdress.startsWith("fav-")) {
 			String startTag = "fav-";
 			String endTag = "-fav";
 			int startIndex = entity.getOriginaladdress().indexOf(startTag) + startTag.length();
@@ -1013,10 +1195,10 @@ public class CollectDataService {
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_collects_videos", null, content,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result(entity, "recommend", sec_user_id, maxc, f2cmd, taskout);
+			logF2Result(entity, "fav", content, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
-				logger.info("[CollectTask] getDYData parsed count={} mode=recommend", jsonFromFile == null ? 0 : jsonFromFile.size());
+				logger.info("[CollectTask] getDYData parsed count={} mode=fav", jsonFromFile == null ? 0 : jsonFromFile.size());
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
@@ -1026,24 +1208,53 @@ public class CollectDataService {
 		return null;
 	}
 
+	private JSONArray executeDouyinListFetch(CollectDataEntity entity, String runId, String monitor, String mode,
+			String sourceId, String cid, String functionName, int maxc, String taskout, long existingDetailCount,
+			long successDetailCount) throws IOException {
+		FetchRunContext context = new FetchRunContext(runId, entity.getId(), entity.getTaskname(),
+				entity.getOriginaladdress(), monitor, mode, sourceId, maxc, existingDetailCount, successDetailCount,
+				entity.getOmaxcur(), entity.getMaxcur(), taskout);
+		lastFetchRunContext.set(context);
+		logger.info("[CollectTask] getDYData request runId={} taskId={} mode={} sourceId={} cid={} maxc={} out={}",
+				runId, entity.getId(), mode, sourceId, cid, maxc, taskout);
+		String cookie = platformCookieService.currentDouyinCookie(functionName);
+		String f2cmd = CommandUtil.f2cmd(cookie, null, functionName,
+				"fav".equals(mode) ? null : sourceId, "fav".equals(mode) ? cid : null, maxc, taskout);
+		reportF2CookieResult(Global.platform.douyin.name(), cookie, f2cmd);
+		logF2Result(entity, runId, mode, sourceId, maxc, f2cmd, taskout);
+		if (f2cmd != null && f2cmd.contains("stream-vault-ok")) {
+			JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
+			logger.info("[CollectTask] getDYData parsed runId={} count={} mode={} sourceId={}",
+					runId, jsonFromFile == null ? 0 : jsonFromFile.size(), mode, sourceId);
+			logFetchSnapshotItems(entity, context, jsonFromFile, "f2-raw");
+			Files.deleteIfExists(Paths.get(taskout));
+			return jsonFromFile;
+		}
+		return null;
+	}
+
 	private void logF2Result(CollectDataEntity entity, String mode, String sourceId, int maxc, String f2cmd, String taskout) {
+		logF2Result(entity, null, mode, sourceId, maxc, f2cmd, taskout);
+	}
+
+	private void logF2Result(CollectDataEntity entity, String runId, String mode, String sourceId, int maxc, String f2cmd, String taskout) {
 		boolean success = f2cmd != null && f2cmd.contains("stream-vault-ok");
 		Integer exitCode = CommandUtil.getLastF2ExitCode();
 		Long durationMs = CommandUtil.getLastF2DurationMs();
-		logger.info("[CollectTask] getDYData f2 outputLength={} containsSuccessMarker={} exitCode={} durationMs={}",
-				f2cmd == null ? 0 : f2cmd.length(), success, exitCode, durationMs);
+		logger.info("[CollectTask] getDYData f2 runId={} mode={} sourceId={} outputLength={} containsSuccessMarker={} exitCode={} durationMs={}",
+				runId, mode, sourceId, f2cmd == null ? 0 : f2cmd.length(), success, exitCode, durationMs);
 		if (!success) {
 			boolean outFileExists = Files.exists(Paths.get(taskout));
 			long outFileSize = outFileExists ? safeFileSize(taskout) : -1;
 			F2FailureDiagnosis diagnosis = analyzeF2Failure(mode, entity.getOriginaladdress(), sourceId, maxc, taskout,
 					outFileExists, outFileSize, exitCode, durationMs, f2cmd);
 			lastF2FailureDiagnosis.set(diagnosis);
-			logger.error("[CollectTask] getDYData f2 rootCause {}", diagnosis.toLogMessage());
-			logger.error("[CollectTask] getDYData f2 failed mode={} sourceId={} outputPreview={}", mode, sourceId, previewOutput(f2cmd));
-			logger.error("[CollectTask] getDYData f2 failed mode={} outPath={} outFileExists={} outFileSize={}",
-					mode, taskout, outFileExists, outFileSize);
+			logger.error("[CollectTask] getDYData f2 rootCause runId={} {}", runId, diagnosis.toLogMessage());
+			logger.error("[CollectTask] getDYData f2 failed runId={} mode={} sourceId={} outputPreview={}", runId, mode, sourceId, previewOutput(f2cmd));
+			logger.error("[CollectTask] getDYData f2 failed runId={} mode={} outPath={} outFileExists={} outFileSize={}",
+					runId, mode, taskout, outFileExists, outFileSize);
 		} else {
-			logger.info("[CollectTask] getDYData output file exists={} path={}", Files.exists(Paths.get(taskout)), taskout);
+			logger.info("[CollectTask] getDYData output file runId={} exists={} path={}", runId, Files.exists(Paths.get(taskout)), taskout);
 		}
 	}
 
@@ -1126,6 +1337,7 @@ public class CollectDataService {
 		if (entity == null || entity.getId() == null) {
 			return;
 		}
+		FetchRunContext fetchContext = lastFetchRunContext.get();
 		CollectDataDetailEntity existing = collectDataDetailService.findByVideoAndDataid("__FETCH__", entity.getId());
 		CollectDataDetailEntity detail = existing == null ? new CollectDataDetailEntity() : existing;
 		detail.setDataid(entity.getId());
@@ -1138,6 +1350,10 @@ public class CollectDataService {
 		detail.setErrormsg(errorMsg);
 		StringBuilder processLog = new StringBuilder();
 		appendLog(processLog, "getDYData", "originaladdress=" + entity.getOriginaladdress());
+		if (fetchContext != null) {
+			appendLog(processLog, "run", "runId=" + fetchContext.runId() + ", fetchMode=" + fetchContext.mode()
+					+ ", sourceId=" + fetchContext.sourceId() + ", maxc=" + fetchContext.maxc());
+		}
 		appendLog(processLog, "f2", "exitCode=" + CommandUtil.getLastF2ExitCode() + ", durationMs=" + CommandUtil.getLastF2DurationMs());
 		detail.setProcesslog(processLog.toString());
 		JSONObject context = new JSONObject();
@@ -1145,6 +1361,13 @@ public class CollectDataService {
 		context.put("taskName", entity.getTaskname());
 		context.put("originaladdress", entity.getOriginaladdress());
 		context.put("error", errorMsg);
+		if (fetchContext != null) {
+			context.put("runId", fetchContext.runId());
+			context.put("fetchMode", fetchContext.mode());
+			context.put("sourceId", fetchContext.sourceId());
+			context.put("maxc", fetchContext.maxc());
+			context.put("taskout", fetchContext.taskout());
+		}
 		if (detailJson != null) {
 			context.put("detail", detailJson);
 		}
@@ -1156,6 +1379,12 @@ public class CollectDataService {
 		JSONObject planItem = new JSONObject();
 		planItem.put("stage", "getDYData");
 		planItem.put("decision", "fetch-fail");
+		if (fetchContext != null) {
+			planItem.put("runId", fetchContext.runId());
+			planItem.put("fetchMode", fetchContext.mode());
+			planItem.put("sourceId", fetchContext.sourceId());
+			planItem.put("maxc", fetchContext.maxc());
+		}
 		planItem.put("errorcode", errorCode);
 		planItem.put("errormsg", errorMsg);
 		planItem.put("exitCode", CommandUtil.getLastF2ExitCode());
@@ -1220,6 +1449,11 @@ public class CollectDataService {
 					+ " outFileExists=" + outFileExists
 					+ " outFileSize=" + outFileSize;
 		}
+	}
+
+	static record FetchRunContext(String runId, Integer taskId, String taskName, String originaladdress,
+			String monitor, String mode, String sourceId, int maxc, long existingDetailCount, long successDetailCount,
+			Integer omaxcur, Integer maxcur, String taskout) {
 	}
 
 	private long safeFileSize(String path) {
