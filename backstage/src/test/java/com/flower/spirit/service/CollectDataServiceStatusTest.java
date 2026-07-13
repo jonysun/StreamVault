@@ -42,9 +42,28 @@ class CollectDataServiceStatusTest {
 		assertThat(diagnosis.errorCode()).isEqualTo("F2_INTERNAL_NICKNAME_RAW_UNBOUND");
 		assertThat(diagnosis.exceptionType()).isEqualTo("UnboundLocalError");
 		assertThat(diagnosis.rootCause()).contains("nickname_raw");
+		assertThat(diagnosis.outputPreview()).contains("UnboundLocalError");
 		assertThat(diagnosis.stackTop()).contains("handler.py:455");
 		assertThat(diagnosis.toLogMessage()).contains("mode=post", "sourceId=MS4abc", "exitCode=1",
-				"outFileExists=false");
+				"outFileExists=false", "outputPreview=");
+	}
+
+	@Test
+	void analyzeF2FailureCarriesDiagnostics() {
+		JSONObject diagnostics = new JSONObject();
+		diagnostics.put("cookiePresent", true);
+		JSONObject profileDiagnostic = new JSONObject();
+		profileDiagnostic.put("success", false);
+		profileDiagnostic.put("error", "empty response");
+		diagnostics.put("profileDiagnostic", profileDiagnostic);
+
+		CollectDataService.F2FailureDiagnosis diagnosis = CollectDataService.analyzeF2Failure("post", "postMS4abc",
+				"MS4abc", 20, "/app/lot/79.json", false, -1, 1, 1515L,
+				"UnboundLocalError: cannot access local variable 'nickname_raw' where it is not associated with a value",
+				diagnostics);
+
+		assertThat(diagnosis.diagnostics()).isSameAs(diagnostics);
+		assertThat(diagnosis.toLogMessage()).contains("diagnostics=");
 	}
 
 	@Test

@@ -1221,7 +1221,7 @@ public class CollectDataService {
 		String f2cmd = CommandUtil.f2cmd(cookie, null, functionName,
 				"fav".equals(mode) ? null : sourceId, "fav".equals(mode) ? cid : null, maxc, taskout);
 		reportF2CookieResult(Global.platform.douyin.name(), cookie, f2cmd);
-		logF2Result(entity, runId, mode, sourceId, maxc, f2cmd, taskout);
+		logF2Result(entity, runId, mode, sourceId, maxc, f2cmd, taskout, cookie);
 		if (f2cmd != null && f2cmd.contains("stream-vault-ok")) {
 			JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 			logger.info("[CollectTask] getDYData parsed runId={} count={} mode={} sourceId={}",
@@ -1234,10 +1234,15 @@ public class CollectDataService {
 	}
 
 	private void logF2Result(CollectDataEntity entity, String mode, String sourceId, int maxc, String f2cmd, String taskout) {
-		logF2Result(entity, null, mode, sourceId, maxc, f2cmd, taskout);
+		logF2Result(entity, null, mode, sourceId, maxc, f2cmd, taskout, null);
 	}
 
 	private void logF2Result(CollectDataEntity entity, String runId, String mode, String sourceId, int maxc, String f2cmd, String taskout) {
+		logF2Result(entity, runId, mode, sourceId, maxc, f2cmd, taskout, null);
+	}
+
+	private void logF2Result(CollectDataEntity entity, String runId, String mode, String sourceId, int maxc,
+			String f2cmd, String taskout, String cookie) {
 		boolean success = f2cmd != null && f2cmd.contains("stream-vault-ok");
 		Integer exitCode = CommandUtil.getLastF2ExitCode();
 		Long durationMs = CommandUtil.getLastF2DurationMs();
@@ -1246,10 +1251,13 @@ public class CollectDataService {
 		if (!success) {
 			boolean outFileExists = Files.exists(Paths.get(taskout));
 			long outFileSize = outFileExists ? safeFileSize(taskout) : -1;
+			JSONObject diagnostics = buildF2FailureDiagnostics(mode, sourceId, cookie);
 			F2FailureDiagnosis diagnosis = analyzeF2Failure(mode, entity.getOriginaladdress(), sourceId, maxc, taskout,
-					outFileExists, outFileSize, exitCode, durationMs, f2cmd);
+					outFileExists, outFileSize, exitCode, durationMs, f2cmd, diagnostics);
 			lastF2FailureDiagnosis.set(diagnosis);
 			logger.error("[CollectTask] getDYData f2 rootCause runId={} {}", runId, diagnosis.toLogMessage());
+			logger.error("[CollectTask] getDYData f2 diagnostics runId={} mode={} sourceId={} diagnostics={}",
+					runId, mode, sourceId, diagnostics == null ? null : diagnostics.toJSONString());
 			logger.error("[CollectTask] getDYData f2 failed runId={} mode={} sourceId={} outputPreview={}", runId, mode, sourceId, previewOutput(f2cmd));
 			logger.error("[CollectTask] getDYData f2 failed runId={} mode={} outPath={} outFileExists={} outFileSize={}",
 					runId, mode, taskout, outFileExists, outFileSize);
@@ -1260,6 +1268,13 @@ public class CollectDataService {
 
 	static F2FailureDiagnosis analyzeF2Failure(String mode, String originaladdress, String sourceId, int maxc,
 			String outPath, boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String output) {
+		return analyzeF2Failure(mode, originaladdress, sourceId, maxc, outPath, outFileExists, outFileSize,
+				exitCode, durationMs, output, null);
+	}
+
+	static F2FailureDiagnosis analyzeF2Failure(String mode, String originaladdress, String sourceId, int maxc,
+			String outPath, boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String output,
+			JSONObject diagnostics) {
 		String normalized = output == null ? "" : output;
 		String exceptionType = null;
 		String exceptionMessage = null;
@@ -1271,8 +1286,10 @@ public class CollectDataService {
 		String stackTop = extractStackTop(normalized);
 		String errorCode = classifyF2Failure(exceptionType, exceptionMessage, normalized, outFileExists, exitCode);
 		String rootCause = buildRootCause(errorCode, exceptionType, exceptionMessage, normalized);
+		String outputPreview = previewOutput(output);
 		return new F2FailureDiagnosis(mode, originaladdress, sourceId, maxc, outPath, outFileExists, outFileSize,
-				exitCode, durationMs, errorCode, exceptionType, exceptionMessage, stackTop, rootCause);
+				exitCode, durationMs, errorCode, exceptionType, exceptionMessage, stackTop, rootCause, outputPreview,
+				diagnostics);
 	}
 
 	private static String extractStackTop(String output) {
@@ -1333,6 +1350,68 @@ public class CollectDataService {
 		}
 	}
 
+	private JSONObject buildF2FailureDiagnostics(String mode, String sourceId, String cookie) {
+		JSONObject diagnostics = new JSONObject();
+		diagnostics.put("mode", mode);
+		diagnostics.put("sourceId", sourceId);
+		diagnostics.put("cookiePresent", cookie != null && !cookie.trim().isEmpty());
+		diagnostics.put("cookieLength", cookie == null ? 0 : cookie.length());
+		diagnostics.put("cookieHasSessionid", containsIgnoreCase(cookie, "sessionid"));
+		diagnostics.put("cookieHasSidGuard", containsIgnoreCase(cookie, "sid_guard"));
+		diagnostics.put("cookieHasTtwid", containsIgnoreCase(cookie, "ttwid"));
+		diagnostics.put("cookieHasPassportCsrf", containsIgnoreCase(cookie, "passport_csrf_token"));
+		if ("post".equals(mode) || "like".equals(mode) || "recommend".equals(mode)) {
+			JSONObject profileDiagnostic = DouUtil.diagnoseUserProfile(sourceId);
+			diagnostics.put("profileDiagnostic", profileDiagnostic);
+		}
+		if ("post".equals(mode) || "like".equals(mode)) {
+			diagnostics.put("awemeListDiagnostic", diagnoseDouyinAwemeList(mode, sourceId, cookie));
+		}
+		return diagnostics;
+	}
+
+	private boolean containsIgnoreCase(String text, String needle) {
+		return text != null && needle != null && text.toLowerCase().contains(needle.toLowerCase());
+	}
+
+	private JSONObject diagnoseDouyinAwemeList(String mode, String sourceId, String cookie) {
+		JSONObject diagnostic = new JSONObject();
+		diagnostic.put("mode", mode);
+		diagnostic.put("sourceId", sourceId);
+		diagnostic.put("count", 1);
+		diagnostic.put("maxCursor", "0");
+		if (sourceId == null || sourceId.trim().isEmpty()) {
+			diagnostic.put("success", false);
+			diagnostic.put("error", "empty sourceId");
+			return diagnostic;
+		}
+		String endpoint;
+		if ("post".equals(mode)) {
+			endpoint = "https://www.douyin.com/aweme/v1/web/aweme/post/?";
+		} else if ("like".equals(mode)) {
+			endpoint = "https://www.douyin.com/aweme/v1/web/aweme/favorite/?";
+		} else {
+			diagnostic.put("success", false);
+			diagnostic.put("error", "unsupported mode");
+			return diagnostic;
+		}
+		try {
+			String query = "aid=6383&sec_user_id=#uid#&count=1&max_cursor=0&cookie_enabled=true&platform=PC&downlink=10"
+					.replace("#uid#", sourceId);
+			String xbogus = XbogusUtil.getXBogus(query);
+			String url = endpoint + query + "&X-Bogus=" + xbogus;
+			diagnostic.put("endpoint", endpoint);
+			diagnostic.put("xbogusPresent", xbogus != null && !xbogus.trim().isEmpty());
+			JSONObject httpDiagnostic = DouUtil.diagnoseHttpGet(url, cookie, 800);
+			diagnostic.put("http", httpDiagnostic);
+			diagnostic.put("success", httpDiagnostic != null && httpDiagnostic.getBooleanValue("success"));
+		} catch (Exception e) {
+			diagnostic.put("success", false);
+			diagnostic.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+		}
+		return diagnostic;
+	}
+
 	private void recordFetchFailureDetail(CollectDataEntity entity, String errorCode, String errorMsg, JSONObject detailJson) {
 		if (entity == null || entity.getId() == null) {
 			return;
@@ -1355,6 +1434,12 @@ public class CollectDataService {
 					+ ", sourceId=" + fetchContext.sourceId() + ", maxc=" + fetchContext.maxc());
 		}
 		appendLog(processLog, "f2", "exitCode=" + CommandUtil.getLastF2ExitCode() + ", durationMs=" + CommandUtil.getLastF2DurationMs());
+		if (detailJson != null && detailJson.getString("outputPreview") != null) {
+			appendLog(processLog, "f2-output", detailJson.getString("outputPreview"));
+		}
+		if (detailJson != null && detailJson.getJSONObject("diagnostics") != null) {
+			appendLog(processLog, "diagnostics", detailJson.getJSONObject("diagnostics").toJSONString());
+		}
 		detail.setProcesslog(processLog.toString());
 		JSONObject context = new JSONObject();
 		context.put("taskId", entity.getId());
@@ -1399,6 +1484,9 @@ public class CollectDataService {
 			planItem.put("exceptionType", detailJson.getString("exceptionType"));
 			planItem.put("exceptionMessage", detailJson.getString("exceptionMessage"));
 			planItem.put("stackTop", detailJson.getString("stackTop"));
+			planItem.put("outputPreview", detailJson.getString("outputPreview"));
+			planItem.put("diagnostics", detailJson.getJSONObject("diagnostics"));
+			planItem.put("processlog", processLog.toString());
 		}
 		planItems.add(planItem);
 		entity.setTaskstatus("执行失败(抓取异常)");
@@ -1426,13 +1514,16 @@ public class CollectDataService {
 			context.put("exceptionType", diagnosis.exceptionType());
 			context.put("exceptionMessage", diagnosis.exceptionMessage());
 			context.put("stackTop", diagnosis.stackTop());
+			context.put("outputPreview", diagnosis.outputPreview());
+			context.put("diagnostics", diagnosis.diagnostics());
 		}
 		return context;
 	}
 
 	static record F2FailureDiagnosis(String mode, String originaladdress, String sourceId, int maxc, String outPath,
 			boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String errorCode,
-			String exceptionType, String exceptionMessage, String stackTop, String rootCause) {
+			String exceptionType, String exceptionMessage, String stackTop, String rootCause, String outputPreview,
+			JSONObject diagnostics) {
 		String toLogMessage() {
 			return "errorCode=" + errorCode
 					+ " rootCause=" + rootCause
@@ -1447,7 +1538,9 @@ public class CollectDataService {
 					+ " durationMs=" + durationMs
 					+ " outPath=" + outPath
 					+ " outFileExists=" + outFileExists
-					+ " outFileSize=" + outFileSize;
+					+ " outFileSize=" + outFileSize
+					+ " outputPreview=" + outputPreview
+					+ " diagnostics=" + (diagnostics == null ? null : diagnostics.toJSONString());
 		}
 	}
 
@@ -1464,7 +1557,7 @@ public class CollectDataService {
 		}
 	}
 
-	private String previewOutput(String output) {
+	private static String previewOutput(String output) {
 		if (output == null) {
 			return "null";
 		}
