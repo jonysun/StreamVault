@@ -629,6 +629,21 @@
             overflow: visible;
         }
 
+        .feed-author-work-more {
+            width: calc(100% - 24px);
+            margin: 12px;
+            height: 36px;
+            border: 0;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 13px;
+        }
+
+        .feed-author-work-more:disabled {
+            opacity: .58;
+        }
+
         .feed-author-work-grid {
             gap: 2px;
             background: #05060a;
@@ -776,17 +791,34 @@
             background: #fff;
         }
 
+        .feed-media-type-badge,
         .feed-graphic-badge {
             position: absolute;
-            right: 12px;
-            top: 24px;
+            left: 54px;
+            top: 12px;
             z-index: 2;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
             padding: 4px 10px;
             border-radius: 999px;
             background: rgba(0,0,0,0.52);
             color: #fff;
             font-size: 12px;
             pointer-events: none;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+
+        .feed-media-type-badge.feed-media-type-graphic {
+            background: rgba(248, 231, 28, 0.9);
+            color: #111;
+            font-weight: 700;
+        }
+
+        .feed-media-type-badge i {
+            font-size: 14px;
+            line-height: 1;
         }
 
         .feed-video.hide-controls {
@@ -1290,6 +1322,9 @@
                                     <button type="button" class="feed-control-btn" id="feedAuthorBtn" title="作者筛选">
                                         <i class="mdi mdi-account"></i><span>全部</span>
                                     </button>
+                                    <button type="button" class="feed-control-btn" id="feedAllMediaBtn" title="回到全部作品" style="display:none;">
+                                        <i class="mdi mdi-arrow-left"></i><span>全部</span>
+                                    </button>
                                     <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
                                         <i class="mdi mdi-volume-off"></i><span>静音</span>
                                     </button>
@@ -1391,6 +1426,11 @@
     var feedPendingAutoNextIndex = -1;
     var feedAuthorProfileQuery = null;
     var feedAuthorProfileType = '';
+    var feedAuthorProfileWorks = [];
+    var feedAuthorProfileWorksPage = 0;
+    var feedAuthorProfileWorksHasMore = false;
+    var feedAuthorProfileWorksLoading = false;
+    var feedAuthorProfileWorksTotal = 0;
     var feedAuthorContext = null;
     var feedAuthorContextTargetKey = '';
 
@@ -1922,7 +1962,7 @@
             html += '<span' + (p === 0 ? ' class="active"' : '') + '></span>';
         }
         html += '</div>';
-        html += '<div class="feed-graphic-badge">Graphic</div>';
+        html += '<div class="feed-media-type-badge feed-media-type-graphic"><i class="mdi mdi-image-multiple"></i><span>图文</span></div>';
         html += '<div class="feed-graphic-slide active" data-slide-index="0">' + buildGraphicSlideMediaHtml(slides[0], cover) + '</div>';
         html += '</div>';
         if (isPrivate) {
@@ -1956,6 +1996,7 @@
         var mp4Url = item.fallbackUrl || item.videounrealaddr || item.playurl || '';
         var html = '<div class="feed-item" data-private="' + isPrivate + '" data-feed-type="video">';
         html += '<div class="feed-video-host" data-src="' + escapeHtml(playUrl) + '" data-fallback="' + escapeHtml(fallbackUrl) + '" data-playurl="' + escapeHtml(item.playurl || '') + '" data-mp4="' + escapeHtml(mp4Url) + '"></div>';
+        html += '<div class="feed-media-type-badge feed-media-type-video"><i class="mdi mdi-play-circle-outline"></i><span>视频</span></div>';
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
@@ -2975,6 +3016,11 @@
             renderFeedAuthorDrawer();
         });
 
+        $('#feedAllMediaBtn').on('click', function() {
+            clearFeedAuthorContext();
+            reloadFeed();
+        });
+
         $('#feedMuteBtn').on('click', function() {
             feedMuted = !feedMuted;
             persistFeedMuted();
@@ -3034,7 +3080,7 @@
             feedAuthorProfileType = this.getAttribute('data-type') || '';
             $('#feedAuthorProfileTabs .feed-author-profile-tab').removeClass('active');
             $(this).addClass('active');
-            loadFeedAuthorProfileWorks();
+            loadFeedAuthorProfileWorks(false);
         });
 
         $('#feedAuthorProfileBody').on('click', '.feed-author-work-card', function() {
@@ -3043,6 +3089,10 @@
                 return;
             }
             switchToAuthorProfileFeed(mediaKey);
+        });
+
+        $('#feedAuthorProfileBody').on('click', '.feed-author-work-more', function() {
+            loadFeedAuthorProfileWorks(true);
         });
 
         $('#feedAuthorClose').on('click', function() {
@@ -3161,27 +3211,51 @@
         }).fail(function() {
             renderFeedAuthorProfileHeader({}, feedAuthorProfileQuery);
         });
-        loadFeedAuthorProfileWorks();
+        loadFeedAuthorProfileWorks(false);
     }
 
-    function loadFeedAuthorProfileWorks() {
-        if (!feedAuthorProfileQuery) {
+    function loadFeedAuthorProfileWorks(append) {
+        if (!feedAuthorProfileQuery || feedAuthorProfileWorksLoading) {
             return;
         }
+        append = append === true;
+        if (!append) {
+            feedAuthorProfileWorks = [];
+            feedAuthorProfileWorksPage = 0;
+            feedAuthorProfileWorksHasMore = false;
+            feedAuthorProfileWorksTotal = 0;
+            $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
+        } else if (!feedAuthorProfileWorksHasMore) {
+            return;
+        }
+        feedAuthorProfileWorksLoading = true;
         var option = $.extend({}, feedAuthorProfileQuery, {
             type: feedAuthorProfileType,
-            pageNo: 0,
-            pageSize: 24
+            pageNo: feedAuthorProfileWorksPage,
+            pageSize: 60
         });
-        $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
+        var loadError = '';
+        renderFeedAuthorProfileWorks(feedAuthorProfileWorks, true);
         $.get('/admin/api/authorProfileWorks', option, function(res) {
             if (res && res.resCode === '000001') {
-                renderFeedAuthorProfileWorks(res.record && res.record.content ? res.record.content : []);
+                var record = res.record || {};
+                var list = record.content || [];
+                feedAuthorProfileWorks = append ? feedAuthorProfileWorks.concat(list) : list;
+                feedAuthorProfileWorksTotal = Number(record.totalElements || feedAuthorProfileWorks.length || 0);
+                feedAuthorProfileWorksHasMore = record.last !== true && list.length > 0;
+                if (feedAuthorProfileWorksHasMore) {
+                    feedAuthorProfileWorksPage += 1;
+                }
+                renderFeedAuthorProfileWorks(feedAuthorProfileWorks, false);
                 return;
             }
-            $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">No works</div>');
+            feedAuthorProfileWorksHasMore = false;
+            loadError = 'No works';
         }).fail(function() {
-            $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Load failed</div>');
+            loadError = 'Load failed';
+        }).always(function() {
+            feedAuthorProfileWorksLoading = false;
+            renderFeedAuthorProfileWorks(feedAuthorProfileWorks, false, loadError);
         });
     }
 
@@ -3278,10 +3352,22 @@
                                     break;
                                 }
                             }
-                            feedAuthorContextTargetKey = '';
-                            setTimeout(function() {
-                                jumpToFeedAbsIndex(targetIndex >= 0 ? targetIndex : 0, true);
-                            }, 80);
+                            if (targetIndex >= 0) {
+                                feedAuthorContextTargetKey = '';
+                                setTimeout(function() {
+                                    jumpToFeedAbsIndex(targetIndex, true);
+                                }, 80);
+                            } else if (hasMore) {
+                                page = pageNo + 1;
+                                setTimeout(function() {
+                                    findList(page);
+                                }, 120);
+                            } else {
+                                feedAuthorContextTargetKey = '';
+                                setTimeout(function() {
+                                    jumpToFeedAbsIndex(0, true);
+                                }, 80);
+                            }
                         }
                     });
                 }
@@ -3325,7 +3411,7 @@
         $('#feedAuthorProfileHeader').html(html);
     }
 
-    function renderFeedAuthorProfileWorks(list) {
+    function renderFeedAuthorProfileWorks(list, loading, errorMessage) {
         var html = '<div class="feed-author-work-grid">';
         for (var i = 0; i < list.length; i++) {
             var item = list[i] || {};
@@ -3392,7 +3478,7 @@
         });
     }
 
-    function renderFeedAuthorProfileWorks(list) {
+    function renderFeedAuthorProfileWorks(list, loading, errorMessage) {
         var html = '<div class="feed-author-work-grid">';
         for (var i = 0; i < list.length; i++) {
             var item = list[i] || {};
@@ -3404,8 +3490,19 @@
             html += '</button>';
         }
         html += '</div>';
+        if (errorMessage) {
+            html += '<div style="padding:10px 12px;color:#fca5a5;font-size:12px;">' + escapeHtml(errorMessage) + '</div>';
+        }
+        if (feedAuthorProfileWorksHasMore || loading) {
+            html += '<button type="button" class="feed-author-work-more" ' + (loading ? 'disabled' : '') + '>';
+            html += loading ? 'Loading...' : '&#21152;&#36733;&#26356;&#22810;';
+            if (!loading && feedAuthorProfileWorksTotal > list.length) {
+                html += ' ' + list.length + '/' + feedAuthorProfileWorksTotal;
+            }
+            html += '</button>';
+        }
         if (!list.length) {
-            html = '<div style="padding:18px;color:#cbd5e1;">暂无作品</div>';
+            html = '<div style="padding:18px;color:#cbd5e1;">' + (loading ? 'Loading...' : (errorMessage ? escapeHtml(errorMessage) : 'No works')) + '</div>';
         }
         $('#feedAuthorProfileBody').html(html);
         if (list.length) {
@@ -3991,6 +4088,7 @@
             authorText = authorText.substring(0, 4) + '…';
         }
         $('#feedAuthorBtn span').text(authorText);
+        $('#feedAllMediaBtn').toggle(!!feedAuthorContext);
         $('#feedMuteBtn i').attr('class', feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high');
         $('#feedMuteBtn span').text(feedMuted ? '静音' : '有声');
         var autoNext = feedPlaybackMode === 'auto_next';

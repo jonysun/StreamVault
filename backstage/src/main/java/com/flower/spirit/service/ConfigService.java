@@ -74,6 +74,18 @@ public class ConfigService {
 		if (cfg.getMediafeedsource() == null || cfg.getMediafeedsource().trim().isEmpty()) {
 			cfg.setMediafeedsource("prefer_hls");
 		}
+		if (cfg.getVideolistsortfield() == null || cfg.getVideolistsortfield().trim().isEmpty()) {
+			cfg.setVideolistsortfield("id");
+		}
+		if (cfg.getVideolistsortorder() == null || cfg.getVideolistsortorder().trim().isEmpty()) {
+			cfg.setVideolistsortorder("desc");
+		}
+		if (cfg.getGraphiclistsortfield() == null || cfg.getGraphiclistsortfield().trim().isEmpty()) {
+			cfg.setGraphiclistsortfield("id");
+		}
+		if (cfg.getGraphiclistsortorder() == null || cfg.getGraphiclistsortorder().trim().isEmpty()) {
+			cfg.setGraphiclistsortorder("desc");
+		}
 		if (cfg.getHlsenable() == null || cfg.getHlsenable().trim().isEmpty()) {
 			cfg.setHlsenable("0");
 		}
@@ -150,6 +162,10 @@ public class ConfigService {
 			sourceMode = "prefer_hls";
 		}
 		Global.mediaFeedSource = sourceMode;
+		Global.videoListSortField = normalizeVideoListSortField(configEntity.getVideolistsortfield());
+		Global.videoListSortOrder = normalizeSortOrder(configEntity.getVideolistsortorder());
+		Global.graphicListSortField = normalizeGraphicListSortField(configEntity.getGraphiclistsortfield());
+		Global.graphicListSortOrder = normalizeSortOrder(configEntity.getGraphiclistsortorder());
 		Global.hlsEnable = "1".equals(configEntity.getHlsenable());
 		if ("immediate".equalsIgnoreCase(configEntity.getHlsmode())) {
 			Global.hlsMode = "immediate";
@@ -229,6 +245,24 @@ public class ConfigService {
 		}
 		Global.douyinApiUrls = configEntity.getDouyinapiurls() == null ? "" : configEntity.getDouyinapiurls();
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);
+	}
+
+	private String normalizeVideoListSortField(String value) {
+		if ("createtime".equals(value) || "publishtime".equals(value) || "videoauthor".equals(value)) {
+			return value;
+		}
+		return "id";
+	}
+
+	private String normalizeGraphicListSortField(String value) {
+		if ("createtime".equals(value) || "publishtime".equals(value) || "author".equals(value)) {
+			return value;
+		}
+		return "id";
+	}
+
+	private String normalizeSortOrder(String value) {
+		return "asc".equalsIgnoreCase(value) ? "asc" : "desc";
 	}
 
 	public AjaxEntity ytextractor(VideoDataEntity enity) {
