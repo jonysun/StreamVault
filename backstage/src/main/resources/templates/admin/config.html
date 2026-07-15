@@ -295,6 +295,38 @@
                                     </select>
                                 </div>
                                 <div class="form-group">
+                                    <label>视频列表默认排序字段</label>
+                                    <select id="videolistsortfield" class="form-control" name="videolistsortfield">
+                                        <option value="id" th:selected="${config.videolistsortfield} eq 'id'">编号</option>
+                                        <option value="createtime" th:selected="${config.videolistsortfield} eq 'createtime'">下载时间</option>
+                                        <option value="publishtime" th:selected="${config.videolistsortfield} eq 'publishtime'">发布时间</option>
+                                        <option value="videoauthor" th:selected="${config.videolistsortfield} eq 'videoauthor'">作者</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>视频列表默认排序方向</label>
+                                    <select id="videolistsortorder" class="form-control" name="videolistsortorder">
+                                        <option value="desc" th:selected="${config.videolistsortorder} eq 'desc'">倒序</option>
+                                        <option value="asc" th:selected="${config.videolistsortorder} eq 'asc'">正序</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>图文列表默认排序字段</label>
+                                    <select id="graphiclistsortfield" class="form-control" name="graphiclistsortfield">
+                                        <option value="id" th:selected="${config.graphiclistsortfield} eq 'id'">编号</option>
+                                        <option value="createtime" th:selected="${config.graphiclistsortfield} eq 'createtime'">下载时间</option>
+                                        <option value="publishtime" th:selected="${config.graphiclistsortfield} eq 'publishtime'">发布时间</option>
+                                        <option value="author" th:selected="${config.graphiclistsortfield} eq 'author'">作者</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>图文列表默认排序方向</label>
+                                    <select id="graphiclistsortorder" class="form-control" name="graphiclistsortorder">
+                                        <option value="desc" th:selected="${config.graphiclistsortorder} eq 'desc'">倒序</option>
+                                        <option value="asc" th:selected="${config.graphiclistsortorder} eq 'asc'">正序</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
                                     <label>HLS转码开关</label>
                                     <select id="hlsenable" class="form-control" name="hlsenable">
                                         <option value="1" th:selected="${config.hlsenable} eq '1'">开启</option>
@@ -343,11 +375,6 @@
                     <!-- 系统配置统一保存 -->
                     <div class="section-action">
                         <button class="btn btn-primary saveConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 4px;"></i>保存系统配置</button>
-                    </div>
-
-                    <div class="section-title"><div class="section-title-inner"><i class="mdi mdi-chart-timeline-variant"></i>运行状态</div></div>
-                    <div class="col-md-12 runtime-status-card">
-                        <div id="hlsStatsContainer"></div>
                     </div>
                 </div>
 
@@ -1020,7 +1047,12 @@
               option['mediahomemode'] = $("#mediahomemode").val();
               option['mediafeedmuted'] = $("#mediafeedmuted").val();
               option['mediafeedsource'] = $("#mediafeedsource").val();
-              option['hlsenable'] = $("#hlsenable").val();
+              
+            option['videolistsortfield'] = $("#videolistsortfield").val();
+            option['videolistsortorder'] = $("#videolistsortorder").val();
+            option['graphiclistsortfield'] = $("#graphiclistsortfield").val();
+            option['graphiclistsortorder'] = $("#graphiclistsortorder").val();
+            option['hlsenable'] = $("#hlsenable").val();
               option['hlsmode'] = $("#hlsmode").val();
               option['hlsidlewindow'] = $("#hlsidlewindow").val();
               option['hlsconcurrency'] = $("#hlsconcurrency").val();
@@ -1212,6 +1244,11 @@
             option['mediahomemode'] = $("#mediahomemode").val();
             option['mediafeedmuted'] = $("#mediafeedmuted").val();
             option['mediafeedsource'] = $("#mediafeedsource").val();
+            
+            option['videolistsortfield'] = $("#videolistsortfield").val();
+            option['videolistsortorder'] = $("#videolistsortorder").val();
+            option['graphiclistsortfield'] = $("#graphiclistsortfield").val();
+            option['graphiclistsortorder'] = $("#graphiclistsortorder").val();
             option['hlsenable'] = $("#hlsenable").val();
             option['hlsmode'] = $("#hlsmode").val();
             option['hlsidlewindow'] = $("#hlsidlewindow").val();

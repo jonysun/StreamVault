@@ -98,6 +98,14 @@ public class ConfigEntity implements Serializable {
 
 	private String douyinapiurls; // 抖音解析API URL列表（多行）
 
+	private String videolistsortfield;
+
+	private String videolistsortorder;
+
+	private String graphiclistsortfield;
+
+	private String graphiclistsortorder;
+
 	public Integer getId() {
 		return id;
 	}
@@ -370,6 +378,37 @@ public class ConfigEntity implements Serializable {
 		this.collectitemintervalms = collectitemintervalms;
 	}
 
+	public String getVideolistsortfield() {
+		return videolistsortfield;
+	}
+
+	public void setVideolistsortfield(String videolistsortfield) {
+		this.videolistsortfield = videolistsortfield;
+	}
+
+	public String getVideolistsortorder() {
+		return videolistsortorder;
+	}
+
+	public void setVideolistsortorder(String videolistsortorder) {
+		this.videolistsortorder = videolistsortorder;
+	}
+
+	public String getGraphiclistsortfield() {
+		return graphiclistsortfield;
+	}
+
+	public void setGraphiclistsortfield(String graphiclistsortfield) {
+		this.graphiclistsortfield = graphiclistsortfield;
+	}
+
+	public String getGraphiclistsortorder() {
+		return graphiclistsortorder;
+	}
+
+	public void setGraphiclistsortorder(String graphiclistsortorder) {
+		this.graphiclistsortorder = graphiclistsortorder;
+	}
 	public String getDouyinapiurls() {
 		return douyinapiurls;
 	}

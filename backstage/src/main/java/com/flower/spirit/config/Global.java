@@ -170,6 +170,14 @@ public class Global {
 
 	public static String douyinApiUrls = "";
 
+	public static String videoListSortField = "id";
+
+	public static String videoListSortOrder = "desc";
+
+	public static String graphicListSortField = "id";
+
+	public static String graphicListSortOrder = "desc";
+
 	@Value("${file.save}")
 	public void setSavefile(String value) {
 		Global.savefile = value;

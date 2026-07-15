@@ -717,7 +717,7 @@
 								<div class="form-group">
 									<label class="control-label">排序字段</label>
 									<select class="form-control" id="sortFieldFilter">
-										<option value="">默认（编号倒序）</option>
+										<option value="" id="graphicDefaultSortOption" th:data-field="${T(com.flower.spirit.config.Global).graphicListSortField}" th:data-order="${T(com.flower.spirit.config.Global).graphicListSortOrder}">默认（编号倒序）</option>
 										<option value="createtime">下载时间</option>
 										<option value="publishtime">发布时间</option>
 										<option value="author">图影作者</option>
@@ -852,6 +852,7 @@
 
 <script type="text/javascript">
 $(function(){
+	updateGraphicDefaultSortLabel();
 	// 初始化页面
 	initPage();
 	
@@ -869,6 +870,13 @@ var currentMediaList = [];
 var currentMediaIndex = 0;
 var graphicAuthorOptions = [];
 var selectedGraphicAuthors = new Set();
+function updateGraphicDefaultSortLabel() {
+	var opt = $('#graphicDefaultSortOption');
+	var field = opt.data('field') || 'id';
+	var order = opt.data('order') || 'desc';
+	var fieldNames = { id: '\u7f16\u53f7', createtime: '\u4e0b\u8f7d\u65f6\u95f4', publishtime: '\u53d1\u5e03\u65f6\u95f4', author: '\u4f5c\u8005' };
+	opt.text('\u9ed8\u8ba4\uff08' + (fieldNames[field] || '\u7f16\u53f7') + (order === 'asc' ? '\u6b63\u5e8f' : '\u5012\u5e8f') + '\uff09');
+}
 
 /**
  * 初始化页面

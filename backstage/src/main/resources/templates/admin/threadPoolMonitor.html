@@ -93,6 +93,8 @@
     <script>
         $(document).ready(function() {
             refreshStatus();
+            loadHlsStats();
+            setInterval(loadHlsStats, 8000);
         });
         
         function refreshStatus() {
@@ -116,17 +118,80 @@
             const container = $('#statusContainer');
             container.empty();
             
-            // 渲染视频解析线程池状态
+            // Render analysis thread pools
             if (data.analysis) {
                 container.append(createAnalysisCards(data.analysis));
             }
-            
-            // 渲染收藏夹处理线程池状态
+
+            // Render collect scheduler
             if (data.collect) {
                 container.append(createCollectCard(data.collect));
             }
+            container.append('<div class="col-lg-12 col-md-12"><div id="hlsStatsContainer"></div></div>');
+            loadHlsStats();
         }
         
+
+        function loadHlsStats() {
+            $.ajax({
+                url: '/admin/api/hlsStats',
+                type: 'GET',
+                dataType: 'json',
+                success: function(response) {
+                    if (response && response.resCode === '000001' && response.record) {
+                        renderHlsStats(response.record);
+                    } else {
+                        renderHlsStats(null);
+                    }
+                },
+                error: function() {
+                    renderHlsStats(null);
+                }
+            });
+        }
+
+        function renderHlsStats(stats) {
+            const container = $('#hlsStatsContainer');
+            if (!container.length) {
+                return;
+            }
+            container.empty();
+            if (!stats) {
+                container.html('<div class="status-card"><div class="status-header"><h5 class="text-info"><i class="mdi mdi-play-network"></i> HLS Transcode Scheduler</h5></div><div class="status-item"><span class="status-label">Status</span><span class="status-value">Unavailable</span></div></div>');
+                return;
+            }
+            const enabled = !!stats.enabled;
+            const mode = stats.mode || 'idle';
+            const queueSize = Number(stats.queueSize || 0);
+            const runningCount = Number(stats.runningCount || 0);
+            const runningVideoId = stats.runningVideoId == null ? '-' : stats.runningVideoId;
+            const lastSuccess = stats.lastSuccessAt ? new Date(stats.lastSuccessAt).toLocaleString() : '-';
+            const lastFail = stats.lastFailAt ? new Date(stats.lastFailAt).toLocaleString() : '-';
+            const idleWindow = stats.idleWindow || '-';
+            const seg = stats.segmentSeconds || '-';
+            const con = stats.concurrency || 1;
+            const privacy = stats.privacyEnabled ? 'Allowed' : 'Blocked';
+            const statusClass = enabled ? 'text-success' : 'text-muted';
+            const statusText = enabled ? 'Enabled' : 'Disabled';
+            let html = '<div class="status-card"><div class="status-header"><h5 class="text-info"><i class="mdi mdi-play-network"></i> HLS Transcode Scheduler</h5></div>';
+            html += '<div class="status-item"><span class="status-label">Enabled</span><span class="status-value ' + statusClass + '">' + statusText + '</span></div>';
+            html += '<div class="status-item"><span class="status-label">Mode</span><span class="status-value">' + (mode === 'immediate' ? 'Immediate' : 'Idle window') + '</span></div>';
+            html += '<div class="status-item"><span class="status-label">Idle window</span><span class="status-value">' + idleWindow + '</span></div>';
+            html += '<div class="status-item"><span class="status-label">Concurrency / Segment</span><span class="status-value">' + con + ' / ' + seg + 's</span></div>';
+            html += '<div class="status-item"><span class="status-label">Queue / Running</span><span class="status-value">' + queueSize + ' / ' + runningCount + ' (videoId: ' + runningVideoId + ')</span></div>';
+            html += '<div class="status-item"><span class="status-label">Private video</span><span class="status-value">' + privacy + '</span></div>';
+            html += '<div class="status-item"><span class="status-label">Last success</span><span class="status-value">' + lastSuccess + '</span></div>';
+            html += '<div class="status-item"><span class="status-label">Last failure</span><span class="status-value">' + lastFail + '</span></div>';
+            if (stats.lastError) {
+                html += '<div class="status-item"><span class="status-label">Last error</span><span class="status-value text-danger">' + escapeHtml(String(stats.lastError)) + '</span></div>';
+            }
+            html += '</div>';
+            container.html(html);
+        }
+
+        function escapeHtml(text) {
+            return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
         function createAnalysisCards(analysisData) {
             let html = '';
             

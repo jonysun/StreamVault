@@ -259,10 +259,10 @@ public class VideoDataService {
 	}
 
 	private List<Order> buildLiteOrders(VideoDataEntity res, Root<VideoDataEntity> root, CriteriaBuilder cb) {
-		String sortField = res == null ? null : res.getSortField();
-		String sortOrder = res == null ? null : res.getSortOrder();
+		String sortField = res == null || res.getSortField() == null || res.getSortField().trim().isEmpty() ? Global.videoListSortField : res.getSortField();
+		String sortOrder = res == null || res.getSortOrder() == null || res.getSortOrder().trim().isEmpty() ? Global.videoListSortOrder : res.getSortOrder();
 		String actualSortField = null;
-		if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
+		if ("id".equals(sortField) || "createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
 			actualSortField = sortField;
 		}
 		if (actualSortField == null) {
@@ -370,10 +370,10 @@ public class VideoDataService {
 	        }
 
 			if (!randomMode) {
-				String sortField = res == null ? null : res.getSortField();
-				String sortOrder = res == null ? null : res.getSortOrder();
+				String sortField = res == null || res.getSortField() == null || res.getSortField().trim().isEmpty() ? Global.videoListSortField : res.getSortField();
+				String sortOrder = res == null || res.getSortOrder() == null || res.getSortOrder().trim().isEmpty() ? Global.videoListSortOrder : res.getSortOrder();
 				String actualSortField = null;
-				if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
+				if ("id".equals(sortField) || "createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
 					actualSortField = sortField;
 				}
 				if (actualSortField != null) {

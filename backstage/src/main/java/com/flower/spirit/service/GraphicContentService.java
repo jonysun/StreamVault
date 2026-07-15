@@ -84,10 +84,10 @@ public class GraphicContentService {
 	            }
 	        }
 
-	        String sortField = res == null ? null : res.getSortField();
-	        String sortOrder = res == null ? null : res.getSortOrder();
+	        String sortField = res == null || res.getSortField() == null || res.getSortField().trim().isEmpty() ? Global.graphicListSortField : res.getSortField();
+	        String sortOrder = res == null || res.getSortOrder() == null || res.getSortOrder().trim().isEmpty() ? Global.graphicListSortOrder : res.getSortOrder();
 	        String actualSortField = null;
-	        if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "author".equals(sortField)) {
+	        if ("id".equals(sortField) || "createtime".equals(sortField) || "publishtime".equals(sortField) || "author".equals(sortField)) {
 	        	actualSortField = sortField;
 	        }
 	        if (actualSortField != null) {
