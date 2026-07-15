@@ -93,6 +93,9 @@ public class CollectDataService {
 	@Autowired
 	private PlatformCookieService platformCookieService;
 
+	@Autowired
+	private DouyinCookieHealthService douyinCookieHealthService;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -1227,6 +1230,7 @@ public class CollectDataService {
 			logger.info("[CollectTask] getDYData parsed runId={} count={} mode={} sourceId={}",
 					runId, jsonFromFile == null ? 0 : jsonFromFile.size(), mode, sourceId);
 			logFetchSnapshotItems(entity, context, jsonFromFile, "f2-raw");
+			reportCookieDegradedFetch(entity, mode, cookie, maxc, jsonFromFile, existingDetailCount);
 			Files.deleteIfExists(Paths.get(taskout));
 			return jsonFromFile;
 		}
@@ -1348,6 +1352,12 @@ public class CollectDataService {
 		if (platformCookieService.isRiskSignal(f2cmd)) {
 			platformCookieService.reportRisk(platform, cookie, previewOutput(f2cmd));
 		}
+	}
+
+	private void reportCookieDegradedFetch(CollectDataEntity entity, String mode, String cookie, int requested,
+			JSONArray jsonFromFile, long existingDetailCount) {
+		int fetched = jsonFromFile == null ? 0 : jsonFromFile.size();
+		douyinCookieHealthService.reportCollectFetchWindow(entity, mode, cookie, requested, fetched, existingDetailCount);
 	}
 
 	private JSONObject buildF2FailureDiagnostics(String mode, String sourceId, String cookie) {
