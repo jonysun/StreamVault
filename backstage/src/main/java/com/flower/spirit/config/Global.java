@@ -178,6 +178,10 @@ public class Global {
 
 	public static String douyinApiUrls = "";
 
+
+
+
+
 	@Value("${file.save}")
 	public void setSavefile(String value) {
 		Global.savefile = value;

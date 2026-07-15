@@ -106,6 +106,10 @@ public class ConfigEntity implements Serializable {
 
 	private String douyinapiurls; // 抖音解析API URL列表（多行）
 
+
+
+
+
 	public Integer getId() {
 		return id;
 	}

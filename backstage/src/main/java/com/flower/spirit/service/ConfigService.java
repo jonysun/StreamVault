@@ -65,6 +65,18 @@ public class ConfigService {
 		if (cfg.getDouyinapiurls() == null) {
 			cfg.setDouyinapiurls("");
 		}
+		if (cfg.getVideolistsortfield() == null || cfg.getVideolistsortfield().trim().isEmpty()) {
+			cfg.setVideolistsortfield("id");
+		}
+		if (cfg.getVideolistsortorder() == null || cfg.getVideolistsortorder().trim().isEmpty()) {
+			cfg.setVideolistsortorder("desc");
+		}
+		if (cfg.getGraphiclistsortfield() == null || cfg.getGraphiclistsortfield().trim().isEmpty()) {
+			cfg.setGraphiclistsortfield("id");
+		}
+		if (cfg.getGraphiclistsortorder() == null || cfg.getGraphiclistsortorder().trim().isEmpty()) {
+			cfg.setGraphiclistsortorder("desc");
+		}
 		if (cfg.getMediahomemode() == null || cfg.getMediahomemode().trim().isEmpty()) {
 			cfg.setMediahomemode("grid");
 		}
@@ -244,18 +256,22 @@ public class ConfigService {
 			}
 		}
 		Global.douyinApiUrls = configEntity.getDouyinapiurls() == null ? "" : configEntity.getDouyinapiurls();
+		Global.videoListSortField = normalizeVideoListSortField(configEntity.getVideolistsortfield());
+		Global.videoListSortOrder = normalizeSortOrder(configEntity.getVideolistsortorder());
+		Global.graphicListSortField = normalizeGraphicListSortField(configEntity.getGraphiclistsortfield());
+		Global.graphicListSortOrder = normalizeSortOrder(configEntity.getGraphiclistsortorder());
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);
 	}
 
 	private String normalizeVideoListSortField(String value) {
-		if ("createtime".equals(value) || "publishtime".equals(value) || "videoauthor".equals(value)) {
+		if ("id".equals(value) || "createtime".equals(value) || "publishtime".equals(value) || "videoauthor".equals(value)) {
 			return value;
 		}
 		return "id";
 	}
 
 	private String normalizeGraphicListSortField(String value) {
-		if ("createtime".equals(value) || "publishtime".equals(value) || "author".equals(value)) {
+		if ("id".equals(value) || "createtime".equals(value) || "publishtime".equals(value) || "author".equals(value)) {
 			return value;
 		}
 		return "id";
@@ -264,7 +280,6 @@ public class ConfigService {
 	private String normalizeSortOrder(String value) {
 		return "asc".equalsIgnoreCase(value) ? "asc" : "desc";
 	}
-
 	public AjaxEntity ytextractor(VideoDataEntity enity) {
 		String detectedPlatform = YtDlpUtil.getPlatform(enity.getOriginaladdress());
 		if(detectedPlatform!= null) {
