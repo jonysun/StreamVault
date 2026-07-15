@@ -86,6 +86,19 @@
             background: #e6f7ff !important; color: #1890ff !important;
             padding: 2px 8px !important; border-radius: 4px !important; font-size: 11px;
         }
+        .cookie-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+        .cookie-table-wrap { border: 1px solid #edf0f5; border-radius: 6px; overflow: hidden; background: #fff; }
+        .cookie-table { width: 100%; margin: 0; font-size: 12px; table-layout: fixed; }
+        .cookie-table th { background: #f7f8fb; color: #4b5563; font-weight: 600; padding: 7px 8px; border-bottom: 1px solid #edf0f5; }
+        .cookie-table td { padding: 7px 8px; border-bottom: 1px solid #f2f4f7; vertical-align: middle; word-break: break-all; }
+        .cookie-table tr:last-child td { border-bottom: none; }
+        .cookie-status-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+        .cookie-status-valid { background: #e8f7ef; color: #17803d; }
+        .cookie-status-degraded { background: #fff7e6; color: #ad6800; }
+        .cookie-status-expired, .cookie-status-incomplete, .cookie-status-error { background: #fff1f0; color: #cf1322; }
+        .cookie-status-unknown { background: #f0f2f5; color: #595959; }
+        .cookie-empty { padding: 14px; color: #8c8c8c; text-align: center; font-size: 12px; }
+        .cookie-edit-area { width: 100%; min-height: 180px; border: 1px solid #e8e8e8; border-radius: 6px; padding: 8px; resize: vertical; }
         .help-icon { cursor: pointer; font-size: 12px; color: #bfbfbf; margin-left: 2px; }
         .help-icon:hover { color: #4361ee; }
         .runtime-status-card { margin-top: 12px; }
@@ -413,7 +426,28 @@
                                     <input type="hidden" class="tiktok" th:value="${tiktok.id}" />
                                     <div class="form-group">
                                         <label>抖音Cookie(使用抖音必填，每行一个；风控转移冷却10分钟)</label>
-                                        <textarea name="tiktokcookiepool" autocomplete="off" class="form-control tiktokcookiepool" rows="4" th:text="${tiktok.cookiepool != null && !#strings.isEmpty(tiktok.cookiepool) ? tiktok.cookiepool : tiktok.cookies}"></textarea>
+                                        <textarea name="tiktokcookiepool" autocomplete="off" class="form-control tiktokcookiepool" rows="4" style="display:none;" th:text="${tiktok.cookiepool != null && !#strings.isEmpty(tiktok.cookiepool) ? tiktok.cookiepool : tiktok.cookies}"></textarea>
+                                        <div class="cookie-toolbar">
+                                            <button type="button" class="btn btn-info btn-sm" onclick="openDouyinCookieEditor(-1)"><i class="mdi mdi-plus" style="margin-right: 2px;"></i>新增Cookie</button>
+                                            <button type="button" class="btn btn-info btn-sm" onclick="checkDouyinCookies()"><i class="mdi mdi-refresh" style="margin-right: 2px;"></i>检测有效性</button>
+                                            <button type="button" class="btn btn-default btn-sm" onclick="openDouyinCookieBulkEditor()">批量编辑</button>
+                                        </div>
+                                        <div class="cookie-table-wrap">
+                                            <table class="cookie-table">
+                                                <thead>
+                                                <tr>
+                                                    <th style="width:44px;">#</th>
+                                                    <th style="width:92px;">标识</th>
+                                                    <th style="width:64px;">长度</th>
+                                                    <th style="width:92px;">状态</th>
+                                                    <th>说明</th>
+                                                    <th style="width:118px;">操作</th>
+                                                </tr>
+                                                </thead>
+                                                <tbody id="douyinCookieRows"></tbody>
+                                            </table>
+                                            <div id="douyinCookieEmpty" class="cookie-empty" style="display:none;">暂无 Cookie</div>
+                                        </div>
                                     </div>
                                     <div class="form-group">
                                         <label>抖音Cookie模式</label>
@@ -617,6 +651,7 @@
         saveTikTokConfig();
         saveCookieConfig();
         saveAgentConfig();
+        initDouyinCookieList();
         checkCookies();
         getNotifyConfig();
         initHiddenPlatforms();
@@ -762,6 +797,186 @@
             }
         });
     }
+
+    var douyinCookieHealth = {};
+
+    function initDouyinCookieList(){
+        renderDouyinCookieList();
+    }
+
+    function parseDouyinCookiePool(){
+        var text = $('.tiktokcookiepool').val() || '';
+        var lines = text.split(/\r?\n/);
+        var cookies = [];
+        for(var i = 0; i < lines.length; i++){
+            var line = $.trim(lines[i] || '');
+            if(line){
+                cookies.push(line);
+            }
+        }
+        return cookies;
+    }
+
+    function syncDouyinCookiePool(cookies){
+        $('.tiktokcookiepool').val((cookies || []).join('\n'));
+        renderDouyinCookieList();
+    }
+
+    function renderDouyinCookieList(){
+        var cookies = parseDouyinCookiePool();
+        var $rows = $('#douyinCookieRows');
+        $rows.empty();
+        $('#douyinCookieEmpty').toggle(cookies.length === 0);
+        for(var i = 0; i < cookies.length; i++){
+            var localId = localCookieFingerprint(cookies[i]);
+            var health = douyinCookieHealth[i + 1] || {};
+            var status = health.status || 'UNKNOWN';
+            var statusText = health.statusText || '未检测';
+            var message = health.message || '点击检测有效性';
+            var fingerprint = health.fingerprint || localId;
+            var length = health.length || cookies[i].length;
+            var statusClass = statusClassName(status);
+            var row = '<tr>' +
+                '<td>' + (i + 1) + '</td>' +
+                '<td><code>' + escapeHtml(fingerprint) + '</code></td>' +
+                '<td>' + length + '</td>' +
+                '<td><span class="cookie-status-badge ' + statusClass + '">' + escapeHtml(statusText) + '</span></td>' +
+                '<td>' + escapeHtml(message) + '</td>' +
+                '<td>' +
+                '<button type="button" class="btn btn-info btn-sm" onclick="openDouyinCookieEditor(' + i + ')">编辑</button> ' +
+                '<button type="button" class="btn btn-danger btn-sm" onclick="deleteDouyinCookie(' + i + ')">删除</button>' +
+                '</td>' +
+                '</tr>';
+            $rows.append(row);
+        }
+    }
+
+    function openDouyinCookieEditor(index){
+        var cookies = parseDouyinCookiePool();
+        var current = index >= 0 ? cookies[index] : '';
+        layer.open({
+            type: 1,
+            title: index >= 0 ? '编辑抖音 Cookie' : '新增抖音 Cookie',
+            area: ['720px', '360px'],
+            content: '<div style="padding:16px;">' +
+                '<textarea id="douyinCookieEditorValue" class="cookie-edit-area" placeholder="粘贴 Cookie Header String"></textarea>' +
+                '<div style="margin-top:12px;text-align:right;">' +
+                '<button type="button" class="btn btn-primary" onclick="saveDouyinCookieEditor(' + index + ')">保存</button>' +
+                '</div></div>',
+            success: function(){
+                $('#douyinCookieEditorValue').val(current);
+            }
+        });
+    }
+
+    function saveDouyinCookieEditor(index){
+        var value = $.trim($('#douyinCookieEditorValue').val() || '');
+        if(!value){
+            layer.msg('Cookie不能为空');
+            return;
+        }
+        var cookies = parseDouyinCookiePool();
+        if(index >= 0){
+            cookies[index] = value;
+        }else{
+            cookies.push(value);
+        }
+        douyinCookieHealth = {};
+        syncDouyinCookiePool(cookies);
+        layer.closeAll();
+    }
+
+    function openDouyinCookieBulkEditor(){
+        layer.open({
+            type: 1,
+            title: '批量编辑抖音 Cookie',
+            area: ['760px', '420px'],
+            content: '<div style="padding:16px;">' +
+                '<textarea id="douyinCookieBulkValue" class="cookie-edit-area" style="min-height:240px;" placeholder="每行一个 Cookie"></textarea>' +
+                '<div style="margin-top:12px;text-align:right;">' +
+                '<button type="button" class="btn btn-primary" onclick="saveDouyinCookieBulkEditor()">保存</button>' +
+                '</div></div>',
+            success: function(){
+                $('#douyinCookieBulkValue').val($('.tiktokcookiepool').val() || '');
+            }
+        });
+    }
+
+    function saveDouyinCookieBulkEditor(){
+        var lines = ($('#douyinCookieBulkValue').val() || '').split(/\r?\n/);
+        var cookies = [];
+        for(var i = 0; i < lines.length; i++){
+            var line = $.trim(lines[i] || '');
+            if(line){
+                cookies.push(line);
+            }
+        }
+        douyinCookieHealth = {};
+        syncDouyinCookiePool(cookies);
+        layer.closeAll();
+    }
+
+    function deleteDouyinCookie(index){
+        var cookies = parseDouyinCookiePool();
+        cookies.splice(index, 1);
+        douyinCookieHealth = {};
+        syncDouyinCookiePool(cookies);
+    }
+
+    function checkDouyinCookies(){
+        var loading = layer.msg('正在检测抖音 Cookie...', {icon: 16, time: 0});
+        $.ajax({
+            url: '/admin/api/checkDouyinCookies',
+            type: 'POST',
+            success: function(res){
+                layer.close(loading);
+                if(res.resCode === '000001'){
+                    douyinCookieHealth = {};
+                    var items = (res.record && res.record.items) || [];
+                    for(var i = 0; i < items.length; i++){
+                        douyinCookieHealth[items[i].index] = items[i];
+                    }
+                    renderDouyinCookieList();
+                }else{
+                    layer.msg(res.message || '检测失败');
+                }
+            },
+            error: function(){
+                layer.close(loading);
+                layer.msg('检测失败');
+            }
+        });
+    }
+
+    function statusClassName(status){
+        var lower = (status || 'unknown').toLowerCase();
+        if(lower === 'valid') return 'cookie-status-valid';
+        if(lower === 'degraded') return 'cookie-status-degraded';
+        if(lower === 'expired') return 'cookie-status-expired';
+        if(lower === 'incomplete') return 'cookie-status-incomplete';
+        if(lower === 'error') return 'cookie-status-error';
+        return 'cookie-status-unknown';
+    }
+
+    function localCookieFingerprint(text){
+        var hash = 0;
+        text = text || '';
+        for(var i = 0; i < text.length; i++){
+            hash = ((hash << 5) - hash) + text.charCodeAt(i);
+            hash |= 0;
+        }
+        return Math.abs(hash).toString(16).substring(0, 8) || 'empty';
+    }
+
+    function escapeHtml(text){
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function saveAgentConfig(){
     	$('.saveAgentConfig').click(function(){
     		//这里先这样把 本来后台搞一个bean复制 可以少传一点  拉倒吧 先这样

@@ -83,6 +83,9 @@ public class CollectDataService {
 	@Autowired
 	private PlatformCookieService platformCookieService;
 
+	@Autowired
+	private DouyinCookieHealthService douyinCookieHealthService;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -911,6 +914,7 @@ public class CollectDataService {
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=post", jsonFromFile == null ? 0 : jsonFromFile.size());
+				reportCookieDegradedFetch(entity, "post", cookie, maxc, jsonFromFile, countByDataid);
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
@@ -925,6 +929,7 @@ public class CollectDataService {
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=like", jsonFromFile == null ? 0 : jsonFromFile.size());
+				reportCookieDegradedFetch(entity, "like", cookie, maxc, jsonFromFile, countByDataid);
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
@@ -945,6 +950,7 @@ public class CollectDataService {
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=fav", jsonFromFile == null ? 0 : jsonFromFile.size());
+				reportCookieDegradedFetch(entity, "fav", cookie, maxc, jsonFromFile, countByDataid);
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
@@ -960,6 +966,7 @@ public class CollectDataService {
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=recommend", jsonFromFile == null ? 0 : jsonFromFile.size());
+				reportCookieDegradedFetch(entity, "recommend", cookie, maxc, jsonFromFile, countByDataid);
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
@@ -993,6 +1000,12 @@ public class CollectDataService {
 		if (platformCookieService.isRiskSignal(f2cmd)) {
 			platformCookieService.reportRisk(platform, cookie, previewOutput(f2cmd));
 		}
+	}
+
+	private void reportCookieDegradedFetch(CollectDataEntity entity, String mode, String cookie, int requested,
+			JSONArray jsonFromFile, long existingDetailCount) {
+		int fetched = jsonFromFile == null ? 0 : jsonFromFile.size();
+		douyinCookieHealthService.reportCollectFetchWindow(entity, mode, cookie, requested, fetched, existingDetailCount);
 	}
 
 	private void recordFetchFailureDetail(CollectDataEntity entity, String errorCode, String errorMsg, JSONObject detailJson) {

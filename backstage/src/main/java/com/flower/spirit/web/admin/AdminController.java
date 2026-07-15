@@ -40,6 +40,7 @@ import com.flower.spirit.service.BlockedWorkService;
 import com.flower.spirit.service.ConfigService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
+import com.flower.spirit.service.DouyinCookieHealthService;
 import com.flower.spirit.service.DouyinWorkMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
@@ -127,6 +128,9 @@ public class AdminController {
 
 	@Autowired
 	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
+
+	@Autowired
+	private DouyinCookieHealthService douyinCookieHealthService;
 	
 	/**  
 	
@@ -472,6 +476,11 @@ public class AdminController {
 	@PostMapping(value = "/checkCookies")
 	public AjaxEntity checkCookies() {
 		return cookiesConfigService.checkCookies();
+	}
+
+	@PostMapping(value = "/checkDouyinCookies")
+	public AjaxEntity checkDouyinCookies() {
+		return new AjaxEntity(Global.ajax_success, "检测完成", douyinCookieHealthService.checkDouyinCookies(false));
 	}
 	
 	@GetMapping(value = "/loadDouFav")
