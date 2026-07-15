@@ -291,6 +291,7 @@ public class ConfigService {
 		if(douyin_cookie!=null && !douyin_cookie.equals("") && douyin_cookie.length()>10 && douyin_cookie.contains("odin_tt") && douyin_cookie.contains("sessionid_ss") && douyin_cookie.contains("ttwid") && douyin_cookie.contains("passport_csrf_token")) {
 			TikTokConfigEntity dyconfig = tikTokConfigService.getData();
 			dyconfig.setCookies(douyin_cookie);
+			dyconfig.setCookiepool(replaceFirstCookie(dyconfig.getCookiepool(), douyin_cookie));
 			tikTokConfigService.updateTikTokConfig(dyconfig);
 			logger.info("收到cookieCloud douyin cookie更新");
 			content =content+"douyin:已被更新\n";
@@ -298,6 +299,29 @@ public class ConfigService {
 		content = content == null || content.isEmpty() ? "无更新成功任务" : content;
 		sendNotify.sendMessage(tilte, content);
 		
+	}
+
+	private String replaceFirstCookie(String pool, String cookie) {
+		if (cookie == null || cookie.trim().isEmpty()) {
+			return pool;
+		}
+		if (pool == null || pool.trim().isEmpty()) {
+			return cookie.trim();
+		}
+		String[] lines = pool.split("\\r?\\n", -1);
+		boolean replaced = false;
+		StringBuilder builder = new StringBuilder();
+		for (String line : lines) {
+			if (!replaced && line != null && !line.trim().isEmpty()) {
+				if (builder.length() > 0) builder.append("\n");
+				builder.append(cookie.trim());
+				replaced = true;
+			} else {
+				if (builder.length() > 0) builder.append("\n");
+				builder.append(line == null ? "" : line);
+			}
+		}
+		return replaced ? builder.toString() : cookie.trim();
 	}
 
 }
