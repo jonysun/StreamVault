@@ -84,21 +84,21 @@ public class GraphicContentService {
 	            }
 	        }
 
-	        String sortField = res == null ? null : res.getSortField();
-	        String sortOrder = res == null ? null : res.getSortOrder();
-	        String actualSortField = null;
-	        if ("createtime".equals(sortField) || "publishtime".equals(sortField) || "author".equals(sortField)) {
-	        	actualSortField = sortField;
-	        }
-	        if (actualSortField != null) {
-	        	if ("asc".equalsIgnoreCase(sortOrder)) {
-	        		query.orderBy(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
-	        	} else {
-	        		query.orderBy(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
-	        	}
-	        } else {
-	        	query.orderBy(cb.desc(root.get("id")));
-	        }
+			String sortField = resolveGraphicSortField(res == null ? null : res.getSortField());
+			String sortOrder = resolveSortOrder(res == null ? null : res.getSortOrder());
+			if ("id".equals(sortField)) {
+				if ("asc".equalsIgnoreCase(sortOrder)) {
+					query.orderBy(cb.asc(root.get("id")));
+				} else {
+					query.orderBy(cb.desc(root.get("id")));
+				}
+			} else {
+				if ("asc".equalsIgnoreCase(sortOrder)) {
+					query.orderBy(cb.asc(root.get(sortField)), cb.desc(root.get("id")));
+				} else {
+					query.orderBy(cb.desc(root.get(sortField)), cb.desc(root.get("id")));
+				}
+			}
 	        return cb.and(predicates.toArray(new Predicate[0]));
 	    };
 
@@ -108,6 +108,19 @@ public class GraphicContentService {
 
 
 
+
+	private String resolveGraphicSortField(String requestedField) {
+		String candidate = StringUtil.isString(requestedField) ? requestedField : Global.graphicListSortField;
+		if ("createtime".equals(candidate) || "publishtime".equals(candidate) || "author".equals(candidate)) {
+			return candidate;
+		}
+		return "id";
+	}
+
+	private String resolveSortOrder(String requestedOrder) {
+		String candidate = StringUtil.isString(requestedOrder) ? requestedOrder : Global.graphicListSortOrder;
+		return "asc".equalsIgnoreCase(candidate) ? "asc" : "desc";
+	}
 
 	public AjaxEntity deleteGraphicContent(String id, String blockwork) {
 		Optional<GraphicContentEntity> findById = graphicContentDao.findById(Integer.valueOf(id));
