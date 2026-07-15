@@ -86,6 +86,18 @@ public class ConfigService {
 		if (cfg.getMediafeedsource() == null || cfg.getMediafeedsource().trim().isEmpty()) {
 			cfg.setMediafeedsource("prefer_hls");
 		}
+		if (cfg.getVideolistsortfield() == null || cfg.getVideolistsortfield().trim().isEmpty()) {
+			cfg.setVideolistsortfield("id");
+		}
+		if (cfg.getVideolistsortorder() == null || cfg.getVideolistsortorder().trim().isEmpty()) {
+			cfg.setVideolistsortorder("desc");
+		}
+		if (cfg.getGraphiclistsortfield() == null || cfg.getGraphiclistsortfield().trim().isEmpty()) {
+			cfg.setGraphiclistsortfield("id");
+		}
+		if (cfg.getGraphiclistsortorder() == null || cfg.getGraphiclistsortorder().trim().isEmpty()) {
+			cfg.setGraphiclistsortorder("desc");
+		}
 		if (cfg.getHlsenable() == null || cfg.getHlsenable().trim().isEmpty()) {
 			cfg.setHlsenable("0");
 		}
@@ -162,6 +174,10 @@ public class ConfigService {
 			sourceMode = "prefer_hls";
 		}
 		Global.mediaFeedSource = sourceMode;
+		Global.videoListSortField = normalizeVideoListSortField(configEntity.getVideolistsortfield());
+		Global.videoListSortOrder = normalizeSortOrder(configEntity.getVideolistsortorder());
+		Global.graphicListSortField = normalizeGraphicListSortField(configEntity.getGraphiclistsortfield());
+		Global.graphicListSortOrder = normalizeSortOrder(configEntity.getGraphiclistsortorder());
 		Global.hlsEnable = "1".equals(configEntity.getHlsenable());
 		if ("immediate".equalsIgnoreCase(configEntity.getHlsmode())) {
 			Global.hlsMode = "immediate";

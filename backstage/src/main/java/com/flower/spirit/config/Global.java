@@ -140,6 +140,14 @@ public class Global {
 
 	public static String mediaFeedSource = "prefer_hls";
 
+	public static String videoListSortField = "id";
+
+	public static String videoListSortOrder = "desc";
+
+	public static String graphicListSortField = "id";
+
+	public static String graphicListSortOrder = "desc";
+
 	public static boolean hlsEnable = false;
 
 	public static String hlsMode = "idle";
@@ -170,13 +178,9 @@ public class Global {
 
 	public static String douyinApiUrls = "";
 
-	public static String videoListSortField = "id";
 
-	public static String videoListSortOrder = "desc";
 
-	public static String graphicListSortField = "id";
 
-	public static String graphicListSortOrder = "desc";
 
 	@Value("${file.save}")
 	public void setSavefile(String value) {

@@ -259,19 +259,15 @@ public class VideoDataService {
 	}
 
 	private List<Order> buildLiteOrders(VideoDataEntity res, Root<VideoDataEntity> root, CriteriaBuilder cb) {
-		String sortField = res == null || res.getSortField() == null || res.getSortField().trim().isEmpty() ? Global.videoListSortField : res.getSortField();
-		String sortOrder = res == null || res.getSortOrder() == null || res.getSortOrder().trim().isEmpty() ? Global.videoListSortOrder : res.getSortOrder();
-		String actualSortField = null;
-		if ("id".equals(sortField) || "createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
-			actualSortField = sortField;
-		}
-		if (actualSortField == null) {
-			return List.of(cb.desc(root.get("id")));
+		String sortField = resolveVideoSortField(res == null ? null : res.getSortField());
+		String sortOrder = resolveSortOrder(res == null ? null : res.getSortOrder(), Global.videoListSortOrder);
+		if ("id".equals(sortField)) {
+			return "asc".equalsIgnoreCase(sortOrder) ? List.of(cb.asc(root.get("id"))) : List.of(cb.desc(root.get("id")));
 		}
 		if ("asc".equalsIgnoreCase(sortOrder)) {
-			return List.of(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
+			return List.of(cb.asc(root.get(sortField)), cb.desc(root.get("id")));
 		}
-		return List.of(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
+		return List.of(cb.desc(root.get(sortField)), cb.desc(root.get("id")));
 	}
 
 	private VideoDataEntity toLiteVideoEntity(Tuple tuple) {
@@ -370,24 +366,37 @@ public class VideoDataService {
 	        }
 
 			if (!randomMode) {
-				String sortField = res == null || res.getSortField() == null || res.getSortField().trim().isEmpty() ? Global.videoListSortField : res.getSortField();
-				String sortOrder = res == null || res.getSortOrder() == null || res.getSortOrder().trim().isEmpty() ? Global.videoListSortOrder : res.getSortOrder();
-				String actualSortField = null;
-				if ("id".equals(sortField) || "createtime".equals(sortField) || "publishtime".equals(sortField) || "videoauthor".equals(sortField)) {
-					actualSortField = sortField;
-				}
-				if (actualSortField != null) {
+				String sortField = resolveVideoSortField(res == null ? null : res.getSortField());
+				String sortOrder = resolveSortOrder(res == null ? null : res.getSortOrder(), Global.videoListSortOrder);
+				if ("id".equals(sortField)) {
 					if ("asc".equalsIgnoreCase(sortOrder)) {
-						query.orderBy(cb.asc(root.get(actualSortField)), cb.desc(root.get("id")));
+						query.orderBy(cb.asc(root.get("id")));
 					} else {
-						query.orderBy(cb.desc(root.get(actualSortField)), cb.desc(root.get("id")));
+						query.orderBy(cb.desc(root.get("id")));
 					}
 				} else {
-					query.orderBy(cb.desc(root.get("id")));
+					if ("asc".equalsIgnoreCase(sortOrder)) {
+						query.orderBy(cb.asc(root.get(sortField)), cb.desc(root.get("id")));
+					} else {
+						query.orderBy(cb.desc(root.get(sortField)), cb.desc(root.get("id")));
+					}
 				}
 			}
 			return cb.and(predicates.toArray(new Predicate[0]));
 		};
+	}
+
+	private String resolveVideoSortField(String requestedField) {
+		String candidate = StringUtil.isString(requestedField) ? requestedField : Global.videoListSortField;
+		if ("createtime".equals(candidate) || "publishtime".equals(candidate) || "videoauthor".equals(candidate)) {
+			return candidate;
+		}
+		return "id";
+	}
+
+	private String resolveSortOrder(String requestedOrder, String defaultOrder) {
+		String candidate = StringUtil.isString(requestedOrder) ? requestedOrder : defaultOrder;
+		return "asc".equalsIgnoreCase(candidate) ? "asc" : "desc";
 	}
 
 	private void stabilizeRandomSourceOrder(List<VideoDataEntity> items) {
