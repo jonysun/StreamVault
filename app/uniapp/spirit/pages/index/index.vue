@@ -146,7 +146,7 @@
 				});
 			},
 			goToFallsVideo() {
-				uni.navigateTo({
+				uni.switchTab({
 					url: '/pages/video/fallsVideo'
 				});
 			},

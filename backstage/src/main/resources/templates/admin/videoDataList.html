@@ -638,7 +638,7 @@
 									<div class="form-group mb-3">
 										<label class="control-label">排序字段</label>
 										<select class="form-control sortField" name="sortField">
-											<option value="">默认（编号倒序）</option>
+											<option value="" id="videoDefaultSortOption" th:data-field="${T(com.flower.spirit.config.Global).videoListSortField}" th:data-order="${T(com.flower.spirit.config.Global).videoListSortOrder}">默认（编号倒序）</option>
 											<option value="createtime">下载时间</option>
 											<option value="publishtime">发布时间</option>
 											<option value="videoauthor">视频作者</option>
@@ -775,6 +775,7 @@
         var videoAuthorOptions = [];
         var selectedVideoAuthors = new Set();
         $(function () {
+            updateVideoDefaultSortLabel();
             findList(1);
             $('.searchData').click(function () {
                 findList(1)
@@ -782,6 +783,14 @@
 			loadVideoAuthors();
 			bindVideoAuthorMultiSelect();
         })
+
+        function updateVideoDefaultSortLabel() {
+            var opt = $('#videoDefaultSortOption');
+            var field = opt.data('field') || 'id';
+            var order = opt.data('order') || 'desc';
+            var fieldNames = { id: '\u7f16\u53f7', createtime: '\u4e0b\u8f7d\u65f6\u95f4', publishtime: '\u53d1\u5e03\u65f6\u95f4', videoauthor: '\u4f5c\u8005' };
+            opt.text('\u9ed8\u8ba4\uff08' + (fieldNames[field] || '\u7f16\u53f7') + (order === 'asc' ? '\u6b63\u5e8f' : '\u5012\u5e8f') + '\uff09');
+        }
 
 		function loadVideoAuthors(){
 			$.get('/admin/api/videoAuthors', function(res){

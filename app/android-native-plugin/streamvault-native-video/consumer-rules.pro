@@ -1,0 +1,3 @@
+-keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations
+-keep public class * extends io.dcloud.feature.uniapp.common.UniModule{*;}
+-keep class com.streamvault.nativefeed.** { *; }

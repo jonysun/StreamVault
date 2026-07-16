@@ -1,0 +1,13 @@
+.git
+.worktrees
+app
+backstage/target
+backstage/runlogs
+db
+jdk17.zip
+maven.zip
+tools
+**/.gradle
+**/build
+**/node_modules
+**/unpackage

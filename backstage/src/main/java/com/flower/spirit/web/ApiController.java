@@ -88,6 +88,24 @@ public class ApiController {
 		return videoDataService.findPage(res);
 	}
 
+	@RequestMapping("/findAllVideos")
+	public AjaxEntity findAllVideos(HttpServletRequest req, VideoDataEntity res) {
+		String token = req.getParameter("token");
+		if (!(Objects.equals(token, Global.apptoken) || Objects.equals(token, Global.readonlytoken))) {
+		    return new AjaxEntity(Global.ajax_uri_error, "app token 错误", null);
+		}
+		return videoDataService.findAll(res);
+	}
+
+	@RequestMapping("/updateVideoFavorite")
+	public AjaxEntity updateVideoFavorite(HttpServletRequest req, Integer id, String favorite) {
+		String token = req.getParameter("token");
+		if (!Objects.equals(token, Global.apptoken)) {
+			return new AjaxEntity(Global.ajax_uri_error, "app token 错误", null);
+		}
+		return videoDataService.updateVideoFavorite(id, favorite);
+	}
+
 	@RequestMapping("/recentProcessHistory")
 	public AjaxEntity recentProcessHistory(HttpServletRequest req, Integer limit) {
 		String token = req.getParameter("token");

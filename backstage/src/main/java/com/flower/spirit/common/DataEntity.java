@@ -14,7 +14,7 @@ public class DataEntity<T> {
 	private int pageSize = 15;
 
 	public int getPageNo() {
-		return pageNo-1;
+		return Math.max(0, pageNo - 1);
 	}
 
 	public void setPageNo(int pageNo) {

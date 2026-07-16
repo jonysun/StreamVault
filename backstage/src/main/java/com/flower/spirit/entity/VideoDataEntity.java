@@ -322,6 +322,9 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	@Transient
 	private String randomSeed;
+
+	@Transient
+	private String mediaType;
 	
 	public String getExcludePlatform() {
 		return excludePlatform;
@@ -401,6 +404,14 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setRandomSeed(String randomSeed) {
 		this.randomSeed = randomSeed;
+	}
+
+	public String getMediaType() {
+		return mediaType;
+	}
+
+	public void setMediaType(String mediaType) {
+		this.mediaType = mediaType;
 	}
 	
 

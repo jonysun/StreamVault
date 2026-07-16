@@ -23,9 +23,11 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.dao.AuthorProfileDao;
 import com.flower.spirit.dto.AdminMediaFeedItem;
 import com.flower.spirit.dto.AdminMediaSlide;
 import com.flower.spirit.dto.AdminVideoListItem;
+import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 
@@ -46,9 +48,13 @@ public class MediaFeedService {
 	@Autowired
 	private GraphicContentService graphicContentService;
 
+	@Autowired
+	private AuthorProfileDao authorProfileDao;
+
 	public AjaxEntity findPage(VideoDataEntity query) {
 		VideoDataEntity videoQuery = copyVideoQuery(query);
 		GraphicContentEntity graphicQuery = toGraphicQuery(query);
+		String mediaType = normalizeMediaType(videoQuery.getMediaType());
 		int pageNo = videoQuery.getPageNo();
 		int pageSize = Math.max(1, videoQuery.getPageSize());
 		int fetchSize = Math.max(pageSize, (pageNo + 1) * pageSize);
@@ -57,12 +63,14 @@ public class MediaFeedService {
 		Map<String, AdminMediaFeedItem> mergedItems = new LinkedHashMap<>();
 		long totalElements = 0;
 
-		totalElements += appendVideoCandidates(mergedItems, videoQuery, fetchSize, true);
-		if (shouldFetchCreateTimeCandidates(videoQuery)) {
+		if (!"graphic".equals(mediaType)) {
+			totalElements += appendVideoCandidates(mergedItems, videoQuery, fetchSize, true);
+		}
+		if (!"graphic".equals(mediaType) && shouldFetchCreateTimeCandidates(videoQuery)) {
 			appendVideoCandidates(mergedItems, videoQuery, fetchSize, false);
 		}
 
-		if (!"1".equals(videoQuery.getFavorite())) {
+		if (!"video".equals(mediaType) && !"1".equals(videoQuery.getFavorite())) {
 			totalElements += appendGraphicCandidates(mergedItems, graphicQuery, fetchSize, true);
 			if (shouldFetchCreateTimeCandidates(videoQuery)) {
 				appendGraphicCandidates(mergedItems, graphicQuery, fetchSize, false);
@@ -102,6 +110,7 @@ public class MediaFeedService {
 		}
 		for (Object row : videoPage.getContent()) {
 			AdminMediaFeedItem item = toVideoFeedItem(row);
+			enrichDisplayAuthor(item);
 			putMediaItem(mergedItems, item);
 		}
 		return countTotal ? videoPage.getTotalElements() : 0;
@@ -125,6 +134,7 @@ public class MediaFeedService {
 			if (row instanceof GraphicContentEntity graphic) {
 				AdminMediaFeedItem item = toGraphicFeedItemForTest(graphic);
 				if (!item.getSlides().isEmpty()) {
+					enrichDisplayAuthor(item);
 					putMediaItem(mergedItems, item);
 				}
 			}
@@ -292,7 +302,19 @@ public class MediaFeedService {
 		target.setFavorite(source.getFavorite());
 		target.setRandomMode(source.getRandomMode());
 		target.setRandomSeed(source.getRandomSeed());
+		target.setMediaType(source.getMediaType());
 		return target;
+	}
+
+	private String normalizeMediaType(String mediaType) {
+		if (mediaType == null) {
+			return "mixed";
+		}
+		String normalized = mediaType.trim().toLowerCase(Locale.ROOT);
+		if ("video".equals(normalized) || "graphic".equals(normalized)) {
+			return normalized;
+		}
+		return "mixed";
 	}
 
 	private void stabilizeRandomSourceOrder(List<AdminMediaFeedItem> items) {
@@ -417,5 +439,19 @@ public class MediaFeedService {
 		}
 		int result = left.compareTo(right);
 		return ascending ? result : -result;
+	}
+
+	private void enrichDisplayAuthor(AdminMediaFeedItem item) {
+		if (authorProfileDao == null || item == null || item.getAuthoruid() == null || item.getAuthoruid().trim().isEmpty()
+				|| item.getPlatform() == null || item.getPlatform().trim().isEmpty()) {
+			return;
+		}
+		authorProfileDao.findByPlatformAndAuthoruid(item.getPlatform().trim(), item.getAuthoruid().trim())
+				.map(AuthorProfileEntity::getDisplayname)
+				.filter(name -> name != null && !name.trim().isEmpty())
+				.ifPresent(name -> {
+					item.setDisplayAuthor(name.trim());
+					item.setProfileAuthorUid(item.getAuthoruid());
+				});
 	}
 }

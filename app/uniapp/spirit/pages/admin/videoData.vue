@@ -55,6 +55,10 @@
 </template>
 
 <script>
+	import nativeVideoBridge from '@/utils/nativeVideoBridge.js'
+	import { normalizeVideoPath } from '@/utils/videoUrl.js'
+	import { buildNativeFeedOptions } from '@/utils/nativeFeedPayload.js'
+
 	export default {
 		data() {
 			return {
@@ -62,7 +66,8 @@
 				fetchPageNum: 1,
 				searchKey: '',
 				isSearching: false,
-				isLoading: false
+				isLoading: false,
+				nativeOpening: false
 			}
 		},
 		onLoad() { this.checkLogin(); },
@@ -139,8 +144,45 @@
 					complete: () => { uni.stopPullDownRefresh(); }
 				});
 			},
-			playVideo(item) {
-				uni.navigateTo({ url: `/pages/video/videoPlay?videoInfo=${encodeURIComponent(JSON.stringify(item))}` });
+			async playVideo(item) {
+				if (!item || this.nativeOpening) return;
+				const opened = await this.tryOpenNativeFromAdmin(item);
+				if (!opened) {
+					uni.navigateTo({ url: `/pages/video/videoPlay?videoInfo=${encodeURIComponent(JSON.stringify(item))}` });
+				}
+			},
+			async tryOpenNativeFromAdmin(item) {
+				const serveraddr = uni.getStorageSync('serveraddr') || '';
+				const serverport = uni.getStorageSync('serverport') || '';
+				const servertoken = uni.getStorageSync('servertoken') || '';
+				const normalized = Object.assign({}, item, {
+					videounrealaddr: normalizeVideoPath(item.videounrealaddr, serveraddr, serverport, servertoken),
+					playurl: normalizeVideoPath(item.playurl, serveraddr, serverport, servertoken),
+					videocover: normalizeVideoPath(item.videocover, serveraddr, serverport, servertoken)
+				});
+				if (!(normalized.videounrealaddr || normalized.playurl || normalized.playSrc)) return false;
+				const options = buildNativeFeedOptions({
+					videos: [normalized],
+					currentIndex: 0,
+					serveraddr,
+					serverport,
+					servertoken,
+					activeOrderMode: 'desc',
+					playbackSourceMode: 'prefer_mp4',
+					playbackMode: 'autonext',
+					isMuted: true,
+					pageNo: this.fetchPageNum,
+					pageSize: 1
+				});
+				this.nativeOpening = true;
+				let res = null;
+				try {
+					res = await nativeVideoBridge.openNativeVideoFeed(options);
+				} finally {
+					this.nativeOpening = false;
+				}
+				console.log('admin videoData native opened', res);
+				return !!(res && res.ok);
 			},
 			deleteVideo(item) {
 				uni.showModal({

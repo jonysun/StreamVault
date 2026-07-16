@@ -2,8 +2,8 @@
     "name" : "StreamVault",
     "appid" : "__UNI__4D65104",
     "description" : "",
-    "versionName" : "2.9.5",
-    "versionCode" : 295,
+    "versionName" : "4.1.2",
+    "versionCode" : 412,
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {
@@ -20,11 +20,31 @@
         "modules" : {
             "VideoPlayer" : {}
         },
+        "nativePlugins" : {
+            "StreamVault-NativeVideo" : {
+                "__plugin_info__" : {
+                    "name" : "StreamVault Native Video",
+                    "description" : "Native Android immersive video feed for StreamVault.",
+                    "platforms" : "Android",
+                    "url" : "",
+                    "android_package_name" : "com.streamvault.nativefeed",
+                    "ios_bundle_id" : "",
+                    "isCloud" : false,
+                    "bought" : 1,
+                    "pid" : "",
+                    "parameters" : {}
+                }
+            }
+        },
         /* 应用发布信息 */
         "distribute" : {
             /* android打包配置 */
             "android" : {
-                "permissions" : [],
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
+                ],
+                "usesCleartextTraffic" : true,
                 "autoSdkPermissions" : false,
                 "abiFilters" : [ "arm64-v8a" ]
             },
@@ -97,5 +117,6 @@
         "version" : "1"
     },
     "vueVersion" : "2",
-    "fallbackLocale" : "zh-Hans"
+    "fallbackLocale" : "zh-Hans",
+    "locale" : "auto"
 }

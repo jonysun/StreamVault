@@ -221,6 +221,7 @@ public class AuthorProfileService {
 		item.setOriginaladdress(video.getOriginaladdress());
 		item.setFavorite(video.getFavorite());
 		item.setPrivacy(video.getVideoprivacy());
+		enrichDisplayAuthor(item);
 		return item;
 	}
 
@@ -247,6 +248,7 @@ public class AuthorProfileService {
 		item.setSourceurl(graphic.getSourceurl());
 		item.setOriginaladdress(graphic.getOriginaladdress());
 		item.setSlides(slides);
+		enrichDisplayAuthor(item);
 		return item;
 	}
 
@@ -270,6 +272,19 @@ public class AuthorProfileService {
 			return List.of();
 		}
 		return slides;
+	}
+
+	private void enrichDisplayAuthor(AdminMediaFeedItem item) {
+		if (item == null || trimToNull(item.getPlatform()) == null || trimToNull(item.getAuthoruid()) == null) {
+			return;
+		}
+		authorProfileDao.findByPlatformAndAuthoruid(item.getPlatform().trim(), item.getAuthoruid().trim())
+				.map(AuthorProfileEntity::getDisplayname)
+				.filter(name -> name != null && !name.trim().isEmpty())
+				.ifPresent(name -> {
+					item.setDisplayAuthor(name.trim());
+					item.setProfileAuthorUid(item.getAuthoruid());
+				});
 	}
 
 	private String detectSlideType(String url) {
@@ -327,11 +342,9 @@ public class AuthorProfileService {
 			String safeAuthor = trimToNull(author);
 			if (safeUid != null) {
 				identity.add(cb.equal(root.get("authoruid"), safeUid));
-			}
-			if (safeUsername != null) {
+			} else if (safeUsername != null) {
 				identity.add(cb.equal(root.get("username"), safeUsername));
-			}
-			if (safeAuthor != null) {
+			} else if (safeAuthor != null) {
 				identity.add(cb.equal(root.get("displayname"), safeAuthor));
 			}
 			if (!identity.isEmpty()) {
@@ -356,12 +369,10 @@ public class AuthorProfileService {
 			if (safeUid != null) {
 				identity.add(cb.equal(root.get("authoruid"), safeUid));
 				identity.add(cb.equal(root.get("secuid"), safeUid));
-			}
-			if (safeUsername != null) {
+			} else if (safeUsername != null) {
 				identity.add(cb.equal(root.get("authorusername"), safeUsername));
 				identity.add(cb.equal(root.get("uniqueid"), safeUsername));
-			}
-			if (safeAuthor != null) {
+			} else if (safeAuthor != null) {
 				identity.add(cb.equal(root.get("videoauthor"), safeAuthor));
 			}
 			if (!identity.isEmpty()) {
@@ -384,12 +395,10 @@ public class AuthorProfileService {
 			if (safeUid != null) {
 				identity.add(cb.equal(root.get("authoruid"), safeUid));
 				identity.add(cb.equal(root.get("secuid"), safeUid));
-			}
-			if (safeUsername != null) {
+			} else if (safeUsername != null) {
 				identity.add(cb.equal(root.get("authorusername"), safeUsername));
 				identity.add(cb.equal(root.get("uniqueid"), safeUsername));
-			}
-			if (safeAuthor != null) {
+			} else if (safeAuthor != null) {
 				identity.add(cb.equal(root.get("author"), safeAuthor));
 			}
 			if (!identity.isEmpty()) {
