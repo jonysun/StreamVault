@@ -1377,6 +1377,52 @@
          * @param {Object} item - 图文数据项
          * @returns {string} HTML字符串
          */
+        function escapeRecentlyHtml(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function extractGraphicImageUrl(entry) {
+            if (typeof entry === 'string') {
+                return entry;
+            }
+            if (!entry || typeof entry !== 'object') {
+                return '';
+            }
+            return entry.url || entry.src || entry.path || entry.image || entry.cover || '';
+        }
+
+        function isVideoLikePath(url) {
+            return /\.(mp4|m3u8|mov|m4v|webm)(\?|#|$)/i.test(url || '');
+        }
+
+        function normalizeGraphicImages(rawImages) {
+            let parsed = rawImages;
+            if (!parsed) {
+                return [];
+            }
+            if (typeof parsed === 'string') {
+                try {
+                    parsed = JSON.parse(parsed);
+                } catch (e) {
+                    parsed = [parsed];
+                }
+            }
+            if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.images)) {
+                parsed = parsed.images;
+            }
+            if (!Array.isArray(parsed)) {
+                parsed = [parsed];
+            }
+            return parsed.map(entry => extractGraphicImageUrl(entry))
+                .map(url => String(url || '').trim().replace(/\\/g, '/'))
+                .filter(url => url && !isVideoLikePath(url));
+        }
+
         function createGraphicRecentlyItem(item) {
             const title = item.title || '无标题';
             const content = item.content || '';
@@ -1385,14 +1431,7 @@
             const badgeClass = getPlatformBadgeClass(platform);
             
             // 解析图片
-            let images = [];
-            try {
-                if (item.images) {
-                    images = JSON.parse(item.images);
-                }
-            } catch (e) {
-                console.error('解析图片失败:', e);
-            }
+            const images = normalizeGraphicImages(item.images);
             
             // 生成缩略图HTML
             let thumbnailHtml = '';
@@ -1400,7 +1439,8 @@
                 const displayImages = images.slice(0, 3);
                 thumbnailHtml = `<div class="recently-thumbnail stacked">`;
                 displayImages.forEach((img, index) => {
-                    thumbnailHtml += `<img src="${img}" alt="图片${index + 1}">`;
+                    const safeImg = escapeRecentlyHtml(img);
+                    thumbnailHtml += `<img src="${safeImg}" alt="图片${index + 1}" onerror="this.onerror=null;this.src='/static/images/noimage.jpg'">`;
                 });
                 if (images.length > 3) {
                     thumbnailHtml += `<span class="image-count">${images.length}</span>`;
