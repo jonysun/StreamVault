@@ -1,0 +1,167 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+class ClassList {
+    constructor() {
+        this.values = new Set();
+    }
+    add(value) { this.values.add(value); }
+    remove(value) { this.values.delete(value); }
+    contains(value) { return this.values.has(value); }
+}
+
+function createNode(tagName, className) {
+    const node = {
+        tagName: String(tagName || '').toUpperCase(),
+        className: className || '',
+        classList: new ClassList(),
+        attributes: {},
+        children: [],
+        parentNode: null,
+        readyState: 0,
+        listeners: {},
+        hidden: false,
+        setAttribute(name, value) { this.attributes[name] = String(value); },
+        getAttribute(name) { return this.attributes[name] || null; },
+        removeAttribute(name) { delete this.attributes[name]; },
+        addEventListener(name, callback) {
+            this.listeners[name] = this.listeners[name] || [];
+            this.listeners[name].push(callback);
+        },
+        dispatch(name) {
+            (this.listeners[name] || []).forEach((callback) => callback.call(this));
+        },
+        appendChild(child) {
+            if (child.parentNode) {
+                child.parentNode.children = child.parentNode.children.filter((item) => item !== child);
+            }
+            child.parentNode = this;
+            this.children.push(child);
+            return child;
+        },
+        closest(selector) {
+            let current = this;
+            while (current) {
+                if (selector === '.feed-video-host' && current.className === 'feed-video-host') {
+                    return current;
+                }
+                current = current.parentNode;
+            }
+            return null;
+        }
+    };
+    return node;
+}
+
+function createItem(index, key) {
+    const host = createNode('div', 'feed-video-host');
+    host.setAttribute('data-media-key', key);
+    const item = createNode('div', 'feed-item');
+    item.setAttribute('data-abs-index', index);
+    item.querySelector = (selector) => selector === '.feed-video-host' ? host : null;
+    item.appendChild(host);
+    return { item, host };
+}
+
+function loadModules() {
+    const body = createNode('body', '');
+    const nodesById = {};
+    const document = {
+        body,
+        createElement: (tag) => createNode(tag, ''),
+        getElementById: (id) => nodesById[id] || null
+    };
+    const window = { document, setTimeout, clearTimeout };
+    window.window = window;
+    const context = vm.createContext({ window, document, setTimeout, clearTimeout, console });
+    const base = path.resolve(__dirname, '../../main/resources/static/js/admin-feed');
+    ['feed-store.js', 'feed-player-pool.js', 'feed-profile.js', 'feed-controller.js'].forEach((file) => {
+        vm.runInContext(fs.readFileSync(path.join(base, file), 'utf8'), context, { filename: file });
+    });
+    return window;
+}
+
+function testPlayerReuse(window) {
+    const mounted = [];
+    const pool = new window.AdminFeed.PlayerPool({
+        maxPlayers: 4,
+        mount(video, item, index) {
+            const host = item.querySelector('.feed-video-host');
+            host.appendChild(video);
+            video.setAttribute('data-feed-index', index);
+            video.setAttribute('data-bound-src', 'source-' + host.getAttribute('data-media-key'));
+            mounted.push(video);
+        },
+        release() {}
+    });
+    let firstWindow = [createItem(0, 'a'), createItem(1, 'b'), createItem(2, 'c')];
+    pool.mountWindow(firstWindow.map((entry) => entry.item), 1, 'down');
+    const preloadedC = pool.players.find((video) => video.getAttribute('data-media-key') === 'c');
+    preloadedC.readyState = 2;
+    preloadedC.dispatch('loadeddata');
+    assert.strictEqual(firstWindow[2].host.classList.contains('feed-video-ready'), true);
+
+    pool.stageAll();
+    const secondWindow = [createItem(1, 'b'), createItem(2, 'c'), createItem(3, 'd')];
+    pool.mountWindow(secondWindow.map((entry) => entry.item), 2, 'down');
+    const currentC = pool.players.find((video) => video.getAttribute('data-media-key') === 'c');
+    assert.strictEqual(currentC, preloadedC, 'the preloaded adjacent player must become current');
+    assert.strictEqual(currentC.getAttribute('data-bound-src'), 'source-c');
+    assert.strictEqual(secondWindow[1].host.classList.contains('feed-video-ready'), true);
+    assert.ok(mounted.length >= 6);
+}
+
+function testIncrementalProfileActivation(window) {
+    const requests = [];
+    function fakeRequest() {
+        const handlers = {};
+        const request = {
+            done(callback) { handlers.done = callback; return request; },
+            fail(callback) { handlers.fail = callback; return request; },
+            abort() { handlers.aborted = true; },
+            resolve(value) { handlers.done(value); }
+        };
+        requests.push(request);
+        return request;
+    }
+
+    let firstPageSnapshot = null;
+    const loader = new window.AdminFeed.ProfileLoader({
+        pageSize: 100,
+        keyOf: (item) => item.mediaKey,
+        request: fakeRequest,
+        onPage(snapshot) { firstPageSnapshot = snapshot; }
+    });
+    loader.load({ authoruid: 'author-1' }, '');
+    requests[0].resolve({
+        resCode: '000001',
+        record: { content: [{ mediaKey: 'a' }, { mediaKey: 'b' }], last: false }
+    });
+    assert.strictEqual(firstPageSnapshot.items.map((item) => item.mediaKey).join(','), 'a,b');
+    assert.strictEqual(firstPageSnapshot.hasMore, true);
+    assert.strictEqual(firstPageSnapshot.nextPage, 1);
+
+    const clickableSnapshot = loader.cancel();
+    const store = new window.AdminFeed.FeedStore();
+    let selectedIndex = -1;
+    const controller = new window.AdminFeed.FeedController(store, {
+        keyOf: (item) => item.mediaKey,
+        beforeReset() {},
+        afterReset(items, index) { selectedIndex = index; }
+    });
+    assert.strictEqual(controller.activateAuthorWork(clickableSnapshot, 'b', {
+        query: { authoruid: 'author-1' },
+        pageSize: 100
+    }), true);
+    assert.strictEqual(selectedIndex, 1);
+    assert.strictEqual(store.state.items.length, 2);
+    assert.strictEqual(store.state.hasMore, true);
+    assert.strictEqual(store.state.page, 0);
+}
+
+const window = loadModules();
+testPlayerReuse(window);
+testIncrementalProfileActivation(window);
+console.log('admin-feed module tests passed');

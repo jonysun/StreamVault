@@ -717,7 +717,7 @@
 								<div class="form-group">
 									<label class="control-label">排序字段</label>
 									<select class="form-control" id="sortFieldFilter">
-										<option value="" id="graphicDefaultSortOption" th:data-field="${T(com.flower.spirit.config.Global).graphicListSortField}" th:data-order="${T(com.flower.spirit.config.Global).graphicListSortOrder}">默认（编号倒序）</option>
+										<option value="" id="graphicDefaultSortOption" th:data-field="${graphicListSortField}" th:data-order="${graphicListSortOrder}">默认（编号倒序）</option>
 										<option value="createtime">下载时间</option>
 										<option value="publishtime">发布时间</option>
 										<option value="author">图影作者</option>
