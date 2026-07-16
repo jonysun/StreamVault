@@ -424,7 +424,7 @@ public class VideoDataService {
 			return;
 		}
 		java.util.Set<Integer> queuedIds = hlsTranscodeService.queuedIdsSnapshot();
-		Integer runningId = hlsTranscodeService.runningVideoIdSnapshot();
+		java.util.Set<Integer> runningIds = hlsTranscodeService.runningVideoIdsSnapshot();
 		for (VideoDataEntity item : items) {
 			if (item == null) {
 				continue;
@@ -442,7 +442,7 @@ public class VideoDataService {
 				item.setHlsstatus("关闭");
 			} else if (hasHls) {
 				item.setHlsstatus("已完成");
-			} else if (item.getId() != null && runningId != null && item.getId().intValue() == runningId.intValue()) {
+			} else if (item.getId() != null && runningIds.contains(item.getId())) {
 				item.setHlsstatus("转码中");
 			} else if (item.getId() != null && queuedIds.contains(item.getId())) {
 				item.setHlsstatus("排队中");

@@ -317,6 +317,13 @@
             padding: 12px;
         }
 
+        .feed-author-profile-loading {
+            padding: 14px 10px 18px;
+            color: #cbd5e1;
+            font-size: 12px;
+            text-align: center;
+        }
+
         .feed-author-work-grid {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -722,10 +729,15 @@
         .feed-slot-next { transform: translate3d(0, 100%, 0); }
 
         .feed-video {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
             width: 100%;
             height: 100%;
             object-fit: contain;
             background: #000;
+            opacity: 0;
+            transition: opacity .12s ease;
         }
 
         .feed-video-host {
@@ -733,6 +745,32 @@
             inset: 0;
             z-index: 1;
             background: #000;
+            overflow: hidden;
+        }
+
+        .feed-video-cover {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background: #000;
+            opacity: 1;
+            transition: opacity .12s ease;
+        }
+
+        .feed-video-cover img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .feed-video-host.feed-video-ready .feed-video {
+            opacity: 1;
+        }
+
+        .feed-video-host.feed-video-ready .feed-video-cover {
+            opacity: 0;
+            pointer-events: none;
         }
 
         .feed-graphic-host {
@@ -1317,9 +1355,9 @@
                     <div class="col-lg-12">
                         <div class="card">
                             <div class="card-body p-0">
-                                <input type="hidden" id="mediaHomeMode" th:value="${T(com.flower.spirit.config.Global).mediaHomeMode}" />
-                                <input type="hidden" id="mediaFeedMuted" th:value="${T(com.flower.spirit.config.Global).mediaFeedMuted}" />
-                                <input type="hidden" id="mediaFeedSource" th:value="${T(com.flower.spirit.config.Global).mediaFeedSource}" />
+                                <input type="hidden" id="mediaHomeMode" th:value="${mediaHomeMode}" />
+                                <input type="hidden" id="mediaFeedMuted" th:value="${mediaFeedMuted}" />
+                                <input type="hidden" id="mediaFeedSource" th:value="${mediaFeedSource}" />
                                 <div class="feed-controls" id="feedControls">
                                     <button type="button" class="feed-control-btn" id="feedOrderBtn" title="播放顺序">
                                         <i class="mdi mdi-sort"></i><span>倒序</span>
@@ -1381,10 +1419,11 @@
 <script type="text/javascript" src="../static/js/main.min.js"></script>
 <script src="../static/js/layer/layer.js" type="text/javascript"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+<script src="../static/js/admin-feed/feed-store.js"></script>
+<script src="../static/js/admin-feed/feed-player-pool.js"></script>
+<script src="../static/js/admin-feed/feed-profile.js"></script>
+<script src="../static/js/admin-feed/feed-controller.js"></script>
 <script>
-    var page = 0;
-    var isLoading = false;
-    var hasMore = true;
     var mediaHomeMode = 'grid';
     var feedObserver = null;
     var feedOrder = 'desc';
@@ -1405,9 +1444,7 @@
     var feedPageSize = 50;
     var feedAbsCounter = 0;
     var feedTrimmedHeadCount = 0;
-    var feedScrollDirection = 'down';
     var feedMaxDomItems = 16;
-    var feedAllItems = [];
     var feedActiveVideo = null;
     var feedMetrics = {
         playAttempts: 0,
@@ -1417,7 +1454,6 @@
         stallsRecovered: 0
     };
     var feedSessionSeed = '';
-    var feedCurrentAbsIndex = -1;
     var feedControlState = {};
     var feedProgressDrag = null;
     var FEED_ORDER_STORAGE_KEY = 'streamv.admin.feedOrder.v2';
@@ -1428,17 +1464,28 @@
     var feedFullscreenTransitioning = false;
     var feedFullscreenTarget = null;
     var feedSuppressAutoNextUntil = 0;
-    var feedPendingAutoNextIndex = -1;
-    var feedAuthorProfileQuery = null;
-    var feedAuthorProfileType = '';
-    var feedAuthorProfileWorks = [];
-    var feedAuthorProfileLoadToken = 0;
-    var feedAuthorContext = null;
-    var feedAuthorContextTargetKey = '';
-    var feedRenderedCenterIndex = -1;
-    var feedSwitching = false;
     var feedTouchStartY = null;
     var feedWheelLockUntil = 0;
+    var feedStore = new window.AdminFeed.FeedStore();
+    feedStore.bindLegacyGlobals({
+        page: 'page',
+        isLoading: 'isLoading',
+        hasMore: 'hasMore',
+        feedScrollDirection: 'scrollDirection',
+        feedAllItems: 'items',
+        feedCurrentAbsIndex: 'currentIndex',
+        feedRenderedCenterIndex: 'renderedCenterIndex',
+        feedSwitching: 'switching',
+        feedPendingAutoNextIndex: 'pendingAutoNextIndex',
+        feedAuthorProfileQuery: 'profileQuery',
+        feedAuthorProfileType: 'profileType',
+        feedAuthorProfileWorks: 'profileWorks',
+        feedAuthorContext: 'authorContext',
+        feedAuthorContextTargetKey: 'authorContextTargetKey'
+    });
+    var feedPlayerPoolManager = null;
+    var feedProfileLoader = null;
+    var feedController = null;
 
     function nowMs() {
         return (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : Date.now();
@@ -2002,8 +2049,10 @@
         var playUrl = item.playurl || item.videounrealaddr || '';
         var fallbackUrl = item.fallbackUrl || item.videounrealaddr || '';
         var mp4Url = item.fallbackUrl || item.videounrealaddr || item.playurl || '';
+        var coverUrl = isPrivate ? '/static/images/noimage.jpg' : (item.cover || item.videocover || '/static/images/noimage.jpg');
         var html = '<div class="feed-item" data-private="' + isPrivate + '" data-feed-type="video">';
-        html += '<div class="feed-video-host" data-src="' + escapeHtml(playUrl) + '" data-fallback="' + escapeHtml(fallbackUrl) + '" data-playurl="' + escapeHtml(item.playurl || '') + '" data-mp4="' + escapeHtml(mp4Url) + '"></div>';
+        html += '<div class="feed-video-host" data-media-key="' + itemKey + '" data-src="' + escapeHtml(playUrl) + '" data-fallback="' + escapeHtml(fallbackUrl) + '" data-playurl="' + escapeHtml(item.playurl || '') + '" data-mp4="' + escapeHtml(mp4Url) + '">';
+        html += '<div class="feed-video-cover"><img src="' + escapeHtml(coverUrl) + '" alt="" onerror="this.src=\'/static/images/noimage.jpg\'"></div></div>';
         html += '<div class="feed-media-type-badge feed-media-type-video"><i class="mdi mdi-play-circle-outline"></i><span>视频</span></div>';
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
@@ -2261,6 +2310,9 @@
             stopGraphicSlideshow(item);
         });
         pauseOtherFeedVideos(null);
+        if (feedPlayerPoolManager) {
+            feedPlayerPoolManager.stageAll();
+        }
         var html = '';
         html += buildFeedSlotHtml(current - 1, 'feed-slot-prev');
         html += buildFeedSlotHtml(current, 'feed-slot-current');
@@ -2522,10 +2574,17 @@
         markVideoPerf(videoEl, 'source-selected', { requestedSrc: src, sourceType: sourceType, fallback: fallback });
         var current = videoEl.getAttribute('data-bound-src');
         if (current === src) {
+            if (feedPlayerPoolManager && videoEl.readyState >= 2) {
+                feedPlayerPoolManager.markReady(videoEl);
+            }
             if (autoPlayWhenReady) {
                 playWithSync(videoEl);
             }
             return;
+        }
+
+        if (feedPlayerPoolManager) {
+            feedPlayerPoolManager.markLoading(videoEl);
         }
 
         if (current && hlsMap[current]) {
@@ -2566,6 +2625,9 @@
             } catch (e) {}
             videoEl.setAttribute('data-bound-src', fallback);
             videoEl.setAttribute('data-source-type', 'MP4');
+            if (feedPlayerPoolManager) {
+                feedPlayerPoolManager.markLoading(videoEl);
+            }
             videoEl.src = fallback;
             var p = videoEl.play();
             if (p && typeof p.catch === 'function') {
@@ -2608,7 +2670,9 @@
 
             hls.on(window.Hls.Events.MANIFEST_PARSED, function() {
                 markVideoPerf(videoEl, 'manifest-parsed');
-                playWithSync(videoEl);
+                if (autoPlayWhenReady) {
+                    playWithSync(videoEl);
+                }
             });
 
             videoEl._frameWatchTimer = setTimeout(function() {
@@ -2772,42 +2836,21 @@
             return;
         }
         ensureFeedVideoPool();
-        var desired = direction === 'up'
-            ? [activeIndex - 2, activeIndex - 1, activeIndex, activeIndex + 1]
-            : [activeIndex - 1, activeIndex, activeIndex + 1, activeIndex + 2];
-        for (var p = 0; p < feedVideoPool.length; p++) {
-            var slot = feedVideoPool[p];
-            var targetIndex = desired[p];
-            var targetItem = null;
-            for (var t = 0; t < items.length; t++) {
-                if (Number(items[t].getAttribute('data-abs-index') || '-1') === targetIndex) {
-                    targetItem = items[t];
-                    break;
-                }
-            }
-            if (targetIndex == null || targetIndex < 0 || !targetItem) {
-                detachPoolVideo(slot);
-                continue;
-            }
-            mountPoolVideo(slot, targetItem, targetIndex, targetIndex === activeIndex);
-        }
-        releaseFarFeedPlayers(items, activeIndex, direction);
+        feedPlayerPoolManager.mountWindow(items, activeIndex, direction);
     }
 
     function ensureFeedVideoPool() {
-        if (feedVideoPool.length > 0) {
-            return;
+        if (!feedPlayerPoolManager) {
+            feedPlayerPoolManager = new window.AdminFeed.PlayerPool({
+                maxPlayers: 4,
+                mount: mountPoolVideo,
+                release: scheduleReleasePoolVideo
+            });
         }
-        var roles = ['prev', 'current', 'next', 'next2'];
-        for (var i = 0; i < roles.length; i++) {
-            var video = document.createElement('video');
-            video.className = 'feed-video hide-controls';
-            video.setAttribute('preload', 'auto');
-            video.setAttribute('playsinline', '');
-            video.setAttribute('webkit-playsinline', '');
+        feedVideoPool = feedPlayerPoolManager.ensure();
+        for (var i = 0; i < feedVideoPool.length; i++) {
+            var video = feedVideoPool[i];
             video.muted = feedMuted;
-            video._poolRole = roles[i];
-            feedVideoPool.push(video);
         }
     }
 
@@ -2834,7 +2877,11 @@
         }
         video._hlsIns = null;
         video.removeAttribute('data-bound-src');
+        video.removeAttribute('data-media-key');
+        video.removeAttribute('data-feed-index');
         video.removeAttribute('src');
+        video._adminFeedReady = false;
+        video._framePrimedFor = '';
         try { video.load(); } catch (e) {}
     }
 
@@ -2860,6 +2907,7 @@
         var fallback = host.getAttribute('data-fallback') || '';
         video.setAttribute('data-fallback', fallback);
         video.setAttribute('data-feed-index', String(itemIndex));
+        video.setAttribute('data-media-key', host.getAttribute('data-media-key') || '');
         setupVideoSource(video, src, autoplayNow);
         video.muted = feedMuted;
         if (!autoplayNow) {
@@ -3154,6 +3202,9 @@
         });
 
         $('#feedAuthorProfileClose').on('click', function() {
+            if (feedProfileLoader) {
+                feedProfileLoader.cancel();
+            }
             $('#feedAuthorProfileDrawer').removeClass('open');
         });
 
@@ -3298,51 +3349,49 @@
         loadFeedAuthorProfileWorks(false);
     }
 
+    function ensureFeedProfileLoader() {
+        if (feedProfileLoader) {
+            return feedProfileLoader;
+        }
+        feedProfileLoader = new window.AdminFeed.ProfileLoader({
+            pageSize: 100,
+            keyOf: getFeedItemKey,
+            request: function(option) {
+                return $.get('/admin/api/authorProfileWorks', option);
+            },
+            onReset: function(snapshot) {
+                feedAuthorProfileWorks = [];
+                renderFeedAuthorProfileWorks([], true, '');
+            },
+            onPage: function(snapshot, added) {
+                feedAuthorProfileWorks = snapshot.items.slice();
+                appendFeedAuthorProfileWorks(added, snapshot.loading);
+            },
+            onComplete: function(snapshot) {
+                feedAuthorProfileWorks = snapshot.items.slice();
+                if (feedAuthorProfileWorks.length) {
+                    updateFeedAuthorProfileLoading(false, '');
+                } else {
+                    renderFeedAuthorProfileWorks([], false, '');
+                }
+            },
+            onError: function(snapshot) {
+                feedAuthorProfileWorks = snapshot.items.slice();
+                if (feedAuthorProfileWorks.length) {
+                    updateFeedAuthorProfileLoading(false, snapshot.error || 'Load failed');
+                } else {
+                    renderFeedAuthorProfileWorks([], false, snapshot.error || 'Load failed');
+                }
+            }
+        });
+        return feedProfileLoader;
+    }
+
     function loadFeedAuthorProfileWorks(append) {
         if (!feedAuthorProfileQuery) {
             return;
         }
-        var token = ++feedAuthorProfileLoadToken;
-        var pageNo = 0;
-        var pageSize = 100;
-        var allWorks = [];
-        feedAuthorProfileWorks = [];
-        $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
-
-        function loadPage() {
-            var option = $.extend({}, feedAuthorProfileQuery, {
-                type: feedAuthorProfileType,
-                pageNo: pageNo,
-                pageSize: pageSize
-            });
-            $.get('/admin/api/authorProfileWorks', option, function(res) {
-                if (token !== feedAuthorProfileLoadToken) {
-                    return;
-                }
-                if (!(res && res.resCode === '000001')) {
-                    $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">No works</div>');
-                    return;
-                }
-                var record = res.record || {};
-                var content = record.content || [];
-                allWorks = allWorks.concat(content);
-                $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Loading ' + allWorks.length + ' works...</div>');
-                if (content.length > 0 && record.last !== true) {
-                    pageNo++;
-                    loadPage();
-                    return;
-                }
-                feedAuthorProfileWorks = allWorks;
-                renderFeedAuthorProfileWorks(feedAuthorProfileWorks);
-            }).fail(function() {
-                if (token !== feedAuthorProfileLoadToken) {
-                    return;
-                }
-                $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Load failed</div>');
-            });
-        }
-
-        loadPage();
+        ensureFeedProfileLoader().load(feedAuthorProfileQuery, feedAuthorProfileType);
     }
 
     function clearFeedAuthorContext() {
@@ -3384,31 +3433,30 @@
         if (!feedAuthorProfileQuery) {
             return;
         }
-        var works = (feedAuthorProfileWorks || []).slice();
-        if (!works.length) {
+        var snapshot = ensureFeedProfileLoader().cancel();
+        if (!snapshot.items.length) {
             return;
         }
-        feedAuthorContext = {
+        var context = {
             query: $.extend({}, feedAuthorProfileQuery),
             type: feedAuthorProfileType || '',
             label: buildFeedAuthorContextLabel(feedAuthorProfileQuery),
-            preloaded: true
+            preloaded: true,
+            pageSize: 100
         };
-        feedAuthorContextTargetKey = '';
         $('#feedAuthorProfileDrawer').removeClass('open');
-        resetFeedRenderState();
-        feedAllItems = works;
-        hasMore = false;
-        appendFeedAuthorOptions(works);
-        updateFeedButtons();
-        var targetIndex = 0;
-        for (var i = 0; i < feedAllItems.length; i++) {
-            if (getFeedItemKey(feedAllItems[i]) === mediaKey) {
-                targetIndex = i;
-                break;
-            }
+        if (!feedController) {
+            feedController = new window.AdminFeed.FeedController(feedStore, {
+                keyOf: getFeedItemKey,
+                beforeReset: resetFeedRenderState,
+                afterReset: function(items, targetIndex) {
+                    appendFeedAuthorOptions(items);
+                    updateFeedButtons();
+                    switchFeedTo(targetIndex, { animate: false, forcePlay: true });
+                }
+            });
         }
-        switchFeedTo(targetIndex, { animate: false, forcePlay: true });
+        feedController.activateAuthorWork(snapshot, mediaKey, context);
     }
 
     function findAuthorContextList(pageNo) {
@@ -3420,7 +3468,7 @@
         var option = $.extend({}, feedAuthorContext.query, {
             type: feedAuthorContext.type || '',
             pageNo: pageNo,
-            pageSize: feedPageSize,
+            pageSize: feedAuthorContext.pageSize || feedPageSize,
             lite: '1'
         });
         var listRequestStart = nowMs();
@@ -3437,8 +3485,8 @@
                 });
                 hasMore = list.length > 0 && record.last !== true;
                 if (list.length > 0) {
-                    feedAllItems = feedAllItems.concat(list);
-                    appendFeedAuthorOptions(list);
+                    var uniqueList = appendUniqueAuthorFeedItems(list);
+                    appendFeedAuthorOptions(uniqueList);
                     requestAnimationFrame(function() {
                         hydrateFeedItems();
                         renderFeedPlaylist();
@@ -3520,8 +3568,26 @@
             $('#feedAuthorProfileDrawer').removeClass('open');
         });
     }
-    function renderFeedAuthorProfileWorks(list, loading, errorMessage) {
-        var html = '<div class="feed-author-work-grid">';
+
+    function appendUniqueAuthorFeedItems(list) {
+        var known = {};
+        for (var i = 0; i < feedAllItems.length; i++) {
+            known[getFeedItemKey(feedAllItems[i])] = true;
+        }
+        var unique = [];
+        for (var j = 0; j < list.length; j++) {
+            var key = getFeedItemKey(list[j]);
+            if (!key || known[key]) {
+                continue;
+            }
+            known[key] = true;
+            unique.push(list[j]);
+        }
+        feedAllItems = feedAllItems.concat(unique);
+        return unique;
+    }
+    function buildFeedAuthorWorkCardsHtml(list) {
+        var html = '';
         for (var i = 0; i < list.length; i++) {
             var item = list[i] || {};
             var title = item.title || item.videoname || 'Untitled';
@@ -3531,7 +3597,53 @@
             html += '<div class="feed-author-work-cover"><img src="' + escapeHtml(cover) + '" alt="' + escapeHtml(title) + '" onerror="this.src=\'/static/images/noimage.jpg\'"><span class="feed-author-work-type">' + typeLabel + '</span><span class="feed-author-work-count"><i class="mdi mdi-heart-outline"></i> ' + compactCount(item.favorite === '1' ? 1 : 0) + '</span></div>';
             html += '</button>';
         }
+        return html;
+    }
+
+    function appendFeedAuthorProfileWorks(list, loading) {
+        var body = $('#feedAuthorProfileBody');
+        var grid = body.find('.feed-author-work-grid');
+        if (!grid.length) {
+            body.html('<div class="feed-author-work-grid"></div><div class="feed-author-profile-loading"></div>');
+            grid = body.find('.feed-author-work-grid');
+        }
+        grid.append(buildFeedAuthorWorkCardsHtml(list || []));
+        updateFeedAuthorProfileLoading(loading, '');
+        if (list && list.length) {
+            var firstCover = list[0].cover || list[0].videocover || '';
+            if (firstCover && !$('#feedAuthorProfileHeader .feed-author-profile-hero').attr('data-work-cover')) {
+                $('#feedAuthorProfileHeader .feed-author-profile-hero')
+                    .attr('data-work-cover', '1')
+                    .css('--author-hero-image', 'url("' + cssUrlEscape(firstCover) + '")');
+            }
+        }
+    }
+
+    function updateFeedAuthorProfileLoading(loading, errorMessage) {
+        var body = $('#feedAuthorProfileBody');
+        var status = body.find('.feed-author-profile-loading');
+        if (!status.length && body.find('.feed-author-work-grid').length) {
+            status = $('<div class="feed-author-profile-loading"></div>').appendTo(body);
+        }
+        if (!status.length) {
+            return;
+        }
+        if (errorMessage) {
+            status.removeClass('text-muted').addClass('text-danger').text(errorMessage);
+        } else if (loading) {
+            status.removeClass('text-danger').html('<i class="mdi mdi-loading mdi-spin"></i> Loading more...');
+        } else {
+            status.remove();
+        }
+    }
+
+    function renderFeedAuthorProfileWorks(list, loading, errorMessage) {
+        var html = '<div class="feed-author-work-grid">';
+        html += buildFeedAuthorWorkCardsHtml(list);
         html += '</div>';
+        if (loading && list.length) {
+            html += '<div class="feed-author-profile-loading"><i class="mdi mdi-loading mdi-spin"></i> Loading more...</div>';
+        }
         if (errorMessage) {
             html += '<div style="padding:10px 12px;color:#fca5a5;font-size:12px;">' + escapeHtml(errorMessage) + '</div>';
         }

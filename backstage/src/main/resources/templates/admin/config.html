@@ -1362,6 +1362,9 @@
     });
 
     function loadHlsStats() {
+        if (!$('#hlsStatsContainer').length) {
+            return;
+        }
         $.ajax({
             url: '/admin/api/hlsStats',
             type: 'GET',

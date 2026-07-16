@@ -72,7 +72,10 @@ public class PageController {
 	 * @return
 	 */
 	@RequestMapping(value = "/index")
-	public String index() {
+	public String index(Model model) {
+		model.addAttribute("mediaHomeMode", Global.mediaHomeMode);
+		model.addAttribute("mediaFeedMuted", Global.mediaFeedMuted);
+		model.addAttribute("mediaFeedSource", Global.mediaFeedSource);
 		return "admin/index";
 	}
 	
@@ -152,6 +155,8 @@ public class PageController {
 	@RequestMapping(value = "/videoDataList")
 	public String videoDataList(Model model) {
 		model.addAttribute("readtoken", Global.readonlytoken);
+		model.addAttribute("videoListSortField", Global.videoListSortField);
+		model.addAttribute("videoListSortOrder", Global.videoListSortOrder);
 		return "admin/videoDataList";
 	}
 	
@@ -187,6 +192,8 @@ public class PageController {
 	@RequestMapping(value = "/graphicContentList")
 	public String graphicContentList(Model model) {
 		model.addAttribute("mediaPreviewLimit", Global.mediaPreviewLimit);
+		model.addAttribute("graphicListSortField", Global.graphicListSortField);
+		model.addAttribute("graphicListSortOrder", Global.graphicListSortOrder);
 		return "admin/graphicContent";
 	}
 

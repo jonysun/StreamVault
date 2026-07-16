@@ -91,10 +91,12 @@
 	<script type="text/javascript" src="../static/js/laypage.js"></script>
 	<script src="../static/js/layer/layer.js" type="text/javascript"></script>
     <script>
+        let hlsStatsTimer = null;
+        let hlsStatsRequestActive = false;
+        let lastHlsStats = null;
+
         $(document).ready(function() {
             refreshStatus();
-            loadHlsStats();
-            setInterval(loadHlsStats, 8000);
         });
         
         function refreshStatus() {
@@ -128,29 +130,47 @@
                 container.append(createCollectCard(data.collect));
             }
             container.append('<div class="col-lg-12 col-md-12"><div id="hlsStatsContainer"></div></div>');
-            loadHlsStats();
+            scheduleHlsStats(0);
         }
-        
+
+        function scheduleHlsStats(delay) {
+            if (hlsStatsTimer) {
+                clearTimeout(hlsStatsTimer);
+            }
+            hlsStatsTimer = setTimeout(loadHlsStats, Math.max(0, delay || 0));
+        }
 
         function loadHlsStats() {
+            if (hlsStatsRequestActive) {
+                return;
+            }
+            hlsStatsRequestActive = true;
             $.ajax({
                 url: '/admin/api/hlsStats',
                 type: 'GET',
                 dataType: 'json',
                 success: function(response) {
                     if (response && response.resCode === '000001' && response.record) {
-                        renderHlsStats(response.record);
+                        lastHlsStats = response.record;
+                        renderHlsStats(lastHlsStats, false);
+                        const active = Number(lastHlsStats.queueSize || 0) > 0 || Number(lastHlsStats.runningCount || 0) > 0;
+                        scheduleHlsStats(active ? 2000 : 8000);
                     } else {
-                        renderHlsStats(null);
+                        renderHlsStats(lastHlsStats, true);
+                        scheduleHlsStats(8000);
                     }
                 },
                 error: function() {
-                    renderHlsStats(null);
+                    renderHlsStats(lastHlsStats, true);
+                    scheduleHlsStats(8000);
+                },
+                complete: function() {
+                    hlsStatsRequestActive = false;
                 }
             });
         }
 
-        function renderHlsStats(stats) {
+        function renderHlsStats(stats, stale) {
             const container = $('#hlsStatsContainer');
             if (!container.length) {
                 return;
@@ -164,7 +184,9 @@
             const mode = stats.mode || 'idle';
             const queueSize = Number(stats.queueSize || 0);
             const runningCount = Number(stats.runningCount || 0);
-            const runningVideoId = stats.runningVideoId == null ? '-' : stats.runningVideoId;
+            const runningVideoIds = Array.isArray(stats.runningVideoIds)
+                ? stats.runningVideoIds.join(', ')
+                : (stats.runningVideoId == null ? '-' : String(stats.runningVideoId));
             const lastSuccess = stats.lastSuccessAt ? new Date(stats.lastSuccessAt).toLocaleString() : '-';
             const lastFail = stats.lastFailAt ? new Date(stats.lastFailAt).toLocaleString() : '-';
             const idleWindow = stats.idleWindow || '-';
@@ -173,12 +195,12 @@
             const privacy = stats.privacyEnabled ? 'Allowed' : 'Blocked';
             const statusClass = enabled ? 'text-success' : 'text-muted';
             const statusText = enabled ? 'Enabled' : 'Disabled';
-            let html = '<div class="status-card"><div class="status-header"><h5 class="text-info"><i class="mdi mdi-play-network"></i> HLS Transcode Scheduler</h5></div>';
+            let html = '<div class="status-card"><div class="status-header"><h5 class="text-info"><i class="mdi mdi-play-network"></i> HLS Transcode Scheduler' + (stale ? ' <small class="text-warning">(stale)</small>' : '') + '</h5></div>';
             html += '<div class="status-item"><span class="status-label">Enabled</span><span class="status-value ' + statusClass + '">' + statusText + '</span></div>';
             html += '<div class="status-item"><span class="status-label">Mode</span><span class="status-value">' + (mode === 'immediate' ? 'Immediate' : 'Idle window') + '</span></div>';
             html += '<div class="status-item"><span class="status-label">Idle window</span><span class="status-value">' + idleWindow + '</span></div>';
             html += '<div class="status-item"><span class="status-label">Concurrency / Segment</span><span class="status-value">' + con + ' / ' + seg + 's</span></div>';
-            html += '<div class="status-item"><span class="status-label">Queue / Running</span><span class="status-value">' + queueSize + ' / ' + runningCount + ' (videoId: ' + runningVideoId + ')</span></div>';
+            html += '<div class="status-item"><span class="status-label">Queue / Running</span><span class="status-value">' + queueSize + ' / ' + runningCount + ' (videoIds: ' + escapeHtml(runningVideoIds) + ')</span></div>';
             html += '<div class="status-item"><span class="status-label">Private video</span><span class="status-value">' + privacy + '</span></div>';
             html += '<div class="status-item"><span class="status-label">Last success</span><span class="status-value">' + lastSuccess + '</span></div>';
             html += '<div class="status-item"><span class="status-label">Last failure</span><span class="status-value">' + lastFail + '</span></div>';
