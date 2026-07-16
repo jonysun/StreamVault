@@ -63,11 +63,12 @@
         .feed-controls {
             display: none;
             position: absolute;
-            right: 12px;
-            top: 18px;
+            right: 16px;
+            bottom: 78px;
             z-index: 6;
-            gap: 10px;
+            gap: 8px;
             flex-direction: column;
+            align-items: center;
         }
 
         .feed-control-btn {
@@ -372,14 +373,13 @@
 
         .feed-author-action-rail {
             position: absolute;
-            right: 14px;
-            top: 50%;
-            transform: translateY(-50%);
+            right: 16px;
+            bottom: 414px;
             z-index: 6;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 14px;
+            gap: 8px;
         }
 
         .feed-author-avatar-btn {
@@ -1274,9 +1274,42 @@
 
             .feed-custom-controls {
                 left: 8px;
-                right: 8px;
+                right: 64px;
                 bottom: 8px;
                 padding: 9px 10px;
+            }
+
+            .feed-controls {
+                right: 10px;
+                bottom: 72px;
+                gap: 6px;
+            }
+
+            .feed-control-btn,
+            .feed-author-avatar-btn {
+                width: 42px;
+                height: 42px;
+            }
+
+            .feed-control-btn {
+                font-size: 10px;
+            }
+
+            .feed-control-btn i {
+                font-size: 16px;
+            }
+
+            .feed-control-btn span {
+                max-width: 38px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                transform: scale(0.9);
+            }
+
+            .feed-author-action-rail {
+                right: 10px;
+                bottom: 362px;
             }
 
             .feed-playlist-drawer {
