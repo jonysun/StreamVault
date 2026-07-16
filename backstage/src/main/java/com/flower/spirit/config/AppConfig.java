@@ -110,6 +110,11 @@ public class AppConfig {
 			Global.mediaHomeMode = "grid";
 		}
 		Global.mediaFeedMuted = !"0".equals(data.getMediafeedmuted());
+		Global.mediaFeedSource = normalizeMediaFeedSource(data.getMediafeedsource());
+		Global.videoListSortField = normalizeVideoListSortField(data.getVideolistsortfield());
+		Global.videoListSortOrder = normalizeSortOrder(data.getVideolistsortorder());
+		Global.graphicListSortField = normalizeGraphicListSortField(data.getGraphiclistsortfield());
+		Global.graphicListSortOrder = normalizeSortOrder(data.getGraphiclistsortorder());
 		Global.hlsEnable = "1".equals(data.getHlsenable());
 		if ("immediate".equalsIgnoreCase(data.getHlsmode())) {
 			Global.hlsMode = "immediate";
@@ -214,6 +219,32 @@ public class AppConfig {
     private static boolean isBlank(String str) {
         return str == null || str.trim().isEmpty();
     }
+
+	private static String normalizeMediaFeedSource(String value) {
+		if ("mp4_only".equals(value) || "hls_only".equals(value)
+				|| "prefer_mp4".equals(value) || "prefer_hls".equals(value)) {
+			return value;
+		}
+		return "prefer_hls";
+	}
+
+	private static String normalizeVideoListSortField(String value) {
+		if ("createtime".equals(value) || "publishtime".equals(value) || "videoauthor".equals(value)) {
+			return value;
+		}
+		return "id";
+	}
+
+	private static String normalizeGraphicListSortField(String value) {
+		if ("createtime".equals(value) || "publishtime".equals(value) || "author".equals(value)) {
+			return value;
+		}
+		return "id";
+	}
+
+	private static String normalizeSortOrder(String value) {
+		return "asc".equalsIgnoreCase(value) ? "asc" : "desc";
+	}
     
     
     public static void main(String[] args) {

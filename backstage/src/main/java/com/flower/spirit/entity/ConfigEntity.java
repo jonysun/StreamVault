@@ -60,6 +60,14 @@ public class ConfigEntity implements Serializable {
 
 	private String mediafeedsource; // 滑动模式播放编码策略: mp4_only/hls_only/prefer_mp4/prefer_hls
 
+	private String videolistsortfield; // 视频列表默认排序字段
+
+	private String videolistsortorder; // 视频列表默认排序方向
+
+	private String graphiclistsortfield; // 图文列表默认排序字段
+
+	private String graphiclistsortorder; // 图文列表默认排序方向
+
 	private String hlsenable; // 是否启用HLS转码: 1/0
 
 	private String hlsmode; // HLS执行模式: immediate/idle
@@ -97,14 +105,6 @@ public class ConfigEntity implements Serializable {
 	private String collectitemintervalms; // 收藏任务内子项间隔（毫秒）
 
 	private String douyinapiurls; // 抖音解析API URL列表（多行）
-
-	private String videolistsortfield;
-
-	private String videolistsortorder;
-
-	private String graphiclistsortfield;
-
-	private String graphiclistsortorder;
 
 	public Integer getId() {
 		return id;
@@ -232,6 +232,38 @@ public class ConfigEntity implements Serializable {
 
 	public void setMediafeedsource(String mediafeedsource) {
 		this.mediafeedsource = mediafeedsource;
+	}
+
+	public String getVideolistsortfield() {
+		return videolistsortfield;
+	}
+
+	public void setVideolistsortfield(String videolistsortfield) {
+		this.videolistsortfield = videolistsortfield;
+	}
+
+	public String getVideolistsortorder() {
+		return videolistsortorder;
+	}
+
+	public void setVideolistsortorder(String videolistsortorder) {
+		this.videolistsortorder = videolistsortorder;
+	}
+
+	public String getGraphiclistsortfield() {
+		return graphiclistsortfield;
+	}
+
+	public void setGraphiclistsortfield(String graphiclistsortfield) {
+		this.graphiclistsortfield = graphiclistsortfield;
+	}
+
+	public String getGraphiclistsortorder() {
+		return graphiclistsortorder;
+	}
+
+	public void setGraphiclistsortorder(String graphiclistsortorder) {
+		this.graphiclistsortorder = graphiclistsortorder;
 	}
 
 	public String getHlsenable() {
@@ -378,37 +410,6 @@ public class ConfigEntity implements Serializable {
 		this.collectitemintervalms = collectitemintervalms;
 	}
 
-	public String getVideolistsortfield() {
-		return videolistsortfield;
-	}
-
-	public void setVideolistsortfield(String videolistsortfield) {
-		this.videolistsortfield = videolistsortfield;
-	}
-
-	public String getVideolistsortorder() {
-		return videolistsortorder;
-	}
-
-	public void setVideolistsortorder(String videolistsortorder) {
-		this.videolistsortorder = videolistsortorder;
-	}
-
-	public String getGraphiclistsortfield() {
-		return graphiclistsortfield;
-	}
-
-	public void setGraphiclistsortfield(String graphiclistsortfield) {
-		this.graphiclistsortfield = graphiclistsortfield;
-	}
-
-	public String getGraphiclistsortorder() {
-		return graphiclistsortorder;
-	}
-
-	public void setGraphiclistsortorder(String graphiclistsortorder) {
-		this.graphiclistsortorder = graphiclistsortorder;
-	}
 	public String getDouyinapiurls() {
 		return douyinapiurls;
 	}

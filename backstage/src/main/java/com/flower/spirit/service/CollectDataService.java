@@ -6,12 +6,15 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.io.File;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.transaction.Transactional;
 import org.quartz.JobDataMap;
@@ -33,6 +36,7 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.dao.CollectdDataDetailDao;
+import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.CollectDataDetailEntity;
 import com.flower.spirit.entity.CollectDataEntity;
@@ -56,6 +60,9 @@ import com.flower.spirit.utils.sendNotify;
 @Service
 public class CollectDataService {
 
+	private static final Pattern PYTHON_EXCEPTION_PATTERN = Pattern.compile("(?m)^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\\s*(.+)$");
+	private static final Pattern PYTHON_FILE_PATTERN = Pattern.compile("File \"([^\"]+)\", line (\\d+), in ([^\\r\\n]+)");
+
 	@Autowired
 	private CollectdDataDao collectdDataDao;
 
@@ -70,6 +77,9 @@ public class CollectDataService {
 
 	@Autowired
 	private VideoDataDao videoDataDao;
+
+	@Autowired
+	private GraphicContentDao graphicContentDao;
 
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
@@ -92,6 +102,8 @@ public class CollectDataService {
 	private QuartzTaskService quartzTaskService;
 
 	private volatile long lastCollectTaskFinishedAt = 0L;
+	private final ThreadLocal<F2FailureDiagnosis> lastF2FailureDiagnosis = new ThreadLocal<>();
+	private final ThreadLocal<FetchRunContext> lastFetchRunContext = new ThreadLocal<>();
 
 	/**
 	 * 文件储存真实路径
@@ -450,8 +462,9 @@ public class CollectDataService {
 
 	public void createDyData(CollectDataEntity entity, String monitor) throws Exception {
 		sleepCollectTaskIntervalIfNeeded();
-		logger.info("[CollectTask] createDyData start id={} name={} monitor={} originaladdress={}",
-				entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
+		String runId = buildCollectRunId(entity);
+		logger.info("[CollectTask] createDyData start runId={} id={} name={} monitor={} originaladdress={}",
+				runId, entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
 		String taskname = entity.getTaskname(); // 任务名称 作为tvshou.nfo元数据
 		// 生成tvshow.nfo元数据
 		String temporaryDirectory = FileUtil.generateDir(true, Global.platform.douyin.name(), false, null, taskname,
@@ -469,19 +482,27 @@ public class CollectDataService {
 		int failedThisRun = 0;
 		int skippedThisRun = 0;
 		logger.info("任务开始" + entity.getOriginaladdress());
-		JSONArray allDYData = this.getDYData(entity, monitor);
+		JSONArray allDYData = this.getDYData(entity, monitor, runId);
+		FetchRunContext fetchContext = lastFetchRunContext.get();
 		if (allDYData != null) {
+			allDYData = sortDouyinItemsByPublishTime(allDYData);
 			entity.setLastfetchcount(allDYData.size());
 			entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
-			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData));
+			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData, fetchContext));
 			collectdDataDao.save(entity);
+			logFetchSnapshotItems(entity, fetchContext, allDYData, "sorted");
 		}
-		logger.info("[CollectTask] getDYData result id={} isNull={} size={}", entity.getId(), allDYData == null,
-				allDYData == null ? 0 : allDYData.size());
+		logger.info("[CollectTask] getDYData result runId={} id={} isNull={} size={}", runId, entity.getId(),
+				allDYData == null, allDYData == null ? 0 : allDYData.size());
 		if (allDYData == null) {
-			logger.error("[CollectTask] getDYData returned null id={} name={} originaladdress={}",
-					entity.getId(), entity.getTaskname(), entity.getOriginaladdress());
-			recordFetchFailureDetail(entity, "FETCH_DY_DATA_FAIL", "用户作品列表抓取失败", getLastF2Context());
+			logger.error("[CollectTask] getDYData returned null runId={} id={} name={} originaladdress={}",
+					runId, entity.getId(), entity.getTaskname(), entity.getOriginaladdress());
+			F2FailureDiagnosis diagnosis = lastF2FailureDiagnosis.get();
+			recordFetchFailureDetail(entity,
+					diagnosis == null ? "FETCH_DY_DATA_FAIL" : diagnosis.errorCode(),
+					diagnosis == null ? "用户作品列表抓取失败" : diagnosis.rootCause(),
+					getLastF2Context(diagnosis));
+			lastF2FailureDiagnosis.remove();
 		}
 		// System.out.println(allDYData.size());
 		String risk = "0";
@@ -504,13 +525,26 @@ public class CollectDataService {
 				StringBuilder processLog = new StringBuilder();
 				JSONObject aweme_detail = allDYData.getJSONObject(i);
 				String awemeId = aweme_detail.getString("aweme_id");
+				String awemeCreateTime = aweme_detail.getString("create_time");
+				String awemePublishTime = formatPublishTimeFromEpochSeconds(awemeCreateTime);
 				JSONObject planItem = new JSONObject();
+				planItem.put("runId", runId);
+				if (fetchContext != null) {
+					planItem.put("fetchMode", fetchContext.mode());
+					planItem.put("sourceId", fetchContext.sourceId());
+					planItem.put("maxc", fetchContext.maxc());
+				}
 				planItem.put("aweme_id", awemeId);
 				planItem.put("desc", aweme_detail.getString("desc"));
+				planItem.put("create_time", awemeCreateTime);
+				planItem.put("publish_time", awemePublishTime);
 				planItem.put("index", i + 1);
 				String desc = aweme_detail.getString("desc");
 				String displayName = safeDisplayName(desc, awemeId, "视频");
 				String detailJson = safeDetailJson(aweme_detail);
+				appendLog(processLog, "run", "runId=" + runId + ", fetchMode=" + (fetchContext == null ? "" : fetchContext.mode())
+						+ ", sourceId=" + (fetchContext == null ? "" : fetchContext.sourceId())
+						+ ", maxc=" + (fetchContext == null ? "" : fetchContext.maxc()));
 				appendLog(processLog, "item-start", "awemeId=" + awemeId + ", desc=" + (desc == null ? "" : desc));
 				String coveruri = "";
 				JSONArray cover = aweme_detail.getJSONArray("cover");
@@ -523,28 +557,42 @@ public class CollectDataService {
 				if (jsonArray == null || jsonArray.isEmpty()) {
 					mediaType = "image";
 					planItem.put("mediatype", mediaType);
+					planItem.put("downloadUrlPresent", false);
 					planItem.put("decision", "image-branch");
+					planItem.put("reason", "video_play_addr empty");
 					displayName = safeDisplayName(desc, awemeId, "图文");
 					appendLog(processLog, "branch", "video_play_addr empty -> imageText executor");
-					if (blockedWorkService.isBlocked("抖音", awemeId, "graphic")) {
+					boolean blockedGraphic = blockedWorkService.isBlocked(Global.platform.douyin.name(), awemeId, "graphic");
+					planItem.put("blocked", blockedGraphic);
+					if (blockedGraphic) {
 						appendLog(processLog, "skip", "blocked work");
 						skippedThisRun++;
 						planItem.put("decision", "skip-blocked");
-						planItems.add(planItem);
+						planItem.put("reason", "blocked work");
+						addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 						continue;
 					}
 					CollectDataDetailEntity existingDetail = collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId());
+					planItem.put("detailExists", existingDetail != null);
 					if (existingDetail != null) {
-						appendLog(processLog, "skip", "detail exists in collect_data_detail");
-						skippedThisRun++;
-						planItem.put("decision", "skip-detail-exists");
-						planItems.add(planItem);
-						continue;
+						boolean graphicExists = graphicContentDao.findByVideoidAndPlatform(awemeId, Global.platform.douyin.name()).isPresent();
+						planItem.put("graphicExists", graphicExists);
+						if (graphicExists) {
+							appendLog(processLog, "skip", "detail exists in collect_data_detail and graphic exists");
+							skippedThisRun++;
+							planItem.put("decision", "skip-detail-exists");
+							planItem.put("reason", "detail and graphic content already exist");
+							addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
+							continue;
+						}
+						appendLog(processLog, "repair", "detail exists but graphic content missing, retry imageText executor");
+						planItem.put("decision", "image-retry-missing-graphic");
+						planItem.put("reason", "detail exists but graphic content missing");
 					}
 					// 不支持
 					try {
 						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(), (String) null);
-						CollectDataDetailEntity collectDataDetailEntity = new CollectDataDetailEntity();
+						CollectDataDetailEntity collectDataDetailEntity = existingDetail == null ? new CollectDataDetailEntity() : existingDetail;
 						collectDataDetailEntity.setDataid(entity.getId());
 						collectDataDetailEntity.setVideoid(awemeId);
 						collectDataDetailEntity.setOriginaladdress(awemeId);
@@ -560,13 +608,16 @@ public class CollectDataService {
 						collectDataDetailEntity.setCreatetime(DateUtils.formatDateTime(new Date()));
 						sleepCollectItemInterval();
 						collectDataDetailService.save(collectDataDetailEntity);
-						String carriedout = entity.getCarriedout() == null ? "1"
-								: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
-						entity.setCarriedout(carriedout);
-						collectdDataDao.save(entity);
+						if (existingDetail == null) {
+							String carriedout = entity.getCarriedout() == null ? "1"
+									: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
+							entity.setCarriedout(carriedout);
+							collectdDataDao.save(entity);
+						}
 						graphiccount++;
 						successThisRun++;
 						planItem.put("decision", "image-success");
+						planItem.put("reason", "imageText executor success");
 					} catch (Exception e) {
 						logger.error("收藏类模块中抖音图集下载异常");
 						logger.error(e.getMessage());
@@ -592,8 +643,9 @@ public class CollectDataService {
 							collectDataDetailService.save(failed);
 						}
 						planItem.put("decision", "image-fail");
+						planItem.put("reason", trimMsg(e.getMessage()));
 					}
-					planItems.add(planItem);
+					addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 					continue;
 				}
 				mediaType = "video";
@@ -605,22 +657,30 @@ public class CollectDataService {
 					videoplay = jsonArray.getString(0);
 				}
 				appendLog(processLog, "branch", "video path selected");
+				planItem.put("downloadUrlPresent", videoplay != null && !videoplay.trim().isEmpty());
 				logger.info("[CollectTask] item start taskId={} index={} awemeId={} desc={}", entity.getId(), i,
 						awemeId, desc);
 
 				List<VideoDataEntity> findByVideoid = videoDataService.findByVideoid(awemeId);
-				if (blockedWorkService.isBlocked("抖音", awemeId, "video")) {
+				boolean blockedVideo = blockedWorkService.isBlocked(Global.platform.douyin.name(), awemeId, "video");
+				planItem.put("blocked", blockedVideo);
+				if (blockedVideo) {
 					appendLog(processLog, "skip", "blocked work");
 					skippedThisRun++;
 					planItem.put("decision", "skip-blocked");
-					planItems.add(planItem);
+					planItem.put("reason", "blocked work");
+					addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 					continue;
 				}
+				planItem.put("videoExists", findByVideoid.size() > 0);
 				if (findByVideoid.size() > 0) {
 					VideoDataEntity existsVideo = findByVideoid.get(0);
 					File vf = existsVideo.getVideoaddr() == null ? null : new File(existsVideo.getVideoaddr());
+					planItem.put("fileExists", vf != null && vf.exists());
+					planItem.put("existingVideoPath", existsVideo.getVideoaddr());
 					if (vf == null || !vf.exists()) {
 						appendLog(processLog, "dedup", "db exists but file missing, force redownload");
+						planItem.put("reason", "video db record exists but file missing");
 						findByVideoid = new ArrayList<>();
 					}
 				}
@@ -650,8 +710,11 @@ public class CollectDataService {
 						logger.info("[CollectTask] local file hit, skip download taskId={} awemeId={} path={}", entity.getId(),
 								awemeId, videofile);
 						planItem.put("decision", "video-local-hit");
+						planItem.put("reason", "local file exists before download");
 					}
 					logger.info("已使用批量下载,下载器类型为:" + Global.downtype);
+					planItem.put("fileExists", localVideoExists);
+					planItem.put("targetVideoPath", videofile);
 					String itemCookie = platformCookieService.currentDouyinCookie("collect_item_download");
 					if (!localVideoExists && Global.downtype.equals("a2")) {
 						appendLog(processLog, "download", "using aria2");
@@ -684,9 +747,11 @@ public class CollectDataService {
 							errorCode = "DOWNLOAD_RISK_OR_FAIL";
 							errorMsg = "内置下载返回1";
 							appendLog(processLog, "download", "http downloader returned 1");
+							planItem.put("reason", "http downloader returned 1");
 							failedThisRun++;
 							logger.error("[CollectTask] risk triggered taskId={} awemeId={} output={}", entity.getId(), awemeId,
 									downloadFileWithOkHttp);
+							addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 							break;
 						}
 					}
@@ -822,9 +887,11 @@ public class CollectDataService {
 					skippedThisRun++;
 					planItem.put("decision", "skip-detail-exists");
 				}
-				planItems.add(planItem);
+				addPlanItem(planItems, planItem, status, errorCode, errorMsg, processLog);
 
 			}
+			planItems.add(0, buildRunSummaryPlanItem(runId, fetchContext, allDYData.size(), successThisRun,
+					failedThisRun, skippedThisRun, videoaddcount, graphiccount, targetSuccess));
 			entity.setLastplanitems(planItems.toJSONString());
 			collectdDataDao.save(entity);
 		}
@@ -840,6 +907,8 @@ public class CollectDataService {
 		logger.info("任务结束" + entity.getOriginaladdress());
 		logger.info("[CollectTask] createDyData finish id={} addedVideo={} addedGraphic={} totalAdded={} successThisRun={} targetSuccess={} failedThisRun={} skippedThisRun={} finalStatus={} carriedout={}",
 				entity.getId(), videoaddcount, graphiccount, totalCount, successThisRun, targetSuccess, failedThisRun, skippedThisRun, entity.getTaskstatus(), entity.getCarriedout());
+		lastF2FailureDiagnosis.remove();
+		lastFetchRunContext.remove();
 	}
 
 	static String resolveDouyinCollectStatus(String risk, boolean fetchFailed, int successThisRun, int failedThisRun, int skippedThisRun) {
@@ -853,14 +922,38 @@ public class CollectDataService {
 		return "处理完成";
 	}
 
-	private String buildFetchSnapshot(JSONArray allData) {
+	String buildFetchSnapshot(JSONArray allData) {
+		return buildFetchSnapshot(allData, null);
+	}
+
+	String buildFetchSnapshot(JSONArray allData, FetchRunContext context) {
 		JSONArray arr = new JSONArray();
 		for (int i = 0; i < allData.size(); i++) {
 			JSONObject src = allData.getJSONObject(i);
+			String createTime = src.getString("create_time");
+			String publishTime = formatPublishTimeFromEpochSeconds(createTime);
 			JSONObject item = new JSONObject();
 			item.put("index", i + 1);
+			item.put("sortedIndex", i + 1);
+			if (context != null) {
+				item.put("runId", context.runId());
+				item.put("taskId", context.taskId());
+				item.put("taskName", context.taskName());
+				item.put("fetchMode", context.mode());
+				item.put("sourceId", context.sourceId());
+				item.put("maxc", context.maxc());
+				item.put("existingDetailCount", context.existingDetailCount());
+				item.put("successDetailCount", context.successDetailCount());
+				item.put("originaladdress", context.originaladdress());
+			}
 			item.put("aweme_id", src.getString("aweme_id"));
 			item.put("desc", src.getString("desc"));
+			item.put("create_time", createTime);
+			item.put("publish_time", publishTime);
+			item.put("type", src.getString("type"));
+			item.put("nickname", src.getString("nickname"));
+			item.put("uid", src.getString("uid"));
+			item.put("sec_uid", src.getString("sec_uid"));
 			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
 			arr.add(item);
 		}
@@ -871,12 +964,160 @@ public class CollectDataService {
 		return text;
 	}
 
+	private String buildCollectRunId(CollectDataEntity entity) {
+		String taskId = entity == null || entity.getId() == null ? "unknown" : String.valueOf(entity.getId());
+		return "collect-" + taskId + "-" + System.currentTimeMillis();
+	}
+
+	private void logFetchSnapshotItems(CollectDataEntity entity, FetchRunContext context, JSONArray data, String order) {
+		if (data == null) {
+			logger.info("[CollectTask] fetch snapshot runId={} taskId={} order={} count=0",
+					context == null ? null : context.runId(), entity == null ? null : entity.getId(), order);
+			return;
+		}
+		logger.info("[CollectTask] fetch snapshot runId={} taskId={} mode={} sourceId={} maxc={} order={} count={} first={} last={}",
+				context == null ? null : context.runId(), entity == null ? null : entity.getId(),
+				context == null ? null : context.mode(), context == null ? null : context.sourceId(),
+				context == null ? null : context.maxc(), order, data.size(), firstAwemeId(data), lastAwemeId(data));
+		for (int i = 0; i < data.size(); i++) {
+			JSONObject item = data.getJSONObject(i);
+			logger.info("[CollectTask] fetched item runId={} taskId={} order={} index={} awemeId={} publishTime={} type={} hasVideo={} desc={}",
+					context == null ? null : context.runId(), entity == null ? null : entity.getId(), order, i + 1,
+					item.getString("aweme_id"), formatPublishTimeFromEpochSeconds(item.getString("create_time")),
+					item.getString("type"),
+					item.getJSONArray("video_play_addr") != null && !item.getJSONArray("video_play_addr").isEmpty(),
+					trimForLog(item.getString("desc"), 160));
+		}
+	}
+
+	private void addPlanItem(JSONArray planItems, JSONObject planItem, String status, String errorCode, String errorMsg,
+			StringBuilder processLog) {
+		planItem.put("status", status == null || status.trim().isEmpty() ? planItem.getString("decision") : status);
+		planItem.put("errorcode", errorCode);
+		planItem.put("errormsg", errorMsg);
+		planItem.put("time", DateUtils.formatDateTime(new Date()));
+		String logText = processLog == null ? "" : processLog.toString();
+		planItem.put("processlog", logText.length() > 12000 ? logText.substring(0, 12000) + "...(truncated)" : logText);
+		planItems.add(planItem);
+		logger.info("[CollectTask] plan item runId={} awemeId={} index={} mediaType={} decision={} status={} reason={} errorCode={} log={}",
+				planItem.getString("runId"), planItem.getString("aweme_id"), planItem.get("index"),
+				planItem.getString("mediatype"), planItem.getString("decision"), planItem.getString("status"),
+				trimForLog(planItem.getString("reason"), 160), errorCode, trimForLog(logText, 500));
+	}
+
+	private JSONObject buildRunSummaryPlanItem(String runId, FetchRunContext context, int fetchedCount,
+			int successThisRun, int failedThisRun, int skippedThisRun, int addedVideo, int addedGraphic,
+			int targetSuccess) {
+		JSONObject summary = new JSONObject();
+		summary.put("stage", "run-summary");
+		summary.put("runId", runId);
+		if (context != null) {
+			summary.put("fetchMode", context.mode());
+			summary.put("sourceId", context.sourceId());
+			summary.put("maxc", context.maxc());
+			summary.put("existingDetailCount", context.existingDetailCount());
+			summary.put("successDetailCount", context.successDetailCount());
+			summary.put("originaladdress", context.originaladdress());
+		}
+		summary.put("fetchedCount", fetchedCount);
+		summary.put("targetSuccess", targetSuccess);
+		summary.put("successThisRun", successThisRun);
+		summary.put("failedThisRun", failedThisRun);
+		summary.put("skippedThisRun", skippedThisRun);
+		summary.put("addedVideo", addedVideo);
+		summary.put("addedGraphic", addedGraphic);
+		summary.put("decision", "run-summary");
+		summary.put("status", "run-summary");
+		summary.put("reason", "fetch/process summary");
+		summary.put("time", DateUtils.formatDateTime(new Date()));
+		logger.info("[CollectTask] run summary runId={} mode={} sourceId={} maxc={} fetched={} targetSuccess={} success={} failed={} skipped={} addedVideo={} addedGraphic={}",
+				runId, context == null ? null : context.mode(), context == null ? null : context.sourceId(),
+				context == null ? null : context.maxc(), fetchedCount, targetSuccess, successThisRun,
+				failedThisRun, skippedThisRun, addedVideo, addedGraphic);
+		return summary;
+	}
+
+	JSONArray sortDouyinItemsByPublishTime(JSONArray allData) {
+		if (allData == null || allData.size() < 2) {
+			return allData;
+		}
+		List<JSONObject> items = new ArrayList<>();
+		for (int i = 0; i < allData.size(); i++) {
+			items.add(allData.getJSONObject(i));
+		}
+		items.sort(Comparator
+				.comparing((JSONObject item) -> publishTimeMillis(item.getString("create_time")),
+						Comparator.nullsLast(Comparator.reverseOrder()))
+				.thenComparing(item -> item.getString("aweme_id"), Comparator.nullsLast(Comparator.reverseOrder())));
+		JSONArray sorted = new JSONArray();
+		for (JSONObject item : items) {
+			sorted.add(item);
+		}
+		if (!sameAwemeOrder(allData, sorted)) {
+			logger.info("[CollectTask] sorted F2 result by publish time size={} firstBefore={} firstAfter={}",
+					allData.size(), firstAwemeId(allData), firstAwemeId(sorted));
+		}
+		return sorted;
+	}
+
+	private boolean sameAwemeOrder(JSONArray left, JSONArray right) {
+		if (left == null || right == null || left.size() != right.size()) {
+			return false;
+		}
+		for (int i = 0; i < left.size(); i++) {
+			String leftId = left.getJSONObject(i).getString("aweme_id");
+			String rightId = right.getJSONObject(i).getString("aweme_id");
+			if (leftId == null ? rightId != null : !leftId.equals(rightId)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private String firstAwemeId(JSONArray data) {
+		if (data == null || data.isEmpty()) {
+			return null;
+		}
+		return data.getJSONObject(0).getString("aweme_id");
+	}
+
+	private String lastAwemeId(JSONArray data) {
+		if (data == null || data.isEmpty()) {
+			return null;
+		}
+		return data.getJSONObject(data.size() - 1).getString("aweme_id");
+	}
+
+	private String trimForLog(String text, int maxLength) {
+		if (text == null) {
+			return null;
+		}
+		String normalized = text.replace("\r", " ").replace("\n", " ");
+		return normalized.length() > maxLength ? normalized.substring(0, maxLength) : normalized;
+	}
+
+	private Long publishTimeMillis(String rawCreateTime) {
+		String publishTime = formatPublishTimeFromEpochSeconds(rawCreateTime);
+		if (publishTime == null) {
+			return null;
+		}
+		Date date = DateUtils.parseDate(publishTime);
+		return date == null ? null : date.getTime();
+	}
+
 	public JSONArray getDYData(CollectDataEntity entity, String monitor) throws IOException {
+		return getDYData(entity, monitor, buildCollectRunId(entity));
+	}
+
+	public JSONArray getDYData(CollectDataEntity entity, String monitor, String runId) throws IOException {
+		lastF2FailureDiagnosis.remove();
+		lastFetchRunContext.remove();
 		String taskout = Global.apppath + "lot" + System.getProperty("file.separator") + entity.getId() + "_"
 				+ entity.getTaskname() + ".json";
-		logger.info("[CollectTask] getDYData start id={} name={} originaladdress={} monitor={} tempFile={}",
-				entity.getId(), entity.getTaskname(), entity.getOriginaladdress(), monitor, taskout);
-		String sec_user_id = entity.getOriginaladdress().replaceAll("post", "").replaceAll("like", "");
+		logger.info("[CollectTask] getDYData start runId={} id={} name={} originaladdress={} monitor={} tempFile={}",
+				runId, entity.getId(), entity.getTaskname(), entity.getOriginaladdress(), monitor, taskout);
+		String originaladdress = entity.getOriginaladdress() == null ? "" : entity.getOriginaladdress();
+		String sec_user_id = originaladdress.replaceFirst("^(post|like|recommend)", "");
 		int maxc = 80;
 
 		// if ("N".equals(monitor)) {
@@ -896,45 +1137,56 @@ public class CollectDataService {
 			long expanded = successCountByDataid + monitorWindow;
 			// 防止窗口无限膨胀导致单次抓取过大
 			maxc = (int) Math.min(expanded, 2000L);
-			logger.info("[CollectTask] monitor mode targetNew={} expandedFetchWindow={} (successProcessed={} + target={}, allDetail={})",
-					monitorWindow, maxc, successCountByDataid, monitorWindow, countByDataid);
+			logger.info("[CollectTask] monitor mode runId={} targetNew={} expandedFetchWindow={} (successProcessed={} + target={}, allDetail={})",
+					runId, monitorWindow, maxc, successCountByDataid, monitorWindow, countByDataid);
 		} else {
 			maxc = null != entity.getOmaxcur() ? entity.getOmaxcur() : 80;
 		}
-		logger.info("[CollectTask] getDYData resolved maxc={} existingDetailCount={} (omaxcur={}, maxcur={})",
-				maxc, countByDataid, entity.getOmaxcur(), entity.getMaxcur());
+		logger.info("[CollectTask] getDYData resolved runId={} maxc={} existingDetailCount={} successDetailCount={} (omaxcur={}, maxcur={})",
+				runId, maxc, countByDataid, successCountByDataid, entity.getOmaxcur(), entity.getMaxcur());
 
-		if (entity.getOriginaladdress().startsWith("post")) {
+		if (originaladdress.startsWith("post")) {
+			return executeDouyinListFetch(entity, runId, monitor, "post", sec_user_id, null,
+					"fetch_user_post_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+		if (originaladdress.startsWith("like")) {
+			return executeDouyinListFetch(entity, runId, monitor, "like", sec_user_id, null,
+					"fetch_user_like_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+		if (originaladdress.startsWith("recommend")) {
+			return executeDouyinListFetch(entity, runId, monitor, "recommend", sec_user_id, null,
+					"fetch_user_feed_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+		if (originaladdress.startsWith("fav-")) {
+			String startTag = "fav-";
+			String endTag = "-fav";
+			int startIndex = originaladdress.indexOf(startTag) + startTag.length();
+			int endIndex = originaladdress.indexOf(endTag);
+			if (startIndex < startTag.length() || endIndex <= startIndex) {
+				logger.error("[CollectTask] getDYData invalid fav address runId={} id={} originaladdress={}",
+						runId, entity.getId(), originaladdress);
+				return null;
+			}
+			String content = originaladdress.substring(startIndex, endIndex).trim();
+			return executeDouyinListFetch(entity, runId, monitor, "fav", content, content,
+					"fetch_user_collects_videos", maxc, taskout, countByDataid, successCountByDataid);
+		}
+
+		if (originaladdress.startsWith("post")) {
 			logger.info("[CollectTask] getDYData mode=post uid={} maxc={} out={}", sec_user_id, maxc, taskout);
 			String cookie = platformCookieService.currentDouyinCookie("fetch_user_post_videos");
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_post_videos", sec_user_id, null,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("post", f2cmd, taskout);
+			logF2Result(entity, "post", sec_user_id, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=post", jsonFromFile == null ? 0 : jsonFromFile.size());
-				reportCookieDegradedFetch(entity, "post", cookie, maxc, jsonFromFile, countByDataid);
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
 		}
-		if (entity.getOriginaladdress().startsWith("like")) {
-			logger.info("[CollectTask] getDYData mode=like uid={} maxc={} out={}", sec_user_id, maxc, taskout);
-			String cookie = platformCookieService.currentDouyinCookie("fetch_user_like_videos");
-			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_like_videos", sec_user_id, null,
-					maxc, taskout);
-			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("like", f2cmd, taskout);
-			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
-				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
-				logger.info("[CollectTask] getDYData parsed count={} mode=like", jsonFromFile == null ? 0 : jsonFromFile.size());
-				reportCookieDegradedFetch(entity, "like", cookie, maxc, jsonFromFile, countByDataid);
-				Files.deleteIfExists(Paths.get(taskout));
-				return jsonFromFile;
-			}
-		}
-		if (entity.getOriginaladdress().startsWith("fav-")) {
+		if (originaladdress.startsWith("fav-")) {
 			String startTag = "fav-";
 			String endTag = "-fav";
 			int startIndex = entity.getOriginaladdress().indexOf(startTag) + startTag.length();
@@ -946,27 +1198,10 @@ public class CollectDataService {
 			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_collects_videos", null, content,
 					maxc, taskout);
 			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("fav", f2cmd, taskout);
+			logF2Result(entity, "fav", content, maxc, f2cmd, taskout);
 			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
 				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
 				logger.info("[CollectTask] getDYData parsed count={} mode=fav", jsonFromFile == null ? 0 : jsonFromFile.size());
-				reportCookieDegradedFetch(entity, "fav", cookie, maxc, jsonFromFile, countByDataid);
-				Files.deleteIfExists(Paths.get(taskout));
-				return jsonFromFile;
-			}
-		}
-		if (entity.getOriginaladdress().startsWith("recommend")) {
-			sec_user_id = entity.getOriginaladdress().replaceAll("recommend", "");
-			logger.info("[CollectTask] getDYData mode=recommend uid={} out={}", sec_user_id, taskout);
-			String cookie = platformCookieService.currentDouyinCookie("fetch_user_feed_videos");
-			String f2cmd = CommandUtil.f2cmd(cookie, null, "fetch_user_feed_videos", sec_user_id, null,
-					maxc, taskout);
-			reportF2CookieResult("抖音", cookie, f2cmd);
-			logF2Result("recommend", f2cmd, taskout);
-			if (null != f2cmd && f2cmd.contains("stream-vault-ok")) {
-				JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
-				logger.info("[CollectTask] getDYData parsed count={} mode=recommend", jsonFromFile == null ? 0 : jsonFromFile.size());
-				reportCookieDegradedFetch(entity, "recommend", cookie, maxc, jsonFromFile, countByDataid);
 				Files.deleteIfExists(Paths.get(taskout));
 				return jsonFromFile;
 			}
@@ -976,20 +1211,137 @@ public class CollectDataService {
 		return null;
 	}
 
-	private void logF2Result(String mode, String f2cmd, String taskout) {
+	private JSONArray executeDouyinListFetch(CollectDataEntity entity, String runId, String monitor, String mode,
+			String sourceId, String cid, String functionName, int maxc, String taskout, long existingDetailCount,
+			long successDetailCount) throws IOException {
+		FetchRunContext context = new FetchRunContext(runId, entity.getId(), entity.getTaskname(),
+				entity.getOriginaladdress(), monitor, mode, sourceId, maxc, existingDetailCount, successDetailCount,
+				entity.getOmaxcur(), entity.getMaxcur(), taskout);
+		lastFetchRunContext.set(context);
+		logger.info("[CollectTask] getDYData request runId={} taskId={} mode={} sourceId={} cid={} maxc={} out={}",
+				runId, entity.getId(), mode, sourceId, cid, maxc, taskout);
+		String cookie = platformCookieService.currentDouyinCookie(functionName);
+		String f2cmd = CommandUtil.f2cmd(cookie, null, functionName,
+				"fav".equals(mode) ? null : sourceId, "fav".equals(mode) ? cid : null, maxc, taskout);
+		reportF2CookieResult(Global.platform.douyin.name(), cookie, f2cmd);
+		logF2Result(entity, runId, mode, sourceId, maxc, f2cmd, taskout, cookie);
+		if (f2cmd != null && f2cmd.contains("stream-vault-ok")) {
+			JSONArray jsonFromFile = FileUtil.readJsonFromFile(taskout);
+			logger.info("[CollectTask] getDYData parsed runId={} count={} mode={} sourceId={}",
+					runId, jsonFromFile == null ? 0 : jsonFromFile.size(), mode, sourceId);
+			logFetchSnapshotItems(entity, context, jsonFromFile, "f2-raw");
+			reportCookieDegradedFetch(entity, mode, cookie, maxc, jsonFromFile, existingDetailCount);
+			Files.deleteIfExists(Paths.get(taskout));
+			return jsonFromFile;
+		}
+		return null;
+	}
+
+	private void logF2Result(CollectDataEntity entity, String mode, String sourceId, int maxc, String f2cmd, String taskout) {
+		logF2Result(entity, null, mode, sourceId, maxc, f2cmd, taskout, null);
+	}
+
+	private void logF2Result(CollectDataEntity entity, String runId, String mode, String sourceId, int maxc, String f2cmd, String taskout) {
+		logF2Result(entity, runId, mode, sourceId, maxc, f2cmd, taskout, null);
+	}
+
+	private void logF2Result(CollectDataEntity entity, String runId, String mode, String sourceId, int maxc,
+			String f2cmd, String taskout, String cookie) {
 		boolean success = f2cmd != null && f2cmd.contains("stream-vault-ok");
 		Integer exitCode = CommandUtil.getLastF2ExitCode();
 		Long durationMs = CommandUtil.getLastF2DurationMs();
-		logger.info("[CollectTask] getDYData f2 outputLength={} containsSuccessMarker={} exitCode={} durationMs={}",
-				f2cmd == null ? 0 : f2cmd.length(), success, exitCode, durationMs);
+		logger.info("[CollectTask] getDYData f2 runId={} mode={} sourceId={} outputLength={} containsSuccessMarker={} exitCode={} durationMs={}",
+				runId, mode, sourceId, f2cmd == null ? 0 : f2cmd.length(), success, exitCode, durationMs);
 		if (!success) {
-			logger.error("[CollectTask] getDYData f2 failed mode={} outputPreview={}", mode, previewOutput(f2cmd));
-			logger.error("[CollectTask] getDYData f2 failed mode={} outPath={} outFileExists={} outFileSize={}",
-					mode, taskout, Files.exists(Paths.get(taskout)),
-					Files.exists(Paths.get(taskout)) ? safeFileSize(taskout) : -1);
+			boolean outFileExists = Files.exists(Paths.get(taskout));
+			long outFileSize = outFileExists ? safeFileSize(taskout) : -1;
+			JSONObject diagnostics = buildF2FailureDiagnostics(mode, sourceId, cookie);
+			F2FailureDiagnosis diagnosis = analyzeF2Failure(mode, entity.getOriginaladdress(), sourceId, maxc, taskout,
+					outFileExists, outFileSize, exitCode, durationMs, f2cmd, diagnostics);
+			lastF2FailureDiagnosis.set(diagnosis);
+			logger.error("[CollectTask] getDYData f2 rootCause runId={} {}", runId, diagnosis.toLogMessage());
+			logger.error("[CollectTask] getDYData f2 diagnostics runId={} mode={} sourceId={} diagnostics={}",
+					runId, mode, sourceId, diagnostics == null ? null : diagnostics.toJSONString());
+			logger.error("[CollectTask] getDYData f2 failed runId={} mode={} sourceId={} outputPreview={}", runId, mode, sourceId, previewOutput(f2cmd));
+			logger.error("[CollectTask] getDYData f2 failed runId={} mode={} outPath={} outFileExists={} outFileSize={}",
+					runId, mode, taskout, outFileExists, outFileSize);
 		} else {
-			logger.info("[CollectTask] getDYData output file exists={} path={}", Files.exists(Paths.get(taskout)), taskout);
+			logger.info("[CollectTask] getDYData output file runId={} exists={} path={}", runId, Files.exists(Paths.get(taskout)), taskout);
 		}
+	}
+
+	static F2FailureDiagnosis analyzeF2Failure(String mode, String originaladdress, String sourceId, int maxc,
+			String outPath, boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String output) {
+		return analyzeF2Failure(mode, originaladdress, sourceId, maxc, outPath, outFileExists, outFileSize,
+				exitCode, durationMs, output, null);
+	}
+
+	static F2FailureDiagnosis analyzeF2Failure(String mode, String originaladdress, String sourceId, int maxc,
+			String outPath, boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String output,
+			JSONObject diagnostics) {
+		String normalized = output == null ? "" : output;
+		String exceptionType = null;
+		String exceptionMessage = null;
+		Matcher exceptionMatcher = PYTHON_EXCEPTION_PATTERN.matcher(normalized);
+		while (exceptionMatcher.find()) {
+			exceptionType = exceptionMatcher.group(1);
+			exceptionMessage = exceptionMatcher.group(2);
+		}
+		String stackTop = extractStackTop(normalized);
+		String errorCode = classifyF2Failure(exceptionType, exceptionMessage, normalized, outFileExists, exitCode);
+		String rootCause = buildRootCause(errorCode, exceptionType, exceptionMessage, normalized);
+		String outputPreview = previewOutput(output);
+		return new F2FailureDiagnosis(mode, originaladdress, sourceId, maxc, outPath, outFileExists, outFileSize,
+				exitCode, durationMs, errorCode, exceptionType, exceptionMessage, stackTop, rootCause, outputPreview,
+				diagnostics);
+	}
+
+	private static String extractStackTop(String output) {
+		Matcher matcher = PYTHON_FILE_PATTERN.matcher(output == null ? "" : output);
+		String stackTop = null;
+		while (matcher.find()) {
+			stackTop = matcher.group(1) + ":" + matcher.group(2) + " in " + matcher.group(3).trim();
+		}
+		return stackTop;
+	}
+
+	private static String classifyF2Failure(String exceptionType, String exceptionMessage, String output,
+			boolean outFileExists, Integer exitCode) {
+		String text = ((exceptionType == null ? "" : exceptionType) + "\n"
+				+ (exceptionMessage == null ? "" : exceptionMessage) + "\n"
+				+ (output == null ? "" : output)).toLowerCase();
+		if (text.contains("nickname_raw") && text.contains("unboundlocalerror")) {
+			return "F2_INTERNAL_NICKNAME_RAW_UNBOUND";
+		}
+		if (text.contains("login") || text.contains("cookie") || text.contains("passport") || text.contains("verify")) {
+			return "F2_COOKIE_OR_VERIFY_REQUIRED";
+		}
+		if (text.contains("captcha") || text.contains("风控") || text.contains("risk")) {
+			return "F2_RISK_CONTROL";
+		}
+		if (text.contains("timeout") || text.contains("timed out")) {
+			return "F2_TIMEOUT";
+		}
+		if (!outFileExists && exitCode != null && exitCode != 0) {
+			return "F2_PROCESS_FAILED_NO_OUTPUT";
+		}
+		if (exitCode != null && exitCode != 0) {
+			return "F2_PROCESS_FAILED";
+		}
+		return "F2_UNKNOWN_FAILURE";
+	}
+
+	private static String buildRootCause(String errorCode, String exceptionType, String exceptionMessage, String output) {
+		if ("F2_INTERNAL_NICKNAME_RAW_UNBOUND".equals(errorCode)) {
+			return "f2 douyin fetch failed before nickname_raw was initialized; likely first-page response abnormal, cookie/risk-control, or upstream response schema changed";
+		}
+		if (exceptionType != null && exceptionMessage != null) {
+			return exceptionType + ": " + exceptionMessage;
+		}
+		if (output == null || output.trim().isEmpty()) {
+			return "f2 returned no stdout/stderr, so no root exception could be extracted";
+		}
+		return "f2 did not return stream-vault-ok success marker";
 	}
 
 	private void reportF2CookieResult(String platform, String cookie, String f2cmd) {
@@ -1008,10 +1360,73 @@ public class CollectDataService {
 		douyinCookieHealthService.reportCollectFetchWindow(entity, mode, cookie, requested, fetched, existingDetailCount);
 	}
 
+	private JSONObject buildF2FailureDiagnostics(String mode, String sourceId, String cookie) {
+		JSONObject diagnostics = new JSONObject();
+		diagnostics.put("mode", mode);
+		diagnostics.put("sourceId", sourceId);
+		diagnostics.put("cookiePresent", cookie != null && !cookie.trim().isEmpty());
+		diagnostics.put("cookieLength", cookie == null ? 0 : cookie.length());
+		diagnostics.put("cookieHasSessionid", containsIgnoreCase(cookie, "sessionid"));
+		diagnostics.put("cookieHasSidGuard", containsIgnoreCase(cookie, "sid_guard"));
+		diagnostics.put("cookieHasTtwid", containsIgnoreCase(cookie, "ttwid"));
+		diagnostics.put("cookieHasPassportCsrf", containsIgnoreCase(cookie, "passport_csrf_token"));
+		if ("post".equals(mode) || "like".equals(mode) || "recommend".equals(mode)) {
+			JSONObject profileDiagnostic = DouUtil.diagnoseUserProfile(sourceId);
+			diagnostics.put("profileDiagnostic", profileDiagnostic);
+		}
+		if ("post".equals(mode) || "like".equals(mode)) {
+			diagnostics.put("awemeListDiagnostic", diagnoseDouyinAwemeList(mode, sourceId, cookie));
+		}
+		return diagnostics;
+	}
+
+	private boolean containsIgnoreCase(String text, String needle) {
+		return text != null && needle != null && text.toLowerCase().contains(needle.toLowerCase());
+	}
+
+	private JSONObject diagnoseDouyinAwemeList(String mode, String sourceId, String cookie) {
+		JSONObject diagnostic = new JSONObject();
+		diagnostic.put("mode", mode);
+		diagnostic.put("sourceId", sourceId);
+		diagnostic.put("count", 1);
+		diagnostic.put("maxCursor", "0");
+		if (sourceId == null || sourceId.trim().isEmpty()) {
+			diagnostic.put("success", false);
+			diagnostic.put("error", "empty sourceId");
+			return diagnostic;
+		}
+		String endpoint;
+		if ("post".equals(mode)) {
+			endpoint = "https://www.douyin.com/aweme/v1/web/aweme/post/?";
+		} else if ("like".equals(mode)) {
+			endpoint = "https://www.douyin.com/aweme/v1/web/aweme/favorite/?";
+		} else {
+			diagnostic.put("success", false);
+			diagnostic.put("error", "unsupported mode");
+			return diagnostic;
+		}
+		try {
+			String query = "aid=6383&sec_user_id=#uid#&count=1&max_cursor=0&cookie_enabled=true&platform=PC&downlink=10"
+					.replace("#uid#", sourceId);
+			String xbogus = XbogusUtil.getXBogus(query);
+			String url = endpoint + query + "&X-Bogus=" + xbogus;
+			diagnostic.put("endpoint", endpoint);
+			diagnostic.put("xbogusPresent", xbogus != null && !xbogus.trim().isEmpty());
+			JSONObject httpDiagnostic = DouUtil.diagnoseHttpGet(url, cookie, 800);
+			diagnostic.put("http", httpDiagnostic);
+			diagnostic.put("success", httpDiagnostic != null && httpDiagnostic.getBooleanValue("success"));
+		} catch (Exception e) {
+			diagnostic.put("success", false);
+			diagnostic.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+		}
+		return diagnostic;
+	}
+
 	private void recordFetchFailureDetail(CollectDataEntity entity, String errorCode, String errorMsg, JSONObject detailJson) {
 		if (entity == null || entity.getId() == null) {
 			return;
 		}
+		FetchRunContext fetchContext = lastFetchRunContext.get();
 		CollectDataDetailEntity existing = collectDataDetailService.findByVideoAndDataid("__FETCH__", entity.getId());
 		CollectDataDetailEntity detail = existing == null ? new CollectDataDetailEntity() : existing;
 		detail.setDataid(entity.getId());
@@ -1024,13 +1439,30 @@ public class CollectDataService {
 		detail.setErrormsg(errorMsg);
 		StringBuilder processLog = new StringBuilder();
 		appendLog(processLog, "getDYData", "originaladdress=" + entity.getOriginaladdress());
+		if (fetchContext != null) {
+			appendLog(processLog, "run", "runId=" + fetchContext.runId() + ", fetchMode=" + fetchContext.mode()
+					+ ", sourceId=" + fetchContext.sourceId() + ", maxc=" + fetchContext.maxc());
+		}
 		appendLog(processLog, "f2", "exitCode=" + CommandUtil.getLastF2ExitCode() + ", durationMs=" + CommandUtil.getLastF2DurationMs());
+		if (detailJson != null && detailJson.getString("outputPreview") != null) {
+			appendLog(processLog, "f2-output", detailJson.getString("outputPreview"));
+		}
+		if (detailJson != null && detailJson.getJSONObject("diagnostics") != null) {
+			appendLog(processLog, "diagnostics", detailJson.getJSONObject("diagnostics").toJSONString());
+		}
 		detail.setProcesslog(processLog.toString());
 		JSONObject context = new JSONObject();
 		context.put("taskId", entity.getId());
 		context.put("taskName", entity.getTaskname());
 		context.put("originaladdress", entity.getOriginaladdress());
 		context.put("error", errorMsg);
+		if (fetchContext != null) {
+			context.put("runId", fetchContext.runId());
+			context.put("fetchMode", fetchContext.mode());
+			context.put("sourceId", fetchContext.sourceId());
+			context.put("maxc", fetchContext.maxc());
+			context.put("taskout", fetchContext.taskout());
+		}
 		if (detailJson != null) {
 			context.put("detail", detailJson);
 		}
@@ -1042,10 +1474,30 @@ public class CollectDataService {
 		JSONObject planItem = new JSONObject();
 		planItem.put("stage", "getDYData");
 		planItem.put("decision", "fetch-fail");
+		if (fetchContext != null) {
+			planItem.put("runId", fetchContext.runId());
+			planItem.put("fetchMode", fetchContext.mode());
+			planItem.put("sourceId", fetchContext.sourceId());
+			planItem.put("maxc", fetchContext.maxc());
+		}
 		planItem.put("errorcode", errorCode);
 		planItem.put("errormsg", errorMsg);
 		planItem.put("exitCode", CommandUtil.getLastF2ExitCode());
 		planItem.put("durationMs", CommandUtil.getLastF2DurationMs());
+		if (detailJson != null) {
+			planItem.put("rootCause", detailJson.getString("rootCause"));
+			planItem.put("mode", detailJson.getString("mode"));
+			planItem.put("sourceId", detailJson.getString("sourceId"));
+			planItem.put("outPath", detailJson.getString("outPath"));
+			planItem.put("outFileExists", detailJson.get("outFileExists"));
+			planItem.put("outFileSize", detailJson.get("outFileSize"));
+			planItem.put("exceptionType", detailJson.getString("exceptionType"));
+			planItem.put("exceptionMessage", detailJson.getString("exceptionMessage"));
+			planItem.put("stackTop", detailJson.getString("stackTop"));
+			planItem.put("outputPreview", detailJson.getString("outputPreview"));
+			planItem.put("diagnostics", detailJson.getJSONObject("diagnostics"));
+			planItem.put("processlog", processLog.toString());
+		}
 		planItems.add(planItem);
 		entity.setTaskstatus("执行失败(抓取异常)");
 		entity.setEndtime(DateUtils.formatDateTime(new Date()));
@@ -1055,11 +1507,56 @@ public class CollectDataService {
 		collectdDataDao.save(entity);
 	}
 
-	private JSONObject getLastF2Context() {
+	private JSONObject getLastF2Context(F2FailureDiagnosis diagnosis) {
 		JSONObject context = new JSONObject();
 		context.put("exitCode", CommandUtil.getLastF2ExitCode());
 		context.put("durationMs", CommandUtil.getLastF2DurationMs());
+		if (diagnosis != null) {
+			context.put("errorCode", diagnosis.errorCode());
+			context.put("rootCause", diagnosis.rootCause());
+			context.put("mode", diagnosis.mode());
+			context.put("originaladdress", diagnosis.originaladdress());
+			context.put("sourceId", diagnosis.sourceId());
+			context.put("maxc", diagnosis.maxc());
+			context.put("outPath", diagnosis.outPath());
+			context.put("outFileExists", diagnosis.outFileExists());
+			context.put("outFileSize", diagnosis.outFileSize());
+			context.put("exceptionType", diagnosis.exceptionType());
+			context.put("exceptionMessage", diagnosis.exceptionMessage());
+			context.put("stackTop", diagnosis.stackTop());
+			context.put("outputPreview", diagnosis.outputPreview());
+			context.put("diagnostics", diagnosis.diagnostics());
+		}
 		return context;
+	}
+
+	static record F2FailureDiagnosis(String mode, String originaladdress, String sourceId, int maxc, String outPath,
+			boolean outFileExists, long outFileSize, Integer exitCode, Long durationMs, String errorCode,
+			String exceptionType, String exceptionMessage, String stackTop, String rootCause, String outputPreview,
+			JSONObject diagnostics) {
+		String toLogMessage() {
+			return "errorCode=" + errorCode
+					+ " rootCause=" + rootCause
+					+ " exceptionType=" + exceptionType
+					+ " exceptionMessage=" + exceptionMessage
+					+ " stackTop=" + stackTop
+					+ " mode=" + mode
+					+ " originaladdress=" + originaladdress
+					+ " sourceId=" + sourceId
+					+ " maxc=" + maxc
+					+ " exitCode=" + exitCode
+					+ " durationMs=" + durationMs
+					+ " outPath=" + outPath
+					+ " outFileExists=" + outFileExists
+					+ " outFileSize=" + outFileSize
+					+ " outputPreview=" + outputPreview
+					+ " diagnostics=" + (diagnostics == null ? null : diagnostics.toJSONString());
+		}
+	}
+
+	static record FetchRunContext(String runId, Integer taskId, String taskName, String originaladdress,
+			String monitor, String mode, String sourceId, int maxc, long existingDetailCount, long successDetailCount,
+			Integer omaxcur, Integer maxcur, String taskout) {
 	}
 
 	private long safeFileSize(String path) {
@@ -1070,7 +1567,7 @@ public class CollectDataService {
 		}
 	}
 
-	private String previewOutput(String output) {
+	private static String previewOutput(String output) {
 		if (output == null) {
 			return "null";
 		}

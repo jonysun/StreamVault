@@ -3,6 +3,7 @@ package com.flower.spirit.utils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.URLEncoder;
@@ -61,6 +62,117 @@ public class DouUtil {
 		return fetchDouyinApi("/api/douyin/web/handler_user_profile", "unique_id", uniqueId);
 	}
 
+	public static JSONObject diagnoseUserProfile(String secUid) {
+		JSONObject diagnostic = new JSONObject();
+		diagnostic.put("path", "/api/douyin/web/handler_user_profile");
+		diagnostic.put("lookupKey", "sec_user_id");
+		diagnostic.put("lookupValue", secUid);
+		diagnostic.put("configured", Global.douyinApiUrls != null && !Global.douyinApiUrls.trim().isEmpty());
+		if (secUid == null || secUid.trim().isEmpty()) {
+			diagnostic.put("success", false);
+			diagnostic.put("error", "empty sec_uid");
+			return diagnostic;
+		}
+		if (Global.douyinApiUrls == null || Global.douyinApiUrls.trim().isEmpty()) {
+			diagnostic.put("success", false);
+			diagnostic.put("error", "douyin api urls not configured");
+			return diagnostic;
+		}
+		JSONArray attempts = new JSONArray();
+		String[] bases = Global.douyinApiUrls.split("\\r?\\n");
+		for (String base : bases) {
+			if (base == null || base.trim().isEmpty()) continue;
+			JSONObject attempt = new JSONObject();
+			attempt.put("base", base.trim());
+			try {
+				String url = buildApiUrl(base.trim(), "/api/douyin/web/handler_user_profile", "sec_user_id", secUid);
+				String response = HttpUtil.getPage(url, null, null);
+				attempt.put("responsePresent", response != null && !response.trim().isEmpty());
+				attempt.put("responseLength", response == null ? 0 : response.length());
+				attempt.put("responsePreview", truncateForDiagnostic(response, 500));
+				if (response == null || response.trim().isEmpty()) {
+					attempt.put("success", false);
+					attempt.put("error", "empty response");
+					attempts.add(attempt);
+					continue;
+				}
+				JSONObject object = JSONObject.parseObject(response);
+				attempt.put("parseOk", object != null);
+				if (object != null) {
+					attempt.put("topLevelKeys", object.keySet().toString());
+					copyIfPresent(object, attempt, "code");
+					copyIfPresent(object, attempt, "status_code");
+					copyIfPresent(object, attempt, "status_msg");
+					copyIfPresent(object, attempt, "message");
+					copyIfPresent(object, attempt, "msg");
+					JSONObject user = extractDiagnosticUser(object);
+					if (user != null) {
+						attempt.put("userFound", true);
+						copyIfPresent(user, attempt, "sec_uid");
+						copyIfPresent(user, attempt, "uid");
+						copyIfPresent(user, attempt, "unique_id");
+						copyIfPresent(user, attempt, "nickname");
+						attempt.put("success", true);
+						attempts.add(attempt);
+						diagnostic.put("success", true);
+						diagnostic.put("attempts", attempts);
+						return diagnostic;
+					} else {
+						attempt.put("userFound", false);
+						attempt.put("success", false);
+					}
+				} else {
+					attempt.put("success", false);
+					attempt.put("error", "response is not a JSON object");
+				}
+			} catch (Exception e) {
+				attempt.put("success", false);
+				attempt.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+			}
+			attempts.add(attempt);
+		}
+		diagnostic.put("success", false);
+		diagnostic.put("attempts", attempts);
+		return diagnostic;
+	}
+
+	public static JSONObject diagnoseHttpGet(String addr, String ck, int previewLength) {
+		JSONObject diagnostic = new JSONObject();
+		diagnostic.put("url", addr);
+		diagnostic.put("cookiePresent", ck != null && !ck.trim().isEmpty());
+		HttpURLConnection conn = null;
+		try {
+			URL url = new URL(addr);
+			conn = (HttpURLConnection) url.openConnection();
+			conn.setRequestMethod("GET");
+			conn.setRequestProperty("user-agent", ua);
+			conn.setRequestProperty("referer", "https://www.douyin.com/");
+			if (ck != null) {
+				conn.setRequestProperty("cookie", ck);
+			}
+			conn.setConnectTimeout(10000);
+			conn.setReadTimeout(10000);
+			int statusCode = conn.getResponseCode();
+			diagnostic.put("success", statusCode >= 200 && statusCode < 400);
+			diagnostic.put("statusCode", statusCode);
+			diagnostic.put("contentType", conn.getContentType());
+			InputStream stream = statusCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
+			String response = readStream(stream);
+			diagnostic.put("responsePresent", response != null && !response.trim().isEmpty());
+			diagnostic.put("responseLength", response == null ? 0 : response.length());
+			diagnostic.put("responsePreview", truncateForDiagnostic(response, previewLength));
+			summarizeDiagnosticJson(response, diagnostic);
+		} catch (Exception e) {
+			diagnostic.put("success", false);
+			diagnostic.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+		} finally {
+			if (conn != null) {
+				conn.disconnect();
+			}
+		}
+		return diagnostic;
+	}
+
 	private static JSONObject fetchDouyinApi(String path, String key, String value) {
 		if (value == null || value.trim().isEmpty() || Global.douyinApiUrls == null || Global.douyinApiUrls.trim().isEmpty()) {
 			return null;
@@ -82,6 +194,92 @@ public class DouUtil {
 			}
 		}
 		return null;
+	}
+
+	private static JSONObject extractDiagnosticUser(JSONObject object) {
+		if (object == null) {
+			return null;
+		}
+		JSONObject user = object.getJSONObject("user");
+		if (user != null) {
+			return user;
+		}
+		JSONObject data = object.getJSONObject("data");
+		if (data != null) {
+			user = data.getJSONObject("user");
+			if (user != null) {
+				return user;
+			}
+			JSONObject userInfo = data.getJSONObject("user_info");
+			if (userInfo != null) {
+				return userInfo;
+			}
+		}
+		JSONObject userInfo = object.getJSONObject("user_info");
+		if (userInfo != null) {
+			return userInfo;
+		}
+		return null;
+	}
+
+	private static void copyIfPresent(JSONObject source, JSONObject target, String key) {
+		if (source != null && source.containsKey(key)) {
+			target.put(key, source.get(key));
+		}
+	}
+
+	private static void summarizeDiagnosticJson(String response, JSONObject diagnostic) {
+		if (response == null || response.trim().isEmpty()) {
+			return;
+		}
+		try {
+			JSONObject object = JSONObject.parseObject(response);
+			diagnostic.put("jsonParseOk", object != null);
+			if (object == null) {
+				return;
+			}
+			diagnostic.put("topLevelKeys", object.keySet().toString());
+			copyIfPresent(object, diagnostic, "code");
+			copyIfPresent(object, diagnostic, "status_code");
+			copyIfPresent(object, diagnostic, "status_msg");
+			copyIfPresent(object, diagnostic, "message");
+			copyIfPresent(object, diagnostic, "msg");
+			copyIfPresent(object, diagnostic, "max_cursor");
+			copyIfPresent(object, diagnostic, "has_more");
+			JSONArray awemeList = object.getJSONArray("aweme_list");
+			if (awemeList != null) {
+				diagnostic.put("awemeListSize", awemeList.size());
+				if (!awemeList.isEmpty() && awemeList.getJSONObject(0) != null) {
+					diagnostic.put("firstAwemeId", awemeList.getJSONObject(0).getString("aweme_id"));
+					diagnostic.put("firstCreateTime", awemeList.getJSONObject(0).getString("create_time"));
+				}
+			}
+		} catch (Exception e) {
+			diagnostic.put("jsonParseOk", false);
+			diagnostic.put("jsonParseError", e.getClass().getSimpleName() + ": " + e.getMessage());
+		}
+	}
+
+	private static String readStream(InputStream stream) throws IOException {
+		if (stream == null) {
+			return null;
+		}
+		try (BufferedReader in = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+			StringBuilder response = new StringBuilder();
+			String inputLine;
+			while ((inputLine = in.readLine()) != null) {
+				response.append(inputLine);
+			}
+			return response.toString();
+		}
+	}
+
+	private static String truncateForDiagnostic(String text, int maxLength) {
+		if (text == null) {
+			return null;
+		}
+		String normalized = text.replace("\r", "\\r").replace("\n", "\\n");
+		return normalized.length() > maxLength ? normalized.substring(0, maxLength) : normalized;
 	}
 
 	private static String buildApiUrl(String base, String path, String key, String value) {
