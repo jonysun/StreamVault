@@ -53,13 +53,10 @@
 				</view>
 
 				<!-- 视频卡片 -->
-				<view class="video-card" v-for="(item, index) in list" :key="index" @tap="playVideo(item)">
+				<view class="video-card" v-for="(item, index) in list" :key="index" @tap="playVideo(item, index)" @click="playVideo(item, index)">
 					<view class="video-card-inner">
-						<view class="video-cover" @click.stop="togglePlayBtn(index)" @touchstart="showPlayButton(index)"
-							@touchend="hidePlayButton(index)">
-							<image class="cover-image" :src="item.videocover" mode="aspectFill" lazy-load="true"
-								@load="onImageLoad(index)" @error="onImageError(index)"
-								v-show="!item.imageLoading && !item.imageError"></image>
+						<view class="video-cover" @tap.stop="playVideo(item, index)" @click.stop="playVideo(item, index)" @touchstart="showPlayButton(index)" @touchend="hidePlayButton(index)">
+							<image class="cover-image" :src="item.videocover" mode="aspectFill" lazy-load="true" @load="onImageLoad(index)" @error="onImageError(index)" v-show="!item.imageLoading && !item.imageError"></image>
 							<view class="privacy-mask" v-if="item.videoprivacy === '1'">
 								<uni-icons type="locked" size="18" color="#fff"></uni-icons>
 							</view>
@@ -69,7 +66,7 @@
 							<view class="image-skeleton" v-if="item.imageLoading">
 								<view class="skeleton-shimmer"></view>
 							</view>
-							<view class="play-btn" :class="{ 'show': item.showPlayBtn }" @click.stop="playVideo(item)">
+							<view class="play-btn" :class="{ 'show': item.showPlayBtn }" @tap.stop="playVideo(item, index)" @click.stop="playVideo(item, index)">
 								<text class="play-icon">▶</text>
 							</view>
 						</view>
@@ -80,7 +77,7 @@
 									<view class="tag platform" v-if="item.videoplatform">{{ item.videoplatform }}</view>
 									<view class="tag videotype" v-if="item.videotag">{{ item.videotag }}</view>
 								</view>
-							<text class="video-time">发:{{ formatTime(item.publishtime) }} / 下:{{ formatTime(item.createtime) }}</text>
+								<text class="video-time">发:{{ formatTime(item.publishtime) }} / 下:{{ formatTime(item.createtime) }}</text>
 							</view>
 						</view>
 					</view>
@@ -103,6 +100,8 @@
 </template>
 
 <script>
+	import { normalizeVideoPath } from '@/utils/videoUrl.js'
+
 	export default {
 		data() {
 			return {
@@ -140,17 +139,7 @@
 		},
 		methods: {
 			normalizePath(rawPath,server,port,token) {
-				if (!rawPath) return '';
-				let normalizedPath = rawPath.replace(/\\/g, '/');
-				if (!normalizedPath.startsWith('/')) {
-					normalizedPath = '/' + normalizedPath;
-				}
-				normalizedPath = normalizedPath.replace(/\/+/g, '/');
-				// 对路径段进行URL编码，解决中文路径在真机请求中被后端拒绝的问题
-				const encodedPath = normalizedPath.split('/').map(segment => encodeURIComponent(segment)).join('/');
-				const baseUrl = server+':'+port; 
-				const tokenParam = 'apptoken='+token;
-				return `${baseUrl}${encodedPath}?${tokenParam}`;
+				return normalizeVideoPath(rawPath, server, port, token);
 			},
 			debounceSearch() {
 				if (this.searchTimer) clearTimeout(this.searchTimer);
@@ -255,6 +244,7 @@
 							for (var i = 0; i < content.length; i++) {
 								content[i].videounrealaddr = that.normalizePath(content[i].videounrealaddr,serveraddr,serverport,servertoken);
 								content[i].videocover = that.normalizePath(content[i].videocover,serveraddr,serverport,servertoken);
+								content[i].playurl = that.normalizePath(content[i].playurl,serveraddr,serverport,servertoken);
 								content[i].imageLoading = true;
 								content[i].imageError = false;
 								content[i].showPlayBtn = false;
@@ -306,6 +296,7 @@
 							for (var i = 0; i < content.length; i++) {
 								content[i].videounrealaddr = that.normalizePath(content[i].videounrealaddr,serveraddr,serverport,servertoken);
 								content[i].videocover = that.normalizePath(content[i].videocover,serveraddr,serverport,servertoken);
+								content[i].playurl = that.normalizePath(content[i].playurl,serveraddr,serverport,servertoken);
 								content[i].imageLoading = true;
 								content[i].imageError = false;
 								content[i].showPlayBtn = false;
@@ -322,8 +313,10 @@
 					}
 				});
 			},
-			playVideo(item) {
-				if (item.videoprivacy === 1) {
+			playVideo(item, index) {
+				if (!item) return;
+				console.log('videolist playVideo', index, item.id || item.videoid || item.videoname);
+				if (item.videoprivacy === 1 || item.videoprivacy === '1') {
 					uni.showModal({
 						title: '请输入密码', editable: true, placeholderText: '请输入访问密码',
 						success: (res) => {
@@ -337,8 +330,17 @@
 				}
 			},
 			navigateToVideo(videoInfo) {
+				const serveraddr = uni.getStorageSync('serveraddr') || '';
+				const serverport = uni.getStorageSync('serverport') || '';
+				const servertoken = uni.getStorageSync('servertoken') || '';
+				const payload = Object.assign({}, videoInfo, {
+					videounrealaddr: normalizeVideoPath(videoInfo.videounrealaddr, serveraddr, serverport, servertoken),
+					playurl: normalizeVideoPath(videoInfo.playurl, serveraddr, serverport, servertoken),
+					videocover: normalizeVideoPath(videoInfo.videocover, serveraddr, serverport, servertoken)
+				});
+				payload.playSrc = payload.playSrc || payload.videounrealaddr || payload.playurl || '';
 				uni.navigateTo({
-					url: `/pages/video/videoPlay?videoInfo=${encodeURIComponent(JSON.stringify(videoInfo))}`
+					url: `/pages/video/videoPlay?videoInfo=${encodeURIComponent(JSON.stringify(payload))}`
 				});
 			},
 		}

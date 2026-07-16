@@ -2,8 +2,8 @@
 	<view class="container">
 		<!-- 视频播放区域 -->
 		<view class="video-section">
-			<video 
-				:src="encodeURI(videoInfo.videounrealaddr)" 
+			<video
+				:src="playSrc"
 				class="video-player"
 				controls
 				:show-center-play-btn="true"
@@ -66,6 +66,12 @@
 			}
 		},
 		computed: {
+			playSrc() {
+				return this.videoInfo.playSrc || this.videoInfo.videounrealaddr || this.videoInfo.playurl || ''
+			},
+			shareSrc() {
+				return this.playSrc || this.videoInfo.videounrealaddr || ''
+			},
 			displayAuthor() {
 				return this.videoInfo.videoauthor || this.videoInfo.author || this.videoInfo.authorusername || ''
 			},
@@ -93,19 +99,20 @@
 		onShareAppMessage(res) {
 			return {
 				title: this.videoInfo.videoname,
-				path: `/pages/video/videoPlay?share=true&url=${encodeURIComponent(this.videoInfo.videounrealaddr)}&title=${encodeURIComponent(this.videoInfo.videoname)}&desc=${encodeURIComponent(this.videoInfo.videodesc)}&time=${encodeURIComponent(this.videoInfo.createTime)}`,
+				path: `/pages/video/videoPlay?share=true&url=${encodeURIComponent(this.shareSrc)}&title=${encodeURIComponent(this.videoInfo.videoname)}&desc=${encodeURIComponent(this.videoInfo.videodesc)}&time=${encodeURIComponent(this.videoInfo.createTime)}`,
 				imageUrl: this.videoInfo.videocover
 			};
 		},
 		onShareTimeline() {
 			return {
 				title: this.videoInfo.videoname,
-				query: `share=true&url=${encodeURIComponent(this.videoInfo.videounrealaddr)}&title=${encodeURIComponent(this.videoInfo.videoname)}&desc=${encodeURIComponent(this.videoInfo.videodesc)}&time=${encodeURIComponent(this.videoInfo.createTime)}`,
+				query: `share=true&url=${encodeURIComponent(this.shareSrc)}&title=${encodeURIComponent(this.videoInfo.videoname)}&desc=${encodeURIComponent(this.videoInfo.videodesc)}&time=${encodeURIComponent(this.videoInfo.createTime)}`,
 				imageUrl: this.videoInfo.videocover
 			};
 		},
 		methods: {
 			handleVideoError(err) {
+				console.log('video play error', err, this.playSrc);
 				uni.showToast({ title: '视频加载失败', icon: 'none' });
 			},
 			formatTime(timestamp) {
@@ -115,9 +122,9 @@
 				return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 			},
 			copyVideoLink() {
-				if (this.videoInfo.videounrealaddr) {
+				if (this.shareSrc) {
 					uni.setClipboardData({
-						data: this.videoInfo.videounrealaddr,
+						data: this.shareSrc,
 						success: () => {
 							uni.showToast({ title: '链接已复制', icon: 'success' });
 						}

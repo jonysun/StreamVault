@@ -3,6 +3,8 @@ package com.flower.spirit.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Date;
@@ -117,6 +119,41 @@ class MediaFeedServiceTest {
 		Page<?> page = (Page<?>) response.getRecord();
 		assertThat(page.getTotalElements()).isEqualTo(2);
 		assertThat(page.getContent()).extracting("mediaKey").containsExactly("graphic:2", "video:1");
+	}
+
+	@Test
+	void findPageVideoOnlySkipsGraphics() {
+		VideoDataEntity request = new VideoDataEntity();
+		request.setPageNo(1);
+		request.setPageSize(2);
+		request.setMediaType("video");
+		AdminVideoListItem video = new AdminVideoListItem();
+		video.setId(1);
+		when(videoDataService.findPage(any(VideoDataEntity.class), eq(true)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(video), Pageable.ofSize(2), 1)));
+
+		Page<?> page = (Page<?>) service.findPage(request).getRecord();
+
+		assertThat(page.getContent()).extracting("mediaKey").containsExactly("video:1");
+		verify(graphicContentService, never()).findPage(any(GraphicContentEntity.class));
+	}
+
+	@Test
+	void findPageGraphicOnlySkipsVideos() {
+		VideoDataEntity request = new VideoDataEntity();
+		request.setPageNo(1);
+		request.setPageSize(2);
+		request.setMediaType("graphic");
+		GraphicContentEntity graphic = new GraphicContentEntity();
+		graphic.setId(2);
+		graphic.setImages("[\"/graphic.jpeg\"]");
+		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(graphic), Pageable.ofSize(2), 1)));
+
+		Page<?> page = (Page<?>) service.findPage(request).getRecord();
+
+		assertThat(page.getContent()).extracting("mediaKey").containsExactly("graphic:2");
+		verify(videoDataService, never()).findPage(any(VideoDataEntity.class), eq(true));
 	}
 
 	@Test

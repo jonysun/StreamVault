@@ -1,6 +1,7 @@
 <template>
 	<view class="video-container" :class="themeClass">
 		<cover-view class="top-controls">
+			<cover-view class="icon-btn native-test-btn" @tap="openNativeManually">原</cover-view>
 			<cover-view class="icon-btn" @tap="toggleOrder" :title="orderTip">{{ orderShortText }}</cover-view>
 			<cover-view class="icon-btn" @tap="openAuthorPopup">作</cover-view>
 			<cover-view class="icon-btn" @tap="toggleMuted">{{ isMuted ? '静' : '声' }}</cover-view>
@@ -38,6 +39,7 @@
 					<cover-view class="video-overlay">
 						<cover-view class="bottom-info">
 							<cover-view class="author-name" @tap="selectAuthor(video.videoauthor)">@{{ video.videoauthor || '未知作者' }}</cover-view>
+							<cover-view class="publish-time" v-if="formatPublishTime(video)">发布时间：{{ formatPublishTime(video) }}</cover-view>
 							<cover-view class="desc-text">{{ video.videoname || video.videodesc || '' }}</cover-view>
 						</cover-view>
 					</cover-view>
@@ -83,6 +85,9 @@
 <script>
 	import uniPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue'
 	import cacheManager from '@/utils/cacheManager.js'
+	import nativeVideoBridge from '@/utils/nativeVideoBridge.js'
+	import { normalizeVideoPath, resolvePlayableSource as resolveVideoSource } from '@/utils/videoUrl.js'
+	import { buildNativeFeedOptions as createNativeFeedOptions } from '@/utils/nativeFeedPayload.js'
 	export default {
 		components: { uniPopup },
 		data() {
@@ -110,7 +115,7 @@
 				servertoken: '',
 				videoContexts: {},
 				cacheSettings: cacheManager.readSettings(),
-				swipeDuration: 220,
+				swipeDuration: 260,
 				preloadNeighbors: 1,
 				playDelayMs: 40,
 				playbackSourceMode: 'prefer_mp4',
@@ -124,6 +129,9 @@
 				currentSec: 0,
 				bufferSec: 0,
 				playRequestToken: 0,
+				nativeTried: false,
+				nativeActive: false,
+				nativeOpening: false,
 				switchPending: {},
 				perfStats: {
 					lastMs: 0,
@@ -200,6 +208,10 @@
 		onShow() {
 			this.cacheSettings = cacheManager.readSettings()
 			this.applyFeedSettings()
+			if (this.nativeActive) {
+				this.nativeActive = false
+				this.nativeTried = true
+			}
 			if (!this.serveraddr || !this.serverport || !this.servertoken) {
 				this.ensureServerConfig()
 			}
@@ -209,6 +221,95 @@
 			}
 		},
 		methods: {
+			showNativeTrace(title, marker) {
+				if (marker) console.log(marker)
+				console.log(title)
+				// #ifdef APP-PLUS
+				uni.showToast({ title, icon: 'none', duration: 1200 })
+				// #endif
+			},
+			openNativeManually() {
+				this.showNativeTrace('作品原生测试', 'SV_NATIVE_FEED_MANUAL')
+				this.nativeTried = false
+				this.tryOpenNativeFeed(true)
+			},
+			async tryOpenNativeFeed(force = false) {
+				this.showNativeTrace(`作品准备原生:${this.playList.length}`, 'SV_NATIVE_FEED_READY')
+				console.log('fallsVideo tryOpenNativeFeed', this.playList.length, this.nativeTried, this.nativeOpening)
+				if ((!force && this.nativeTried) || this.nativeOpening || !this.playList.length) return false
+				const options = this.buildNativeFeedOptions()
+				if (!options.videos.length && !(options.serveraddr && options.serverport && options.servertoken)) {
+					this.showNativeTrace('作品无播放源', 'SV_NATIVE_FEED_EMPTY')
+					this.nativeTried = true
+					this.playCurrent()
+					return false
+				}
+				this.nativeTried = true
+				this.nativeOpening = true
+				let res = null
+				try {
+					this.showNativeTrace(`作品调用原生:${options.videos.length}`, 'SV_NATIVE_FEED_CALL')
+					res = await nativeVideoBridge.openNativeVideoFeed(options)
+				} finally {
+					this.nativeOpening = false
+				}
+				if (res && res.ok) {
+					this.nativeActive = true
+					this.pauseAll()
+					return true
+				}
+				console.log('fallsVideo native failed', res)
+				uni.showToast({ title: `原生播放不可用：${(res && res.reason) || 'fallback'}`, icon: 'none' })
+				this.nativeActive = false
+				this.playCurrent()
+				return false
+			},
+			buildNativeFeedOptions() {
+				const before = 1
+				const after = 1
+				const start = Math.max(0, this.currentIndex - before)
+				const end = Math.min(this.playList.length, this.currentIndex + after + 1)
+				const videos = this.playList.slice(start, end).filter(v => this.hasPlayableSource(v))
+				const current = this.playList[this.currentIndex]
+				const currentInPayload = videos.findIndex(v => v === current)
+				return createNativeFeedOptions({
+					videos,
+					currentIndex: currentInPayload >= 0 ? currentInPayload : 0,
+					serveraddr: this.serveraddr,
+					serverport: this.serverport,
+					servertoken: this.servertoken,
+					selectedAuthor: this.selectedAuthor,
+					activeOrderMode: this.activeOrderMode,
+					playbackSourceMode: this.playbackSourceMode,
+					playbackMode: this.playbackMode,
+					isMuted: this.isMuted,
+					currentVideoId: current ? (current.id || current.videoid || current.sourceurl || current.originaladdress || '') : '',
+					randomSeed: this.sessionRandomSeed
+				})
+			},
+			hasPlayableSource(video) {
+				return !!(video && (video.playSrc || video.videounrealaddr || video.playurl || video.mp4Url || video.hlsUrl))
+			},
+			formatPublishTime(video) {
+				const raw = video && (video.publishtime || video.publishTime)
+				if (!raw) return ''
+				try {
+					const date = new Date(raw)
+					if (isNaN(date.getTime())) return raw
+					const now = new Date()
+					const diff = now - date
+					const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+					if (days === 0) return '今天'
+					if (days === 1) return '昨天'
+					if (days > 1 && days < 7) return `${days}天前`
+					const y = date.getFullYear()
+					const m = String(date.getMonth() + 1).padStart(2, '0')
+					const d = String(date.getDate()).padStart(2, '0')
+					return `${y}-${m}-${d}`
+				} catch (e) {
+					return raw
+				}
+			},
 			createRandomSeed() {
 				return `${Date.now()}_${Math.floor(Math.random() * 1000000)}`
 			},
@@ -336,12 +437,7 @@
 				if (this.servertoken) uni.setStorageSync('servertoken', this.servertoken)
 			},
 			normalizePath(rawPath) {
-				if (!rawPath) return ''
-				if (/^https?:\/\//i.test(rawPath)) return rawPath
-				let p = rawPath.replace(/\\/g, '/')
-				if (!p.startsWith('/')) p = '/' + p
-				const encodedPath = p.split('/').map(s => encodeURIComponent(s)).join('/')
-				return `${this.serveraddr}:${this.serverport}${encodedPath}?apptoken=${this.servertoken}`
+				return normalizeVideoPath(rawPath, this.serveraddr, this.serverport, this.servertoken)
 			},
 			buildFeedQuery(pageNo) {
 				const query = {
@@ -361,20 +457,7 @@
 				return query
 			},
 			resolvePlayableSource(video) {
-				if (!video) return ''
-				const playurl = video.playurl || ''
-				const mp4 = video.videounrealaddr || ''
-				const isHls = /\.m3u8(\?|$)/i.test(playurl)
-				if (this.playbackSourceMode === 'mp4_only') {
-					return mp4 || playurl || ''
-				}
-				if (this.playbackSourceMode === 'hls_only') {
-					return (isHls ? playurl : '') || playurl || mp4 || ''
-				}
-				if (this.playbackSourceMode === 'prefer_hls') {
-					return (isHls ? playurl : '') || mp4 || playurl || ''
-				}
-				return mp4 || playurl || ''
+				return resolveVideoSource(video, this.playbackSourceMode)
 			},
 			resolveFallbackSource(video) {
 				if (!video) return ''
@@ -387,8 +470,9 @@
 			},
 			preparePlaybackWindow(centerIndex) {
 				if (!Array.isArray(this.playList) || this.playList.length === 0) return
-				const start = Math.max(0, centerIndex - this.preloadNeighbors)
-				const end = Math.min(this.playList.length - 1, centerIndex + this.preloadNeighbors + 1)
+				const neighborCount = Math.max(1, this.preloadNeighbors)
+				const start = Math.max(0, centerIndex - neighborCount)
+				const end = Math.min(this.playList.length - 1, centerIndex + neighborCount)
 				for (let i = start; i <= end; i++) {
 					const item = this.playList[i]
 					if (!item) continue
@@ -417,6 +501,9 @@
 				this.bufferSec = 0
 				this.showControls = false
 				this.manualPaused = false
+				this.nativeTried = false
+				this.nativeActive = false
+				this.nativeOpening = false
 				this.switchPending = {}
 				if (options.resetSeed || this.activeOrderMode === 'random') {
 					this.sessionRandomSeed = this.createRandomSeed()
@@ -426,7 +513,7 @@
 						this.isResettingFeed = false
 						this.preparePlaybackWindow(0)
 						if (this.playList.length > 0) {
-							this.$nextTick(() => this.playCurrent())
+							this.$nextTick(() => this.tryOpenNativeFeed())
 						}
 						resolve(true)
 					})
@@ -494,6 +581,7 @@
 				if (next === this.currentIndex) return
 				this.showControls = false
 				this.currentIndex = next
+				this.preparePlaybackWindow(next)
 				if (this.pendingOrderMode && this.pendingOrderMode !== this.activeOrderMode) {
 					this.applyPendingOrder()
 					return
@@ -553,7 +641,7 @@
 			},
 			getVideoSrc(index, video) {
 				if (!video) return ''
-				if (Math.abs(index - this.currentIndex) <= this.preloadNeighbors) {
+				if (Math.abs(index - this.currentIndex) <= 1 || Math.abs(index - this.currentIndex) <= this.preloadNeighbors) {
 					return video.playSrc || ''
 				}
 				return ''
@@ -693,6 +781,7 @@
 	.video-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 24rpx; background: linear-gradient(to top, rgba(0,0,0,.55), transparent); }
 	.bottom-info { color: #fff; }
 	.author-name { font-size: 28rpx; font-weight: 600; display: block; margin-bottom: 10rpx; }
+	.publish-time { display: block; font-size: 22rpx; color: rgba(255,255,255,.78); margin-bottom: 8rpx; }
 	.desc-text { font-size: 24rpx; }
 	.top-controls { position: fixed; z-index: 99; top: 28rpx; right: 20rpx; display: flex; flex-direction: column; gap: 12rpx; }
 	.icon-btn { width: 60rpx; height: 60rpx; line-height: 60rpx; border-radius: 30rpx; text-align: center; background: rgba(0,0,0,.45); color: #fff; font-size: 24rpx; }

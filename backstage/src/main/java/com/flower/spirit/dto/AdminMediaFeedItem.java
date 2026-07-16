@@ -12,6 +12,8 @@ public class AdminMediaFeedItem {
 	private String videoid;
 	private String platform;
 	private String author;
+	private String displayAuthor;
+	private String profileAuthorUid;
 	private String authoruid;
 	private String authorusername;
 	private String authoravatar;
@@ -75,6 +77,22 @@ public class AdminMediaFeedItem {
 
 	public void setAuthor(String author) {
 		this.author = author;
+	}
+
+	public String getDisplayAuthor() {
+		return displayAuthor;
+	}
+
+	public void setDisplayAuthor(String displayAuthor) {
+		this.displayAuthor = displayAuthor;
+	}
+
+	public String getProfileAuthorUid() {
+		return profileAuthorUid;
+	}
+
+	public void setProfileAuthorUid(String profileAuthorUid) {
+		this.profileAuthorUid = profileAuthorUid;
 	}
 
 	public String getAuthoruid() {

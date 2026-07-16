@@ -37,6 +37,16 @@ buildNumber.properties
 /app/desktop/StreamVault-tauri/src-tauri/target/
 /app/desktop/StreamVault-tauri/src-tauri/Cargo.lock
 /backstage/src/main/docker/buildx/script/logs
+/backstage/src/main/docker/buildx/StreamVault-0.0.1-SNAPSHOT.jar
+/app/android-native-plugin/.gradle/
+/app/android-native-plugin/**/build/
+/app/android-native-plugin/local.properties
+/.tmp/
+/tools/
+/log/
+/.superpowers/
+/backstage/runlogs/
+/*.zip
 /db/
 /.worktrees/
 

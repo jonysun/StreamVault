@@ -1395,6 +1395,9 @@
                                     <button type="button" class="feed-control-btn" id="feedOrderBtn" title="播放顺序">
                                         <i class="mdi mdi-sort"></i><span>倒序</span>
                                     </button>
+                                    <button type="button" class="feed-control-btn" id="feedMediaTypeBtn" title="媒体类型">
+                                        <i class="mdi mdi-play-box-multiple-outline"></i><span>混合</span>
+                                    </button>
                                     <button type="button" class="feed-control-btn" id="feedAuthorBtn" title="作者筛选">
                                         <i class="mdi mdi-account"></i><span>全部</span>
                                     </button>
@@ -1460,6 +1463,7 @@
     var mediaHomeMode = 'grid';
     var feedObserver = null;
     var feedOrder = 'desc';
+    var feedMediaType = 'mixed';
     var feedAuthor = '';
     var feedMuted = true;
     var feedSourceMode = 'prefer_hls';
@@ -1490,6 +1494,7 @@
     var feedControlState = {};
     var feedProgressDrag = null;
     var FEED_ORDER_STORAGE_KEY = 'streamv.admin.feedOrder.v2';
+    var FEED_MEDIA_TYPE_STORAGE_KEY = 'streamv.admin.feedMediaType.v1';
     var FEED_MUTED_STORAGE_KEY = 'streamv.admin.feedMuted';
     var FEED_AUTONEXT_STORAGE_KEY = 'streamv.admin.feedAutoNext';
     var FEED_PLAYBACK_MODE_STORAGE_KEY = 'streamv.admin.feedPlaybackMode';
@@ -1589,6 +1594,12 @@
             var savedOrder = localStorage.getItem(FEED_ORDER_STORAGE_KEY);
             if (savedOrder === 'asc' || savedOrder === 'desc' || savedOrder === 'random') {
                 feedOrder = savedOrder;
+            }
+        } catch (e) {}
+        try {
+            var savedMediaType = localStorage.getItem(FEED_MEDIA_TYPE_STORAGE_KEY);
+            if (savedMediaType === 'mixed' || savedMediaType === 'video' || savedMediaType === 'graphic') {
+                feedMediaType = savedMediaType;
             }
         } catch (e) {}
         try {
@@ -1910,7 +1921,8 @@
         var itemType = item.type || 'video';
         var titleValue = item.title || item.videoname || 'Untitled';
         var platformValue = item.platform || item.videoplatform || 'Unknown';
-        var authorValue = item.author || item.videoauthor || 'Unknown';
+        var authorValue = item.displayAuthor || item.author || item.videoauthor || 'Unknown';
+        item.authoruid = item.profileAuthorUid || item.authoruid;
         var timeValue = item.publishTime || item.publishtime || item.createTime || item.createtime;
         if (itemType === 'graphic') {
             return buildGraphicFeedItemHtml(item, isPrivate, titleValue, platformValue, authorValue, timeValue);
@@ -2011,7 +2023,7 @@
         if (isPrivate) {
             return '';
         }
-        var authorUid = item.authoruid || '';
+        var authorUid = item.profileAuthorUid || item.authoruid || '';
         var authorUsername = item.authorusername || '';
         var rawAuthor = authorValue || item.author || item.videoauthor || '';
         if (!rawAuthor && !authorUid && !authorUsername) {
@@ -2069,7 +2081,8 @@
         var itemType = item.type || 'video';
         var titleValue = item.title || item.videoname || 'Untitled';
         var platformValue = item.platform || item.videoplatform || 'Unknown';
-        var authorValue = item.author || item.videoauthor || 'Unknown';
+        var authorValue = item.displayAuthor || item.author || item.videoauthor || 'Unknown';
+        item.authoruid = item.profileAuthorUid || item.authoruid;
         var timeValue = item.publishTime || item.publishtime || item.createTime || item.createtime;
         if (itemType === 'graphic') {
             return buildGraphicFeedItemHtml(item, isPrivate, titleValue, platformValue, authorValue, timeValue);
@@ -3197,6 +3210,19 @@
             applyOrderWithoutReload();
         });
 
+        $('#feedMediaTypeBtn').on('click', function() {
+            if (feedMediaType === 'mixed') {
+                feedMediaType = 'video';
+            } else if (feedMediaType === 'video') {
+                feedMediaType = 'graphic';
+            } else {
+                feedMediaType = 'mixed';
+            }
+            persistFeedMediaType();
+            updateFeedButtons();
+            reloadFeed();
+        });
+
         $('#feedAuthorBtn').on('click', function() {
             $('#feedAuthorDrawer').toggleClass('open');
             renderFeedAuthorDrawer();
@@ -4040,6 +4066,12 @@
         } catch (e) {}
     }
 
+    function persistFeedMediaType() {
+        try {
+            localStorage.setItem(FEED_MEDIA_TYPE_STORAGE_KEY, feedMediaType);
+        } catch (e) {}
+    }
+
     function persistFeedMuted() {
         try {
             localStorage.setItem(FEED_MUTED_STORAGE_KEY, feedMuted ? '1' : '0');
@@ -4083,6 +4115,7 @@
                 option.randomMode = '1';
                 option.randomSeed = feedSessionSeed;
             }
+            option.mediaType = feedMediaType;
             if (feedAuthor && feedAuthor.trim() !== '') {
                 option.videoauthor = feedAuthor.trim();
             }
@@ -4192,7 +4225,7 @@
 
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
-            var author = (list[i].videoauthor || '').trim();
+            var author = (list[i].displayAuthor || list[i].videoauthor || '').trim();
             if (!author || feedAuthorSet[author]) {
                 continue;
             }
@@ -4258,7 +4291,7 @@
 
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
-            var author = (list[i].author || list[i].videoauthor || '').trim();
+            var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
             if (!author || feedAuthorSet[author]) {
                 continue;
             }
@@ -4269,6 +4302,10 @@
     function updateFeedButtons() {
         var orderText = feedOrder === 'asc' ? '顺序' : (feedOrder === 'random' ? '随机' : '倒序');
         $('#feedOrderBtn span').text(orderText);
+        var mediaTypeText = feedMediaType === 'video' ? '仅视频' : (feedMediaType === 'graphic' ? '仅图文' : '混合');
+        var mediaTypeIcon = feedMediaType === 'video' ? 'mdi mdi-play-box-outline' : (feedMediaType === 'graphic' ? 'mdi mdi-image-multiple-outline' : 'mdi mdi-play-box-multiple-outline');
+        $('#feedMediaTypeBtn i').attr('class', mediaTypeIcon);
+        $('#feedMediaTypeBtn span').text(mediaTypeText);
         var authorText = feedAuthor && feedAuthor.trim() !== '' ? feedAuthor : '全部';
         if (feedAuthorContext && feedAuthorContext.label) {
             authorText = feedAuthorContext.label;
