@@ -51,6 +51,26 @@ empty, and may collide. They must not be used as the primary grouping key when `
 `displayname` is the current nickname in the author profile table. `videoauthor` and graphic
 `author` are work-level nickname snapshots captured when the work was ingested or repaired.
 
+## Current Author List Data Source
+
+The existing `/admin/authorList` page does not group directly from the video and graphic work
+tables at request time. Its current flow is:
+
+1. `authorList.html` posts to `/admin/api/findAuthorProfileList`.
+2. `AdminController.findAuthorProfileList` delegates to `AuthorProfileService.findPage`.
+3. `AuthorProfileService.findPage` queries `biz_author_profile` through `AuthorProfileDao`.
+4. The optional keyword currently searches `displayname`, `username`, and `authoruid`.
+5. The page is ordered by `updatetime desc, id desc`.
+6. The history button calls `/admin/api/findAuthorNameHistory`, which reads
+   `biz_author_name_history` for the selected author profile id.
+
+That means the author list only reflects data that has already been written to
+`biz_author_profile`. New or changed author names appear there only when an ingest, analysis,
+repair, or rebuild path calls `AuthorProfileService.upsertAuthor` with a stable uid and nickname.
+If a work row has a newer nickname but no matching profile upsert happened, the work can look
+newer than the author list. This implementation should therefore fix both the display/query
+semantics and the profile-upsert coverage.
+
 ## Display Rules
 
 Author-level UI shows the current profile nickname:
