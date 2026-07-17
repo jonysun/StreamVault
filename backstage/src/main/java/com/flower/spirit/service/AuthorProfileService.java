@@ -54,6 +54,11 @@ public class AuthorProfileService {
 	private GraphicContentDao graphicContentDao;
 
 	public void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar, String homepage) {
+		upsertAuthor(platform, authoruid, username, displayName, avatar, homepage, null);
+	}
+
+	public void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar,
+			String homepage, String signature) {
 		if (platform == null || platform.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
 			return;
 		}
@@ -84,6 +89,9 @@ public class AuthorProfileService {
 		}
 		if (homepage != null && !homepage.trim().isEmpty()) {
 			entity.setHomepage(homepage.trim());
+		}
+		if (signature != null && !signature.trim().isEmpty()) {
+			entity.setSignature(signature.trim());
 		}
 		entity.setUpdatetime(now);
 		AuthorProfileEntity saved = authorProfileDao.save(entity);
@@ -145,6 +153,7 @@ public class AuthorProfileService {
 			summary.setDisplayname(profile.getDisplayname());
 			summary.setAvatar(profile.getAvatar());
 			summary.setHomepage(profile.getHomepage());
+			summary.setSignature(profile.getSignature());
 			summary.setUpdatetime(profile.getUpdatetime());
 		}
 		summary.setPlatform(firstNotBlank(summary.getPlatform(), platform));
@@ -491,7 +500,7 @@ public class AuthorProfileService {
 				video.setAuthorusername(username);
 				video.setUniqueid(username);
 				upsertAuthor("抖音", authorUid, username, video.getVideoauthor(), video.getAuthoravatar(),
-						"https://www.douyin.com/user/" + authorUid);
+						"https://www.douyin.com/user/" + authorUid, authorSignature(profileAuthor, hybridAuthor));
 				if (profileAuthor == null && hybridAuthor == null) {
 					fallbackUsed++;
 				}
@@ -511,8 +520,7 @@ public class AuthorProfileService {
 			scannedGraphics++;
 			String sourceUrl = null;
 			if (item.getVideoid() != null && !item.getVideoid().trim().isEmpty()) {
-				sourceUrl = DouyinSourceUrlUtil.note(item.getVideoid());
-				item.setSourceurl(sourceUrl);
+				sourceUrl = firstNotBlank(item.getSourceurl(), DouyinSourceUrlUtil.note(item.getVideoid()));
 			}
 			JSONObject hybrid = DouUtil.fetchHybridVideoData(firstNotBlank(item.getOriginaladdress(), sourceUrl));
 			JSONObject hybridAuthor = null;
@@ -536,8 +544,12 @@ public class AuthorProfileService {
 				item.setSecuid(authorUid);
 				item.setAuthorusername(username);
 				item.setUniqueid(username);
+				String graphicSourceUrl = DouyinSourceUrlUtil.graphic(authorUid, item.getVideoid());
+				if (graphicSourceUrl != null) {
+					item.setSourceurl(graphicSourceUrl);
+				}
 				upsertAuthor("抖音", authorUid, username, item.getAuthor(), item.getAuthoravatar(),
-						"https://www.douyin.com/user/" + authorUid);
+						"https://www.douyin.com/user/" + authorUid, authorSignature(profileAuthor, hybridAuthor));
 				if (profileAuthor == null && hybridAuthor == null) {
 					fallbackUsed++;
 				}
@@ -606,6 +618,12 @@ public class AuthorProfileService {
 			profile = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
 		}
 		return profile;
+	}
+
+	private String authorSignature(JSONObject profileAuthor, JSONObject hybridAuthor) {
+		String profileSignature = profileAuthor == null ? null : profileAuthor.getString("signature");
+		String hybridSignature = hybridAuthor == null ? null : hybridAuthor.getString("signature");
+		return firstNotBlank(profileSignature, hybridSignature);
 	}
 
 	private JSONObject extractProfileUser(JSONObject profile) {

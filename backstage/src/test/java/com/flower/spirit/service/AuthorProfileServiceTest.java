@@ -69,10 +69,11 @@ class AuthorProfileServiceTest {
 		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(eq(7), eq("new name")))
 				.thenReturn(Optional.empty());
 
-		service.upsertAuthor("douyin", "MS4wLjABAAAAstable", "handle", "new name", null, null);
+		service.upsertAuthor("douyin", "MS4wLjABAAAAstable", "handle", "new name", null, null, "profile bio");
 
 		assertThat(profile.getDisplayname()).isEqualTo("new name");
 		assertThat(profile.getUsername()).isEqualTo("handle");
+		assertThat(profile.getSignature()).isEqualTo("profile bio");
 		ArgumentCaptor<AuthorNameHistoryEntity> historyCaptor = ArgumentCaptor.forClass(AuthorNameHistoryEntity.class);
 		verify(authorNameHistoryDao).save(historyCaptor.capture());
 		assertThat(historyCaptor.getValue().getAuthorprofileid()).isEqualTo(7);

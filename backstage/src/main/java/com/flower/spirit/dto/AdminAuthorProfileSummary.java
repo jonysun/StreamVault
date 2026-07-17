@@ -11,6 +11,7 @@ public class AdminAuthorProfileSummary {
 	private String displayname;
 	private String avatar;
 	private String homepage;
+	private String signature;
 	private Date updatetime;
 	private long videoCount;
 	private long graphicCount;
@@ -70,6 +71,14 @@ public class AdminAuthorProfileSummary {
 
 	public void setHomepage(String homepage) {
 		this.homepage = homepage;
+	}
+
+	public String getSignature() {
+		return signature;
+	}
+
+	public void setSignature(String signature) {
+		this.signature = signature;
 	}
 
 	public Date getUpdatetime() {

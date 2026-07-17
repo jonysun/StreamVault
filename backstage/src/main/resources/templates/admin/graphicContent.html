@@ -1070,7 +1070,22 @@ function renderGraphicContentList(contentList) {
 /**
  * 生成图文卡片HTML
  */
+function buildGraphicOriginalUrl(item) {
+	if (!item) {
+		return '';
+	}
+	var platform = (item.platform || '').toString().toLowerCase();
+	var isDouyin = platform === 'douyin' || platform.indexOf('抖音') >= 0;
+	var authorUid = item.authoruid || item.secuid || '';
+	var workId = item.videoid || '';
+	if (isDouyin && authorUid && workId) {
+		return 'https://www.douyin.com/user/' + encodeURIComponent(authorUid) + '?modal_id=' + encodeURIComponent(workId);
+	}
+	return item.sourceurl || item.originaladdress || '';
+}
+
 function generateGraphicCard(item) {
+	var originalUrl = buildGraphicOriginalUrl(item);
 	var platformClass = item.platform === 'douyin' ? 'platform-douyin' : 'platform-default';
 	var platformName = item.platform === 'douyin' ? '抖音' : item.platform;
 	
@@ -1131,13 +1146,13 @@ function generateGraphicCard(item) {
 						<button class="btn btn-sm btn-outline-primary download-package" data-id="${item.id}" data-title="${displayTitle}" data-images='${JSON.stringify(mediaList)}'>
 							<i class="mdi mdi-download"></i> 打包下载
 						</button>
-					<button class="btn btn-sm btn-outline-success copy-link" data-url="${item.sourceurl || item.originaladdress || ''}">
+					<button class="btn btn-sm btn-outline-success copy-link" data-url="${originalUrl}">
 						<i class="mdi mdi-link"></i> 复制原链接
 					</button>
 					<button class="btn btn-sm btn-outline-primary redownload-graphic" data-id="${item.id}">
 						<i class="mdi mdi-download"></i> 重新下载
 					</button>
-					${item.sourceurl ? `<a class="btn btn-sm btn-outline-info" href="${item.sourceurl}" target="_blank"><i class="mdi mdi-open-in-new"></i> 查看原作品</a>` : ''}
+					${originalUrl ? `<a class="btn btn-sm btn-outline-info" href="${originalUrl}" target="_blank"><i class="mdi mdi-open-in-new"></i> 查看原作品</a>` : ''}
 					<button class="btn btn-sm btn-outline-danger delete-content" data-id="${item.id}" data-title="${displayTitle}">
 						<i class="mdi mdi-delete"></i> 删除
 					</button>
@@ -1176,13 +1191,13 @@ function generateGraphicCard(item) {
 						<button class="btn btn-sm btn-outline-primary download-package" data-id="${item.id}" data-title="${displayTitle}" data-images='${JSON.stringify(mediaList)}'>
 							<i class="mdi mdi-download"></i> 打包下载
 						</button>
-					<button class="btn btn-sm btn-outline-success copy-link" data-url="${item.sourceurl || item.originaladdress || ''}">
+					<button class="btn btn-sm btn-outline-success copy-link" data-url="${originalUrl}">
 						<i class="mdi mdi-link"></i> 复制原链接
 					</button>
 					<button class="btn btn-sm btn-outline-primary redownload-graphic" data-id="${item.id}">
 						<i class="mdi mdi-download"></i> 重新下载
 					</button>
-					${item.sourceurl ? `<a class="btn btn-sm btn-outline-info" href="${item.sourceurl}" target="_blank"><i class="mdi mdi-open-in-new"></i> 查看原作品</a>` : ''}
+					${originalUrl ? `<a class="btn btn-sm btn-outline-info" href="${originalUrl}" target="_blank"><i class="mdi mdi-open-in-new"></i> 查看原作品</a>` : ''}
 					<button class="btn btn-sm btn-outline-danger delete-content" data-id="${item.id}" data-title="${displayTitle}">
 						<i class="mdi mdi-delete"></i> 删除
 					</button>

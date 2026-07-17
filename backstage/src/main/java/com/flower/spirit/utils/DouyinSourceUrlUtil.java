@@ -13,10 +13,21 @@ public final class DouyinSourceUrlUtil {
 		return build("note", noteId);
 	}
 
+	public static String graphic(String authorUid, String awemeId) {
+		if (isBlank(authorUid) || isBlank(awemeId)) {
+			return null;
+		}
+		return "https://www.douyin.com/user/" + authorUid.trim() + "?modal_id=" + awemeId.trim();
+	}
+
 	private static String build(String type, String id) {
-		if (id == null || id.trim().isEmpty()) {
+		if (isBlank(id)) {
 			return null;
 		}
 		return "https://www.douyin.com/" + type + "/" + id.trim();
+	}
+
+	private static boolean isBlank(String value) {
+		return value == null || value.trim().isEmpty();
 	}
 }

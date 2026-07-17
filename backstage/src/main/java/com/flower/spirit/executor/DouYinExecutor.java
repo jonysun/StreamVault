@@ -181,16 +181,17 @@ public class DouYinExecutor {
 			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
 			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
 			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
-			String sourceUrl = DouyinSourceUrlUtil.note(post);
-			JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
+			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
+			JSONObject hybridData = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(post)));
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
 				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uniqueId, authorSnapshot.nickname,
 						authorSnapshot.avatar,
-						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null);
+						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null,
+						authorSnapshot.signature);
 			}
-			graphicContentEntity.setSourceurl(sourceUrl);
+			graphicContentEntity.setSourceurl(firstNotBlank(sourceUrl, originaladdress));
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -301,16 +302,17 @@ public class DouYinExecutor {
 			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
 			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
 			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
-			String sourceUrl = DouyinSourceUrlUtil.note(post);
-			JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
+			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
+			JSONObject hybridData = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(post)));
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
 				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uniqueId, authorSnapshot.nickname,
 						authorSnapshot.avatar,
-						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null);
+						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null,
+						authorSnapshot.signature);
 			}
-			graphicContentEntity.setSourceurl(sourceUrl);
+			graphicContentEntity.setSourceurl(firstNotBlank(sourceUrl, type));
 			graphicContentEntity.setCreatetime(new Date());
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
@@ -362,6 +364,7 @@ public class DouYinExecutor {
 		snapshot.uniqueId = author == null ? null : author.getString("unique_id");
 		snapshot.uid = author == null ? null : author.getString("uid");
 		snapshot.avatar = DouUtil.extractAvatar(author);
+		snapshot.signature = author == null ? null : author.getString("signature");
 		JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(snapshot.secUid));
 		if (profileUser == null) {
 			profileUser = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(snapshot.uniqueId));
@@ -372,6 +375,7 @@ public class DouYinExecutor {
 			snapshot.uniqueId = firstNotBlank(profileUser.getString("unique_id"), snapshot.uniqueId);
 			snapshot.uid = firstNotBlank(profileUser.getString("uid"), snapshot.uid);
 			snapshot.avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), snapshot.avatar);
+			snapshot.signature = firstNotBlank(profileUser.getString("signature"), snapshot.signature);
 		}
 		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid, snapshot.uid);
 		snapshot.secUid = snapshot.authorUid;
@@ -403,6 +407,7 @@ public class DouYinExecutor {
 		String uniqueId;
 		String uid;
 		String avatar;
+		String signature;
 	}
 
 	private static String formatPublishTimeFromEpochSeconds(String epochSeconds) {
