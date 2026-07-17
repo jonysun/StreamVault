@@ -76,6 +76,12 @@ public class GraphicContentService {
 	            		predicates.add(cb.or(authorPredicates.toArray(new Predicate[0])));
 	            	}
 	            }
+	            String effectiveAuthorUid = StringUtil.isString(res.getAuthoruid()) ? res.getAuthoruid().trim()
+	                    : (StringUtil.isString(res.getSecuid()) ? res.getSecuid().trim() : null);
+	            if (StringUtil.isString(effectiveAuthorUid)) {
+	                String safeUid = effectiveAuthorUid.trim();
+	                predicates.add(cb.or(cb.equal(root.get("authoruid"), safeUid), cb.equal(root.get("secuid"), safeUid)));
+	            }
 	            if (StringUtil.isString(res.getPublishStart())) {
 	            	predicates.add(cb.greaterThanOrEqualTo(root.get("publishtime"), res.getPublishStart().trim() + " 00:00:00"));
 	            }

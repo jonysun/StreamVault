@@ -1494,6 +1494,7 @@
     var feedOrder = 'desc';
     var feedMediaType = 'mixed';
     var feedAuthor = '';
+    var feedAuthorUid = '';
     var feedMuted = true;
     var feedSourceMode = 'prefer_hls';
     var feedAuthorSet = {};
@@ -1978,7 +1979,7 @@
         html += '<div class="feed-title">' + safeTitle + '</div>';
         var authorChip = '';
         if (!isPrivate && safeAuthor !== '未知作者') {
-            authorChip = '<span class="feed-author-chip" data-author="' + escapeHtml(safeAuthor) + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + escapeHtml(safeAuthor) + '" data-authoruid="' + escapeHtml(item.profileAuthorUid || item.authoruid || '') + '">' + safeAuthor + '</span>';
         }
         html += '<div class="feed-meta">' + safePlatform + ' · ' + timeText + authorChip + '</div>';
         html += '</div>';
@@ -2040,7 +2041,7 @@
         var timeText = escapeHtml(formatTime(timeValue));
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.profileAuthorUid || item.authoruid || '') + '">' + safeAuthor + '</span>';
         }
         var html = '<div class="feed-overlay">';
         html += '<div class="feed-title">' + safeTitle + '</div>';
@@ -2137,7 +2138,7 @@
         html += '<div class="feed-title">' + safeTitle + '</div>';
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.profileAuthorUid || item.authoruid || '') + '">' + safeAuthor + '</span>';
         }
         html += '<div class="feed-meta">' + safePlatform + ' | ' + timeText + authorChip + '</div>';
         html += '</div>';
@@ -2821,6 +2822,40 @@
         return { src: hls || mp4 || fallbackSrc, type: (hls ? 'HLS' : 'MP4'), fallback: mp4 || fallbackSrc };
     }
 
+    function fallbackCurrentVideoToMp4(videoEl, reason) {
+        if (!videoEl || videoEl.getAttribute('data-source-type') !== 'HLS' || videoEl.getAttribute('data-did-fallback') === '1') {
+            return false;
+        }
+        var fallback = videoEl.getAttribute('data-fallback') || '';
+        var current = videoEl.getAttribute('data-bound-src') || videoEl.currentSrc || videoEl.src || '';
+        if (!fallback || fallback === current) {
+            return false;
+        }
+        videoEl.setAttribute('data-did-fallback', '1');
+        feedMetrics.fallbackToMp4++;
+        markVideoPerf(videoEl, 'fallback-to-mp4', { reason: reason || 'startup-stall' });
+        try {
+            if (videoEl._hlsIns) {
+                videoEl._hlsIns.destroy();
+                videoEl._hlsIns = null;
+            }
+        } catch (e) {}
+        if (current && hlsMap[current]) {
+            try { hlsMap[current].destroy(); } catch (e) {}
+            delete hlsMap[current];
+        }
+        videoEl.setAttribute('data-bound-src', fallback);
+        videoEl.setAttribute('data-source-type', 'MP4');
+        updateFeedSourceBadge(videoEl, 'MP4');
+        if (feedPlayerPoolManager) {
+            feedPlayerPoolManager.markLoading(videoEl);
+        }
+        videoEl.src = fallback;
+        try { videoEl.load(); } catch (e) {}
+        playWithSync(videoEl, reason || 'startup-fallback');
+        return true;
+    }
+
     function playWithSync(videoEl, reason) {
         if (!videoEl) {
             return;
@@ -2887,6 +2922,12 @@
                 }
                 var stuckAtFirstFrame = videoEl.readyState >= 2 && videoEl.currentTime <= 0.06 && !videoEl.ended;
                 if (videoEl.paused || stuckAtFirstFrame || videoEl.readyState < 2) {
+                    if (stuckAtFirstFrame && videoEl._hlsIns && idx >= 1 && typeof videoEl._hlsIns.recoverMediaError === 'function') {
+                        try { videoEl._hlsIns.recoverMediaError(); } catch (e) {}
+                    }
+                    if (stuckAtFirstFrame && idx >= 2 && fallbackCurrentVideoToMp4(videoEl, 'startup-stall')) {
+                        return;
+                    }
                     if (!videoEl._hlsIns && videoEl.readyState < 2 && (videoEl.getAttribute('data-bound-src') || videoEl.currentSrc || videoEl.src)) {
                         try { videoEl.load(); } catch (e) {}
                     }
@@ -3395,6 +3436,7 @@
         $('#feedAuthorList').on('click', '.feed-author-item', function() {
             clearFeedAuthorContext();
             feedAuthor = ($(this).data('author') || '').toString().trim();
+            feedAuthorUid = ($(this).data('authoruid') || '').toString().trim();
             $('#feedAuthorDrawer').removeClass('open');
             updateFeedButtons();
             reloadFeed();
@@ -3407,6 +3449,7 @@
                 return;
             }
             feedAuthor = author;
+            feedAuthorUid = ($(this).data('authoruid') || '').toString().trim();
             updateFeedButtons();
             reloadFeed();
         });
@@ -3640,6 +3683,11 @@
                     appendFeedAuthorOptions(items);
                     updateFeedButtons();
                     switchFeedTo(targetIndex, { animate: false, forcePlay: true });
+                    requestAnimationFrame(function() {
+                        setTimeout(function() {
+                            playFeedItemByAbsIndex(targetIndex, 0);
+                        }, 40);
+                    });
                 }
             });
         }
@@ -4243,7 +4291,10 @@
                 option.randomSeed = feedSessionSeed;
             }
             option.mediaType = feedMediaType;
-            if (feedAuthor && feedAuthor.trim() !== '') {
+            if (feedAuthorUid && feedAuthorUid.trim() !== '') {
+                option.authoruid = feedAuthorUid.trim();
+                option.secuid = feedAuthorUid.trim();
+            } else if (feedAuthor && feedAuthor.trim() !== '') {
                 option.videoauthor = feedAuthor.trim();
             }
         }
@@ -4310,11 +4361,18 @@
         if (!wrap.length) {
             return;
         }
-        var authors = Object.keys(feedAuthorSet).sort();
-        var html = '<button type="button" class="feed-author-item' + (!feedAuthor ? ' active' : '') + '" data-author="">全部作者</button>';
+        var authors = Object.keys(feedAuthorSet).map(function(key) {
+            return feedAuthorSet[key];
+        }).sort(function(left, right) {
+            return String((left && left.label) || '').localeCompare(String((right && right.label) || ''));
+        });
+        var html = '<button type="button" class="feed-author-item' + (!feedAuthor && !feedAuthorUid ? ' active' : '') + '" data-author="" data-authoruid="">全部作者</button>';
         for (var i = 0; i < authors.length; i++) {
-            var activeCls = feedAuthor === authors[i] ? ' active' : '';
-            html += '<button type="button" class="feed-author-item' + activeCls + '" data-author="' + escapeHtml(authors[i]) + '">' + escapeHtml(authors[i]) + '</button>';
+            var option = authors[i] || {};
+            var label = option.label || '';
+            var uid = option.authoruid || '';
+            var activeCls = (feedAuthorUid && uid === feedAuthorUid) || (!feedAuthorUid && feedAuthor === label) ? ' active' : '';
+            html += '<button type="button" class="feed-author-item' + activeCls + '" data-author="' + escapeHtml(label) + '" data-authoruid="' + escapeHtml(uid) + '">' + escapeHtml(label) + '</button>';
         }
         wrap.html(html);
     }
@@ -4352,11 +4410,16 @@
 
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
-            var author = (list[i].displayAuthor || list[i].videoauthor || '').trim();
-            if (!author || feedAuthorSet[author]) {
+            var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
+            var uid = (list[i].profileAuthorUid || list[i].authoruid || '').trim();
+            var key = uid ? ('uid:' + uid) : ('name:' + author);
+            if (!author || feedAuthorSet[key]) {
                 continue;
             }
-            feedAuthorSet[author] = true;
+            feedAuthorSet[key] = {
+                label: author,
+                authoruid: uid
+            };
         }
     }
 
@@ -4419,10 +4482,15 @@
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
             var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
-            if (!author || feedAuthorSet[author]) {
+            var uid = (list[i].profileAuthorUid || list[i].authoruid || '').trim();
+            var key = uid ? ('uid:' + uid) : ('name:' + author);
+            if (!author || feedAuthorSet[key]) {
                 continue;
             }
-            feedAuthorSet[author] = true;
+            feedAuthorSet[key] = {
+                label: author,
+                authoruid: uid
+            };
         }
     }
 
