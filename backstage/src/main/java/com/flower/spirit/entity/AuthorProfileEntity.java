@@ -36,6 +36,8 @@ public class AuthorProfileEntity extends DataEntity<AuthorProfileEntity> impleme
 
 	private String homepage;
 
+	private String signature;
+
 	private Date createtime;
 
 	private Date updatetime;
@@ -97,6 +99,14 @@ public class AuthorProfileEntity extends DataEntity<AuthorProfileEntity> impleme
 
 	public void setHomepage(String homepage) {
 		this.homepage = homepage;
+	}
+
+	public String getSignature() {
+		return signature;
+	}
+
+	public void setSignature(String signature) {
+		this.signature = signature;
 	}
 
 	public Date getCreatetime() {

@@ -102,7 +102,10 @@ public class DouyinWorkMaintenanceService {
 			return new AjaxEntity(Global.ajax_uri_error, "仅支持抖音图文重新下载", null);
 		}
 		String postId = existing.getVideoid();
-		String source = isBlank(postId) ? resolveGraphicSource(existing) : DouyinSourceUrlUtil.note(postId);
+		String source = isBlank(postId) ? resolveGraphicSource(existing)
+				: firstNotBlank(DouyinSourceUrlUtil.graphic(
+						AuthorProfileService.preferDouyinAuthorUid(existing.getSecuid(), existing.getAuthoruid()), postId),
+						resolveGraphicSource(existing));
 		if (isBlank(postId) || isBlank(source)) {
 			return new AjaxEntity(Global.ajax_uri_error, "缺少图文ID或原作品链接，无法重新下载", null);
 		}
@@ -165,7 +168,12 @@ public class DouyinWorkMaintenanceService {
 				boolean changed = false;
 				String oldSource = item.getSourceurl();
 				String originalAddress = item.getOriginaladdress();
-				String sourceUrl = isBlank(item.getVideoid()) ? null : DouyinSourceUrlUtil.note(item.getVideoid());
+				String sourceUrl = isBlank(item.getVideoid()) ? null
+						: DouyinSourceUrlUtil.graphic(
+								AuthorProfileService.preferDouyinAuthorUid(item.getSecuid(), item.getAuthoruid()),
+								item.getVideoid());
+				String fetchSourceUrl = firstNotBlank(sourceUrl,
+						isBlank(item.getVideoid()) ? null : DouyinSourceUrlUtil.note(item.getVideoid()));
 				if (!isBlank(sourceUrl) && !sourceUrl.equals(item.getSourceurl())) {
 					item.setSourceurl(sourceUrl);
 					sourceUrlUpdated++;
@@ -173,7 +181,7 @@ public class DouyinWorkMaintenanceService {
 				}
 				JSONObject hybrid = null;
 				if (isBlank(item.getJsonData())) {
-					hybrid = fetchHybridWithFallbacks(oldSource, originalAddress, sourceUrl);
+					hybrid = fetchHybridWithFallbacks(oldSource, originalAddress, fetchSourceUrl);
 					if (hybrid != null) {
 						item.setJsonData(hybrid.toJSONString());
 						jsonUpdated++;
@@ -250,12 +258,14 @@ public class DouyinWorkMaintenanceService {
 		String uniqueId = map.get("unique_id");
 		String uid = map.get("uid");
 		String avatar = map.get("avatar_thumb");
+		String signature = null;
 		if (author != null) {
 			secUid = firstNotBlank(author.getString("sec_uid"), secUid);
 			uniqueId = firstNotBlank(author.getString("unique_id"), uniqueId);
 			nickname = firstNotBlank(author.getString("nickname"), nickname);
 			uid = firstNotBlank(author.getString("uid"), uid);
 			avatar = firstNotBlank(DouUtil.extractAvatar(author), avatar);
+			signature = author.getString("signature");
 		}
 		String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(secUid, uid);
 		String jsonData = firstNotBlank(map.get("jsonData"), JSONObject.toJSONString(map));
@@ -283,7 +293,7 @@ public class DouyinWorkMaintenanceService {
 		target.setCreatetime(new Date());
 		if (authorProfileService != null) {
 			authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, avatar,
-					!isBlank(authorUidForSave) ? "https://www.douyin.com/user/" + authorUidForSave : null);
+					!isBlank(authorUidForSave) ? "https://www.douyin.com/user/" + authorUidForSave : null, signature);
 		}
 	}
 
@@ -336,8 +346,8 @@ public class DouyinWorkMaintenanceService {
 			}
 		}
 		AuthorSnapshot snapshot = resolveAuthorSnapshot(detail, nickname);
-		String sourceUrl = DouyinSourceUrlUtil.note(postId);
-		JSONObject hybrid = DouUtil.fetchHybridVideoData(sourceUrl);
+		String sourceUrl = DouyinSourceUrlUtil.graphic(snapshot.authorUid, postId);
+		JSONObject hybrid = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(postId)));
 		target.setVideoid(postId);
 		target.setPlatform("抖音");
 		target.setOriginaladdress(source);
@@ -353,11 +363,12 @@ public class DouyinWorkMaintenanceService {
 		target.setAuthoravatar(snapshot.avatar);
 		target.setJsonData(hybrid == null ? json : hybrid.toJSONString());
 		target.setPublishtime(DateUtils.normalizePublishTime(detail.getString("create_time")));
-		target.setSourceurl(sourceUrl);
+		target.setSourceurl(firstNotBlank(sourceUrl, source));
 		target.setCreatetime(new Date());
 		if (authorProfileService != null) {
 			authorProfileService.upsertAuthor("抖音", snapshot.authorUid, snapshot.uniqueId, snapshot.nickname, snapshot.avatar,
-					!isBlank(snapshot.authorUid) ? "https://www.douyin.com/user/" + snapshot.authorUid : null);
+					!isBlank(snapshot.authorUid) ? "https://www.douyin.com/user/" + snapshot.authorUid : null,
+					snapshot.signature);
 		}
 		Files.deleteIfExists(Paths.get(taskout));
 	}
@@ -409,6 +420,7 @@ public class DouyinWorkMaintenanceService {
 		snapshot.uniqueId = author == null ? null : author.getString("unique_id");
 		snapshot.uid = author == null ? null : author.getString("uid");
 		snapshot.avatar = DouUtil.extractAvatar(author);
+		snapshot.signature = author == null ? null : author.getString("signature");
 		JSONObject profile = resolveAuthor(snapshot.secUid, snapshot.uniqueId);
 		if (profile != null) {
 			snapshot.nickname = firstNotBlank(profile.getString("nickname"), snapshot.nickname);
@@ -416,6 +428,7 @@ public class DouyinWorkMaintenanceService {
 			snapshot.uniqueId = firstNotBlank(profile.getString("unique_id"), snapshot.uniqueId);
 			snapshot.uid = firstNotBlank(profile.getString("uid"), snapshot.uid);
 			snapshot.avatar = firstNotBlank(DouUtil.extractAvatar(profile), snapshot.avatar);
+			snapshot.signature = firstNotBlank(profile.getString("signature"), snapshot.signature);
 		}
 		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid, snapshot.uid);
 		snapshot.secUid = snapshot.authorUid;
@@ -486,5 +499,6 @@ public class DouyinWorkMaintenanceService {
 		String uniqueId;
 		String uid;
 		String avatar;
+		String signature;
 	}
 }

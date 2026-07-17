@@ -772,11 +772,13 @@ public class CollectDataService {
 					String uniqueId = aweme_detail.getString("unique_id");
 					String authorUid = aweme_detail.getString("uid");
 					String avatar = aweme_detail.getString("avatar_thumb");
+					String signature = null;
 					if (author != null) {
 						if (sourceUid == null || sourceUid.trim().isEmpty()) sourceUid = author.getString("sec_uid");
 						if (uniqueId == null || uniqueId.trim().isEmpty()) uniqueId = author.getString("unique_id");
 						if (authorUid == null || authorUid.trim().isEmpty()) authorUid = author.getString("uid");
 						if (avatar == null || avatar.trim().isEmpty()) avatar = author.getString("avatar_thumb");
+						signature = author.getString("signature");
 					}
 					JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(sourceUid));
 					if (profileUser == null) {
@@ -788,11 +790,13 @@ public class CollectDataService {
 						authorUid = firstNotBlank(profileUser.getString("uid"), authorUid);
 						dyNickname = firstNotBlank(profileUser.getString("nickname"), dyNickname);
 						avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), avatar);
+						signature = firstNotBlank(profileUser.getString("signature"), signature);
 					}
 					String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(sourceUid, authorUid);
 					authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, dyNickname,
 							avatar,
-							authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
+							authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null,
+							signature);
 					videoDataEntity.setAuthoruid(authorUidForSave);
 					videoDataEntity.setSecuid(authorUidForSave);
 					videoDataEntity.setAuthorusername(uniqueId);

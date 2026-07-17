@@ -48,6 +48,7 @@ class DouyinWorkMaintenanceServiceTest {
 		GraphicContentEntity graphic = new GraphicContentEntity();
 		graphic.setId(22);
 		graphic.setVideoid("7412345678901234567");
+		graphic.setAuthoruid("MS4wLjABAAAAstableAuthor");
 		graphic.setPlatform("抖音");
 		graphic.setCreatetime(originalDownloadTime);
 
@@ -61,7 +62,8 @@ class DouyinWorkMaintenanceServiceTest {
 		verify(videoDataDao, times(1)).save(videoCaptor.capture());
 		verify(graphicContentDao, times(1)).save(graphicCaptor.capture());
 		assertThat(videoCaptor.getValue().getSourceurl()).isEqualTo("https://www.douyin.com/video/7312345678901234567");
-		assertThat(graphicCaptor.getValue().getSourceurl()).isEqualTo("https://www.douyin.com/note/7412345678901234567");
+		assertThat(graphicCaptor.getValue().getSourceurl())
+				.isEqualTo("https://www.douyin.com/user/MS4wLjABAAAAstableAuthor?modal_id=7412345678901234567");
 		assertThat(videoCaptor.getValue().getCreatetime()).isEqualTo(originalDownloadTime);
 		assertThat(graphicCaptor.getValue().getCreatetime()).isEqualTo(originalDownloadTime);
 	}
