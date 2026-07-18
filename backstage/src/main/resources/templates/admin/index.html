@@ -2123,8 +2123,8 @@
         var safeAuthor = isPrivate ? '****' : escapeHtml(String(authorValue));
         var timeText = escapeHtml(formatTime(timeValue));
         var itemKey = escapeHtml(getFeedItemKey(item));
-        var playUrl = item.playurl || item.videounrealaddr || '';
-        var fallbackUrl = item.fallbackUrl || item.videounrealaddr || '';
+        var playUrl = item.playurl || item.fallbackUrl || item.videounrealaddr || '';
+        var fallbackUrl = item.fallbackUrl || item.videounrealaddr || item.playurl || '';
         var mp4Url = item.fallbackUrl || item.videounrealaddr || item.playurl || '';
         var coverUrl = isPrivate ? '/static/images/noimage.jpg' : (item.cover || item.videocover || '/static/images/noimage.jpg');
         var html = '<div class="feed-item" data-private="' + isPrivate + '" data-feed-type="video">';
