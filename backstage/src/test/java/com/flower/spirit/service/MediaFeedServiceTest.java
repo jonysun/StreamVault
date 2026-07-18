@@ -12,6 +12,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -119,6 +120,31 @@ class MediaFeedServiceTest {
 		Page<?> page = (Page<?>) response.getRecord();
 		assertThat(page.getTotalElements()).isEqualTo(2);
 		assertThat(page.getContent()).extracting("mediaKey").containsExactly("graphic:2", "video:1");
+	}
+
+	@Test
+	void findPagePropagatesAuthorUidToVideoAndGraphicQueries() {
+		VideoDataEntity request = new VideoDataEntity();
+		request.setPageNo(1);
+		request.setPageSize(2);
+		request.setMediaType("mixed");
+		request.setAuthoruid("MS4wLjABAAAAstable");
+		request.setSecuid("MS4wLjABAAAAstable");
+		when(videoDataService.findPage(any(VideoDataEntity.class), eq(true)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)));
+		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)));
+
+		service.findPage(request);
+
+		ArgumentCaptor<VideoDataEntity> videoCaptor = ArgumentCaptor.forClass(VideoDataEntity.class);
+		ArgumentCaptor<GraphicContentEntity> graphicCaptor = ArgumentCaptor.forClass(GraphicContentEntity.class);
+		verify(videoDataService).findPage(videoCaptor.capture(), eq(true));
+		verify(graphicContentService).findPage(graphicCaptor.capture());
+		assertThat(videoCaptor.getValue().getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(videoCaptor.getValue().getSecuid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(graphicCaptor.getValue().getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(graphicCaptor.getValue().getSecuid()).isEqualTo("MS4wLjABAAAAstable");
 	}
 
 	@Test

@@ -295,6 +295,8 @@ public class MediaFeedService {
 		target.setExcludePlatform(source.getExcludePlatform());
 		target.setVideotag(source.getVideotag());
 		target.setVideoauthor(source.getVideoauthor());
+		target.setAuthoruid(source.getAuthoruid());
+		target.setSecuid(source.getSecuid());
 		target.setPublishStart(source.getPublishStart());
 		target.setPublishEnd(source.getPublishEnd());
 		target.setSortField(source.getSortField());
@@ -332,6 +334,8 @@ public class MediaFeedService {
 		graphicQuery.setContent(videoQuery.getVideodesc());
 		graphicQuery.setPlatform(videoQuery.getVideoplatform());
 		graphicQuery.setAuthor(videoQuery.getVideoauthor());
+		graphicQuery.setAuthoruid(videoQuery.getAuthoruid());
+		graphicQuery.setSecuid(videoQuery.getSecuid());
 		graphicQuery.setPublishStart(videoQuery.getPublishStart());
 		graphicQuery.setPublishEnd(videoQuery.getPublishEnd());
 		graphicQuery.setSortField(toGraphicSortField(videoQuery.getSortField()));
@@ -348,6 +352,8 @@ public class MediaFeedService {
 		target.setContent(source.getContent());
 		target.setPlatform(source.getPlatform());
 		target.setAuthor(source.getAuthor());
+		target.setAuthoruid(source.getAuthoruid());
+		target.setSecuid(source.getSecuid());
 		target.setPublishStart(source.getPublishStart());
 		target.setPublishEnd(source.getPublishEnd());
 		target.setSortField(source.getSortField());

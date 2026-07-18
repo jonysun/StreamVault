@@ -3,9 +3,11 @@ package com.flower.spirit.service;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -139,11 +141,12 @@ public class AuthorProfileService {
 	}
 
 	public AjaxEntity findProfileSummary(String platform, String authoruid, String authorusername, String author) {
-		Specification<VideoDataEntity> videoSpec = buildVideoAuthorSpec(platform, authoruid, authorusername, author);
-		Specification<GraphicContentEntity> graphicSpec = buildGraphicAuthorSpec(platform, authoruid, authorusername, author);
+		AuthorProfileEntity profile = findBestProfile(platform, authoruid, authorusername, author);
+		List<String> nameAliases = authorNameAliases(profile, author);
+		Specification<VideoDataEntity> videoSpec = buildVideoAuthorSpec(platform, authoruid, authorusername, author, nameAliases);
+		Specification<GraphicContentEntity> graphicSpec = buildGraphicAuthorSpec(platform, authoruid, authorusername, author, nameAliases);
 		long videoCount = videoDataDao.count(videoSpec);
 		long graphicCount = graphicContentDao.count(graphicSpec);
-		AuthorProfileEntity profile = findBestProfile(platform, authoruid, authorusername, author);
 		AdminAuthorProfileSummary summary = new AdminAuthorProfileSummary();
 		if (profile != null) {
 			summary.setId(profile.getId());
@@ -173,8 +176,10 @@ public class AuthorProfileService {
 		int fetchSize = Math.max(actualPageSize, (actualPageNo + 1) * actualPageSize);
 		List<AdminMediaFeedItem> items = new ArrayList<>();
 		long totalElements = 0;
+		AuthorProfileEntity profile = findBestProfile(platform, authoruid, authorusername, author);
+		List<String> nameAliases = authorNameAliases(profile, author);
 		if (!"graphic".equalsIgnoreCase(type)) {
-			Page<VideoDataEntity> videos = videoDataDao.findAll(buildVideoAuthorSpec(platform, authoruid, authorusername, author),
+			Page<VideoDataEntity> videos = videoDataDao.findAll(buildVideoAuthorSpec(platform, authoruid, authorusername, author, nameAliases),
 					PageRequest.of(0, fetchSize, mediaSort()));
 			totalElements += videos.getTotalElements();
 			for (VideoDataEntity video : videos.getContent()) {
@@ -182,7 +187,7 @@ public class AuthorProfileService {
 			}
 		}
 		if (!"video".equalsIgnoreCase(type)) {
-			Page<GraphicContentEntity> graphics = graphicContentDao.findAll(buildGraphicAuthorSpec(platform, authoruid, authorusername, author),
+			Page<GraphicContentEntity> graphics = graphicContentDao.findAll(buildGraphicAuthorSpec(platform, authoruid, authorusername, author, nameAliases),
 					PageRequest.of(0, fetchSize, mediaSort()));
 			totalElements += graphics.getTotalElements();
 			for (GraphicContentEntity graphic : graphics.getContent()) {
@@ -365,7 +370,39 @@ public class AuthorProfileService {
 		return candidates.isEmpty() ? null : candidates.get(0);
 	}
 
-	private Specification<VideoDataEntity> buildVideoAuthorSpec(String platform, String authoruid, String authorusername, String author) {
+	private List<String> authorNameAliases(AuthorProfileEntity profile, String requestedAuthor) {
+		Set<String> aliases = new LinkedHashSet<>();
+		addAlias(aliases, requestedAuthor);
+		if (profile != null) {
+			addAlias(aliases, profile.getDisplayname());
+			if (profile.getId() != null) {
+				for (AuthorNameHistoryEntity history : authorNameHistoryDao.findByAuthorProfileIdOrderByLastSeen(profile.getId())) {
+					addAlias(aliases, history == null ? null : history.getDisplayname());
+				}
+			}
+		}
+		return new ArrayList<>(aliases);
+	}
+
+	private List<String> normalizeAliases(List<String> values) {
+		Set<String> aliases = new LinkedHashSet<>();
+		if (values != null) {
+			for (String value : values) {
+				addAlias(aliases, value);
+			}
+		}
+		return new ArrayList<>(aliases);
+	}
+
+	private void addAlias(Set<String> aliases, String value) {
+		String safeValue = trimToNull(value);
+		if (safeValue != null) {
+			aliases.add(safeValue);
+		}
+	}
+
+	private Specification<VideoDataEntity> buildVideoAuthorSpec(String platform, String authoruid, String authorusername, String author,
+			List<String> nameAliases) {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
 			if (trimToNull(platform) != null) {
@@ -378,6 +415,18 @@ public class AuthorProfileService {
 			if (safeUid != null) {
 				identity.add(cb.equal(root.get("authoruid"), safeUid));
 				identity.add(cb.equal(root.get("secuid"), safeUid));
+				Predicate blankUid = cb.and(
+						cb.or(cb.isNull(root.get("authoruid")), cb.equal(root.get("authoruid"), "")),
+						cb.or(cb.isNull(root.get("secuid")), cb.equal(root.get("secuid"), "")));
+				if (safeUsername != null) {
+					identity.add(cb.and(blankUid, cb.or(
+							cb.equal(root.get("authorusername"), safeUsername),
+							cb.equal(root.get("uniqueid"), safeUsername))));
+				}
+				List<String> aliases = normalizeAliases(nameAliases);
+				if (!aliases.isEmpty()) {
+					identity.add(cb.and(blankUid, root.get("videoauthor").in(aliases)));
+				}
 			} else if (safeUsername != null) {
 				identity.add(cb.equal(root.get("authorusername"), safeUsername));
 				identity.add(cb.equal(root.get("uniqueid"), safeUsername));
@@ -391,7 +440,8 @@ public class AuthorProfileService {
 		};
 	}
 
-	private Specification<GraphicContentEntity> buildGraphicAuthorSpec(String platform, String authoruid, String authorusername, String author) {
+	private Specification<GraphicContentEntity> buildGraphicAuthorSpec(String platform, String authoruid, String authorusername, String author,
+			List<String> nameAliases) {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
 			if (trimToNull(platform) != null) {
@@ -404,6 +454,18 @@ public class AuthorProfileService {
 			if (safeUid != null) {
 				identity.add(cb.equal(root.get("authoruid"), safeUid));
 				identity.add(cb.equal(root.get("secuid"), safeUid));
+				Predicate blankUid = cb.and(
+						cb.or(cb.isNull(root.get("authoruid")), cb.equal(root.get("authoruid"), "")),
+						cb.or(cb.isNull(root.get("secuid")), cb.equal(root.get("secuid"), "")));
+				if (safeUsername != null) {
+					identity.add(cb.and(blankUid, cb.or(
+							cb.equal(root.get("authorusername"), safeUsername),
+							cb.equal(root.get("uniqueid"), safeUsername))));
+				}
+				List<String> aliases = normalizeAliases(nameAliases);
+				if (!aliases.isEmpty()) {
+					identity.add(cb.and(blankUid, root.get("author").in(aliases)));
+				}
 			} else if (safeUsername != null) {
 				identity.add(cb.equal(root.get("authorusername"), safeUsername));
 				identity.add(cb.equal(root.get("uniqueid"), safeUsername));
