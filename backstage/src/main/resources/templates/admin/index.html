@@ -2034,14 +2034,14 @@
         }
     }
 
-    function buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue) {
+    function buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, authorUid) {
         var safeTitle = isPrivate ? '******' : escapeHtml(String(titleValue || 'Untitled'));
         var safePlatform = isPrivate ? '****' : escapeHtml(String(platformValue || 'Unknown'));
         var safeAuthor = isPrivate ? '****' : escapeHtml(String(authorValue || 'Unknown'));
         var timeText = escapeHtml(formatTime(timeValue));
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.profileAuthorUid || item.authoruid || '') + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(authorUid || '') + '">' + safeAuthor + '</span>';
         }
         var html = '<div class="feed-overlay">';
         html += '<div class="feed-title">' + safeTitle + '</div>';
@@ -2099,7 +2099,7 @@
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
-        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue);
+        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, item.profileAuthorUid || item.authoruid || '');
         html += buildFeedAuthorActionHtml(item, isPrivate, authorValue);
         html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '"></div>';
         html += '<div class="feed-bottom-hover-zone"></div>';
