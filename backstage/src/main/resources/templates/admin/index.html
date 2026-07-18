@@ -2642,6 +2642,7 @@
         bindVideoPerfEvents(videoEl);
         videoEl._perfStartedAt = nowMs();
         videoEl.removeAttribute('data-did-fallback');
+        videoEl.removeAttribute('data-did-mp4-refresh');
         var host = videoEl.parentNode;
         var sourcePack = resolveFeedSource(host, src);
         src = sourcePack.src;
@@ -2650,8 +2651,13 @@
         markVideoPerf(videoEl, 'source-selected', { requestedSrc: src, sourceType: sourceType, fallback: fallback });
         var current = videoEl.getAttribute('data-bound-src');
         if (current === src) {
+            if (!videoEl._hlsIns && videoEl.readyState < 2) {
+                try { videoEl.load(); } catch (e) {}
+            }
             if (feedPlayerPoolManager && videoEl.readyState >= 2) {
                 feedPlayerPoolManager.markReady(videoEl);
+            } else if (feedPlayerPoolManager) {
+                feedPlayerPoolManager.markLoading(videoEl);
             }
             if (autoPlayWhenReady) {
                 playWithSync(videoEl);
@@ -2856,6 +2862,37 @@
         return true;
     }
 
+    function refreshCurrentMp4Source(videoEl, reason) {
+        if (!videoEl || videoEl.getAttribute('data-source-type') === 'HLS') {
+            return false;
+        }
+        if (videoEl.getAttribute('data-did-mp4-refresh') === '1') {
+            return false;
+        }
+        var src = videoEl.getAttribute('data-bound-src') || videoEl.currentSrc || videoEl.src || '';
+        if (!src) {
+            return false;
+        }
+        videoEl.setAttribute('data-did-mp4-refresh', '1');
+        markVideoPerf(videoEl, 'refresh-mp4-source', { reason: reason || 'startup-stall' });
+        if (feedPlayerPoolManager) {
+            feedPlayerPoolManager.markLoading(videoEl);
+        }
+        try {
+            if (videoEl._hlsIns) {
+                videoEl._hlsIns.destroy();
+                videoEl._hlsIns = null;
+            }
+        } catch (e) {}
+        try { videoEl.removeAttribute('src'); } catch (e) {}
+        try { videoEl.load(); } catch (e) {}
+        videoEl.setAttribute('data-bound-src', src);
+        videoEl.src = src;
+        try { videoEl.load(); } catch (e) {}
+        playWithSync(videoEl, reason || 'startup-mp4-refresh');
+        return true;
+    }
+
     function playWithSync(videoEl, reason) {
         if (!videoEl) {
             return;
@@ -2926,6 +2963,9 @@
                         try { videoEl._hlsIns.recoverMediaError(); } catch (e) {}
                     }
                     if (stuckAtFirstFrame && idx >= 2 && fallbackCurrentVideoToMp4(videoEl, 'startup-stall')) {
+                        return;
+                    }
+                    if (!videoEl._hlsIns && idx >= 2 && refreshCurrentMp4Source(videoEl, 'startup-stall')) {
                         return;
                     }
                     if (!videoEl._hlsIns && videoEl.readyState < 2 && (videoEl.getAttribute('data-bound-src') || videoEl.currentSrc || videoEl.src)) {
@@ -3043,6 +3083,7 @@
         video.removeAttribute('data-bound-src');
         video.removeAttribute('data-media-key');
         video.removeAttribute('data-feed-index');
+        video.removeAttribute('data-did-mp4-refresh');
         video.removeAttribute('src');
         video._adminFeedReady = false;
         video._framePrimedFor = '';
@@ -3938,9 +3979,14 @@
         var lines = [];
         lines.push('Type: ' + type);
         lines.push('ReadyState: ' + video.readyState);
+        lines.push('NetworkState: ' + video.networkState);
         lines.push('Resolution: ' + (video.videoWidth || 0) + 'x' + (video.videoHeight || 0));
         lines.push('Time: ' + (video.currentTime || 0).toFixed(2));
         lines.push('Buffered: ' + getBufferedEnd(video));
+        lines.push('Duration: ' + (isFinite(video.duration || 0) ? (video.duration || 0).toFixed(2) : 'NaN'));
+        lines.push('Paused: ' + video.paused);
+        lines.push('Muted: ' + video.muted);
+        lines.push('Error: ' + (video.error ? (video.error.code + ':' + (video.error.message || 'media-error')) : '-'));
         lines.push('PlaybackRate: ' + (video.playbackRate || 1).toFixed(2));
         lines.push('DroppedFrames: ' + getDroppedFrames(video));
         lines.push('PoolRole: ' + (video._poolRole || '-'));
