@@ -62,6 +62,8 @@ public class CollectDataService {
 
 	private static final Pattern PYTHON_EXCEPTION_PATTERN = Pattern.compile("(?m)^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\\s*(.+)$");
 	private static final Pattern PYTHON_FILE_PATTERN = Pattern.compile("File \"([^\"]+)\", line (\\d+), in ([^\\r\\n]+)");
+	private static final int FETCH_SNAPSHOT_MAX_LENGTH = 200000;
+	private static final Pattern SNAPSHOT_HAS_VIDEO_PATTERN = Pattern.compile("\"has_video_play_addr\"\\s*:\\s*(true|false)");
 
 	@Autowired
 	private CollectdDataDao collectdDataDao;
@@ -961,11 +963,34 @@ public class CollectDataService {
 			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
 			arr.add(item);
 		}
+		return limitFetchSnapshot(arr, allData.size());
+	}
+
+	String limitFetchSnapshot(JSONArray arr, int totalCount) {
 		String text = arr.toJSONString();
-		if (text.length() > 200000) {
-			return text.substring(0, 200000) + "...(truncated)";
+		if (text.length() <= FETCH_SNAPSHOT_MAX_LENGTH) {
+			return text;
 		}
-		return text;
+		JSONArray limited = new JSONArray();
+		for (int i = 0; i < arr.size(); i++) {
+			limited.add(arr.getJSONObject(i));
+			if (limited.toJSONString().length() > FETCH_SNAPSHOT_MAX_LENGTH) {
+				limited.remove(limited.size() - 1);
+				break;
+			}
+		}
+		JSONObject marker = new JSONObject();
+		marker.put("snapshot_truncated", true);
+		marker.put("total_count", totalCount);
+		marker.put("included_count", limited.size());
+		marker.put("omitted_count", Math.max(0, totalCount - limited.size()));
+		limited.add(marker);
+		while (limited.toJSONString().length() > FETCH_SNAPSHOT_MAX_LENGTH && limited.size() > 1) {
+			limited.remove(limited.size() - 2);
+			marker.put("included_count", limited.size() - 1);
+			marker.put("omitted_count", Math.max(0, totalCount - (limited.size() - 1)));
+		}
+		return limited.toJSONString();
 	}
 
 	private String buildCollectRunId(CollectDataEntity entity) {
@@ -2097,15 +2122,19 @@ public class CollectDataService {
 			int totalImage = 0;
 			try {
 				if (task.getLastfetchsnapshot() != null && !task.getLastfetchsnapshot().trim().isEmpty()) {
-					JSONArray arr = JSONArray.parseArray(task.getLastfetchsnapshot());
-					for (int i = 0; i < arr.size(); i++) {
-						JSONObject obj = arr.getJSONObject(i);
-						if (obj.getBooleanValue("has_video_play_addr")) totalVideo++;
-						else totalImage++;
-					}
+					SnapshotMediaStats stats = parseSnapshotMediaStats(task.getLastfetchsnapshot());
+					totalVideo = stats.videoCount();
+					totalImage = stats.imageCount();
 				}
 			} catch (Exception e) {
-				logger.warn("[AuthorStats] parse snapshot failed taskId={}", task.getId());
+				SnapshotMediaStats fallbackStats = scanSnapshotMediaStats(task.getLastfetchsnapshot());
+				totalVideo = fallbackStats.videoCount();
+				totalImage = fallbackStats.imageCount();
+				String snapshot = task.getLastfetchsnapshot();
+				logger.warn("[AuthorStats] parse snapshot failed taskId={} length={} truncated={} fallbackVideo={} fallbackImage={} error={} preview={}",
+						task.getId(), snapshot == null ? 0 : snapshot.length(),
+						snapshot != null && snapshot.contains("...(truncated)"), totalVideo, totalImage,
+						e.getClass().getSimpleName() + ": " + e.getMessage(), previewText(snapshot, 200));
 			}
 			long doneVideo = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "video", successStatuses);
 			long doneImage = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "image", successStatuses);
@@ -2116,5 +2145,54 @@ public class CollectDataService {
 			result.add(row);
 		}
 		return result;
+	}
+
+	static SnapshotMediaStats parseSnapshotMediaStats(String snapshot) {
+		JSONArray arr = JSONArray.parseArray(snapshot);
+		int videoCount = 0;
+		int imageCount = 0;
+		for (int i = 0; i < arr.size(); i++) {
+			JSONObject obj = arr.getJSONObject(i);
+			if (obj.getBooleanValue("snapshot_truncated")) {
+				continue;
+			}
+			if (obj.getBooleanValue("has_video_play_addr")) {
+				videoCount++;
+			} else {
+				imageCount++;
+			}
+		}
+		return new SnapshotMediaStats(videoCount, imageCount);
+	}
+
+	static SnapshotMediaStats scanSnapshotMediaStats(String snapshot) {
+		if (snapshot == null || snapshot.isEmpty()) {
+			return new SnapshotMediaStats(0, 0);
+		}
+		int videoCount = 0;
+		int imageCount = 0;
+		Matcher matcher = SNAPSHOT_HAS_VIDEO_PATTERN.matcher(snapshot);
+		while (matcher.find()) {
+			if ("true".equals(matcher.group(1))) {
+				videoCount++;
+			} else {
+				imageCount++;
+			}
+		}
+		return new SnapshotMediaStats(videoCount, imageCount);
+	}
+
+	static String previewText(String value, int limit) {
+		if (value == null) {
+			return "";
+		}
+		String text = value.replace('\r', ' ').replace('\n', ' ');
+		if (text.length() <= limit) {
+			return text;
+		}
+		return text.substring(0, limit) + "...";
+	}
+
+	record SnapshotMediaStats(int videoCount, int imageCount) {
 	}
 }

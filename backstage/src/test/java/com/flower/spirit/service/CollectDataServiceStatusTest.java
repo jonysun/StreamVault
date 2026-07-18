@@ -116,6 +116,55 @@ class CollectDataServiceStatusTest {
 		assertThat(item.getLong("successDetailCount")).isEqualTo(80L);
 	}
 
+	@Test
+	void buildFetchSnapshotTruncatesAsValidJsonAtItemBoundary() {
+		CollectDataService service = new CollectDataService();
+		JSONArray items = new JSONArray();
+		for (int i = 0; i < 80; i++) {
+			JSONObject item = douyinItem("work-" + i, "2026-07-05 23-28-46");
+			item.put("desc", "x".repeat(4000));
+			items.add(item);
+		}
+
+		String snapshot = service.buildFetchSnapshot(items);
+		JSONArray parsed = JSONArray.parseArray(snapshot);
+		JSONObject marker = parsed.getJSONObject(parsed.size() - 1);
+
+		assertThat(snapshot.length()).isLessThanOrEqualTo(200000);
+		assertThat(marker.getBooleanValue("snapshot_truncated")).isTrue();
+		assertThat(marker.getInteger("total_count")).isEqualTo(80);
+	}
+
+	@Test
+	void parseSnapshotMediaStatsIgnoresTruncationMarker() {
+		JSONArray snapshot = new JSONArray();
+		JSONObject video = new JSONObject();
+		video.put("has_video_play_addr", true);
+		snapshot.add(video);
+		JSONObject image = new JSONObject();
+		image.put("has_video_play_addr", false);
+		snapshot.add(image);
+		JSONObject marker = new JSONObject();
+		marker.put("snapshot_truncated", true);
+		marker.put("omitted_count", 10);
+		snapshot.add(marker);
+
+		CollectDataService.SnapshotMediaStats stats = CollectDataService.parseSnapshotMediaStats(snapshot.toJSONString());
+
+		assertThat(stats.videoCount()).isEqualTo(1);
+		assertThat(stats.imageCount()).isEqualTo(1);
+	}
+
+	@Test
+	void scanSnapshotMediaStatsReadsLegacyInvalidTruncatedSnapshot() {
+		String snapshot = "[{\"has_video_play_addr\":true},{\"has_video_play_addr\":false}...(truncated)";
+
+		CollectDataService.SnapshotMediaStats stats = CollectDataService.scanSnapshotMediaStats(snapshot);
+
+		assertThat(stats.videoCount()).isEqualTo(1);
+		assertThat(stats.imageCount()).isEqualTo(1);
+	}
+
 	private static JSONObject douyinItem(String awemeId, String createTime) {
 		JSONObject item = new JSONObject();
 		item.put("aweme_id", awemeId);
