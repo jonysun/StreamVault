@@ -125,7 +125,7 @@ public class MediaFeedService {
 			query.setSortField("createtime");
 			query.setSortOrder("desc");
 		}
-		AjaxEntity graphicResponse = graphicContentService.findPage(query);
+		AjaxEntity graphicResponse = graphicContentService.findLitePage(query);
 		Page<?> graphicPage = pageFrom(graphicResponse);
 		if (graphicPage == null) {
 			return 0;

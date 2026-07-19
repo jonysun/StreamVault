@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.flower.spirit.config.Global;
 import com.flower.spirit.entity.CollectDataEntity;
 import com.flower.spirit.service.CollectDataService;
 
@@ -39,8 +40,12 @@ public class CollectDataJob implements Job {
         JobDataMap dataMap = context.getJobDetail().getJobDataMap();
         Integer taskId = dataMap.getInt("taskId");
         String taskName = dataMap.getString("taskName");
-        
+
         try {
+            if (Global.isCollectPaused()) {
+                logger.info("收藏任务已暂停，跳过执行：{}", taskName);
+                return;
+            }
             logger.info("开始执行收藏夹任务：{}", taskName);
             
             // 获取任务详情

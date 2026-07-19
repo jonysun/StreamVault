@@ -448,6 +448,59 @@ public class AdminController {
 	 * @param entity
 	 * @return
 	 */
+	private Map<String, Object> buildBackgroundTaskControlStatus() {
+		Map<String, Object> control = new HashMap<>();
+		control.put("allPaused", Global.backgroundTaskPauseAll);
+		control.put("downloadPaused", Global.backgroundTaskPauseDownload);
+		control.put("collectPaused", Global.backgroundTaskPauseCollect);
+		control.put("hlsPaused", Global.backgroundTaskPauseHls);
+		control.put("effectiveDownloadPaused", Global.isDownloadPaused());
+		control.put("effectiveCollectPaused", Global.isCollectPaused());
+		control.put("effectiveHlsPaused", Global.isHlsPaused());
+		return control;
+	}
+
+	@GetMapping(value = "/getBackgroundTaskStatus")
+	public AjaxEntity getBackgroundTaskStatus() {
+		try {
+			Map<String, Object> result = new HashMap<>();
+			result.put("control", buildBackgroundTaskControlStatus());
+			result.put("analysis", analysisService.getThreadPoolStatus());
+			result.put("collect", collectDataService.getCollectThreadPoolStatus());
+			AjaxEntity hls = hlsTranscodeService.stats();
+			result.put("hls", hls == null ? null : hls.getRecord());
+			return new AjaxEntity(Global.ajax_success, "获取后台任务状态成功", result);
+		} catch (Exception e) {
+			return new AjaxEntity(Global.ajax_uri_error, "获取后台任务状态失败: " + e.getMessage(), null);
+		}
+	}
+
+	@PostMapping(value = "/setBackgroundTaskPause")
+	public AjaxEntity setBackgroundTaskPause(String scope, String paused) {
+		boolean value = "1".equals(paused) || "true".equalsIgnoreCase(String.valueOf(paused)) || "Y".equalsIgnoreCase(String.valueOf(paused));
+		String normalized = scope == null ? "" : scope.trim().toLowerCase();
+		switch (normalized) {
+		case "all":
+			Global.backgroundTaskPauseAll = value;
+			Global.backgroundTaskPauseDownload = value;
+			Global.backgroundTaskPauseCollect = value;
+			Global.backgroundTaskPauseHls = value;
+			break;
+		case "download":
+			Global.backgroundTaskPauseDownload = value;
+			break;
+		case "collect":
+			Global.backgroundTaskPauseCollect = value;
+			break;
+		case "hls":
+			Global.backgroundTaskPauseHls = value;
+			break;
+		default:
+			return new AjaxEntity(Global.ajax_uri_error, "未知任务范围: " + scope, null);
+		}
+		return getBackgroundTaskStatus();
+	}
+
 	@PostMapping(value = "/updateCookie")
 	public AjaxEntity updateCookie(CookiesConfigEntity entity) {
 		return cookiesConfigService.updateCookie(entity);

@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.entity.CollectDataEntity;
 import com.flower.spirit.entity.ConfigEntity;
@@ -111,6 +112,10 @@ public class QuartzTaskService {
      */
     public boolean triggerTask(Integer taskId) {
         try {
+            if (Global.isCollectPaused()) {
+                logger.info("收藏任务已暂停，跳过手动触发：{}", taskId);
+                return false;
+            }
             JobKey jobKey = JobKey.jobKey("job-" + taskId, "collect");
             if (!scheduler.checkExists(jobKey)) {
                 logger.warn("任务不存在，无法手动触发：{}", taskId);

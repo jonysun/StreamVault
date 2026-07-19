@@ -218,6 +218,57 @@
             z-index: 1;
         }
 
+        .task-control-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .task-toggle-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 8px;
+        }
+
+        .task-toggle-btn.active {
+            background: var(--danger-color);
+            border-color: var(--danger-color);
+            color: #fff;
+        }
+
+        .task-status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
+
+        .task-status-block {
+            border: 1px solid var(--gray-200);
+            border-radius: 10px;
+            background: var(--gray-50);
+            padding: 12px 14px;
+        }
+
+        .task-status-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--gray-900);
+            margin-bottom: 10px;
+        }
+
+        .task-status-list {
+            margin: 0;
+            padding-left: 18px;
+            color: var(--gray-600);
+            font-size: 0.85rem;
+        }
+
         .platform-item {
             display: flex;
             justify-content: space-between;
@@ -777,6 +828,28 @@
 						<!-- 作者统计卡片将在这里动态生成 -->
 					</div>
 
+                    <div class="row" id="taskControlContainer" style="display: none; margin-top: 10px;">
+                        <div class="col-12 mb-4">
+                            <div class="platform-card">
+                                <div class="platform-header">
+                                    <div class="platform-icon" style="background: var(--danger-color);">
+                                        <i class="mdi mdi-pause-circle-outline"></i>
+                                    </div>
+                                    <h3 class="platform-title">后台任务控制</h3>
+                                </div>
+                                <div class="task-control-actions" id="taskControlActions">
+                                    <button type="button" class="btn btn-outline-danger task-toggle-btn" data-scope="all"><i class="mdi mdi-pause-octagon-outline"></i><span>暂停全部</span></button>
+                                    <button type="button" class="btn btn-outline-warning task-toggle-btn" data-scope="download"><i class="mdi mdi-download"></i><span>暂停下载</span></button>
+                                    <button type="button" class="btn btn-outline-info task-toggle-btn" data-scope="collect"><i class="mdi mdi-cloud-search-outline"></i><span>暂停爬取</span></button>
+                                    <button type="button" class="btn btn-outline-secondary task-toggle-btn" data-scope="hls"><i class="mdi mdi-filmstrip-box-multiple"></i><span>暂停HLS</span></button>
+                                </div>
+                                <div class="task-status-grid" id="taskStatusGrid">
+                                    <div class="task-status-block">正在加载后台任务状态...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
 				    
                     <!-- 最近入库 -->
                     <div class="row recently-added-section" id="recentlyAddedSection" style="display: none;">
@@ -1093,6 +1166,7 @@
                 `);
             }
 			loadAuthorStats();
+			loadTaskControlState();
 			
             // 分阶段更新主要指标，创建更好的视觉效果
               const metrics = [
@@ -1135,6 +1209,121 @@
             // 加载最近入库数据
             loadRecentlyAdded();
         }
+
+		let taskControlState = {};
+
+		function loadTaskControlState() {
+			$.ajax({
+				url: '/admin/api/getBackgroundTaskStatus',
+				type: 'GET',
+				dataType: 'json',
+				cache: false,
+				success: function(response) {
+					if (response && response.resCode === '000001' && response.record) {
+						renderTaskControlState(response.record);
+						$('#taskControlContainer').fadeIn(400);
+					}
+				},
+				error: function(xhr, status, error) {
+					$('#taskStatusGrid').html('<div class="task-status-block">后台任务状态加载失败：' + escapeRecentlyHtml(error || status || '') + '</div>');
+					$('#taskControlContainer').fadeIn(400);
+				}
+			});
+		}
+
+		function renderTaskControlState(data) {
+			data = data || {};
+			const control = data.control || {};
+			taskControlState = control;
+			updateTaskControlButton('all', !!control.allPaused, '暂停全部', '恢复全部');
+			updateTaskControlButton('download', !!control.effectiveDownloadPaused, '暂停下载', '恢复下载');
+			updateTaskControlButton('collect', !!control.effectiveCollectPaused, '暂停爬取', '恢复爬取');
+			updateTaskControlButton('hls', !!control.effectiveHlsPaused, '暂停HLS', '恢复HLS');
+
+			const analysis = data.analysis || {};
+			const domestic = analysis.domestic || {};
+			const bilibili = analysis.bilibili || {};
+			const ytdlp = analysis.ytdlp || {};
+			const collect = data.collect || {};
+			const quartz = collect.quartz || {};
+			const hls = data.hls || {};
+			let html = '';
+			html += taskStatusBlock('下载任务', 'mdi-download', !!control.effectiveDownloadPaused, [
+				'国内池：运行 ' + numberText(domestic.activeCount) + ' / 队列 ' + numberText(domestic.queueSize),
+				'哔哩池：运行 ' + numberText(bilibili.activeCount) + ' / 队列 ' + numberText(bilibili.queueSize),
+				'yt-dlp池：运行 ' + numberText(ytdlp.activeCount) + ' / 队列 ' + numberText(ytdlp.queueSize)
+			]);
+			html += taskStatusBlock('收藏/爬取', 'mdi-cloud-search-outline', !!control.effectiveCollectPaused, [
+				'调度器：' + (quartz.isStarted ? '已启动' : '未启动'),
+				'监控任务：' + numberText(quartz.totalTasks),
+				'当前执行：' + numberText(quartz.executingJobCount),
+				'executingJobs' in quartz ? runningCollectText(quartz.executingJobs) : '执行列表：暂无'
+			]);
+			html += taskStatusBlock('HLS转码', 'mdi-filmstrip-box-multiple', !!control.effectiveHlsPaused, [
+				'功能：' + (hls.enabled ? '已开启' : '已关闭'),
+				'运行：' + numberText(hls.runningCount) + ' / 队列 ' + numberText(hls.queueSize),
+				'运行视频：' + idsText(hls.runningVideoIds || hls.runningVideoId),
+				hls.lastError ? '最近错误：' + hls.lastError : '最近错误：无'
+			]);
+			$('#taskStatusGrid').html(html);
+		}
+
+		function updateTaskControlButton(scope, active, pausedText, resumeText) {
+			const btn = $('#taskControlActions .task-toggle-btn[data-scope="' + scope + '"]');
+			btn.toggleClass('active', active);
+			btn.find('span').text(active ? resumeText : pausedText);
+		}
+
+		function taskStatusBlock(title, icon, paused, lines) {
+			let html = '<div class="task-status-block">';
+			html += '<div class="task-status-title"><span><i class="mdi ' + icon + '"></i> ' + escapeRecentlyHtml(title) + '</span><span class="badge ' + (paused ? 'badge-danger' : 'badge-success') + '">' + (paused ? '已暂停' : '运行中') + '</span></div>';
+			html += '<ul class="task-status-list">';
+			(lines || []).forEach(function(line) {
+				html += '<li>' + escapeRecentlyHtml(line) + '</li>';
+			});
+			html += '</ul></div>';
+			return html;
+		}
+
+		function numberText(value) {
+			return value == null ? '0' : String(value);
+		}
+
+		function idsText(value) {
+			if (Array.isArray(value)) {
+				return value.length ? value.join(', ') : '无';
+			}
+			return value ? String(value) : '无';
+		}
+
+		function runningCollectText(items) {
+			if (!Array.isArray(items) || items.length === 0) {
+				return '执行列表：暂无';
+			}
+			return '执行列表：' + items.slice(0, 3).map(function(item) {
+				return item.taskName || item.jobName || '未知任务';
+			}).join(', ');
+		}
+
+		function setTaskPause(scope, paused) {
+			$.ajax({
+				url: '/admin/api/setBackgroundTaskPause',
+				type: 'POST',
+				dataType: 'json',
+				data: { scope: scope, paused: paused ? '1' : '0' },
+				success: function(response) {
+					if (response && response.resCode === '000001') {
+						renderTaskControlState(response.record || {});
+						layer.msg(paused ? '已暂停' : '已恢复', {icon: 1});
+					} else {
+						layer.msg((response && response.message) || '操作失败', {icon: 2});
+					}
+				},
+				error: function() {
+					layer.msg('后台任务控制失败', {icon: 2});
+				}
+			});
+		}
 
 		function loadAuthorStats() {
 			$.ajax({
@@ -1303,6 +1492,16 @@
             $(document).on('click', '[data-action="refresh"]', function(e) {
                 e.preventDefault();
                 refreshStatistics();
+            });
+
+            $(document).on('click', '#taskControlActions .task-toggle-btn', function(e) {
+                e.preventDefault();
+                const scope = $(this).data('scope') || '';
+                const pausedKey = scope === 'all'
+                    ? 'allPaused'
+                    : (scope === 'download' ? 'effectiveDownloadPaused' : (scope === 'collect' ? 'effectiveCollectPaused' : 'effectiveHlsPaused'));
+                const currentPaused = !!(taskControlState && taskControlState[pausedKey]);
+                setTaskPause(scope, !currentPaused);
             });
         });
         

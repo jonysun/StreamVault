@@ -159,6 +159,26 @@ public class Global {
 	public static boolean hlsPrivacyEnabled = true;
 
 	public static int hlsSegmentSeconds = 4;
+
+	public static volatile boolean backgroundTaskPauseAll = false;
+
+	public static volatile boolean backgroundTaskPauseDownload = false;
+
+	public static volatile boolean backgroundTaskPauseCollect = false;
+
+	public static volatile boolean backgroundTaskPauseHls = false;
+
+	public static boolean isDownloadPaused() {
+		return backgroundTaskPauseAll || backgroundTaskPauseDownload;
+	}
+
+	public static boolean isCollectPaused() {
+		return backgroundTaskPauseAll || backgroundTaskPauseCollect;
+	}
+
+	public static boolean isHlsPaused() {
+		return backgroundTaskPauseAll || backgroundTaskPauseHls;
+	}
 	
 	public static String hiddenplatforms = "";  // 在视频首页隐藏的平台（逗号分隔）
 	
