@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
+import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
@@ -77,6 +78,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	
 	private Date createtime;
 
+	@Column(name = "videoinfo", insertable = false, updatable = false)
 	private String videoinfo;
 
 	private String publishtime;
@@ -203,11 +205,14 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	}
 
 	public String getVideoinfo() {
-		return videoinfo;
+		return isString(videoinfo) ? videoinfo : jsonData;
 	}
 
 	public void setVideoinfo(String videoinfo) {
 		this.videoinfo = videoinfo;
+		if (!isString(this.jsonData)) {
+			this.jsonData = videoinfo;
+		}
 	}
 
 	public String getPublishtime() {
@@ -288,6 +293,10 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setJsonData(String jsonData) {
 		this.jsonData = jsonData;
+	}
+
+	private boolean isString(String value) {
+		return value != null && !value.trim().isEmpty();
 	}
 	
 	/**

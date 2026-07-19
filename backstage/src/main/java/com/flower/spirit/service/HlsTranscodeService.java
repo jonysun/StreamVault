@@ -141,12 +141,18 @@ public class HlsTranscodeService {
 	}
 
 	public AjaxEntity processNowOnce() {
+		if (Global.isHlsPaused()) {
+			return new AjaxEntity(Global.ajax_uri_error, "HLS转码已暂停", null);
+		}
 		processQueueTick(true);
 		return new AjaxEntity(Global.ajax_success, "已触发立即处理", null);
 	}
 
 	public void processQueueTick(boolean forceRun) {
 		if (!Global.hlsEnable) {
+			return;
+		}
+		if (Global.isHlsPaused()) {
 			return;
 		}
 		if (!forceRun && "idle".equalsIgnoreCase(Global.hlsMode) && !isInIdleWindow(Global.hlsIdleWindow)) {
@@ -243,6 +249,7 @@ public class HlsTranscodeService {
 		java.util.Map<String, Object> map = new java.util.HashMap<>();
 		map.put("enabled", Global.hlsEnable);
 		map.put("mode", Global.hlsMode);
+		map.put("paused", Global.isHlsPaused());
 		map.put("idleWindow", Global.hlsIdleWindow);
 		map.put("concurrency", Global.hlsConcurrency);
 		map.put("segmentSeconds", Global.hlsSegmentSeconds);

@@ -648,7 +648,7 @@ public class VideoDataService {
 	    if (!(videoDataEntity.getVideoplatform().equals(Global.platform.bilibili.name()) || videoDataEntity.getVideoplatform().equals("哔哩"))) {
 	        return new AjaxEntity(Global.ajax_uri_error, "当前平台暂时不支持刷新弹幕,目前仅支持BiliBili", null);
 	    }
-	    String videoinfo = videoDataEntity.getVideoinfo();
+	    String videoinfo = videoMetadataJson(videoDataEntity);
 	    if (videoinfo == null || videoinfo.isEmpty()) {
 	        return new AjaxEntity(Global.ajax_uri_error, "当前视频未旧版数据,暂时不支持刷新弹幕", null);
 	    }
@@ -658,6 +658,16 @@ public class VideoDataService {
 	    BiliUtil.biliDanmaku("1", videoDataEntity.getVideoid(), video.getString("aid"), Integer.valueOf(video.getString("duration")), filepathname, videoDataEntity.getVideoname());
 	    
 	    return new AjaxEntity(Global.ajax_success, "刷新成功", null);
+	}
+
+	private String videoMetadataJson(VideoDataEntity videoDataEntity) {
+		if (videoDataEntity == null) {
+			return null;
+		}
+		if (StringUtil.isString(videoDataEntity.getJsonData())) {
+			return videoDataEntity.getJsonData();
+		}
+		return videoDataEntity.getVideoinfo();
 	}
 
 	public VideoDataEntity findRandomByVideoplatform(String platform) {

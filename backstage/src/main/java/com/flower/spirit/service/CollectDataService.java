@@ -62,7 +62,7 @@ public class CollectDataService {
 
 	private static final Pattern PYTHON_EXCEPTION_PATTERN = Pattern.compile("(?m)^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\\s*(.+)$");
 	private static final Pattern PYTHON_FILE_PATTERN = Pattern.compile("File \"([^\"]+)\", line (\\d+), in ([^\\r\\n]+)");
-	private static final int FETCH_SNAPSHOT_MAX_LENGTH = 200000;
+	private static final int FETCH_SNAPSHOT_MAX_LENGTH = 500000;
 	private static final Pattern SNAPSHOT_HAS_VIDEO_PATTERN = Pattern.compile("\"has_video_play_addr\"\\s*:\\s*(true|false)");
 
 	@Autowired
@@ -181,6 +181,10 @@ public class CollectDataService {
 				collectDataEntity.getId(), collectDataEntity.getTaskname(), collectDataEntity.getPlatform(), monitor,
 				collectDataEntity.getMonitoring(), collectDataEntity.getOriginaladdress(), collectDataEntity.getTaskcron(),
 				collectDataEntity.getMaxcur(), collectDataEntity.getOmaxcur());
+		if (Global.isCollectPaused()) {
+			logger.info("[CollectTask] collection paused, skip submit id={} name={}", collectDataEntity.getId(), collectDataEntity.getTaskname());
+			return new AjaxEntity(Global.ajax_uri_error, "收藏/爬取任务已暂停，本次跳过", null);
+		}
 		if (null != collectDataEntity.getPlatform() && collectDataEntity.getPlatform().equals("哔哩")) {
 			// 必须授权ck
 			if (null == Global.bilicookies || Global.bilicookies.equals("")) {
@@ -250,6 +254,7 @@ public class CollectDataService {
 	 */
 	public Map<String, Object> getCollectThreadPoolStatus() {
 		Map<String, Object> status = new HashMap<>();
+		status.put("paused", Global.isCollectPaused());
 
 		try {
 			// Quartz调度器基本信息
@@ -493,6 +498,7 @@ public class CollectDataService {
 			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData, fetchContext));
 			collectdDataDao.save(entity);
 			logFetchSnapshotItems(entity, fetchContext, allDYData, "sorted");
+			prefillDouyinAuthorProfile(allDYData, fetchContext, runId);
 		}
 		logger.info("[CollectTask] getDYData result runId={} id={} isNull={} size={}", runId, entity.getId(),
 				allDYData == null, allDYData == null ? 0 : allDYData.size());
@@ -963,10 +969,10 @@ public class CollectDataService {
 			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
 			arr.add(item);
 		}
-		return limitFetchSnapshot(arr, allData.size());
+		return limitFetchSnapshot(arr, allData.size(), summarizeSnapshotMediaStats(arr));
 	}
 
-	String limitFetchSnapshot(JSONArray arr, int totalCount) {
+	String limitFetchSnapshot(JSONArray arr, int totalCount, SnapshotMediaStats totalStats) {
 		String text = arr.toJSONString();
 		if (text.length() <= FETCH_SNAPSHOT_MAX_LENGTH) {
 			return text;
@@ -982,6 +988,8 @@ public class CollectDataService {
 		JSONObject marker = new JSONObject();
 		marker.put("snapshot_truncated", true);
 		marker.put("total_count", totalCount);
+		marker.put("video_total", totalStats == null ? 0 : totalStats.videoCount());
+		marker.put("image_total", totalStats == null ? 0 : totalStats.imageCount());
 		marker.put("included_count", limited.size());
 		marker.put("omitted_count", Math.max(0, totalCount - limited.size()));
 		limited.add(marker);
@@ -991,6 +999,26 @@ public class CollectDataService {
 			marker.put("omitted_count", Math.max(0, totalCount - (limited.size() - 1)));
 		}
 		return limited.toJSONString();
+	}
+
+	private SnapshotMediaStats summarizeSnapshotMediaStats(JSONArray arr) {
+		int videoCount = 0;
+		int imageCount = 0;
+		if (arr == null) {
+			return new SnapshotMediaStats(0, 0);
+		}
+		for (int i = 0; i < arr.size(); i++) {
+			JSONObject obj = arr.getJSONObject(i);
+			if (obj == null || obj.getBooleanValue("snapshot_truncated")) {
+				continue;
+			}
+			if (obj.getBooleanValue("has_video_play_addr")) {
+				videoCount++;
+			} else {
+				imageCount++;
+			}
+		}
+		return new SnapshotMediaStats(videoCount, imageCount);
 	}
 
 	private String buildCollectRunId(CollectDataEntity entity) {
@@ -2133,7 +2161,7 @@ public class CollectDataService {
 				String snapshot = task.getLastfetchsnapshot();
 				logger.warn("[AuthorStats] parse snapshot failed taskId={} length={} truncated={} fallbackVideo={} fallbackImage={} error={} preview={}",
 						task.getId(), snapshot == null ? 0 : snapshot.length(),
-						snapshot != null && snapshot.contains("...(truncated)"), totalVideo, totalImage,
+						isSnapshotTruncated(snapshot), totalVideo, totalImage,
 						e.getClass().getSimpleName() + ": " + e.getMessage(), previewText(snapshot, 200));
 			}
 			long doneVideo = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "video", successStatuses);
@@ -2147,6 +2175,47 @@ public class CollectDataService {
 		return result;
 	}
 
+	private void prefillDouyinAuthorProfile(JSONArray allDYData, FetchRunContext context, String runId) {
+		if (allDYData == null || allDYData.isEmpty() || authorProfileService == null) {
+			return;
+		}
+		JSONObject awemeDetail = allDYData.getJSONObject(0);
+		if (awemeDetail == null) {
+			return;
+		}
+		JSONObject author = awemeDetail.getJSONObject("author");
+		String sourceUid = firstNotBlank(author == null ? null : author.getString("sec_uid"), awemeDetail.getString("sec_uid"));
+		String uniqueId = firstNotBlank(author == null ? null : author.getString("unique_id"), awemeDetail.getString("unique_id"));
+		String authorUid = firstNotBlank(author == null ? null : author.getString("uid"), awemeDetail.getString("uid"));
+		String nickname = firstNotBlank(author == null ? null : author.getString("nickname"), awemeDetail.getString("nickname"));
+		String avatar = firstNotBlank(DouUtil.extractAvatar(author), awemeDetail.getString("avatar_thumb"));
+		String signature = author == null ? null : author.getString("signature");
+		String taskSourceId = context == null ? null : context.sourceId();
+		sourceUid = firstNotBlank(sourceUid, taskSourceId);
+		JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(sourceUid));
+		if (profileUser == null) {
+			profileUser = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
+		}
+		if (profileUser != null) {
+			sourceUid = firstNotBlank(profileUser.getString("sec_uid"), sourceUid);
+			uniqueId = firstNotBlank(profileUser.getString("unique_id"), uniqueId);
+			authorUid = firstNotBlank(profileUser.getString("uid"), authorUid);
+			nickname = firstNotBlank(profileUser.getString("nickname"), nickname);
+			avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), avatar);
+			signature = firstNotBlank(profileUser.getString("signature"), signature);
+		}
+		String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(sourceUid, firstNotBlank(authorUid, taskSourceId));
+		if (authorUidForSave == null) {
+			logger.info("[CollectTask] author prefill skipped runId={} reason=no-author-uid uniqueId={} nickname={}",
+					runId, uniqueId, nickname);
+			return;
+		}
+		authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, avatar,
+				"https://www.douyin.com/user/" + authorUidForSave, signature);
+		logger.info("[CollectTask] author prefill runId={} authorUid={} uniqueId={} nickname={}",
+				runId, authorUidForSave, uniqueId, nickname);
+	}
+
 	static SnapshotMediaStats parseSnapshotMediaStats(String snapshot) {
 		JSONArray arr = JSONArray.parseArray(snapshot);
 		int videoCount = 0;
@@ -2154,6 +2223,11 @@ public class CollectDataService {
 		for (int i = 0; i < arr.size(); i++) {
 			JSONObject obj = arr.getJSONObject(i);
 			if (obj.getBooleanValue("snapshot_truncated")) {
+				Integer videoTotal = obj.getInteger("video_total");
+				Integer imageTotal = obj.getInteger("image_total");
+				if (videoTotal != null && imageTotal != null) {
+					return new SnapshotMediaStats(Math.max(0, videoTotal), Math.max(0, imageTotal));
+				}
 				continue;
 			}
 			if (obj.getBooleanValue("has_video_play_addr")) {
@@ -2163,6 +2237,10 @@ public class CollectDataService {
 			}
 		}
 		return new SnapshotMediaStats(videoCount, imageCount);
+	}
+
+	static boolean isSnapshotTruncated(String snapshot) {
+		return snapshot != null && (snapshot.contains("...(truncated)") || snapshot.contains("\"snapshot_truncated\":true"));
 	}
 
 	static SnapshotMediaStats scanSnapshotMediaStats(String snapshot) {

@@ -116,6 +116,10 @@ public class AnalysisService {
 		    logger.error("提交了一个错误的链接地址");
 		    return;
 		}
+		if (Global.isDownloadPaused()) {
+			logger.info("下载任务已暂停，跳过提交：{}", video);
+			return;
+		}
 		logger.info("解析开始~原地址:" + video);
 		String platform = this.getPlatform(video);
 		String url = this.getUrl(video);
@@ -315,6 +319,11 @@ public class AnalysisService {
 	 * @param task     要执行的任务
 	 */
 	private void executeTask(ExecutorService executor, Integer historyId, String queueLog, ExceptionRunnable task) {
+		if (Global.isDownloadPaused()) {
+			logger.info("下载任务已暂停，未进入执行队列 historyId={}", historyId);
+			processHistoryService.markProcessLog(historyId, "已暂停", "下载任务已暂停，未进入执行队列");
+			return;
+		}
 		if (historyId != null && StringUtils.isNotBlank(queueLog)) {
 			processHistoryService.markProcessLog(historyId, "已提交未执行", queueLog);
 		}
@@ -372,6 +381,7 @@ public class AnalysisService {
 	 */
 	public Map<String, Object> getThreadPoolStatus() {
 		Map<String, Object> status = new HashMap<>();
+		status.put("paused", Global.isDownloadPaused());
 		
 		// 国内平台线程池状态
 		if (domestic instanceof ThreadPoolExecutor) {

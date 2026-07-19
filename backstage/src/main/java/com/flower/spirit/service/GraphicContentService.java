@@ -9,12 +9,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.Tuple;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -32,6 +37,9 @@ public class GraphicContentService {
 	
 	@Autowired
 	private GraphicContentDao graphicContentDao;
+
+	@PersistenceContext
+	private EntityManager entityManager;
 
 	@Autowired
 	private BlockedWorkService blockedWorkService;
@@ -114,6 +122,135 @@ public class GraphicContentService {
 
 
 
+
+	public AjaxEntity findLitePage(GraphicContentEntity res) {
+		int pageNo = res == null ? 0 : Math.max(0, res.getPageNo());
+		int pageSize = res == null ? 25 : Math.max(1, res.getPageSize());
+		PageRequest pageRequest = PageRequest.of(pageNo, pageSize);
+		CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+		CriteriaQuery<Tuple> query = cb.createTupleQuery();
+		Root<GraphicContentEntity> root = query.from(GraphicContentEntity.class);
+		query.multiselect(
+				root.get("id").alias("id"),
+				root.get("originaladdress").alias("originaladdress"),
+				root.get("videoid").alias("videoid"),
+				root.get("platform").alias("platform"),
+				root.get("title").alias("title"),
+				root.get("content").alias("content"),
+				root.get("images").alias("images"),
+				root.get("author").alias("author"),
+				root.get("authoruid").alias("authoruid"),
+				root.get("authorusername").alias("authorusername"),
+				root.get("authoravatar").alias("authoravatar"),
+				root.get("secuid").alias("secuid"),
+				root.get("uniqueid").alias("uniqueid"),
+				root.get("createtime").alias("createtime"),
+				root.get("publishtime").alias("publishtime"),
+				root.get("sourceurl").alias("sourceurl"));
+		query.where(buildGraphicPredicates(res, root, cb));
+		query.orderBy(buildGraphicOrders(res, root, cb));
+		List<Tuple> tuples = entityManager.createQuery(query)
+				.setFirstResult(pageNo * pageSize)
+				.setMaxResults(pageSize)
+				.getResultList();
+		long totalElements = countLiteItems(res);
+		List<GraphicContentEntity> items = new ArrayList<>();
+		for (Tuple tuple : tuples) {
+			items.add(toLiteGraphicEntity(tuple));
+		}
+		Page<GraphicContentEntity> page = new PageImpl<>(items, pageRequest, totalElements);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);
+	}
+
+	private long countLiteItems(GraphicContentEntity res) {
+		CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+		CriteriaQuery<Long> query = cb.createQuery(Long.class);
+		Root<GraphicContentEntity> root = query.from(GraphicContentEntity.class);
+		query.select(cb.count(root));
+		query.where(buildGraphicPredicates(res, root, cb));
+		return entityManager.createQuery(query).getSingleResult();
+	}
+
+	private Predicate[] buildGraphicPredicates(GraphicContentEntity res, Root<GraphicContentEntity> root, CriteriaBuilder cb) {
+		List<Predicate> predicates = new ArrayList<>();
+		if (res != null) {
+			if (StringUtil.isString(res.getTitle()) && StringUtil.isString(res.getContent())) {
+				predicates.add(cb.or(
+						cb.like(root.get("title"), "%" + res.getTitle() + "%"),
+						cb.like(root.get("content"), "%" + res.getContent() + "%")));
+			} else if (StringUtil.isString(res.getTitle())) {
+				predicates.add(cb.like(root.get("title"), "%" + res.getTitle() + "%"));
+			} else if (StringUtil.isString(res.getContent())) {
+				predicates.add(cb.like(root.get("content"), "%" + res.getContent() + "%"));
+			}
+			if (StringUtil.isString(res.getPlatform())) {
+				predicates.add(cb.like(root.get("platform"), "%" + res.getPlatform() + "%"));
+			}
+			if (StringUtil.isString(res.getAuthor())) {
+				String[] authors = res.getAuthor().split(",");
+				List<Predicate> authorPredicates = new ArrayList<>();
+				for (String author : authors) {
+					String trimmed = author == null ? "" : author.trim();
+					if (!trimmed.isEmpty()) {
+						authorPredicates.add(cb.like(root.get("author"), "%" + trimmed + "%"));
+					}
+				}
+				if (!authorPredicates.isEmpty()) {
+					predicates.add(cb.or(authorPredicates.toArray(new Predicate[0])));
+				}
+			}
+			String effectiveAuthorUid = StringUtil.isString(res.getAuthoruid()) ? res.getAuthoruid().trim()
+					: (StringUtil.isString(res.getSecuid()) ? res.getSecuid().trim() : null);
+			if (StringUtil.isString(effectiveAuthorUid)) {
+				String safeUid = effectiveAuthorUid.trim();
+				predicates.add(cb.or(cb.equal(root.get("authoruid"), safeUid), cb.equal(root.get("secuid"), safeUid)));
+			}
+			if (StringUtil.isString(res.getPublishStart())) {
+				predicates.add(cb.greaterThanOrEqualTo(root.get("publishtime"), res.getPublishStart().trim() + " 00:00:00"));
+			}
+			if (StringUtil.isString(res.getPublishEnd())) {
+				predicates.add(cb.lessThanOrEqualTo(root.get("publishtime"), res.getPublishEnd().trim() + " 23:59:59"));
+			}
+		}
+		return predicates.toArray(new Predicate[0]);
+	}
+
+	private Order[] buildGraphicOrders(GraphicContentEntity res, Root<GraphicContentEntity> root, CriteriaBuilder cb) {
+		String sortField = resolveGraphicSortField(res == null ? null : res.getSortField());
+		String sortOrder = resolveSortOrder(res == null ? null : res.getSortOrder());
+		if ("id".equals(sortField)) {
+			return "asc".equalsIgnoreCase(sortOrder)
+					? new Order[] { cb.asc(root.get("id")) }
+					: new Order[] { cb.desc(root.get("id")) };
+		}
+		return "asc".equalsIgnoreCase(sortOrder)
+				? new Order[] { cb.asc(root.get(sortField)), cb.desc(root.get("id")) }
+				: new Order[] { cb.desc(root.get(sortField)), cb.desc(root.get("id")) };
+	}
+
+	private GraphicContentEntity toLiteGraphicEntity(Tuple tuple) {
+		GraphicContentEntity item = new GraphicContentEntity();
+		if (tuple == null) {
+			return item;
+		}
+		item.setId(tuple.get("id", Integer.class));
+		item.setOriginaladdress(tuple.get("originaladdress", String.class));
+		item.setVideoid(tuple.get("videoid", String.class));
+		item.setPlatform(tuple.get("platform", String.class));
+		item.setTitle(tuple.get("title", String.class));
+		item.setContent(tuple.get("content", String.class));
+		item.setImages(tuple.get("images", String.class));
+		item.setAuthor(tuple.get("author", String.class));
+		item.setAuthoruid(tuple.get("authoruid", String.class));
+		item.setAuthorusername(tuple.get("authorusername", String.class));
+		item.setAuthoravatar(tuple.get("authoravatar", String.class));
+		item.setSecuid(tuple.get("secuid", String.class));
+		item.setUniqueid(tuple.get("uniqueid", String.class));
+		item.setCreatetime(tuple.get("createtime", Date.class));
+		item.setPublishtime(tuple.get("publishtime", String.class));
+		item.setSourceurl(tuple.get("sourceurl", String.class));
+		return item;
+	}
 
 	private String resolveGraphicSortField(String requestedField) {
 		String candidate = StringUtil.isString(requestedField) ? requestedField : Global.graphicListSortField;

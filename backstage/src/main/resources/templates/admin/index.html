@@ -423,6 +423,31 @@
             box-shadow: 0 3px 12px rgba(0,0,0,0.32);
         }
 
+        .feed-controls.profile-open #feedAuthorBtn {
+            display: none !important;
+        }
+
+        .feed-author-link-btn {
+            width: 48px;
+            min-height: 42px;
+            border: 0;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.42);
+            color: #fff;
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            font-size: 11px;
+            line-height: 1;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.28);
+        }
+
+        .feed-author-link-btn i {
+            font-size: 19px;
+        }
+
         .feed-author-action-avatar {
             width: 100%;
             height: 100%;
@@ -1315,7 +1340,8 @@
             }
 
             .feed-control-btn,
-            .feed-author-avatar-btn {
+            .feed-author-avatar-btn,
+            .feed-author-link-btn {
                 width: 42px;
                 height: 42px;
             }
@@ -1429,9 +1455,6 @@
                                     </button>
                                     <button type="button" class="feed-control-btn" id="feedAuthorBtn" title="作者筛选">
                                         <i class="mdi mdi-account"></i><span>全部</span>
-                                    </button>
-                                    <button type="button" class="feed-control-btn" id="feedAllMediaBtn" title="回到全部作品" style="display:none;">
-                                        <i class="mdi mdi-arrow-left"></i><span>全部</span>
                                     </button>
                                     <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
                                         <i class="mdi mdi-volume-off"></i><span>静音</span>
@@ -2050,7 +2073,7 @@
         return html;
     }
 
-    function buildFeedAuthorActionHtml(item, isPrivate, authorValue) {
+    function buildFeedAuthorActionHtmlLegacy(item, isPrivate, authorValue) {
         if (isPrivate) {
             return '';
         }
@@ -2075,6 +2098,58 @@
         html += '<span class="feed-author-action-avatar">' + avatarHtml + '</span>';
         html += '</button></div>';
         return html;
+    }
+
+    function buildFeedAuthorActionHtml(item, isPrivate, authorValue) {
+        if (isPrivate) {
+            return '';
+        }
+        item = item || {};
+        var authorUid = item.profileAuthorUid || item.authoruid || '';
+        var authorUsername = item.authorusername || '';
+        var rawAuthor = authorValue || item.author || item.videoauthor || '';
+        var sourceUrl = safeExternalUrl(item.sourceurl || item.sourceUrl || item.originaladdress || item.originalAddress || '');
+        if (!rawAuthor && !authorUid && !authorUsername && !sourceUrl) {
+            return '';
+        }
+        var authorName = rawAuthor || 'Unknown';
+        var avatar = item.authoravatar || item.authorAvatar || '';
+        var avatarHtml = avatar
+            ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(authorName) + '" onerror="this.parentNode.textContent=\'' + escapeHtml(authorInitial(authorName)) + '\'">'
+            : escapeHtml(authorInitial(authorName));
+        var html = '<div class="feed-author-action-rail">';
+        if (rawAuthor || authorUid || authorUsername || avatar) {
+            html += '<button type="button" class="feed-author-avatar-btn" title="作者主页"'
+                + ' data-platform="' + escapeHtml(item.platform || item.videoplatform || '') + '"'
+                + ' data-author="' + escapeHtml(authorName || '') + '"'
+                + ' data-authoruid="' + escapeHtml(authorUid) + '"'
+                + ' data-authorusername="' + escapeHtml(authorUsername) + '"'
+                + ' data-authoravatar="' + escapeHtml(avatar || '') + '">';
+            html += '<span class="feed-author-action-avatar">' + avatarHtml + '</span>';
+            html += '</button>';
+        }
+        if (sourceUrl) {
+            html += '<button type="button" class="feed-author-link-btn feed-origin-link-btn" title="原链" data-url="' + escapeHtml(sourceUrl) + '"><i class="mdi mdi-link-variant"></i><span>原链</span></button>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function safeExternalUrl(url) {
+        var value = (url || '').toString().trim();
+        return /^https?:\/\//i.test(value) ? value : '';
+    }
+
+    function buildAuthorPlatformUrl(platform, authorUid) {
+        var uid = (authorUid || '').toString().trim();
+        if (!uid) {
+            return '';
+        }
+        var p = (platform || '').toString().toLowerCase();
+        if (p.indexOf('douyin') >= 0 || p.indexOf('抖音') >= 0) {
+            return 'https://www.douyin.com/user/' + encodeURIComponent(uid);
+        }
+        return '';
     }
 
     function authorInitial(name) {
@@ -3384,13 +3459,13 @@
         });
 
         $('#feedAuthorBtn').on('click', function() {
+            if (feedAuthorContext) {
+                clearFeedAuthorContext();
+                reloadFeed();
+                return;
+            }
             $('#feedAuthorDrawer').toggleClass('open');
             renderFeedAuthorDrawer();
-        });
-
-        $('#feedAllMediaBtn').on('click', function() {
-            clearFeedAuthorContext();
-            reloadFeed();
         });
 
         $('#feedMuteBtn').on('click', function() {
@@ -3441,11 +3516,20 @@
             });
         });
 
+        $('#videoFeed').on('click', '.feed-origin-link-btn', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var url = safeExternalUrl(this.getAttribute('data-url') || '');
+            if (url) {
+                window.open(url, '_blank', 'noopener');
+            }
+        });
+
         $('#feedAuthorProfileClose').on('click', function() {
             if (feedProfileLoader) {
                 feedProfileLoader.cancel();
             }
-            $('#feedAuthorProfileDrawer').removeClass('open');
+            closeFeedAuthorProfileDrawer();
         });
 
         $('#feedAuthorProfileTabs').on('click', '.feed-author-profile-tab', function() {
@@ -3567,8 +3651,13 @@
             if (drawer.contains(e.target) || (e.target.closest && e.target.closest('.feed-author-avatar-btn'))) {
                 return;
             }
-            drawer.classList.remove('open');
+            closeFeedAuthorProfileDrawer();
         });
+    }
+
+    function closeFeedAuthorProfileDrawer() {
+        $('#feedAuthorProfileDrawer').removeClass('open');
+        $('#feedControls').removeClass('profile-open');
     }
 
     function openFeedAuthorProfile(query) {
@@ -3578,6 +3667,7 @@
         $('#feedAuthorProfileTabs .feed-author-profile-tab').removeClass('active');
         $('#feedAuthorProfileTabs .feed-author-profile-tab[data-type=""]').addClass('active');
         $('#feedAuthorProfileDrawer').addClass('open');
+        $('#feedControls').addClass('profile-open');
         $('#feedAuthorProfileHeader').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
         $('#feedAuthorProfileBody').html('<div style="padding:12px;color:#cbd5e1;">Loading...</div>');
         $.get('/admin/api/authorProfileSummary', feedAuthorProfileQuery, function(res) {
@@ -3668,6 +3758,7 @@
     function clearFeedAuthorContext() {
         feedAuthorContext = null;
         feedAuthorContextTargetKey = '';
+        $('#feedAuthorDrawer').removeClass('open');
     }
 
     function buildFeedAuthorContextLabel(query) {
@@ -3715,7 +3806,7 @@
             preloaded: true,
             pageSize: 100
         };
-        $('#feedAuthorProfileDrawer').removeClass('open');
+        closeFeedAuthorProfileDrawer();
         if (!feedController) {
             feedController = new window.AdminFeed.FeedController(feedStore, {
                 keyOf: getFeedItemKey,
@@ -3804,7 +3895,7 @@
         var uid = summary.authoruid || fallback.authoruid || '';
         var platform = summary.platform || fallback.platform || '';
         var avatar = summary.avatar || fallback.authoravatar || '';
-        var homepage = summary.homepage || '';
+        var homepage = summary.homepage || buildAuthorPlatformUrl(platform, uid);
         var signature = summary.signature || fallback.signature || '';
         var heroImage = avatar ? 'url("' + cssUrlEscape(avatar) + '")' : 'none';
         var avatarHtml = avatar ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(name) + '">' : escapeHtml(authorInitial(name));
@@ -3840,10 +3931,10 @@
         html += '<div class="feed-author-profile-action"><i class="mdi mdi-account-group"></i><div><strong>作者档案</strong><span>' + (uid ? escapeHtml(uid) : '本地资料') + '</span></div></div>';
         html += '<div class="feed-author-profile-action"><i class="mdi mdi-link-variant"></i><div><strong>主页</strong><span>' + (homepage ? '打开原站' : '暂无链接') + '</span></div></div>';
         html += '</div>';
-        html += homepage ? '<button type="button" class="feed-author-profile-follow" onclick="window.open(\'' + escapeJsString(homepage) + '\', \'_blank\')">进入主页</button>' : '<button type="button" class="feed-author-profile-follow">+ 关注</button>';
+        html += homepage ? '<button type="button" class="feed-author-profile-follow" onclick="window.open(\'' + escapeJsString(homepage) + '\', \'_blank\', \'noopener\')">主页</button>' : '<button type="button" class="feed-author-profile-follow" disabled>主页</button>';
         $('#feedAuthorProfileHeader').html(html);
         $('#feedAuthorProfileBack').off('click').on('click', function() {
-            $('#feedAuthorProfileDrawer').removeClass('open');
+            closeFeedAuthorProfileDrawer();
         });
         $('#feedAuthorProfileSearchBtn').off('click').on('click', function() {
             $('#feedAuthorProfileSearchBox').toggleClass('open');
@@ -4254,11 +4345,11 @@
     }
 
     function isControlElement(target) {
-        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-author-profile-drawer'));
+        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer'));
     }
 
     function isFeedInteractiveTarget(target) {
-        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-author-profile-drawer, .feed-playlist-drawer, .feed-author-drawer, .feed-controls'));
+        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer, .feed-playlist-drawer, .feed-author-drawer, .feed-controls'));
     }
 
     function isCurrentFeedVideo(videoEl) {
@@ -4548,14 +4639,16 @@
         $('#feedMediaTypeBtn i').attr('class', mediaTypeIcon);
         $('#feedMediaTypeBtn span').text(mediaTypeText);
         var authorText = feedAuthor && feedAuthor.trim() !== '' ? feedAuthor : '全部';
-        if (feedAuthorContext && feedAuthorContext.label) {
-            authorText = feedAuthorContext.label;
-        }
         if (authorText.length > 4) {
             authorText = authorText.substring(0, 4) + '…';
         }
-        $('#feedAuthorBtn span').text(authorText);
-        $('#feedAllMediaBtn').toggle(!!feedAuthorContext);
+        var inAuthorContext = !!feedAuthorContext;
+        $('#videoFeed').toggleClass('feed-author-context', inAuthorContext);
+        $('#feedAuthorBtn')
+            .attr('title', inAuthorContext ? '回到全部作品' : '作者筛选')
+            .toggleClass('is-return-mode', inAuthorContext);
+        $('#feedAuthorBtn i').attr('class', inAuthorContext ? 'mdi mdi-arrow-left' : 'mdi mdi-account');
+        $('#feedAuthorBtn span').text(inAuthorContext ? '返回全部' : authorText);
         $('#feedMuteBtn i').attr('class', feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high');
         $('#feedMuteBtn span').text(feedMuted ? '静音' : '有声');
         var autoNext = feedPlaybackMode === 'auto_next';

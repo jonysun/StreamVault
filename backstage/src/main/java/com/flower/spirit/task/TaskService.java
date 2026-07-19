@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.flower.spirit.config.Global;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.FfmpegQueueService;
@@ -33,23 +34,34 @@ public class TaskService {
 	
 	@Scheduled(fixedDelay = 1000*5)
 	public void taskCheckStatus() {
+		if (Global.isDownloadPaused()) {
+			return;
+		}
 		ffmpegQueueService.taskCheckStatus();
 	}
 	
 	@Scheduled(fixedDelay = 1000*5)
 	public void taskMergeTasks() {
+		if (Global.isDownloadPaused()) {
+			return;
+		}
 		ffmpegQueueService.taskMergeTasks();
 	}
 
 	@Scheduled(fixedDelay = 1000*8)
 	public void hlsQueueTick() {
+		if (Global.isHlsPaused()) {
+			return;
+		}
 		hlsTranscodeService.processQueueTick(false);
 	}
 	
 	@Scheduled(cron = "0 0 9 * * ?")
 	public void isNeedRefreshAndUpdate() {
 		try {
-			biliConfigService.isNeedRefreshAndUpdate();
+			if (!Global.isCollectPaused()) {
+				biliConfigService.isNeedRefreshAndUpdate();
+			}
 		} catch (Exception e) {
 			logger.error("[TaskService] bili refresh task failed", e);
 		}

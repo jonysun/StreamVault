@@ -120,9 +120,12 @@ class CollectDataServiceStatusTest {
 	void buildFetchSnapshotTruncatesAsValidJsonAtItemBoundary() {
 		CollectDataService service = new CollectDataService();
 		JSONArray items = new JSONArray();
-		for (int i = 0; i < 80; i++) {
+		for (int i = 0; i < 200; i++) {
 			JSONObject item = douyinItem("work-" + i, "2026-07-05 23-28-46");
 			item.put("desc", "x".repeat(4000));
+			if (i % 4 == 0) {
+				item.put("video_play_addr", new JSONArray());
+			}
 			items.add(item);
 		}
 
@@ -130,9 +133,11 @@ class CollectDataServiceStatusTest {
 		JSONArray parsed = JSONArray.parseArray(snapshot);
 		JSONObject marker = parsed.getJSONObject(parsed.size() - 1);
 
-		assertThat(snapshot.length()).isLessThanOrEqualTo(200000);
+		assertThat(snapshot.length()).isLessThanOrEqualTo(500000);
 		assertThat(marker.getBooleanValue("snapshot_truncated")).isTrue();
-		assertThat(marker.getInteger("total_count")).isEqualTo(80);
+		assertThat(marker.getInteger("total_count")).isEqualTo(200);
+		assertThat(marker.getInteger("video_total")).isEqualTo(150);
+		assertThat(marker.getInteger("image_total")).isEqualTo(50);
 	}
 
 	@Test
@@ -153,6 +158,24 @@ class CollectDataServiceStatusTest {
 
 		assertThat(stats.videoCount()).isEqualTo(1);
 		assertThat(stats.imageCount()).isEqualTo(1);
+	}
+
+	@Test
+	void parseSnapshotMediaStatsUsesSummaryWhenSnapshotWasTruncated() {
+		JSONArray snapshot = new JSONArray();
+		JSONObject video = new JSONObject();
+		video.put("has_video_play_addr", true);
+		snapshot.add(video);
+		JSONObject marker = new JSONObject();
+		marker.put("snapshot_truncated", true);
+		marker.put("video_total", 150);
+		marker.put("image_total", 50);
+		snapshot.add(marker);
+
+		CollectDataService.SnapshotMediaStats stats = CollectDataService.parseSnapshotMediaStats(snapshot.toJSONString());
+
+		assertThat(stats.videoCount()).isEqualTo(150);
+		assertThat(stats.imageCount()).isEqualTo(50);
 	}
 
 	@Test

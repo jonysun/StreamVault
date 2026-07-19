@@ -110,7 +110,7 @@ class MediaFeedServiceTest {
 		graphic.setImages("[\"/graphic.jpeg\"]");
 		when(videoDataService.findPage(any(VideoDataEntity.class), eq(true)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(video), Pageable.ofSize(2), 1)));
-		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+		when(graphicContentService.findLitePage(any(GraphicContentEntity.class)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(graphic), Pageable.ofSize(2), 1)));
 
 		AjaxEntity response = service.findPage(request);
@@ -132,7 +132,7 @@ class MediaFeedServiceTest {
 		request.setSecuid("MS4wLjABAAAAstable");
 		when(videoDataService.findPage(any(VideoDataEntity.class), eq(true)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)));
-		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+		when(graphicContentService.findLitePage(any(GraphicContentEntity.class)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)));
 
 		service.findPage(request);
@@ -140,7 +140,7 @@ class MediaFeedServiceTest {
 		ArgumentCaptor<VideoDataEntity> videoCaptor = ArgumentCaptor.forClass(VideoDataEntity.class);
 		ArgumentCaptor<GraphicContentEntity> graphicCaptor = ArgumentCaptor.forClass(GraphicContentEntity.class);
 		verify(videoDataService).findPage(videoCaptor.capture(), eq(true));
-		verify(graphicContentService).findPage(graphicCaptor.capture());
+		verify(graphicContentService).findLitePage(graphicCaptor.capture());
 		assertThat(videoCaptor.getValue().getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
 		assertThat(videoCaptor.getValue().getSecuid()).isEqualTo("MS4wLjABAAAAstable");
 		assertThat(graphicCaptor.getValue().getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
@@ -161,7 +161,7 @@ class MediaFeedServiceTest {
 		Page<?> page = (Page<?>) service.findPage(request).getRecord();
 
 		assertThat(page.getContent()).extracting("mediaKey").containsExactly("video:1");
-		verify(graphicContentService, never()).findPage(any(GraphicContentEntity.class));
+		verify(graphicContentService, never()).findLitePage(any(GraphicContentEntity.class));
 	}
 
 	@Test
@@ -173,7 +173,7 @@ class MediaFeedServiceTest {
 		GraphicContentEntity graphic = new GraphicContentEntity();
 		graphic.setId(2);
 		graphic.setImages("[\"/graphic.jpeg\"]");
-		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+		when(graphicContentService.findLitePage(any(GraphicContentEntity.class)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(graphic), Pageable.ofSize(2), 1)));
 
 		Page<?> page = (Page<?>) service.findPage(request).getRecord();
@@ -202,7 +202,7 @@ class MediaFeedServiceTest {
 		graphic.setImages("[\"/graphic.jpeg\"]");
 		when(videoDataService.findPage(any(VideoDataEntity.class), eq(true)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(olderVideo, newerVideo), Pageable.ofSize(3), 2)));
-		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+		when(graphicContentService.findLitePage(any(GraphicContentEntity.class)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(graphic), Pageable.ofSize(3), 1)));
 
 		Page<?> page = (Page<?>) service.findPage(request).getRecord();
@@ -232,7 +232,7 @@ class MediaFeedServiceTest {
 						new PageImpl<>(List.of(publishedVideo), Pageable.ofSize(2), 2)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success",
 						new PageImpl<>(List.of(freshMissingPublishTime), Pageable.ofSize(2), 2)));
-		when(graphicContentService.findPage(any(GraphicContentEntity.class)))
+		when(graphicContentService.findLitePage(any(GraphicContentEntity.class)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)))
 				.thenReturn(new AjaxEntity(Global.ajax_success, "success", new PageImpl<>(List.of(), Pageable.ofSize(2), 0)));
 
