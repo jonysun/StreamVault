@@ -86,6 +86,22 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	private String sourceurl;
 
 	private String favorite;
+
+	@Column(length = 64)
+	private String platformkey;
+
+	@Column(length = 32)
+	private String contenttype;
+
+	@Column(length = 512)
+	private String authorhomepage;
+
+	@Lob
+	private String metadataoverrides;
+
+	private Date metadataeditedat;
+
+	private String metadataeditedby;
 	
 	
 	
@@ -237,6 +253,54 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	public void setFavorite(String favorite) {
 		this.favorite = favorite;
+	}
+
+	public String getPlatformkey() {
+		return platformkey;
+	}
+
+	public void setPlatformkey(String platformkey) {
+		this.platformkey = platformkey;
+	}
+
+	public String getContenttype() {
+		return contenttype;
+	}
+
+	public void setContenttype(String contenttype) {
+		this.contenttype = contenttype;
+	}
+
+	public String getAuthorhomepage() {
+		return authorhomepage;
+	}
+
+	public void setAuthorhomepage(String authorhomepage) {
+		this.authorhomepage = authorhomepage;
+	}
+
+	public String getMetadataoverrides() {
+		return metadataoverrides;
+	}
+
+	public void setMetadataoverrides(String metadataoverrides) {
+		this.metadataoverrides = metadataoverrides;
+	}
+
+	public Date getMetadataeditedat() {
+		return metadataeditedat;
+	}
+
+	public void setMetadataeditedat(Date metadataeditedat) {
+		this.metadataeditedat = metadataeditedat;
+	}
+
+	public String getMetadataeditedby() {
+		return metadataeditedby;
+	}
+
+	public void setMetadataeditedby(String metadataeditedby) {
+		this.metadataeditedby = metadataeditedby;
 	}
 
 	public String getVideoauthor() {

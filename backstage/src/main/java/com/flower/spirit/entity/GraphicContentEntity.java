@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
+import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
@@ -64,6 +65,28 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	private String publishtime;
 
 	private String sourceurl;
+
+	@Column(length = 64)
+	private String platformkey;
+
+	@Column(length = 32)
+	private String contenttype;
+
+	@Column(length = 512)
+	private String authorhomepage;
+
+	@Lob
+	private String metadataoverrides;
+
+	private Date metadataeditedat;
+
+	private String metadataeditedby;
+
+	@Column(length = 32)
+	private String privacy;
+
+	@Column(length = 32)
+	private String favorite;
 
 	@Transient
 	private String publishStart;
@@ -223,6 +246,70 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	public void setSourceurl(String sourceurl) {
 		this.sourceurl = sourceurl;
+	}
+
+	public String getPlatformkey() {
+		return platformkey;
+	}
+
+	public void setPlatformkey(String platformkey) {
+		this.platformkey = platformkey;
+	}
+
+	public String getContenttype() {
+		return contenttype;
+	}
+
+	public void setContenttype(String contenttype) {
+		this.contenttype = contenttype;
+	}
+
+	public String getAuthorhomepage() {
+		return authorhomepage;
+	}
+
+	public void setAuthorhomepage(String authorhomepage) {
+		this.authorhomepage = authorhomepage;
+	}
+
+	public String getMetadataoverrides() {
+		return metadataoverrides;
+	}
+
+	public void setMetadataoverrides(String metadataoverrides) {
+		this.metadataoverrides = metadataoverrides;
+	}
+
+	public Date getMetadataeditedat() {
+		return metadataeditedat;
+	}
+
+	public void setMetadataeditedat(Date metadataeditedat) {
+		this.metadataeditedat = metadataeditedat;
+	}
+
+	public String getMetadataeditedby() {
+		return metadataeditedby;
+	}
+
+	public void setMetadataeditedby(String metadataeditedby) {
+		this.metadataeditedby = metadataeditedby;
+	}
+
+	public String getPrivacy() {
+		return privacy;
+	}
+
+	public void setPrivacy(String privacy) {
+		this.privacy = privacy;
+	}
+
+	public String getFavorite() {
+		return favorite;
+	}
+
+	public void setFavorite(String favorite) {
+		this.favorite = favorite;
 	}
 
 	public String getPublishStart() {

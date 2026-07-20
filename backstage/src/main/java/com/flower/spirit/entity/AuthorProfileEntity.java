@@ -6,6 +6,7 @@ import java.util.Date;
 import com.flower.spirit.common.DataEntity;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.Column;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -26,6 +27,9 @@ public class AuthorProfileEntity extends DataEntity<AuthorProfileEntity> impleme
 
 	private String platform;
 
+	@Column(length = 64)
+	private String platformkey;
+
 	private String authoruid;
 
 	private String username;
@@ -36,6 +40,7 @@ public class AuthorProfileEntity extends DataEntity<AuthorProfileEntity> impleme
 
 	private String homepage;
 
+	@Column(length = 1024)
 	private String signature;
 
 	private Date createtime;
@@ -59,6 +64,14 @@ public class AuthorProfileEntity extends DataEntity<AuthorProfileEntity> impleme
 
 	public void setPlatform(String platform) {
 		this.platform = platform;
+	}
+
+	public String getPlatformkey() {
+		return platformkey;
+	}
+
+	public void setPlatformkey(String platformkey) {
+		this.platformkey = platformkey;
 	}
 
 	public String getAuthoruid() {
