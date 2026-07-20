@@ -802,6 +802,52 @@
             overflow: hidden;
         }
 
+        .feed-center-play-btn {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            z-index: 7;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 72px;
+            height: 72px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.58);
+            color: #fff;
+            font-size: 42px;
+            line-height: 1;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transform: translate(-50%, -50%) scale(0.92);
+            transition: opacity .16s ease, transform .16s ease, background-color .16s ease;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+
+        .feed-center-play-btn i {
+            margin-left: 4px;
+        }
+
+        .feed-item.feed-video-paused .feed-center-play-btn {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .feed-item.feed-video-paused .feed-center-play-btn:hover,
+        .feed-item.feed-video-paused .feed-center-play-btn:focus-visible {
+            background: rgba(0, 0, 0, 0.76);
+            transform: translate(-50%, -50%) scale(1.06);
+            outline: 2px solid rgba(255, 255, 255, 0.85);
+            outline-offset: 3px;
+        }
+
         .feed-video-cover {
             position: absolute;
             inset: 0;
@@ -2221,6 +2267,7 @@
         html += '<div class="feed-debug-panel"></div>';
         html += '<div class="feed-source-badge"><i class="mdi mdi-file-video"></i><span>MP4</span></div>';
         html += buildFeedAuthorActionHtml(item, isPrivate, authorValue);
+        html += '<button type="button" class="feed-center-play-btn" title="播放" aria-label="播放" aria-hidden="true" tabindex="-1"><i class="mdi mdi-play"></i></button>';
         html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '">';
         html += '<div class="feed-controls-topline"><span class="feed-controls-time">0:00 / 0:00</span><div class="feed-controls-actions"><button type="button" class="feed-inline-btn feed-play-toggle" title="鎾斁/鏆傚仠"><i class="mdi mdi-play"></i></button><button type="button" class="feed-inline-btn feed-mute-toggle" title="闈欓煶"><i class="mdi mdi-volume-' + (feedMuted ? 'off' : 'high') + '"></i></button><button type="button" class="feed-inline-btn feed-fullscreen-toggle" title="鍏ㄥ睆"><i class="mdi mdi-fullscreen"></i></button></div></div>';
         html += '<div class="feed-progress-track"><div class="feed-progress-buffer"></div><div class="feed-progress-played"></div><div class="feed-progress-thumb"></div></div>';
@@ -2580,11 +2627,12 @@
     }
 
     function bindFeedVideoControls() {
-        $('#videoFeed .feed-video').off('click');
+        $('#videoFeed').off('click.feedVideoToggle', '.feed-video');
+        $('#videoFeed').off('touchstart.feedVideoControls', '.feed-video');
         $('#videoFeed .feed-item').off('mouseenter mouseleave');
         $('#videoFeed .feed-bottom-hover-zone').off('mouseenter mouseleave');
         $('#videoFeed .feed-progress-track').off('mousedown click');
-        $('#videoFeed .feed-play-toggle, #videoFeed .feed-mute-toggle, #videoFeed .feed-fullscreen-toggle').off('click');
+        $('#videoFeed .feed-center-play-btn, #videoFeed .feed-play-toggle, #videoFeed .feed-mute-toggle, #videoFeed .feed-fullscreen-toggle').off('click');
         $('#videoFeed .feed-item').on('mouseenter', function() {
             var badge = this.querySelector('.feed-source-badge');
             if (badge) {
@@ -2614,7 +2662,7 @@
                 item.classList.remove('controls-visible');
             }
         });
-        $('#videoFeed .feed-video').on('touchstart', function() {
+        $('#videoFeed').on('touchstart.feedVideoControls', '.feed-video', function() {
             var self = this;
             var badge = self.parentNode ? self.parentNode.querySelector('.feed-source-badge') : null;
             if (badge) {
@@ -2636,11 +2684,20 @@
                 }
             }, 1800);
         });
-        $('#videoFeed .feed-video').on('click', function(e) {
+        $('#videoFeed').on('click.feedVideoToggle', '.feed-video', function(e) {
             if (isFeedInteractiveTarget(e.target)) {
                 return;
             }
             toggleCurrentFeedVideo(this);
+        });
+        $('#videoFeed .feed-center-play-btn').on('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var item = this.closest('.feed-item');
+            var video = item ? item.querySelector('.feed-video') : null;
+            if (video) {
+                toggleCurrentFeedVideo(video);
+            }
         });
         $('#videoFeed .feed-play-toggle').on('click', function(e) {
             e.stopPropagation();
@@ -4152,6 +4209,14 @@
         if (!itemEl) {
             return;
         }
+        var videoEl = itemEl.querySelector('.feed-video');
+        var centerPlayBtn = itemEl.querySelector('.feed-center-play-btn');
+        var showCenterPlay = !!(videoEl && isCurrentFeedVideo(videoEl) && videoEl.paused);
+        itemEl.classList.toggle('feed-video-paused', showCenterPlay);
+        if (centerPlayBtn) {
+            centerPlayBtn.setAttribute('aria-hidden', showCenterPlay ? 'false' : 'true');
+            centerPlayBtn.tabIndex = showCenterPlay ? 0 : -1;
+        }
         var controls = itemEl.querySelector('.feed-custom-controls');
         if (!controls) {
             return;
@@ -4345,11 +4410,11 @@
     }
 
     function isControlElement(target) {
-        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer'));
+        return !!(target && target.closest && target.closest('.feed-center-play-btn, .feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer'));
     }
 
     function isFeedInteractiveTarget(target) {
-        return !!(target && target.closest && target.closest('.feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer, .feed-playlist-drawer, .feed-author-drawer, .feed-controls'));
+        return !!(target && target.closest && target.closest('.feed-center-play-btn, .feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer, .feed-playlist-drawer, .feed-author-drawer, .feed-controls'));
     }
 
     function isCurrentFeedVideo(videoEl) {
