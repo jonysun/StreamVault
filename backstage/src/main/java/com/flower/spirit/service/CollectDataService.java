@@ -49,6 +49,7 @@ import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.DouyinSourceUrlUtil;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.FileNameTemplateUtil;
@@ -803,7 +804,7 @@ public class CollectDataService {
 					String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(sourceUid, authorUid);
 					authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, dyNickname,
 							avatar,
-							authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null,
+							AuthorIdentityUtil.douyinHomepage(authorUidForSave),
 							signature);
 					videoDataEntity.setAuthoruid(authorUidForSave);
 					videoDataEntity.setSecuid(authorUidForSave);
@@ -2211,7 +2212,7 @@ public class CollectDataService {
 			return;
 		}
 		authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, avatar,
-				"https://www.douyin.com/user/" + authorUidForSave, signature);
+				AuthorIdentityUtil.douyinHomepage(authorUidForSave), signature);
 		logger.info("[CollectTask] author prefill runId={} authorUid={} uniqueId={} nickname={}",
 				runId, authorUidForSave, uniqueId, nickname);
 	}

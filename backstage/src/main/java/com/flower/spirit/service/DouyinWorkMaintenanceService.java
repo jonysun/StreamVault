@@ -28,6 +28,7 @@ import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.DouyinSourceUrlUtil;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.HttpUtil;
@@ -293,7 +294,7 @@ public class DouyinWorkMaintenanceService {
 		target.setCreatetime(new Date());
 		if (authorProfileService != null) {
 			authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, avatar,
-					!isBlank(authorUidForSave) ? "https://www.douyin.com/user/" + authorUidForSave : null, signature);
+					AuthorIdentityUtil.douyinHomepage(authorUidForSave), signature);
 		}
 	}
 
@@ -367,7 +368,7 @@ public class DouyinWorkMaintenanceService {
 		target.setCreatetime(new Date());
 		if (authorProfileService != null) {
 			authorProfileService.upsertAuthor("抖音", snapshot.authorUid, snapshot.uniqueId, snapshot.nickname, snapshot.avatar,
-					!isBlank(snapshot.authorUid) ? "https://www.douyin.com/user/" + snapshot.authorUid : null,
+					AuthorIdentityUtil.douyinHomepage(snapshot.authorUid),
 					snapshot.signature);
 		}
 		Files.deleteIfExists(Paths.get(taskout));
@@ -392,8 +393,9 @@ public class DouyinWorkMaintenanceService {
 		String uniqueId = author.getString("unique_id");
 		String nickname = author.getString("nickname");
 		String avatar = DouUtil.extractAvatar(author);
-		if (isBlank(item.getAuthoruid()) && !isBlank(secUid)) { item.setAuthoruid(secUid); changed = true; }
-		if (isBlank(item.getSecuid()) && !isBlank(secUid)) { item.setSecuid(secUid); changed = true; }
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(item.getPlatform(), item.getAuthoruid(), secUid);
+		if (canonicalUid != null && !canonicalUid.equals(item.getAuthoruid())) { item.setAuthoruid(canonicalUid); changed = true; }
+		if (canonicalUid != null && !canonicalUid.equals(item.getSecuid())) { item.setSecuid(canonicalUid); changed = true; }
 		if (isBlank(item.getAuthorusername()) && !isBlank(uniqueId)) { item.setAuthorusername(uniqueId); changed = true; }
 		if (isBlank(item.getUniqueid()) && !isBlank(uniqueId)) { item.setUniqueid(uniqueId); changed = true; }
 		if (isBlank(item.getAuthor()) && !isBlank(nickname)) { item.setAuthor(nickname); changed = true; }
@@ -403,8 +405,9 @@ public class DouyinWorkMaintenanceService {
 
 	private boolean setIfBlankVideoAuthor(VideoDataEntity video, String secUid, String uniqueId, String nickname, String avatar) {
 		boolean changed = false;
-		if (isBlank(video.getAuthoruid()) && !isBlank(secUid)) { video.setAuthoruid(secUid); changed = true; }
-		if (isBlank(video.getSecuid()) && !isBlank(secUid)) { video.setSecuid(secUid); changed = true; }
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), secUid);
+		if (canonicalUid != null && !canonicalUid.equals(video.getAuthoruid())) { video.setAuthoruid(canonicalUid); changed = true; }
+		if (canonicalUid != null && !canonicalUid.equals(video.getSecuid())) { video.setSecuid(canonicalUid); changed = true; }
 		if (isBlank(video.getAuthorusername()) && !isBlank(uniqueId)) { video.setAuthorusername(uniqueId); changed = true; }
 		if (isBlank(video.getUniqueid()) && !isBlank(uniqueId)) { video.setUniqueid(uniqueId); changed = true; }
 		if (isBlank(video.getVideoauthor()) && !isBlank(nickname)) { video.setVideoauthor(nickname); changed = true; }

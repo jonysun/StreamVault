@@ -27,6 +27,7 @@ class DouyinSourceUrlUtilTest {
 	@Test
 	void graphicSourceUrlRequiresAuthorUidAndAwemeId() {
 		assertThat(DouyinSourceUrlUtil.graphic(null, "7622696915705286079")).isNull();
+		assertThat(DouyinSourceUrlUtil.graphic("84583932458", "7622696915705286079")).isNull();
 		assertThat(DouyinSourceUrlUtil.graphic("MS4w", null)).isNull();
 	}
 }

@@ -30,6 +30,7 @@ import com.flower.spirit.dto.AdminVideoListItem;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 
 @Service
 public class MediaFeedService {
@@ -190,7 +191,9 @@ public class MediaFeedService {
 		item.setPlatform(graphic.getPlatform());
 		item.setAuthor(graphic.getAuthor());
 		item.setAuthoruid(graphic.getAuthoruid());
+		item.setSecuid(graphic.getSecuid());
 		item.setAuthorusername(graphic.getAuthorusername());
+		item.setUniqueid(graphic.getUniqueid());
 		item.setAuthoravatar(graphic.getAuthoravatar());
 		item.setTitle(graphic.getTitle());
 		item.setDesc(graphic.getContent());
@@ -200,6 +203,7 @@ public class MediaFeedService {
 		item.setSourceurl(graphic.getSourceurl());
 		item.setOriginaladdress(graphic.getOriginaladdress());
 		item.setSlides(slides);
+		normalizeAuthorIdentity(item);
 		return item;
 	}
 
@@ -217,7 +221,9 @@ public class MediaFeedService {
 			item.setPlatform(video.getVideoplatform());
 			item.setAuthor(video.getVideoauthor());
 			item.setAuthoruid(video.getAuthoruid());
+			item.setSecuid(video.getSecuid());
 			item.setAuthorusername(video.getAuthorusername());
+			item.setUniqueid(video.getUniqueid());
 			item.setAuthoravatar(video.getAuthoravatar());
 			item.setTitle(video.getVideoname());
 			item.setDesc(video.getVideodesc());
@@ -231,6 +237,7 @@ public class MediaFeedService {
 			item.setOriginaladdress(video.getOriginaladdress());
 			item.setFavorite(video.getFavorite());
 			item.setPrivacy(video.getVideoprivacy());
+			normalizeAuthorIdentity(item);
 			return item;
 		}
 		if (row instanceof VideoDataEntity video) {
@@ -448,16 +455,33 @@ public class MediaFeedService {
 	}
 
 	private void enrichDisplayAuthor(AdminMediaFeedItem item) {
-		if (authorProfileDao == null || item == null || item.getAuthoruid() == null || item.getAuthoruid().trim().isEmpty()
+		if (item == null) {
+			return;
+		}
+		normalizeAuthorIdentity(item);
+		String canonicalUid = item.getAuthoruid();
+		if (authorProfileDao == null || canonicalUid == null
 				|| item.getPlatform() == null || item.getPlatform().trim().isEmpty()) {
 			return;
 		}
-		authorProfileDao.findByPlatformAndAuthoruid(item.getPlatform().trim(), item.getAuthoruid().trim())
+		authorProfileDao.findByPlatformAndAuthoruid(item.getPlatform().trim(), canonicalUid)
 				.map(AuthorProfileEntity::getDisplayname)
 				.filter(name -> name != null && !name.trim().isEmpty())
 				.ifPresent(name -> {
 					item.setDisplayAuthor(name.trim());
-					item.setProfileAuthorUid(item.getAuthoruid());
+					item.setProfileAuthorUid(canonicalUid);
 				});
+	}
+
+	private void normalizeAuthorIdentity(AdminMediaFeedItem item) {
+		if (item == null) {
+			return;
+		}
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(item.getPlatform(), item.getAuthoruid(), item.getSecuid());
+		String canonicalUsername = AuthorIdentityUtil.canonicalUsername(item.getAuthorusername(), item.getUniqueid());
+		item.setAuthoruid(canonicalUid);
+		item.setSecuid(canonicalUid);
+		item.setAuthorusername(canonicalUsername);
+		item.setUniqueid(canonicalUsername);
 	}
 }

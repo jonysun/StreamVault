@@ -56,7 +56,7 @@ public class NativeVideoItem {
         String title = first(obj, "title", "videoname");
         String desc = first(obj, "desc", "videodesc");
         String author = first(obj, "author", "videoauthor");
-        String authorId = first(obj, "authorId", "authoruid", "secuid", "uniqueid");
+        String authorId = canonicalAuthorId(obj);
         String authorAvatarUrl = first(obj, "authorAvatarUrl", "authoravatar");
         String authorDesc = first(obj, "authorDesc");
         String publishTime = first(obj, "publishTime", "publishtime", "createTime");
@@ -75,6 +75,15 @@ public class NativeVideoItem {
             if (!v.isEmpty()) return v;
         }
         return "";
+    }
+
+    private static String canonicalAuthorId(JSONObject obj) {
+        String platform = first(obj, "platform", "videoplatform").toLowerCase();
+        boolean douyin = "douyin".equals(platform) || platform.contains("抖音");
+        String secUid = first(obj, "secuid");
+        if (secUid.startsWith("MS4")) return secUid;
+        String authorId = first(obj, "authorId", "authoruid");
+        return !douyin || authorId.startsWith("MS4") ? authorId : "";
     }
 
     private static String value(String raw) {

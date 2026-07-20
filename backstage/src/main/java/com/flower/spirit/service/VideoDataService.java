@@ -26,6 +26,7 @@ import jakarta.persistence.criteria.Root;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -45,6 +46,7 @@ import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.dto.AdminVideoListItem;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.BiliUtil;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.StringUtil;
@@ -112,6 +114,7 @@ public class VideoDataService {
 			findAll = videoDataDao.findAll(specification, of);
 		}
 		if (findAll != null && findAll.getContent() != null) {
+			findAll = findAll.map(this::copyForResponse);
 			enrichVideoItems(findAll.getContent());
 		}
 		if (lite) {
@@ -171,7 +174,9 @@ public class VideoDataService {
 				root.get("videotag").alias("videotag"),
 				root.get("videoauthor").alias("videoauthor"),
 				root.get("authoruid").alias("authoruid"),
+				root.get("secuid").alias("secuid"),
 				root.get("authorusername").alias("authorusername"),
+				root.get("uniqueid").alias("uniqueid"),
 				root.get("authoravatar").alias("authoravatar"),
 				root.get("publishtime").alias("publishtime"),
 				root.get("createtime").alias("createtime"),
@@ -289,7 +294,9 @@ public class VideoDataService {
 		video.setVideotag(tuple.get("videotag", String.class));
 		video.setVideoauthor(tuple.get("videoauthor", String.class));
 		video.setAuthoruid(tuple.get("authoruid", String.class));
+		video.setSecuid(tuple.get("secuid", String.class));
 		video.setAuthorusername(tuple.get("authorusername", String.class));
+		video.setUniqueid(tuple.get("uniqueid", String.class));
 		video.setAuthoravatar(tuple.get("authoravatar", String.class));
 		video.setPublishtime(tuple.get("publishtime", String.class));
 		video.setCreatetime(tuple.get("createtime", Date.class));
@@ -309,6 +316,7 @@ public class VideoDataService {
 			long seed = randomSeed == null ? System.nanoTime() : randomSeed.hashCode();
 			java.util.Collections.shuffle(list, new java.util.Random(seed));
 		}
+		list = list.stream().map(this::copyForResponse).toList();
 		enrichVideoItems(list);
 		return new AjaxEntity(Global.ajax_success, "查询成功", list);
 	}
@@ -462,6 +470,21 @@ public class VideoDataService {
 				item.setHlsstatus("未完成");
 			}
 		}
+	}
+
+	private VideoDataEntity copyForResponse(VideoDataEntity source) {
+		VideoDataEntity target = new VideoDataEntity();
+		if (source == null) {
+			return target;
+		}
+		BeanUtils.copyProperties(source, target, "pageNo", "pageSize");
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(source.getVideoplatform(), source.getAuthoruid(), source.getSecuid());
+		String canonicalUsername = AuthorIdentityUtil.canonicalUsername(source.getAuthorusername(), source.getUniqueid());
+		target.setAuthoruid(canonicalUid);
+		target.setSecuid(canonicalUid);
+		target.setAuthorusername(canonicalUsername);
+		target.setUniqueid(canonicalUsername);
+		return target;
 	}
 
 	/**

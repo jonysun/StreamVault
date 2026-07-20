@@ -161,7 +161,53 @@ function testIncrementalProfileActivation(window) {
     assert.strictEqual(store.state.page, 0);
 }
 
+function extractFunction(source, name) {
+    const start = source.indexOf('function ' + name + '(');
+    assert.ok(start >= 0, 'missing function ' + name);
+    const bodyStart = source.indexOf('{', start);
+    let depth = 0;
+    for (let i = bodyStart; i < source.length; i += 1) {
+        if (source[i] === '{') depth += 1;
+        if (source[i] === '}') depth -= 1;
+        if (depth === 0) return source.slice(start, i + 1);
+    }
+    throw new Error('unterminated function ' + name);
+}
+
+function testFeedOriginalUrlNormalization() {
+    const html = fs.readFileSync(
+        path.resolve(__dirname, '../../main/resources/templates/admin/index.html'),
+        'utf8'
+    );
+    const names = ['safeExternalUrl', 'isDouyinFeedPlatform', 'canonicalFeedAuthorUid', 'buildFeedOriginalUrl'];
+    const context = vm.createContext({ Array, encodeURIComponent });
+    vm.runInContext(names.map((name) => extractFunction(html, name)).join('\n'), context);
+
+    assert.strictEqual(context.buildFeedOriginalUrl({
+        type: 'graphic',
+        platform: 'douyin',
+        videoid: '7622696915705286079',
+        authoruid: '84583932458',
+        secuid: 'MS4wLjABAAAAstable',
+        sourceurl: 'https://www.douyin.com/user/84583932458?modal_id=7622696915705286079'
+    }), 'https://www.douyin.com/user/MS4wLjABAAAAstable?modal_id=7622696915705286079');
+    assert.strictEqual(context.buildFeedOriginalUrl({
+        type: 'graphic',
+        platform: 'douyin',
+        videoid: '7622696915705286079',
+        authoruid: '84583932458',
+        sourceurl: 'https://www.douyin.com/user/84583932458?modal_id=7622696915705286079'
+    }), '');
+    assert.strictEqual(context.buildFeedOriginalUrl({
+        type: 'video',
+        platform: 'douyin',
+        videoid: '7622696915705286079',
+        slides: []
+    }), 'https://www.douyin.com/video/7622696915705286079');
+}
+
 const window = loadModules();
 testPlayerReuse(window);
 testIncrementalProfileActivation(window);
+testFeedOriginalUrlNormalization();
 console.log('admin-feed module tests passed');

@@ -28,8 +28,9 @@ class AdminVideoListItemTest {
 		video.setVideoprivacy("0");
 		video.setVideotag("tag");
 		video.setVideoauthor("author");
-		video.setAuthoruid("MS4w");
-		video.setAuthorusername("author-name");
+		video.setAuthoruid("84583932458");
+		video.setSecuid("MS4wLjABAAAAstable");
+		video.setUniqueid("author-name");
 		video.setPublishtime("2026-06-28 11:17:55");
 		video.setCreatetime(new Date(1_000L));
 		video.setHlsstatus("ready");
@@ -49,10 +50,26 @@ class AdminVideoListItemTest {
 		assertThat(item.getVideoname()).isEqualTo("title");
 		assertThat(item.getVideodesc()).isEqualTo("summary");
 		assertThat(item.getVideoauthor()).isEqualTo("author");
+		assertThat(item.getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(item.getSecuid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(item.getAuthorusername()).isEqualTo("author-name");
+		assertThat(item.getUniqueid()).isEqualTo("author-name");
 		assertThat(item.getPublishtime()).isEqualTo("2026-06-28 11:17:55");
 		assertThat(item.getPlayurl()).isEqualTo("/video.m3u8");
 		assertThat(item.getVideounrealaddr()).isEqualTo("/video.mp4");
 		assertThat(item.getOriginaladdress()).isEqualTo("https://example.test/original");
 		assertThat(properties).doesNotContain("jsonData", "videoinfo", "videoaddr");
+	}
+
+	@Test
+	void fromSuppressesNumericDouyinUidWithoutCanonicalSecUid() {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setVideoplatform("douyin");
+		video.setAuthoruid("84583932458");
+
+		AdminVideoListItem item = AdminVideoListItem.from(video);
+
+		assertThat(item.getAuthoruid()).isNull();
+		assertThat(item.getSecuid()).isNull();
 	}
 }

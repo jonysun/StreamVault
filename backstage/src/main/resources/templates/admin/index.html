@@ -92,6 +92,15 @@
             background: rgba(0, 0, 0, 0.62);
         }
 
+        .feed-control-btn:disabled {
+            opacity: 0.38;
+            cursor: not-allowed;
+        }
+
+        .feed-control-btn:disabled:hover {
+            background: rgba(0, 0, 0, 0.45);
+        }
+
         .feed-control-btn i {
             font-size: 18px;
             line-height: 1;
@@ -403,7 +412,7 @@
         .feed-author-action-rail {
             position: absolute;
             right: 16px;
-            bottom: 414px;
+            bottom: 470px;
             z-index: 6;
             display: flex;
             flex-direction: column;
@@ -425,27 +434,6 @@
 
         .feed-controls.profile-open #feedAuthorBtn {
             display: none !important;
-        }
-
-        .feed-author-link-btn {
-            width: 48px;
-            min-height: 42px;
-            border: 0;
-            border-radius: 6px;
-            background: rgba(0,0,0,0.42);
-            color: #fff;
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 2px;
-            font-size: 11px;
-            line-height: 1;
-            box-shadow: 0 3px 12px rgba(0,0,0,0.28);
-        }
-
-        .feed-author-link-btn i {
-            font-size: 19px;
         }
 
         .feed-author-action-avatar {
@@ -1386,8 +1374,7 @@
             }
 
             .feed-control-btn,
-            .feed-author-avatar-btn,
-            .feed-author-link-btn {
+            .feed-author-avatar-btn {
                 width: 42px;
                 height: 42px;
             }
@@ -1410,7 +1397,7 @@
 
             .feed-author-action-rail {
                 right: 10px;
-                bottom: 362px;
+                bottom: 410px;
             }
 
             .feed-playlist-drawer {
@@ -1501,6 +1488,9 @@
                                     </button>
                                     <button type="button" class="feed-control-btn" id="feedAuthorBtn" title="作者筛选">
                                         <i class="mdi mdi-account"></i><span>全部</span>
+                                    </button>
+                                    <button type="button" class="feed-control-btn" id="feedOriginBtn" title="当前作品没有原链" disabled>
+                                        <i class="mdi mdi-link-variant"></i><span>原链</span>
                                     </button>
                                     <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
                                         <i class="mdi mdi-volume-off"></i><span>静音</span>
@@ -2022,7 +2012,9 @@
         var titleValue = item.title || item.videoname || 'Untitled';
         var platformValue = item.platform || item.videoplatform || 'Unknown';
         var authorValue = item.displayAuthor || item.author || item.videoauthor || 'Unknown';
-        item.authoruid = item.profileAuthorUid || item.authoruid;
+        item.authoruid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+        item.secuid = item.authoruid;
+        item.profileAuthorUid = item.authoruid;
         var timeValue = item.publishTime || item.publishtime || item.createTime || item.createtime;
         if (itemType === 'graphic') {
             return buildGraphicFeedItemHtml(item, isPrivate, titleValue, platformValue, authorValue, timeValue);
@@ -2048,7 +2040,7 @@
         html += '<div class="feed-title">' + safeTitle + '</div>';
         var authorChip = '';
         if (!isPrivate && safeAuthor !== '未知作者') {
-            authorChip = '<span class="feed-author-chip" data-author="' + escapeHtml(safeAuthor) + '" data-authoruid="' + escapeHtml(item.profileAuthorUid || item.authoruid || '') + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + escapeHtml(safeAuthor) + '" data-authoruid="' + escapeHtml(item.authoruid || '') + '">' + safeAuthor + '</span>';
         }
         html += '<div class="feed-meta">' + safePlatform + ' · ' + timeText + authorChip + '</div>';
         html += '</div>';
@@ -2123,9 +2115,12 @@
         if (isPrivate) {
             return '';
         }
-        var authorUid = item.profileAuthorUid || item.authoruid || '';
-        var authorUsername = item.authorusername || '';
+        var authorUid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+        var authorUsername = item.authorusername || item.uniqueid || '';
         var rawAuthor = authorValue || item.author || item.videoauthor || '';
+        if (isDouyinFeedPlatform(item.platform || item.videoplatform) && !authorUid) {
+            return '';
+        }
         if (!rawAuthor && !authorUid && !authorUsername) {
             return '';
         }
@@ -2151,11 +2146,13 @@
             return '';
         }
         item = item || {};
-        var authorUid = item.profileAuthorUid || item.authoruid || '';
-        var authorUsername = item.authorusername || '';
+        var authorUid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+        var authorUsername = item.authorusername || item.uniqueid || '';
         var rawAuthor = authorValue || item.author || item.videoauthor || '';
-        var sourceUrl = safeExternalUrl(item.sourceurl || item.sourceUrl || item.originaladdress || item.originalAddress || '');
-        if (!rawAuthor && !authorUid && !authorUsername && !sourceUrl) {
+        if (isDouyinFeedPlatform(item.platform || item.videoplatform) && !authorUid) {
+            return '';
+        }
+        if (!rawAuthor && !authorUid && !authorUsername) {
             return '';
         }
         var authorName = rawAuthor || 'Unknown';
@@ -2174,9 +2171,6 @@
             html += '<span class="feed-author-action-avatar">' + avatarHtml + '</span>';
             html += '</button>';
         }
-        if (sourceUrl) {
-            html += '<button type="button" class="feed-author-link-btn feed-origin-link-btn" title="原链" data-url="' + escapeHtml(sourceUrl) + '"><i class="mdi mdi-link-variant"></i><span>原链</span></button>';
-        }
         html += '</div>';
         return html;
     }
@@ -2186,8 +2180,49 @@
         return /^https?:\/\//i.test(value) ? value : '';
     }
 
+    function buildFeedOriginalUrl(item) {
+        item = item || {};
+        var platform = item.platform || item.videoplatform || '';
+        var fallback = safeExternalUrl(item.sourceurl || item.sourceUrl || item.originaladdress || item.originalAddress || '');
+        if (!isDouyinFeedPlatform(platform)) {
+            return fallback;
+        }
+        var workId = (item.videoid || '').toString().trim();
+        var isGraphic = item.type === 'graphic'
+            || (!item.type && Array.isArray(item.slides) && item.slides.length > 0);
+        if (isGraphic) {
+            var authorUid = canonicalFeedAuthorUid(platform, item.profileAuthorUid, item.secuid, item.authoruid);
+            return authorUid && workId
+                ? 'https://www.douyin.com/user/' + encodeURIComponent(authorUid) + '?modal_id=' + encodeURIComponent(workId)
+                : '';
+        }
+        if (workId) {
+            return 'https://www.douyin.com/video/' + encodeURIComponent(workId);
+        }
+        return /https?:\/\/(?:www\.)?douyin\.com\/video\/[^/?#]+/i.test(fallback) ? fallback : '';
+    }
+
+    function isDouyinFeedPlatform(platform) {
+        var value = (platform || '').toString().trim().toLowerCase();
+        return value === 'douyin' || value.indexOf('抖音') >= 0;
+    }
+
+    function canonicalFeedAuthorUid(platform) {
+        var candidates = Array.prototype.slice.call(arguments, 1);
+        for (var i = 0; i < candidates.length; i++) {
+            var value = (candidates[i] || '').toString().trim();
+            if (!value) {
+                continue;
+            }
+            if (!isDouyinFeedPlatform(platform) || value.indexOf('MS4') === 0) {
+                return value;
+            }
+        }
+        return '';
+    }
+
     function buildAuthorPlatformUrl(platform, authorUid) {
-        var uid = (authorUid || '').toString().trim();
+        var uid = canonicalFeedAuthorUid(platform, authorUid);
         if (!uid) {
             return '';
         }
@@ -2196,6 +2231,13 @@
             return 'https://www.douyin.com/user/' + encodeURIComponent(uid);
         }
         return '';
+    }
+
+    function sanitizeAuthorHomepage(platform, authorUid, homepage) {
+        if (isDouyinFeedPlatform(platform)) {
+            return buildAuthorPlatformUrl(platform, authorUid);
+        }
+        return safeExternalUrl(homepage);
     }
 
     function authorInitial(name) {
@@ -2220,7 +2262,7 @@
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
-        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, item.profileAuthorUid || item.authoruid || '');
+        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, item.authoruid || '');
         html += buildFeedAuthorActionHtml(item, isPrivate, authorValue);
         html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '"></div>';
         html += '<div class="feed-bottom-hover-zone"></div>';
@@ -2234,7 +2276,9 @@
         var titleValue = item.title || item.videoname || 'Untitled';
         var platformValue = item.platform || item.videoplatform || 'Unknown';
         var authorValue = item.displayAuthor || item.author || item.videoauthor || 'Unknown';
-        item.authoruid = item.profileAuthorUid || item.authoruid;
+        item.authoruid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+        item.secuid = item.authoruid;
+        item.profileAuthorUid = item.authoruid;
         var timeValue = item.publishTime || item.publishtime || item.createTime || item.createtime;
         if (itemType === 'graphic') {
             return buildGraphicFeedItemHtml(item, isPrivate, titleValue, platformValue, authorValue, timeValue);
@@ -2259,7 +2303,7 @@
         html += '<div class="feed-title">' + safeTitle + '</div>';
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.profileAuthorUid || item.authoruid || '') + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.authoruid || '') + '">' + safeAuthor + '</span>';
         }
         html += '<div class="feed-meta">' + safePlatform + ' | ' + timeText + authorChip + '</div>';
         html += '</div>';
@@ -2384,6 +2428,7 @@
         if (absIndex >= 0 && absIndex !== feedCurrentAbsIndex) {
             feedCurrentAbsIndex = absIndex;
             renderFeedPlaylist();
+            updateFeedButtons();
         }
         itemEl.setAttribute('data-graphic-running', '1');
         pauseOtherFeedVideos(null);
@@ -2503,6 +2548,7 @@
             $('#videoFeed').empty();
             feedRenderedCenterIndex = -1;
             renderFeedPlaylist();
+            updateFeedButtons();
             return;
         }
         document.querySelectorAll('#videoFeed .feed-item').forEach(function(item) {
@@ -2524,6 +2570,7 @@
         prewarmFeedIndexWindow(items, current, feedScrollDirection);
         renderFeedPlaylist();
         renderFeedAuthorDrawer();
+        updateFeedButtons();
         var remaining = feedAllItems.length - 1 - current;
         if (remaining <= feedPrefetchPageThreshold && hasMore && !isLoading) {
             page++;
@@ -3036,6 +3083,7 @@
             }
             feedCurrentAbsIndex = ownerIndex;
             renderFeedPlaylist();
+            updateFeedButtons();
         }
         var playToken = (videoEl._playRequestToken || 0) + 1;
         videoEl._playRequestToken = playToken;
@@ -3525,6 +3573,13 @@
             renderFeedAuthorDrawer();
         });
 
+        $('#feedOriginBtn').on('click', function() {
+            var url = safeExternalUrl(this.getAttribute('data-url') || '');
+            if (url) {
+                window.open(url, '_blank', 'noopener');
+            }
+        });
+
         $('#feedMuteBtn').on('click', function() {
             feedMuted = !feedMuted;
             persistFeedMuted();
@@ -3571,15 +3626,6 @@
                 authorusername: this.getAttribute('data-authorusername') || '',
                 authoravatar: this.getAttribute('data-authoravatar') || ''
             });
-        });
-
-        $('#videoFeed').on('click', '.feed-origin-link-btn', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            var url = safeExternalUrl(this.getAttribute('data-url') || '');
-            if (url) {
-                window.open(url, '_blank', 'noopener');
-            }
         });
 
         $('#feedAuthorProfileClose').on('click', function() {
@@ -3948,11 +3994,11 @@
     function renderFeedAuthorProfileHeader(summary, fallback) {
         fallback = fallback || {};
         var name = summary.displayname || fallback.author || 'Unknown';
-        var username = summary.username || fallback.authorusername || '';
-        var uid = summary.authoruid || fallback.authoruid || '';
         var platform = summary.platform || fallback.platform || '';
+        var username = summary.username || fallback.authorusername || fallback.uniqueid || '';
+        var uid = canonicalFeedAuthorUid(platform, summary.authoruid, fallback.authoruid, fallback.secuid);
         var avatar = summary.avatar || fallback.authoravatar || '';
-        var homepage = summary.homepage || buildAuthorPlatformUrl(platform, uid);
+        var homepage = sanitizeAuthorHomepage(platform, uid, summary.homepage || '');
         var signature = summary.signature || fallback.signature || '';
         var heroImage = avatar ? 'url("' + cssUrlEscape(avatar) + '")' : 'none';
         var avatarHtml = avatar ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(name) + '">' : escapeHtml(authorInitial(name));
@@ -3971,7 +4017,9 @@
         html += '<div class="feed-author-profile-stat"><strong>' + compactCount(summary.graphicCount || 0) + '</strong><span>图文</span></div>';
         html += '</div>';
         html += '<div class="feed-author-profile-bio">';
-        html += escapeHtml(signature || name) + '\n';
+        if (signature) {
+            html += escapeHtml(signature) + '\n';
+        }
         if (uid) {
             html += 'UID: ' + escapeHtml(uid) + '\n';
         }
@@ -4410,11 +4458,11 @@
     }
 
     function isControlElement(target) {
-        return !!(target && target.closest && target.closest('.feed-center-play-btn, .feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer'));
+        return !!(target && target.closest && target.closest('.feed-center-play-btn, .feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-author-profile-drawer'));
     }
 
     function isFeedInteractiveTarget(target) {
-        return !!(target && target.closest && target.closest('.feed-center-play-btn, .feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-origin-link-btn, .feed-author-profile-drawer, .feed-playlist-drawer, .feed-author-drawer, .feed-controls'));
+        return !!(target && target.closest && target.closest('.feed-center-play-btn, .feed-custom-controls, .feed-debug-btn, .feed-author-chip, .feed-author-avatar-btn, .feed-author-profile-drawer, .feed-playlist-drawer, .feed-author-drawer, .feed-controls'));
     }
 
     function isCurrentFeedVideo(videoEl) {
@@ -4613,9 +4661,10 @@
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
             var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
-            var uid = (list[i].profileAuthorUid || list[i].authoruid || '').trim();
+            var uid = canonicalFeedAuthorUid(list[i].platform || list[i].videoplatform,
+                    list[i].profileAuthorUid, list[i].secuid, list[i].authoruid);
             var key = uid ? ('uid:' + uid) : ('name:' + author);
-            if (!author || feedAuthorSet[key]) {
+            if (!author || (isDouyinFeedPlatform(list[i].platform || list[i].videoplatform) && !uid) || feedAuthorSet[key]) {
                 continue;
             }
             feedAuthorSet[key] = {
@@ -4684,9 +4733,10 @@
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
             var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
-            var uid = (list[i].profileAuthorUid || list[i].authoruid || '').trim();
+            var uid = canonicalFeedAuthorUid(list[i].platform || list[i].videoplatform,
+                    list[i].profileAuthorUid, list[i].secuid, list[i].authoruid);
             var key = uid ? ('uid:' + uid) : ('name:' + author);
-            if (!author || feedAuthorSet[key]) {
+            if (!author || (isDouyinFeedPlatform(list[i].platform || list[i].videoplatform) && !uid) || feedAuthorSet[key]) {
                 continue;
             }
             feedAuthorSet[key] = {
@@ -4714,6 +4764,12 @@
             .toggleClass('is-return-mode', inAuthorContext);
         $('#feedAuthorBtn i').attr('class', inAuthorContext ? 'mdi mdi-arrow-left' : 'mdi mdi-account');
         $('#feedAuthorBtn span').text(inAuthorContext ? '返回全部' : authorText);
+        var currentItem = feedCurrentAbsIndex >= 0 ? (feedAllItems[feedCurrentAbsIndex] || {}) : {};
+        var originUrl = buildFeedOriginalUrl(currentItem);
+        $('#feedOriginBtn')
+            .attr('data-url', originUrl)
+            .attr('title', originUrl ? '打开原作品' : '当前作品没有原链')
+            .prop('disabled', !originUrl);
         $('#feedMuteBtn i').attr('class', feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high');
         $('#feedMuteBtn span').text(feedMuted ? '静音' : '有声');
         var autoNext = feedPlaybackMode === 'auto_next';

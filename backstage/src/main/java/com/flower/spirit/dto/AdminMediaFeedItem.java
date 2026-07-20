@@ -15,7 +15,9 @@ public class AdminMediaFeedItem {
 	private String displayAuthor;
 	private String profileAuthorUid;
 	private String authoruid;
+	private String secuid;
 	private String authorusername;
+	private String uniqueid;
 	private String authoravatar;
 	private String title;
 	private String desc;
@@ -103,12 +105,28 @@ public class AdminMediaFeedItem {
 		this.authoruid = authoruid;
 	}
 
+	public String getSecuid() {
+		return secuid;
+	}
+
+	public void setSecuid(String secuid) {
+		this.secuid = secuid;
+	}
+
 	public String getAuthorusername() {
 		return authorusername;
 	}
 
 	public void setAuthorusername(String authorusername) {
 		this.authorusername = authorusername;
+	}
+
+	public String getUniqueid() {
+		return uniqueid;
+	}
+
+	public void setUniqueid(String uniqueid) {
+		this.uniqueid = uniqueid;
 	}
 
 	public String getAuthoravatar() {

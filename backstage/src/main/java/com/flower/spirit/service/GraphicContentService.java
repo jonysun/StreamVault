@@ -17,6 +17,7 @@ import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -28,6 +29,7 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.entity.GraphicContentEntity;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.StringUtil;
 
@@ -117,6 +119,7 @@ public class GraphicContentService {
 	    };
 
 	    Page<GraphicContentEntity> findAll = graphicContentDao.findAll(specification, pageRequest);
+	    findAll = findAll.map(this::copyForResponse);
 	    return new AjaxEntity(Global.ajax_success, "数据获取成功", findAll);
 	}
 
@@ -249,7 +252,27 @@ public class GraphicContentService {
 		item.setCreatetime(tuple.get("createtime", Date.class));
 		item.setPublishtime(tuple.get("publishtime", String.class));
 		item.setSourceurl(tuple.get("sourceurl", String.class));
+		normalizeResponseIdentity(item, item);
 		return item;
+	}
+
+	private GraphicContentEntity copyForResponse(GraphicContentEntity source) {
+		GraphicContentEntity target = new GraphicContentEntity();
+		if (source == null) {
+			return target;
+		}
+		BeanUtils.copyProperties(source, target, "pageNo", "pageSize");
+		normalizeResponseIdentity(source, target);
+		return target;
+	}
+
+	private void normalizeResponseIdentity(GraphicContentEntity source, GraphicContentEntity target) {
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(source.getPlatform(), source.getAuthoruid(), source.getSecuid());
+		String canonicalUsername = AuthorIdentityUtil.canonicalUsername(source.getAuthorusername(), source.getUniqueid());
+		target.setAuthoruid(canonicalUid);
+		target.setSecuid(canonicalUid);
+		target.setAuthorusername(canonicalUsername);
+		target.setUniqueid(canonicalUsername);
 	}
 
 	private String resolveGraphicSortField(String requestedField) {

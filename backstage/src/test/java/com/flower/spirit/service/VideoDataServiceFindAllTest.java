@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -99,6 +100,51 @@ class VideoDataServiceFindAllTest {
 		AjaxEntity response = videoDataService.findPage(request);
 
 		assertThat(response.getResCode()).isEqualTo(Global.ajax_success);
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void findAllSanitizesDouyinIdentityWithoutMutatingStoredEntity() {
+		boolean previousHlsEnable = Global.hlsEnable;
+		try {
+			Global.hlsEnable = false;
+			VideoDataEntity stored = video(9, "video.mp4");
+			stored.setVideoplatform("douyin");
+			stored.setAuthoruid("84583932458");
+			stored.setSecuid("MS4wLjABAAAAstable");
+			stored.setUniqueid("public_handle");
+			when(videoDataDao.findAll(any(Specification.class))).thenReturn(new ArrayList<>(List.of(stored)));
+
+			List<VideoDataEntity> response = (List<VideoDataEntity>) videoDataService.findAll(new VideoDataEntity()).getRecord();
+
+			assertThat(response).hasSize(1);
+			assertThat(response.get(0)).isNotSameAs(stored);
+			assertThat(response.get(0).getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
+			assertThat(response.get(0).getSecuid()).isEqualTo("MS4wLjABAAAAstable");
+			assertThat(response.get(0).getAuthorusername()).isEqualTo("public_handle");
+			assertThat(response.get(0).getUniqueid()).isEqualTo("public_handle");
+			assertThat(stored.getAuthoruid()).isEqualTo("84583932458");
+		} finally {
+			Global.hlsEnable = previousHlsEnable;
+		}
+	}
+
+	@Test
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	void findPageSuppressesNumericDouyinUidWithoutCanonicalSecUid() {
+		VideoDataEntity request = new VideoDataEntity();
+		VideoDataEntity stored = video(10, "video.mp4");
+		stored.setVideoplatform("douyin");
+		stored.setAuthoruid("84583932458");
+		when(videoDataDao.findAll(any(Specification.class), any(Pageable.class)))
+				.thenAnswer(invocation -> new PageImpl<>(List.of(stored), invocation.getArgument(1), 1));
+
+		Page<VideoDataEntity> response = (Page<VideoDataEntity>) videoDataService.findPage(request).getRecord();
+
+		assertThat(response.getContent()).hasSize(1);
+		assertThat(response.getContent().get(0).getAuthoruid()).isNull();
+		assertThat(response.getContent().get(0).getSecuid()).isNull();
+		assertThat(stored.getAuthoruid()).isEqualTo("84583932458");
 	}
 
 	private VideoDataEntity video(Integer id, String playUrl) {
