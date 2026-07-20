@@ -3,6 +3,7 @@ package com.flower.spirit.dto;
 import java.util.Date;
 
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 
 public class AdminVideoListItem {
 
@@ -18,7 +19,9 @@ public class AdminVideoListItem {
 	private String videotag;
 	private String videoauthor;
 	private String authoruid;
+	private String secuid;
 	private String authorusername;
+	private String uniqueid;
 	private String authoravatar;
 	private String publishtime;
 	private Date createtime;
@@ -43,8 +46,12 @@ public class AdminVideoListItem {
 		item.setVideoprivacy(video.getVideoprivacy());
 		item.setVideotag(video.getVideotag());
 		item.setVideoauthor(video.getVideoauthor());
-		item.setAuthoruid(video.getAuthoruid());
-		item.setAuthorusername(video.getAuthorusername());
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
+		String canonicalUsername = AuthorIdentityUtil.canonicalUsername(video.getAuthorusername(), video.getUniqueid());
+		item.setAuthoruid(canonicalUid);
+		item.setSecuid(canonicalUid);
+		item.setAuthorusername(canonicalUsername);
+		item.setUniqueid(canonicalUsername);
 		item.setAuthoravatar(video.getAuthoravatar());
 		item.setPublishtime(video.getPublishtime());
 		item.setCreatetime(video.getCreatetime());
@@ -151,12 +158,28 @@ public class AdminVideoListItem {
 		this.authoruid = authoruid;
 	}
 
+	public String getSecuid() {
+		return secuid;
+	}
+
+	public void setSecuid(String secuid) {
+		this.secuid = secuid;
+	}
+
 	public String getAuthorusername() {
 		return authorusername;
 	}
 
 	public void setAuthorusername(String authorusername) {
 		this.authorusername = authorusername;
+	}
+
+	public String getUniqueid() {
+		return uniqueid;
+	}
+
+	public void setUniqueid(String uniqueid) {
+		this.uniqueid = uniqueid;
 	}
 
 	public String getAuthoravatar() {

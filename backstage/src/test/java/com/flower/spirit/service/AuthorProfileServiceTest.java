@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
+import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -16,10 +18,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.dao.AuthorNameHistoryDao;
 import com.flower.spirit.dao.AuthorProfileDao;
+import com.flower.spirit.dao.GraphicContentDao;
+import com.flower.spirit.dao.VideoDataDao;
+import com.flower.spirit.dto.AdminAuthorProfileSummary;
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 
@@ -31,6 +38,12 @@ class AuthorProfileServiceTest {
 
 	@Mock
 	private AuthorNameHistoryDao authorNameHistoryDao;
+
+	@Mock
+	private VideoDataDao videoDataDao;
+
+	@Mock
+	private GraphicContentDao graphicContentDao;
 
 	@InjectMocks
 	private AuthorProfileService service;
@@ -83,6 +96,118 @@ class AuthorProfileServiceTest {
 	}
 
 	@Test
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	void profileSummaryRejectsNumericDouyinUidAndHomepageButKeepsUsernameFallback() {
+		when(videoDataDao.count(any(Specification.class))).thenReturn(0L);
+		when(graphicContentDao.count(any(Specification.class))).thenReturn(0L);
+
+		AdminAuthorProfileSummary summary = (AdminAuthorProfileSummary) service
+				.findProfileSummary("抖音", "84583932458", "public_handle", "display")
+				.getRecord();
+
+		assertThat(summary.getAuthoruid()).isNull();
+		assertThat(summary.getUsername()).isEqualTo("public_handle");
+		assertThat(summary.getHomepage()).isNull();
+		verify(authorProfileDao, never()).findByPlatformAndAuthoruid("抖音", "84583932458");
+		verify(authorProfileDao, never()).findAll(any(Specification.class), any(Pageable.class));
+	}
+
+	@Test
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	void profileSummaryBuildsHomepageFromCanonicalDouyinUid() {
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setPlatform("抖音");
+		profile.setAuthoruid("MS4wLjABAAAAstable");
+		profile.setDisplayname("display");
+		when(authorProfileDao.findByPlatformAndAuthoruid("抖音", "MS4wLjABAAAAstable"))
+				.thenReturn(Optional.of(profile));
+		when(videoDataDao.count(any(Specification.class))).thenReturn(0L);
+		when(graphicContentDao.count(any(Specification.class))).thenReturn(0L);
+
+		AdminAuthorProfileSummary summary = (AdminAuthorProfileSummary) service
+				.findProfileSummary("抖音", "MS4wLjABAAAAstable", null, "display")
+				.getRecord();
+
+		assertThat(summary.getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(summary.getHomepage()).isEqualTo("https://www.douyin.com/user/MS4wLjABAAAAstable");
+	}
+
+	@Test
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	void profileSummaryDoesNotUseRejectedNumericUidAsAnUnboundedProfileLookup() {
+		when(videoDataDao.count(any(Specification.class))).thenReturn(0L);
+		when(graphicContentDao.count(any(Specification.class))).thenReturn(0L);
+
+		AdminAuthorProfileSummary summary = (AdminAuthorProfileSummary) service
+				.findProfileSummary("douyin", "84583932458", null, null)
+				.getRecord();
+
+		assertThat(summary.getAuthoruid()).isNull();
+		assertThat(summary.getTotalCount()).isZero();
+		verify(authorProfileDao, never()).findAll(any(Specification.class), any(Pageable.class));
+	}
+
+	@Test
+	void rebuildKeepsLegacyProfilesWhenNoCanonicalReplacementCanBeResolved() {
+		AuthorProfileEntity legacy = new AuthorProfileEntity();
+		legacy.setId(11);
+		legacy.setPlatform("抖音");
+		legacy.setAuthoruid("84583932458");
+		when(videoDataDao.findAll()).thenReturn(List.of());
+		when(graphicContentDao.findAll()).thenReturn(List.of());
+		when(authorProfileDao.findByPlatform("抖音")).thenReturn(List.of(legacy));
+
+		service.rebuildDouyinAuthors();
+
+		verify(authorProfileDao, never()).deleteAll(any(Iterable.class));
+		verify(authorProfileDao, never()).delete(any(AuthorProfileEntity.class));
+		verify(authorNameHistoryDao, never()).deleteByAuthorprofileid(11);
+	}
+
+	@Test
+	void mergeLegacyProfileMovesMetadataAndHistoryBeforeDeletingNumericProfile() throws Exception {
+		AuthorProfileEntity legacy = new AuthorProfileEntity();
+		legacy.setId(11);
+		legacy.setPlatform("douyin");
+		legacy.setAuthoruid("84583932458");
+		legacy.setDisplayname("old display");
+		legacy.setSignature("old signature");
+		legacy.setCreatetime(new Date(1_000L));
+		legacy.setUpdatetime(new Date(2_000L));
+		AuthorProfileEntity canonical = new AuthorProfileEntity();
+		canonical.setId(12);
+		canonical.setPlatform("douyin");
+		canonical.setAuthoruid("MS4wLjABAAAAstable");
+		canonical.setDisplayname("current display");
+		AuthorNameHistoryEntity oldHistory = new AuthorNameHistoryEntity();
+		oldHistory.setDisplayname("older display");
+		oldHistory.setFirstseentime(new Date(500L));
+		oldHistory.setLastseentime(new Date(800L));
+		when(authorProfileDao.findByPlatformAndAuthoruid("douyin", "84583932458"))
+				.thenReturn(Optional.of(legacy));
+		when(authorProfileDao.findByPlatformAndAuthoruid("douyin", "MS4wLjABAAAAstable"))
+				.thenReturn(Optional.of(canonical));
+		when(authorNameHistoryDao.findByAuthorProfileIdOrderByLastSeen(11)).thenReturn(List.of(oldHistory));
+		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(12, "old display"))
+				.thenReturn(Optional.empty());
+		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(12, "older display"))
+				.thenReturn(Optional.empty());
+
+		boolean merged = invokeMergeLegacyProfile(service, "douyin", "84583932458", "MS4wLjABAAAAstable");
+
+		assertThat(merged).isTrue();
+		assertThat(canonical.getDisplayname()).isEqualTo("current display");
+		assertThat(canonical.getSignature()).isEqualTo("old signature");
+		assertThat(canonical.getHomepage()).isEqualTo("https://www.douyin.com/user/MS4wLjABAAAAstable");
+		ArgumentCaptor<AuthorNameHistoryEntity> historyCaptor = ArgumentCaptor.forClass(AuthorNameHistoryEntity.class);
+		verify(authorNameHistoryDao, org.mockito.Mockito.times(2)).save(historyCaptor.capture());
+		assertThat(historyCaptor.getAllValues()).extracting(AuthorNameHistoryEntity::getDisplayname)
+				.containsExactlyInAnyOrder("old display", "older display");
+		verify(authorNameHistoryDao).deleteByAuthorprofileid(11);
+		verify(authorProfileDao).delete(legacy);
+	}
+
+	@Test
 	void extractProfileUserReturnsNullForNonUserPayload() throws Exception {
 		JSONObject payload = JSONObject.parseObject("{\"status_code\":1,\"message\":\"error\"}");
 
@@ -105,5 +230,13 @@ class AuthorProfileServiceTest {
 		Method method = AuthorProfileService.class.getDeclaredMethod("extractProfileUser", JSONObject.class);
 		method.setAccessible(true);
 		return (JSONObject) method.invoke(service, payload);
+	}
+
+	private boolean invokeMergeLegacyProfile(AuthorProfileService service, String platform, String legacyUid,
+			String canonicalUid) throws Exception {
+		Method method = AuthorProfileService.class.getDeclaredMethod("mergeLegacyProfile", String.class, String.class,
+				String.class);
+		method.setAccessible(true);
+		return (Boolean) method.invoke(service, platform, legacyUid, canonicalUid);
 	}
 }

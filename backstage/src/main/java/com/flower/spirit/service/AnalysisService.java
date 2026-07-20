@@ -36,6 +36,7 @@ import com.flower.spirit.utils.BiliUtil;
 import com.flower.spirit.utils.DateUtils;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.DouyinSourceUrlUtil;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.FileNameTemplateUtil;
@@ -833,7 +834,7 @@ public class AnalysisService {
 		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
 		videoDataEntity.setSourceurl(DouyinSourceUrlUtil.video(awemeId));
 		authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, map.get("avatar_thumb"),
-				authorUidForSave != null && !authorUidForSave.trim().isEmpty() ? "https://www.douyin.com/user/" + authorUidForSave : null);
+				AuthorIdentityUtil.douyinHomepage(authorUidForSave));
 		videoDataEntity.setAuthoruid(authorUidForSave);
 		videoDataEntity.setSecuid(authorUidForSave);
 		videoDataEntity.setAuthorusername(uniqueId);
@@ -842,7 +843,7 @@ public class AnalysisService {
 		// 生成元数据
 		if (Global.getGeneratenfo) {
 			// 下载发布者头像
-			String publisher = nickname + "-" + uid + ".png";
+			String publisher = nickname + "-" + authorUidForSave + ".png";
 			HttpUtil.downloadFileWithOkHttp(map.get("avatar_thumb"), publisher, coverdir, header);
 			if (null != Global.nfonetaddr && !"".equals(Global.nfonetaddr)) {
 				String publisherdir = FileUtil.generateDir(false, Global.platform.douyin.name(), true, filename, null,
@@ -850,7 +851,7 @@ public class AnalysisService {
 				// System.out.println(publisherdir);
 				publisher = Global.nfonetaddr + publisherdir + "/" + publisher + "?apptoken=" + Global.readonlytoken;
 			}
-			EmbyMetadataGenerator.createDouNfo(nickname, uid, publisher, create_time, awemeId,
+			EmbyMetadataGenerator.createDouNfo(nickname, authorUidForSave, publisher, create_time, awemeId,
 					desc, desc, coverfile, videofile);
 			videoDataEntity.setVideoauthor(nickname);
 		} else {

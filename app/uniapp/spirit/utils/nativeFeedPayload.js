@@ -1,5 +1,20 @@
 import { resolvePlayableSource } from './videoUrl.js'
 
+function canonicalAuthorId(video) {
+	const platform = String(video.videoplatform || video.platform || '').trim().toLowerCase()
+	const isDouyin = platform === 'douyin' || platform.indexOf('抖音') >= 0
+	const candidates = [video.secuid, video.authoruid, video.authorId]
+	for (let i = 0; i < candidates.length; i += 1) {
+		const value = String(candidates[i] || '').trim()
+		if (value && (!isDouyin || value.indexOf('MS4') === 0)) return value
+	}
+	return ''
+}
+
+function canonicalAuthorUsername(video) {
+	return String(video.authorusername || video.uniqueid || '').trim()
+}
+
 export function buildNativeFeedOptions({
 	videos,
 	currentIndex,
@@ -30,6 +45,8 @@ export function buildNativeFeedOptions({
 		videos: safeVideos.map(v => {
 			const mp4Url = v.videounrealaddr || v.mp4Url || ''
 			const hlsUrl = v.playurl || v.hlsUrl || ''
+			const authorId = canonicalAuthorId(v)
+			const authorUsername = canonicalAuthorUsername(v)
 			return {
 				id: v.id || v.videoid || '',
 				videoid: v.videoid || '',
@@ -42,7 +59,7 @@ export function buildNativeFeedOptions({
 				hlsUrl,
 				playSrc: v.playSrc || resolvePlayableSource(v, playbackSourceMode),
 				favorite: v.favorite || '0',
-				authorId: v.authoruid || v.authorId || '',
+				authorId,
 				authorAvatarUrl: v.authoravatar || v.authorAvatarUrl || '',
 				authorDesc: v.authorDesc || '',
 				originalUrl: v.sourceurl || v.originaladdress || '',
@@ -55,7 +72,11 @@ export function buildNativeFeedOptions({
 				playurl: hlsUrl,
 				sourceurl: v.sourceurl || '',
 				originaladdress: v.originaladdress || '',
-				authoruid: v.authoruid || '',
+				platform: v.videoplatform || v.platform || '',
+				authoruid: authorId,
+				secuid: authorId,
+				authorusername: authorUsername,
+				uniqueid: authorUsername,
 				authoravatar: v.authoravatar || ''
 			}
 		})

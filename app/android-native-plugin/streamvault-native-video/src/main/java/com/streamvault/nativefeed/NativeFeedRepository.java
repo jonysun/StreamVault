@@ -126,7 +126,7 @@ public class NativeFeedRepository {
                 first(obj, "title", "videoname"),
                 first(obj, "desc", "videodesc"),
                 first(obj, "author", "videoauthor"),
-                first(obj, "authorId", "authoruid", "secuid", "uniqueid"),
+                canonicalAuthorId(obj),
                 first(obj, "authorAvatarUrl", "authoravatar"),
                 first(obj, "authorDesc"),
                 first(obj, "publishTime", "publishtime", "createTime"),
@@ -145,6 +145,15 @@ public class NativeFeedRepository {
             if (value != null && !value.isEmpty()) return value;
         }
         return "";
+    }
+
+    private static String canonicalAuthorId(JSONObject obj) {
+        String platform = first(obj, "platform", "videoplatform").toLowerCase();
+        boolean douyin = "douyin".equals(platform) || platform.contains("抖音");
+        String secUid = first(obj, "secuid");
+        if (secUid.startsWith("MS4")) return secUid;
+        String authorId = first(obj, "authorId", "authoruid");
+        return !douyin || authorId.startsWith("MS4") ? authorId : "";
     }
 
     private static NativeVideoItem normalize(NativeVideoItem item, String serveraddr, String serverport, String token) {

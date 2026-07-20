@@ -15,6 +15,7 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.BlockedWorkDao;
 import com.flower.spirit.entity.BlockedWorkEntity;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 
 import jakarta.persistence.criteria.Predicate;
 
@@ -39,7 +40,7 @@ public class BlockedWorkService {
 		entity.setWorktype(workType.trim());
 		entity.setTitle(title);
 		entity.setAuthorname(authorName);
-		entity.setAuthoruid(authorUid);
+		entity.setAuthoruid(AuthorIdentityUtil.canonicalAuthorUid(platform, authorUid, authorUid));
 		entity.setSourceurl(sourceUrl);
 		entity.setReason(reason);
 		entity.setStatus("blocked");

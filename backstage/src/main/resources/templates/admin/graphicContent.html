@@ -1076,12 +1076,18 @@ function buildGraphicOriginalUrl(item) {
 	}
 	var platform = (item.platform || '').toString().toLowerCase();
 	var isDouyin = platform === 'douyin' || platform.indexOf('抖音') >= 0;
-	var authorUid = item.authoruid || item.secuid || '';
+	var secUid = (item.secuid || '').toString().trim();
+	var storedAuthorUid = (item.authoruid || '').toString().trim();
+	var authorUid = secUid.indexOf('MS4') === 0 ? secUid : (storedAuthorUid.indexOf('MS4') === 0 ? storedAuthorUid : '');
 	var workId = item.videoid || '';
 	if (isDouyin && authorUid && workId) {
 		return 'https://www.douyin.com/user/' + encodeURIComponent(authorUid) + '?modal_id=' + encodeURIComponent(workId);
 	}
-	return item.sourceurl || item.originaladdress || '';
+	var fallback = item.sourceurl || item.originaladdress || '';
+	if (isDouyin && /douyin\.com\/user\/(?!MS4)/i.test(fallback)) {
+		return '';
+	}
+	return fallback;
 }
 
 function generateGraphicCard(item) {

@@ -95,6 +95,35 @@ class MediaFeedServiceTest {
 	}
 
 	@Test
+	void douyinFeedUsesSecUidAndKeepsUsernameSeparate() {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setVideoplatform("抖音");
+		video.setAuthoruid("84583932458");
+		video.setSecuid("MS4wLjABAAAAstable");
+		video.setAuthorusername("public_handle");
+		video.setUniqueid("raw_handle");
+
+		AdminMediaFeedItem item = service.toVideoFeedItemForTest(video);
+
+		assertThat(item.getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(item.getSecuid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(item.getAuthorusername()).isEqualTo("public_handle");
+		assertThat(item.getUniqueid()).isEqualTo("public_handle");
+	}
+
+	@Test
+	void douyinFeedDoesNotExposeNumericUidWhenSecUidIsMissing() {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setVideoplatform("douyin");
+		video.setAuthoruid("84583932458");
+
+		AdminMediaFeedItem item = service.toVideoFeedItemForTest(video);
+
+		assertThat(item.getAuthoruid()).isNull();
+		assertThat(item.getSecuid()).isNull();
+	}
+
+	@Test
 	void findPageMergesVideosAndGraphicsByPublishTime() {
 		VideoDataEntity request = new VideoDataEntity();
 		request.setPageNo(1);

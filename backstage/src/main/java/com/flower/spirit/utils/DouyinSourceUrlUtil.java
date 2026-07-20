@@ -14,7 +14,7 @@ public final class DouyinSourceUrlUtil {
 	}
 
 	public static String graphic(String authorUid, String awemeId) {
-		if (isBlank(authorUid) || isBlank(awemeId)) {
+		if (!AuthorIdentityUtil.isDouyinSecUid(authorUid) || isBlank(awemeId)) {
 			return null;
 		}
 		return "https://www.douyin.com/user/" + authorUid.trim() + "?modal_id=" + awemeId.trim();

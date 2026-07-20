@@ -80,8 +80,8 @@ public class EmbyMetadataGenerator {
                     .append("    <actor>\n")
                     .append(createXmlTag("name", actor, 8))
                     .append(createXmlTag("role", DEFAULT_ROLE, 8));
-            	if(genre.equals(Platform.DOUYIN.getGenreName())) {
-            		xmlBuilder.append(createXmlTag("profile", "http://douyin.com/user/"+upmid, 8));
+				if(genre.equals(Platform.DOUYIN.getGenreName()) && AuthorIdentityUtil.isDouyinSecUid(upmid)) {
+					xmlBuilder.append(createXmlTag("profile", "https://www.douyin.com/user/"+upmid, 8));
             	}
             	if(genre.equals(Platform.BILIBILI.getGenreName())) {
             		xmlBuilder.append(createXmlTag("profile", "https://space.bilibili.com/"+upmid, 8));

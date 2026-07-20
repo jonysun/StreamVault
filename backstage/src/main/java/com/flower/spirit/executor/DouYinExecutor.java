@@ -26,6 +26,7 @@ import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.DouyinSourceUrlUtil;
+import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.FileUtil;
 import com.flower.spirit.utils.FileNameTemplateUtil;
 import com.flower.spirit.utils.HttpUtil;
@@ -188,7 +189,7 @@ public class DouYinExecutor {
 			if (staticAuthorProfileService != null) {
 				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uniqueId, authorSnapshot.nickname,
 						authorSnapshot.avatar,
-						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null,
+						AuthorIdentityUtil.douyinHomepage(authorSnapshot.authorUid),
 						authorSnapshot.signature);
 			}
 			graphicContentEntity.setSourceurl(firstNotBlank(sourceUrl, originaladdress));
@@ -309,7 +310,7 @@ public class DouYinExecutor {
 			if (staticAuthorProfileService != null) {
 				staticAuthorProfileService.upsertAuthor("抖音", authorSnapshot.authorUid, authorSnapshot.uniqueId, authorSnapshot.nickname,
 						authorSnapshot.avatar,
-						authorSnapshot.authorUid != null ? "https://www.douyin.com/user/" + authorSnapshot.authorUid : null,
+						AuthorIdentityUtil.douyinHomepage(authorSnapshot.authorUid),
 						authorSnapshot.signature);
 			}
 			graphicContentEntity.setSourceurl(firstNotBlank(sourceUrl, type));

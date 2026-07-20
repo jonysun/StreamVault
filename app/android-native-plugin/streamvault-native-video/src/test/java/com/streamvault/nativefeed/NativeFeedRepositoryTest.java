@@ -52,4 +52,24 @@ public class NativeFeedRepositoryTest {
         assertEquals("B", videos.get(0).title);
         assertEquals("http://cdn/b.mp4", videos.get(0).mp4Url);
     }
+
+    @Test
+    public void parseDouyinRecordRejectsNumericAuthorUid() throws Exception {
+        String json = "{\"record\":[{\"id\":1,\"platform\":\"douyin\",\"authoruid\":\"84583932458\",\"uniqueid\":\"public_handle\"}]}";
+
+        List<NativeVideoItem> videos = NativeFeedRepository.parseVideoList(json, "prefer_mp4", "http://host", "28081", "tok");
+
+        assertEquals(1, videos.size());
+        assertEquals("", videos.get(0).authorId);
+    }
+
+    @Test
+    public void parseDouyinRecordPrefersCanonicalSecUid() throws Exception {
+        String json = "{\"record\":[{\"id\":1,\"platform\":\"douyin\",\"authoruid\":\"84583932458\",\"secuid\":\"MS4wLjABAAAAstable\",\"uniqueid\":\"public_handle\"}]}";
+
+        List<NativeVideoItem> videos = NativeFeedRepository.parseVideoList(json, "prefer_mp4", "http://host", "28081", "tok");
+
+        assertEquals(1, videos.size());
+        assertEquals("MS4wLjABAAAAstable", videos.get(0).authorId);
+    }
 }
