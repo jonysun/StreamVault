@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import java.nio.file.Path;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Service;
 
@@ -49,6 +50,14 @@ public class WorkIngestService {
 	public IngestResult ingest(String input, Path outputDirectory, boolean replaceExisting) {
 		ProcessHistoryEntity history = processHistoryService.beginPlatformProcess(input, "unknown", "RECOGNIZING");
 		Integer historyId = history == null ? null : history.getId();
+		return ingest(input, metadata -> outputDirectory, replaceExisting, historyId);
+	}
+
+	public IngestResult ingest(String input, Function<WorkMetadata, Path> outputDirectoryResolver,
+			boolean replaceExisting, Integer historyId) {
+		if (outputDirectoryResolver == null) {
+			throw new IllegalArgumentException("output directory resolver is required");
+		}
 		String stage = "RECOGNIZING";
 		try {
 			PlatformResolver.Resolution resolution = resolver.resolveRequired(input);
@@ -57,6 +66,10 @@ public class WorkIngestService {
 			processHistoryService.recordPlatformStage(historyId, stage);
 			WorkMetadata metadata = normalizer.normalize(
 					adapter.parse(new WorkParseRequest(input, resolution.url(), false)));
+			Path outputDirectory = outputDirectoryResolver.apply(metadata);
+			if (outputDirectory == null) {
+				throw new IllegalArgumentException("output directory resolver returned null");
+			}
 
 			stage = "DOWNLOADING";
 			processHistoryService.recordPlatformStage(historyId, stage);
