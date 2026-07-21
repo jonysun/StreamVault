@@ -65,11 +65,14 @@ class BilibiliPlatformAdapterTest {
 				"https://www.bilibili.com/video/BV1multi/?p=2", true));
 		List<WorkMetadata> parts = adapter.parseParts(new WorkParseRequest("input",
 				"https://b23.tv/multi", true));
+		List<WorkMetadata> routedParts = adapter.parseAll(new WorkParseRequest("input",
+				"https://b23.tv/multi", true));
 
 		assertThat(selected.getWorkId()).isEqualTo("2102");
 		assertThat(selected.getTitle()).contains("Ending");
 		assertThat(selected.getSourceUrl()).endsWith("/video/BV1multi/?p=2");
 		assertThat(parts).extracting(WorkMetadata::getWorkId).containsExactly("2101", "2102");
+		assertThat(routedParts).extracting(WorkMetadata::getWorkId).containsExactly("2101", "2102");
 		assertThat(parts).extracting(WorkMetadata::getSourceUrl).containsExactly(
 				"https://www.bilibili.com/video/BV1multi/?p=1",
 				"https://www.bilibili.com/video/BV1multi/?p=2");
@@ -91,7 +94,8 @@ class BilibiliPlatformAdapterTest {
 		DownloadResult result = adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
 
 		assertThat(result.getStatus()).isEqualTo(DownloadResult.Status.COMPLETED);
-		assertThat(result.getMediaResources()).singleElement().satisfies(resource -> {
+		assertThat(result.getMediaResources()).filteredOn(resource -> resource.getType() == WorkMediaResource.Type.VIDEO)
+				.singleElement().satisfies(resource -> {
 			assertThat(resource.getLocalPath()).isEqualTo(tempDir.resolve("2001.mp4"));
 			assertThat(resource.getType()).isEqualTo(WorkMediaResource.Type.VIDEO);
 		});
@@ -99,6 +103,24 @@ class BilibiliPlatformAdapterTest {
 		assertThat(tempDir.resolve("2001-video.m4s")).doesNotExist();
 		assertThat(tempDir.resolve("2001-audio.m4s")).doesNotExist();
 		assertThat(gateway.cookies).containsOnly("SESSDATA=not-committed");
+	}
+
+	@Test
+	void preservesAndConcatenatesEveryDurlSegment() throws Exception {
+		String segmented = "{\"code\":0,\"data\":{\"durl\":["
+				+ "{\"url\":\"https://cdn.example/one.mp4\"},"
+				+ "{\"url\":\"https://cdn.example/two.mp4\"}]}}";
+		FakeGateway gateway = new FakeGateway(resource("view-single.json"), segmented);
+		BilibiliPlatformAdapter adapter = adapter(gateway);
+		WorkMetadata metadata = adapter.parse(new WorkParseRequest("input",
+				"https://www.bilibili.com/video/BV1single/", false));
+
+		assertThat(metadata.getMediaResources()).hasSize(2);
+		DownloadResult result = adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
+
+		assertThat(result.getMediaResources()).filteredOn(resource -> resource.getType() == WorkMediaResource.Type.VIDEO)
+				.singleElement().satisfies(resource ->
+				assertThat(resource.getLocalPath()).hasContent("concatenated"));
 	}
 
 	@Test
@@ -175,6 +197,11 @@ class BilibiliPlatformAdapterTest {
 		@Override
 		public Path merge(Path video, Path audio, Path destination) throws IOException {
 			return Files.writeString(destination, "merged");
+		}
+
+		@Override
+		public Path concat(List<Path> segments, Path destination) throws IOException {
+			return Files.writeString(destination, "concatenated");
 		}
 	}
 }

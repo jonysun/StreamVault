@@ -21,11 +21,16 @@ public class WorkPostProcessingService {
 	}
 
 	public void complete(Integer historyId, WorkMetadata metadata, PersistenceResult persistenceResult) {
+		complete(historyId, metadata, persistenceResult, true);
+	}
+
+	public void complete(Integer historyId, WorkMetadata metadata, PersistenceResult persistenceResult,
+			boolean completeHistory) {
 		if (persistenceResult != null && persistenceResult.contentType() == WorkContentType.VIDEO
 				&& persistenceResult.id() != null) {
 			hlsTranscodeService.enqueueVideo(persistenceResult.id());
 		}
 		notificationService.notifyCompleted(metadata);
-		processHistoryService.completePlatformProcess(historyId);
+		if (completeHistory) processHistoryService.completePlatformProcess(historyId);
 	}
 }

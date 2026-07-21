@@ -132,7 +132,8 @@ public class AnalysisService {
 			return new SubmissionResult(null, resolvedPlatformKey(video), "legacy", "rejected");
 		}
 		PlatformResolver.Resolution resolution = platformResolver.resolve(video).orElse(null);
-		if (resolution == null || !platformAdapterProperties.useNewAdapter(resolution.platform().getKey())) {
+		if (resolution == null || !platformAdapterProperties.useNewAdapter(resolution.platform().getKey())
+				|| requiresLegacyAria2(resolution.platform().getKey())) {
 			processingVideosLegacy(token, video);
 			return new SubmissionResult(null, resolution == null ? null : resolution.platform().getKey(),
 					"legacy", "submitted");
@@ -144,9 +145,15 @@ public class AnalysisService {
 				resolution.platform().getDisplayName(), "SUBMITTED");
 		Integer historyId = history == null ? null : history.getId();
 		ExecutorService executor = executorFor(resolution.platform().getKey());
-		executeTask(executor, historyId, "queued for unified platform ingest", () ->
+		boolean accepted = executeTask(executor, historyId, "queued for unified platform ingest", true, () ->
 				workIngestService.ingest(video, this::adapterOutputDirectory, false, historyId));
-		return new SubmissionResult(historyId, resolution.platform().getKey(), "new", "submitted");
+		return new SubmissionResult(historyId, resolution.platform().getKey(), "new",
+				accepted ? "submitted" : "rejected");
+	}
+
+	private boolean requiresLegacyAria2(String platformKey) {
+		return "a2".equalsIgnoreCase(Global.downtype) && ("douyin".equals(platformKey)
+				|| "bilibili".equals(platformKey) || "kuaishou".equals(platformKey));
 	}
 
 	void processingVideosLegacy(String token, String video) throws Exception {
@@ -390,11 +397,16 @@ public class AnalysisService {
 	 * @param executor 线程池
 	 * @param task     要执行的任务
 	 */
-	private void executeTask(ExecutorService executor, Integer historyId, String queueLog, ExceptionRunnable task) {
+	private boolean executeTask(ExecutorService executor, Integer historyId, String queueLog, ExceptionRunnable task) {
+		return executeTask(executor, historyId, queueLog, false, task);
+	}
+
+	private boolean executeTask(ExecutorService executor, Integer historyId, String queueLog,
+			boolean taskManagesHistory, ExceptionRunnable task) {
 		if (Global.isDownloadPaused()) {
 			logger.info("下载任务已暂停，未进入执行队列 historyId={}", historyId);
 			processHistoryService.markProcessLog(historyId, "已暂停", "下载任务已暂停，未进入执行队列");
-			return;
+			return false;
 		}
 		if (historyId != null && StringUtils.isNotBlank(queueLog)) {
 			processHistoryService.markProcessLog(historyId, "已提交未执行", queueLog);
@@ -403,15 +415,19 @@ public class AnalysisService {
 			executor.execute(() -> {
 				try {
 					task.run();
-					processHistoryService.completeProcess(historyId, "任务执行完成");
+					if (!taskManagesHistory) processHistoryService.completePlatformProcess(historyId);
 				} catch (Exception e) {
 					logger.error("任务执行失败: " + e.getMessage(), e);
-					processHistoryService.completeProcess(historyId, "任务执行失败: " + e.getMessage());
+					if (!taskManagesHistory) {
+						processHistoryService.failPlatformProcess(historyId, "EXECUTING", e.getMessage());
+					}
 				}
 			});
+			return true;
 		} catch (RejectedExecutionException e) {
 			logger.warn("任务队列已满，拒绝新任务 historyId={}", historyId);
-			processHistoryService.completeProcess(historyId, "任务队列已满，请稍后重试");
+			processHistoryService.failPlatformProcess(historyId, "REJECTED", "task queue is full");
+			return false;
 		}
 	}
 
@@ -1300,8 +1316,16 @@ public class AnalysisService {
 		result.put("supportTier", metadata.getSupportTier() == null ? null
 				: metadata.getSupportTier().name().toLowerCase());
 		result.put("sourceUrl", metadata.getSourceUrl());
+		result.put("originalAddress", metadata.getOriginalAddress());
 		result.put("title", metadata.getTitle());
+		result.put("description", metadata.getDescription());
 		result.put("author", metadata.getAuthorName());
+		result.put("authorId", metadata.getAuthorId());
+		result.put("authorUsername", metadata.getAuthorUsername());
+		result.put("authorAvatar", metadata.getAuthorAvatar());
+		result.put("authorHomepage", metadata.getAuthorHomepage());
+		result.put("authorSignature", metadata.getAuthorSignature());
+		result.put("publishTime", metadata.getPublishTime());
 		result.put("coverUrl", metadata.getCoverUrl());
 		List<Map<String, Object>> resources = new ArrayList<>();
 		List<String> visualUrls = new ArrayList<>();

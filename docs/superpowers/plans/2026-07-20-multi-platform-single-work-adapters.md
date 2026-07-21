@@ -1,6 +1,8 @@
 # Multi-Platform Single-Work Adapters Implementation Plan
 
-> **Execution note:** The `writing-plans` skill was not installed in the current environment. This plan follows the repository's existing executable-plan format and the approved design at `docs/superpowers/specs/2026-07-20-multi-platform-single-work-adapter-design.md`.
+> **Execution note:** The `writing-plans` skill was not installed in the current environment. This plan follows the repository's existing executable-plan format and the approved remediation design at `docs/superpowers/specs/2026-07-21-multi-platform-single-work-remediation-design.md`.
+
+> **Remediation status (2026-07-21):** Shared public-path mapping, file rollback, sidecar preservation, pre-download deduplication, canonical preview fields, metadata sanitization, Bilibili BV/multi-part/DURL handling, platform artifact hooks, and Aria2 legacy protection are implemented. The complete automated suite passes 186 tests. Live platform and client-consumer validation remains required before changing any rollout flag from `legacy`.
 
 **Goal:** Normalize single-work parsing, downloading, persistence, display metadata, manual correction, refresh, and redownload across the nine formal platforms while preserving the current SQLite tables, APIs, clients, and mature Douyin/Bilibili collection workflows.
 

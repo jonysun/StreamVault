@@ -9,6 +9,7 @@
 - 当前开发、生产和 Docker 配置中的 10 个开关全部是 `legacy`。本轮没有默认启用任何新适配器。
 - 音频作品不在范围内。B 站和 YouTube 的独立音轨只用于合并成最终视频，不作为音频作品入库。
 - 抖音、B 站原有批量收藏/监控仍走旧实现；其他平台的批量监控尚未实现，后续可在单作品在线矩阵通过后增加各平台采集器。
+- 当下载器为 Aria2 时，抖音、B 站和快手即使配置为 `new` 也继续走原 legacy 下载路径；统一重下会明确拒绝绕过 Aria2。HTTP 模式才进入新同步下载管线。
 
 状态说明：`自动通过` 表示使用固定夹具验证了解析、下载结果和字段映射；`待在线验证` 表示代码已实现但没有用真实作品和真实 Cookie 完成端到端验证；`不支持` 表示适配器会明确拒绝，且不会部分入库。
 
@@ -54,7 +55,7 @@
 
 | 接口 | 请求 | 行为 |
 | --- | --- | --- |
-| `POST /admin/api/updateWorkMetadata` | `workType`、`id`、`overrides`、`syncAuthorProfile` | 可编辑标题、简介、作者名/头像/主页、发布时间、来源地址、标签、隐私和收藏；平台键、作品 ID、本地媒体和原始元数据不可改 |
+| `POST /admin/api/updateWorkMetadata` | `workType`、`id`、`overrides`、`syncAuthorProfile` | 可编辑标题、简介、作者名/用户名/头像/主页/签名、视频封面、发布时间、来源地址、标签、隐私和收藏；平台键、作品 ID、本地媒体和原始元数据不可改 |
 | `POST /admin/api/refreshWorkMetadata` | `workType`、`id` | 只重新解析元数据，不下载；锁定平台和作品身份，并重新应用人工覆盖 |
 | `POST /admin/api/redownloadWork` | `workType`、`id` | 在临时目录下载并校验后替换；失败时保留旧媒体，成功后重建 HLS |
 
@@ -62,17 +63,17 @@
 
 | 检查 | 结果 | 证据 |
 | --- | --- | --- |
-| 完整 Maven 回归 | 通过 | 172 tests，0 failures，0 errors，0 skipped |
+| 完整 Maven 回归 | 通过 | 186 tests，0 failures，0 errors，0 skipped；`BUILD SUCCESS` |
 | 平台解析和下载夹具 | 通过 | Douyin、Bilibili、YouTube/通用 yt-dlp、Kuaishou、Xiaohongshu、Weibo、Twitter/X、Instagram、TikTok 适配器测试 |
 | 旧 API 参数和响应外壳 | 通过 | `SingleWorkApiCompatibilityTest` |
 | 新旧路由只执行一次 | 通过 | `AnalysisServiceRoutingTest`；新适配器失败不回落到旧路径或通用持久化 |
 | 预览无下载/无入库 | 通过 | 平台适配器测试和 `WorkIngestServiceTest` |
-| 去重、阻止重复作品 | 通过 | `WorkDeduplicationServiceTest` |
-| 人工覆盖、刷新、重下回滚 | 通过 | `WorkMetadataEditServiceTest`、`WorkRefreshServiceTest`、`WorkRedownloadServiceTest` |
+| 去重、阻止重复作品 | 通过 | 下载前预检查和持久化二次检查；`WorkIngestServiceTest`、`WorkDeduplicationServiceTest` |
+| 人工覆盖、刷新、重下回滚 | 通过 | 文件备份保留到事务提交、sidecar 保留、事务回滚恢复；`WorkMetadataEditServiceTest`、`WorkRefreshServiceTest`、`WorkRedownloadServiceTest` |
 | HLS、通知、处理历史 | 通过（服务级） | `HlsTranscodeServiceTest`、`WorkIngestServiceTest`、`ProcessHistoryServiceTest` |
-| 列表/播放所需兼容字段 | 通过（DTO/服务级） | `MediaFeedServiceTest`、`VideoDataServiceFindAllTest`、`GraphicContentServiceTest`、`PlatformMetadataCompatibilityServiceTest` |
-| Web 单作品入口 | 通过 | 桌面 1280x720、移动 390x844；模式切换和无横向溢出；`DirectDataTemplateTest` |
-| Cookie/签名数据扫描 | 通过 | `src/test/resources` 无 Cookie、Authorization、签名或 token 模式；本次服务日志只有表名 `biz_cookies_config` 命中关键词，没有值 |
+| 列表/播放所需兼容字段 | 通过（DTO/服务级） | 本地路径到公共路径映射；`MediaPathServiceTest`、`MediaFeedServiceTest`、`VideoDataServiceFindAllTest`、`GraphicContentServiceTest` |
+| Web 单作品入口 | 通过 | 外部 URL 不再进入内联事件处理器；规范作者和发布时间字段可见；`DirectDataTemplateTest` |
+| Cookie/签名数据扫描 | 通过（自动） | 统一递归清理请求头、Cookie、Authorization、token 和签名 URL 参数；`RawMetadataSanitizerTest` |
 | 默认开关 | 通过 | dev/prod/docker 各 10 个 `streamvault.adapter.*` 均为 `legacy` |
 
 ## 旧数据库迁移

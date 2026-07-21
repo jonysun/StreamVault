@@ -19,6 +19,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
@@ -49,14 +51,18 @@ class WorkRedownloadServiceTest {
 
 	private WorkRedownloadService service;
 	private VideoDataEntity existing;
+	private MediaPathService mediaPathService;
 
 	@BeforeEach
 	void setUp() throws Exception {
+		mediaPathService = new MediaPathService(tempDir, "/cos");
 		service = new WorkRedownloadService(refreshService, new MediaDownloadService(), persistenceService,
-				editService, videoDataDao, graphicContentDao, hlsTranscodeService);
+				editService, videoDataDao, graphicContentDao, hlsTranscodeService, mediaPathService);
 		Path directory = tempDir.resolve("work-7");
 		Files.createDirectories(directory);
 		Files.writeString(directory.resolve("video.mp4"), "old-media");
+		Files.writeString(directory.resolve("metadata.nfo"), "sidecar");
+		Files.writeString(directory.resolve("danmaku.ass"), "comments");
 		existing = new VideoDataEntity();
 		existing.setId(7);
 		existing.setVideoaddr(directory.resolve("video.mp4").toString());
@@ -73,6 +79,8 @@ class WorkRedownloadServiceTest {
 		assertThat(result.status()).isEqualTo(DownloadResult.Status.COMPLETED);
 		assertThat(result.persistence().id()).isEqualTo(7);
 		assertThat(Files.readString(tempDir.resolve("work-7/video.mp4"))).isEqualTo("new-media");
+		assertThat(tempDir.resolve("work-7/metadata.nfo")).hasContent("sidecar");
+		assertThat(tempDir.resolve("work-7/danmaku.ass")).hasContent("comments");
 		verify(editService).reapplyStoredOverrides(existing);
 		verify(hlsTranscodeService).enqueueVideo(7);
 	}
@@ -100,6 +108,29 @@ class WorkRedownloadServiceTest {
 		assertThat(Files.readString(tempDir.resolve("work-7/video.mp4"))).isEqualTo("old-media");
 		verify(persistenceService, never()).persist(any());
 		verify(hlsTranscodeService, never()).enqueueVideo(any());
+	}
+
+	@Test
+	void transactionCompletionRollbackRestoresFilesAndDefersHls() throws Exception {
+		prepareWith(adapter(false));
+		when(persistenceService.persist(any())).thenReturn(PersistenceResult.video(false, existing));
+		when(videoDataDao.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		TransactionSynchronizationManager.initSynchronization();
+		try {
+			service.redownload(request());
+
+			assertThat(tempDir.resolve("work-7/video.mp4")).hasContent("new-media");
+			verify(hlsTranscodeService, never()).enqueueVideo(any());
+			for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+				synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+			}
+
+			assertThat(tempDir.resolve("work-7/video.mp4")).hasContent("old-media");
+			assertThat(tempDir.resolve("work-7/metadata.nfo")).hasContent("sidecar");
+			verify(hlsTranscodeService, never()).enqueueVideo(any());
+		} finally {
+			TransactionSynchronizationManager.clearSynchronization();
+		}
 	}
 
 	private void prepareWith(PlatformWorkAdapter workAdapter) {

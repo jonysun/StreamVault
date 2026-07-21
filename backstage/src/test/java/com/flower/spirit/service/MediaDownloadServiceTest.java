@@ -83,6 +83,30 @@ class MediaDownloadServiceTest {
 		assertThat(Files.exists(target)).isFalse();
 	}
 
+	@Test
+	void rollbackRestoresExistingTargetAndCommitRemovesBackup() {
+		Path target = tempDir.resolve("work-replace");
+		write(target.resolve("old.mp4"), "old");
+		PlatformWorkAdapter adapter = adapter((metadata, request) -> DownloadResult.completed(List.of(
+				resource(0, WorkMediaResource.Type.VIDEO,
+						write(request.getOutputDirectory().resolve("new.mp4"), "new")))));
+
+		MediaDownloadService.DownloadOutcome rolledBack = service.download(adapter, metadata(),
+				new WorkDownloadRequest(target, true));
+		service.rollback(rolledBack);
+
+		assertThat(target.resolve("old.mp4")).hasContent("old");
+		assertThat(target.resolve("new.mp4")).doesNotExist();
+
+		MediaDownloadService.DownloadOutcome committed = service.download(adapter, metadata(),
+				new WorkDownloadRequest(target, true));
+		Path backup = committed.backupDirectory();
+		service.commit(committed);
+
+		assertThat(target.resolve("new.mp4")).hasContent("new");
+		assertThat(backup).doesNotExist();
+	}
+
 	private List<Path> stagingDirectories() {
 		try (var paths = Files.list(tempDir)) {
 			return paths.filter(path -> path.getFileName().toString().contains(".staging-")).toList();
@@ -93,6 +117,7 @@ class MediaDownloadServiceTest {
 
 	private Path write(Path path, String value) {
 		try {
+			Files.createDirectories(path.getParent());
 			return Files.writeString(path, value);
 		} catch (Exception e) {
 			throw new RuntimeException(e);

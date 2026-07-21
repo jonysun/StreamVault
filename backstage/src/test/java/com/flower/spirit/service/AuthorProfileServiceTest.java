@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.dao.AuthorNameHistoryDao;
@@ -47,6 +49,18 @@ class AuthorProfileServiceTest {
 
 	@InjectMocks
 	private AuthorProfileService service;
+
+	@Test
+	void everyPublicAuthorUpsertEntryPointIsTransactionalAndSynchronized() {
+		assertThat(List.of(AuthorProfileService.class.getDeclaredMethods()).stream()
+				.filter(method -> method.getName().equals("upsertAuthor")
+						|| method.getName().equals("upsertCanonicalAuthor")))
+				.isNotEmpty()
+				.allSatisfy(method -> {
+					assertThat(method.isAnnotationPresent(Transactional.class)).isTrue();
+					assertThat(Modifier.isSynchronized(method.getModifiers())).isTrue();
+				});
+	}
 
 	@Test
 	void preferDouyinAuthorUidUsesSecUidWhenAvailable() {

@@ -37,13 +37,14 @@ class WorkPersistenceServiceTest {
 	@Mock private VideoDataDao videoDataDao;
 	@Mock private GraphicContentDao graphicContentDao;
 	@Mock private AuthorProfileService authorProfileService;
+	private final MediaPathService mediaPathService = new MediaPathService(Path.of("C:/media"), "/cos");
 
 	private WorkPersistenceService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new WorkPersistenceService(new WorkMetadataNormalizer(ZoneId.of("UTC")), deduplicationService,
-				videoDataDao, graphicContentDao, authorProfileService);
+				videoDataDao, graphicContentDao, authorProfileService, mediaPathService);
 		when(deduplicationService.findExisting(any())).thenReturn(Optional.empty());
 	}
 
@@ -71,6 +72,7 @@ class WorkPersistenceServiceTest {
 		assertThat(video.getSourceurl()).isEqualTo("https://youtube.com/watch?v=work-1");
 		assertThat(video.getJsonData()).isEqualTo("{\"id\":\"work-1\"}");
 		assertThat(video.getVideoaddr()).endsWith("video.mp4");
+		assertThat(video.getVideounrealaddr()).isEqualTo("/cos/video.mp4");
 		verify(authorProfileService).upsertCanonicalAuthor("youtube", "YouTube", "author-1", "author-name",
 				"author", "https://cdn.example/avatar.jpg", "https://youtube.com/@author", "author signature");
 	}
@@ -91,7 +93,7 @@ class WorkPersistenceServiceTest {
 		assertThat(result.contentType()).isEqualTo(WorkContentType.MIXED);
 		assertThat(graphic.getContenttype()).isEqualTo("mixed");
 		assertThat(JSON.parseArray(graphic.getImages(), String.class))
-				.containsExactly("C:\\media\\first.jpg", "C:\\media\\second.mp4");
+				.containsExactly("/cos/first.jpg", "/cos/second.mp4");
 		assertThat(graphic.getMarkroute()).isEqualTo("C:\\media");
 	}
 

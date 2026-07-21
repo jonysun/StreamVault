@@ -2,7 +2,9 @@ package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -11,6 +13,7 @@ import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +56,7 @@ class WorkIngestServiceTest {
 		service = new WorkIngestService(new PlatformResolver(), adapterRegistry,
 				new WorkMetadataNormalizer(ZoneId.of("UTC")), mediaDownloadService, persistenceService,
 				postProcessingService, processHistoryService);
+		org.mockito.Mockito.lenient().when(persistenceService.findExisting(any())).thenReturn(Optional.empty());
 	}
 
 	@Test
@@ -64,7 +68,7 @@ class WorkIngestServiceTest {
 		verify(processHistoryService, never()).beginPlatformProcess(anyString(), anyString(), anyString());
 		verify(mediaDownloadService, never()).download(any(), any(), any());
 		verify(persistenceService, never()).persist(any());
-		verify(postProcessingService, never()).complete(any(), any(), any());
+		verify(postProcessingService, never()).complete(any(), any(), any(), anyBoolean());
 	}
 
 	@Test
@@ -87,7 +91,7 @@ class WorkIngestServiceTest {
 
 		assertThat(result.status()).isEqualTo(DownloadResult.Status.COMPLETED);
 		verify(persistenceService).persist(any(WorkMetadata.class));
-		verify(postProcessingService).complete(any(), any(WorkMetadata.class), any(PersistenceResult.class));
+		verify(postProcessingService).complete(any(), any(WorkMetadata.class), any(PersistenceResult.class), eq(true));
 		verify(processHistoryService).recordPlatformStage(10, "PERSISTING");
 		verify(processHistoryService).recordPlatformStage(10, "POST_PROCESSING");
 	}
@@ -107,7 +111,39 @@ class WorkIngestServiceTest {
 		assertThat(result.status()).isEqualTo(DownloadResult.Status.QUEUED);
 		verify(processHistoryService).recordPlatformStage(11, "QUEUED");
 		verify(persistenceService, never()).persist(any());
-		verify(postProcessingService, never()).complete(any(), any(), any());
+		verify(postProcessingService, never()).complete(any(), any(), any(), anyBoolean());
+	}
+
+	@Test
+	void persistenceFailureRollsBackPromotedMedia() {
+		stubAdapterPipeline();
+		DownloadOutcome download = DownloadOutcome.completed(List.of(new WorkMediaResource(0,
+				WorkMediaResource.Type.VIDEO, null, Path.of("C:/media/work-1/video.mp4"), "mp4", Map.of())),
+				Path.of("C:/media/work-1"));
+		when(mediaDownloadService.download(any(), any(), any())).thenReturn(download);
+		when(persistenceService.persist(any())).thenThrow(new IllegalStateException("database unavailable"));
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.ingest("https://youtu.be/work-1",
+				Path.of("C:/media/work-1"), false)).isInstanceOf(IllegalStateException.class);
+
+		verify(mediaDownloadService).rollback(download);
+		verify(mediaDownloadService, never()).commit(any());
+	}
+
+	@Test
+	void duplicateStopsBeforeOutputResolutionAndDownload() {
+		stubAdapterPipeline();
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(44);
+		when(persistenceService.findExisting(any())).thenReturn(
+				Optional.of(PersistenceResult.video(false, video)));
+
+		WorkIngestService.IngestResult result = service.ingest("https://youtu.be/work-1",
+				ignored -> { throw new AssertionError("output must not be resolved"); }, false, 12);
+
+		assertThat(result.message()).isEqualTo("work already exists");
+		verify(mediaDownloadService, never()).download(any(), any(), any());
+		verify(processHistoryService).recordPlatformStage(12, "DUPLICATE");
 	}
 
 	@Test
@@ -139,6 +175,7 @@ class WorkIngestServiceTest {
 
 	private void stubAdapterPipeline() {
 		when(adapterRegistry.requireByPlatformKey("youtube")).thenReturn(adapter);
-		when(adapter.parse(any())).thenReturn(metadata);
+		org.mockito.Mockito.lenient().when(adapter.parse(any())).thenReturn(metadata);
+		org.mockito.Mockito.lenient().when(adapter.parseAll(any())).thenReturn(List.of(metadata));
 	}
 }

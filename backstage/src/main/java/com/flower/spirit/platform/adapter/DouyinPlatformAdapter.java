@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.flower.spirit.config.Global;
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformResolver;
@@ -23,6 +24,7 @@ import com.flower.spirit.platform.WorkParseRequest;
 import com.flower.spirit.service.PlatformCookieService;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
+import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.DouyinSourceUrlUtil;
 
 @Component
@@ -97,6 +99,18 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				downloaded.add(new WorkMediaResource(source.getOrder(), source.getType(), source.getSourceUrl(),
 						local, extension, source.getRequestHeaders()));
 			}
+			if (metadata.getContentType() == WorkContentType.VIDEO && metadata.getCoverUrl() != null
+					&& !metadata.getCoverUrl().isBlank()) {
+				try {
+					WorkMediaResource coverSource = resource(downloaded.size(), WorkMediaResource.Type.IMAGE,
+							metadata.getCoverUrl(), "jpg");
+					Path cover = request.getOutputDirectory().resolve(safeName(metadata.getWorkId()) + ".jpg");
+					Path local = gateway.download(coverSource, cover, cookie);
+					downloaded.add(new WorkMediaResource(coverSource.getOrder(), WorkMediaResource.Type.IMAGE,
+							metadata.getCoverUrl(), local, "jpg", coverSource.getRequestHeaders()));
+				} catch (IOException ignored) {
+				}
+			}
 			if (downloaded.isEmpty()) {
 				throw new WorkMetadataValidationException("Douyin work has no downloadable visual media");
 			}
@@ -106,6 +120,17 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			reportRisk(cookie, e.getMessage(), "download request failed");
 			throw new WorkMetadataValidationException("Douyin download failed", e);
 		}
+	}
+
+	@Override
+	public void postProcessDownloaded(WorkMetadata metadata, Path outputDirectory,
+			List<WorkMediaResource> downloadedResources) {
+		if (!Global.getGeneratenfo || metadata.getContentType() != WorkContentType.VIDEO) return;
+		String cover = downloadedResources.stream().filter(value -> value.getType() == WorkMediaResource.Type.IMAGE)
+				.map(value -> value.getLocalPath().getFileName().toString()).findFirst().orElse(metadata.getCoverUrl());
+		EmbyMetadataGenerator.createDouNfo(metadata.getAuthorName(), metadata.getAuthorId(), metadata.getAuthorAvatar(),
+				metadata.getPublishTime(), metadata.getWorkId(), metadata.getTitle(), metadata.getDescription(), cover,
+				outputDirectory.toString());
 	}
 
 	WorkMetadata parseRaw(String raw, String fallbackWorkId, String originalInput, String resolvedUrl) {

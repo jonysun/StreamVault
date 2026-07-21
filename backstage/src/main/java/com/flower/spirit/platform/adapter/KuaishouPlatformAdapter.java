@@ -5,12 +5,14 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import com.flower.spirit.config.Global;
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformResolver;
@@ -22,6 +24,7 @@ import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.platform.WorkParseRequest;
 import com.flower.spirit.service.PlatformCookieService;
 import com.flower.spirit.utils.KuaishouParser;
+import com.flower.spirit.utils.EmbyMetadataGenerator;
 import com.flower.spirit.utils.KuaishouParser.VideoInfo;
 
 import okhttp3.OkHttpClient;
@@ -108,13 +111,35 @@ public class KuaishouPlatformAdapter implements PlatformWorkAdapter {
 			Path local = gateway.download(source.getSourceUrl(), request.getOutputDirectory().resolve(fileName),
 					cookie, source.getRequestHeaders());
 			cookieService.reportSuccess(platformDisplayName(), cookie);
-			return DownloadResult.completed(List.of(new WorkMediaResource(0, WorkMediaResource.Type.VIDEO,
-					source.getSourceUrl(), local, "mp4", source.getRequestHeaders())));
+			List<WorkMediaResource> downloaded = new ArrayList<>();
+			downloaded.add(new WorkMediaResource(0, WorkMediaResource.Type.VIDEO,
+					source.getSourceUrl(), local, "mp4", source.getRequestHeaders()));
+			if (metadata.getCoverUrl() != null && !metadata.getCoverUrl().isBlank()) {
+				try {
+					Path cover = gateway.download(metadata.getCoverUrl(), request.getOutputDirectory()
+							.resolve(safeFileName(metadata.getWorkId()) + ".jpg"), cookie, source.getRequestHeaders());
+					downloaded.add(new WorkMediaResource(1, WorkMediaResource.Type.IMAGE, metadata.getCoverUrl(),
+							cover, "jpg", source.getRequestHeaders()));
+				} catch (IOException ignored) {
+				}
+			}
+			return DownloadResult.completed(downloaded);
 		} catch (IOException e) {
 			String reason = safeFailureReason(e);
 			reportRisk(cookie, e, reason);
 			throw new WorkMetadataValidationException("Kuaishou download failed: " + reason, e);
 		}
+	}
+
+	@Override
+	public void postProcessDownloaded(WorkMetadata metadata, Path outputDirectory,
+			List<WorkMediaResource> downloadedResources) {
+		if (!Global.getGeneratenfo) return;
+		String cover = downloadedResources.stream().filter(value -> value.getType() == WorkMediaResource.Type.IMAGE)
+				.map(value -> value.getLocalPath().getFileName().toString()).findFirst().orElse(metadata.getCoverUrl());
+		EmbyMetadataGenerator.createKuaiNfo(metadata.getAuthorName(), metadata.getAuthorId(),
+				metadata.getPublishTime(), metadata.getWorkId(), metadata.getTitle(), metadata.getDescription(), cover,
+				outputDirectory.toString());
 	}
 
 	private String requireCookie(String purpose) {

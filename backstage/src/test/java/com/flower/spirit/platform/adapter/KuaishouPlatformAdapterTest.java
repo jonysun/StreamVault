@@ -79,6 +79,7 @@ class KuaishouPlatformAdapterTest {
 	void fallsBackToH264AndDownloadsSynchronouslyWithCookieOutOfBand() throws Exception {
 		VideoInfo h264Only = video();
 		h264Only.setH265Url(null);
+		h264Only.setCoverUrl(null);
 		gateway.video = h264Only;
 		when(cookieService.currentKuaishouCookie("single_work_parse")).thenReturn("parse-cookie");
 		when(cookieService.currentKuaishouCookie("single_work_download")).thenReturn("download-cookie");

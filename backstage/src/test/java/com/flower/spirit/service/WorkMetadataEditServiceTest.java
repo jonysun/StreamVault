@@ -76,7 +76,7 @@ class WorkMetadataEditServiceTest {
 		assertThat(stored.get("description")).isNull();
 		assertThat(stored.getString("title")).isEqualTo("edited title");
 		verify(authorProfileService).upsertCanonicalAuthor("youtube", "YouTube", "channel-1", "creator",
-				"Creator", "avatar.jpg", "https://youtube.com/@creator");
+				"Creator", "avatar.jpg", "https://youtube.com/@creator", null);
 	}
 
 	@Test
@@ -119,7 +119,7 @@ class WorkMetadataEditServiceTest {
 		when(videoDataDao.findById(7)).thenReturn(Optional.of(video));
 		when(videoDataDao.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 		doThrow(new IllegalStateException("profile unavailable")).when(authorProfileService)
-				.upsertCanonicalAuthor(any(), any(), any(), any(), any(), any(), any());
+				.upsertCanonicalAuthor(any(), any(), any(), any(), any(), any(), any(), any());
 
 		WorkMetadataEditService.EditResult result = service.update(request("video", 7,
 				Map.of("title", "saved despite profile failure"), true), "admin");
@@ -138,6 +138,24 @@ class WorkMetadataEditServiceTest {
 				.isInstanceOf(WorkMetadataValidationException.class)
 				.hasMessageContaining("stored metadata overrides are invalid");
 		assertThat(video.getPlatformkey()).isEqualTo("youtube");
+	}
+
+	@Test
+	void editsVideoAuthorUsernameSignatureAndCoverWithoutChangingIdentity() {
+		VideoDataEntity video = video();
+		when(videoDataDao.findById(7)).thenReturn(Optional.of(video));
+		when(videoDataDao.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		UpdateWorkMetadataRequest request = request("video", 7, Map.of(
+				"authorUsername", "new-user",
+				"authorSignature", "new signature",
+				"coverUrl", "https://cdn.example/new-cover.jpg"), true);
+
+		service.update(request, "admin");
+
+		assertThat(video.getAuthorusername()).isEqualTo("new-user");
+		assertThat(video.getVideocover()).isEqualTo("https://cdn.example/new-cover.jpg");
+		verify(authorProfileService).upsertCanonicalAuthor("youtube", "YouTube", "channel-1", "new-user",
+				"Creator", "avatar.jpg", "https://youtube.com/@creator", "new signature");
 	}
 
 	private VideoDataEntity video() {

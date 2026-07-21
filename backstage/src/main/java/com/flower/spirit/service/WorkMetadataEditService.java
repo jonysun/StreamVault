@@ -6,7 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -28,24 +30,46 @@ public class WorkMetadataEditService {
 	private final GraphicContentDao graphicContentDao;
 	private final AuthorProfileService authorProfileService;
 	private final WorkMetadataNormalizer normalizer;
+	private final TransactionTemplate transactionTemplate;
 
+	@Autowired
 	public WorkMetadataEditService(VideoDataDao videoDataDao, GraphicContentDao graphicContentDao,
+			AuthorProfileService authorProfileService, WorkMetadataNormalizer normalizer,
+			PlatformTransactionManager transactionManager) {
+		this.videoDataDao = videoDataDao;
+		this.graphicContentDao = graphicContentDao;
+		this.authorProfileService = authorProfileService;
+		this.normalizer = normalizer;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
+	}
+
+	WorkMetadataEditService(VideoDataDao videoDataDao, GraphicContentDao graphicContentDao,
 			AuthorProfileService authorProfileService, WorkMetadataNormalizer normalizer) {
 		this.videoDataDao = videoDataDao;
 		this.graphicContentDao = graphicContentDao;
 		this.authorProfileService = authorProfileService;
 		this.normalizer = normalizer;
+		this.transactionTemplate = null;
 	}
 
-	@Transactional
 	public EditResult update(UpdateWorkMetadataRequest request, String editor) {
 		validateRequest(request);
 		Map<String, Object> overrides = request.getOverrides() == null ? Map.of() : request.getOverrides();
 		validateEditableKeys(overrides);
-		if ("video".equals(normalizeType(request.getWorkType()))) {
-			return updateVideo(request, editor, overrides);
-		}
-		return updateGraphic(request, editor, overrides);
+		String workType = normalizeType(request.getWorkType());
+		validateApplicableKeys(workType, overrides);
+		EditResult saved = executeWorkUpdate(() -> "video".equals(workType)
+				? updateVideo(request, editor, overrides) : updateGraphic(request, editor, overrides));
+		boolean synced = saved.video() != null ? syncAuthor(request, saved.video())
+				: syncAuthor(request, saved.graphic());
+		return new EditResult(saved.workType(), saved.id(), synced, saved.video(), saved.graphic());
+	}
+
+	private EditResult executeWorkUpdate(java.util.function.Supplier<EditResult> update) {
+		if (transactionTemplate == null) return update.get();
+		EditResult result = transactionTemplate.execute(status -> update.get());
+		if (result == null) throw new WorkMetadataValidationException("metadata update transaction returned no result");
+		return result;
 	}
 
 	public void reapplyStoredOverrides(VideoDataEntity entity) {
@@ -64,8 +88,7 @@ public class WorkMetadataEditService {
 		entity.setMetadataeditedat(new Date());
 		entity.setMetadataeditedby(trimToNull(editor));
 		VideoDataEntity saved = videoDataDao.save(entity);
-		boolean synced = syncAuthor(request, entity);
-		return new EditResult("video", saved.getId(), synced, saved, null);
+		return new EditResult("video", saved.getId(), false, saved, null);
 	}
 
 	private EditResult updateGraphic(UpdateWorkMetadataRequest request, String editor, Map<String, Object> overrides) {
@@ -76,8 +99,7 @@ public class WorkMetadataEditService {
 		entity.setMetadataeditedat(new Date());
 		entity.setMetadataeditedby(trimToNull(editor));
 		GraphicContentEntity saved = graphicContentDao.save(entity);
-		boolean synced = syncAuthor(request, entity);
-		return new EditResult("graphic", saved.getId(), synced, null, saved);
+		return new EditResult("graphic", saved.getId(), false, null, saved);
 	}
 
 	private void applyVideo(VideoDataEntity entity, Map<String, Object> overrides) {
@@ -87,10 +109,13 @@ public class WorkMetadataEditService {
 			case "title" -> entity.setVideoname(value);
 			case "description" -> entity.setVideodesc(value);
 			case "authorName" -> entity.setVideoauthor(value);
+			case "authorUsername" -> entity.setAuthorusername(value);
 			case "authorAvatar" -> entity.setAuthoravatar(value);
 			case "authorHomepage" -> entity.setAuthorhomepage(value);
 			case "publishTime" -> entity.setPublishtime(value);
 			case "sourceUrl" -> entity.setSourceurl(value);
+			case "coverUrl" -> entity.setVideocover(value);
+			case "authorSignature" -> { }
 			case "tags" -> entity.setVideotag(value);
 			case "privacy" -> entity.setVideoprivacy(value);
 			case "favorite" -> entity.setFavorite(value);
@@ -106,10 +131,12 @@ public class WorkMetadataEditService {
 			case "title" -> entity.setTitle(value);
 			case "description" -> entity.setContent(value);
 			case "authorName" -> entity.setAuthor(value);
+			case "authorUsername" -> entity.setAuthorusername(value);
 			case "authorAvatar" -> entity.setAuthoravatar(value);
 			case "authorHomepage" -> entity.setAuthorhomepage(value);
 			case "publishTime" -> entity.setPublishtime(value);
 			case "sourceUrl" -> entity.setSourceurl(value);
+			case "authorSignature" -> { }
 			case "tags" -> entity.setTags(value);
 			case "privacy" -> entity.setPrivacy(value);
 			case "favorite" -> entity.setFavorite(value);
@@ -150,7 +177,8 @@ public class WorkMetadataEditService {
 		if (value == null) return null;
 		String text = String.valueOf(value);
 		if ("publishTime".equals(key)) return normalizer.normalizePublishTime(text);
-		if (("sourceUrl".equals(key) || "authorHomepage".equals(key)) && !isHttpUrl(text)) {
+		if (("sourceUrl".equals(key) || "authorHomepage".equals(key) || "coverUrl".equals(key))
+				&& !isHttpUrl(text)) {
 			throw new WorkMetadataValidationException(key + " must be an HTTP(S) URL");
 		}
 		return text;
@@ -160,7 +188,8 @@ public class WorkMetadataEditService {
 		if (!request.isSyncAuthorProfile() || !hasText(entity.getPlatformkey()) || !hasText(entity.getAuthoruid())) return false;
 		try {
 			authorProfileService.upsertCanonicalAuthor(entity.getPlatformkey(), entity.getVideoplatform(), entity.getAuthoruid(),
-					entity.getAuthorusername(), entity.getVideoauthor(), entity.getAuthoravatar(), entity.getAuthorhomepage());
+					entity.getAuthorusername(), entity.getVideoauthor(), entity.getAuthoravatar(), entity.getAuthorhomepage(),
+					overrideText(request, "authorSignature"));
 			return true;
 		} catch (RuntimeException e) {
 			return false;
@@ -171,7 +200,8 @@ public class WorkMetadataEditService {
 		if (!request.isSyncAuthorProfile() || !hasText(entity.getPlatformkey()) || !hasText(entity.getAuthoruid())) return false;
 		try {
 			authorProfileService.upsertCanonicalAuthor(entity.getPlatformkey(), entity.getPlatform(), entity.getAuthoruid(),
-					entity.getAuthorusername(), entity.getAuthor(), entity.getAuthoravatar(), entity.getAuthorhomepage());
+					entity.getAuthorusername(), entity.getAuthor(), entity.getAuthoravatar(), entity.getAuthorhomepage(),
+					overrideText(request, "authorSignature"));
 			return true;
 		} catch (RuntimeException e) {
 			return false;
@@ -194,6 +224,18 @@ public class WorkMetadataEditService {
 				throw new WorkMetadataValidationException("field is not editable: " + key);
 			}
 		}
+	}
+
+	private void validateApplicableKeys(String workType, Map<String, Object> overrides) {
+		if ("graphic".equals(workType) && overrides.containsKey("coverUrl")) {
+			throw new WorkMetadataValidationException("coverUrl is editable only for video works");
+		}
+	}
+
+	private String overrideText(UpdateWorkMetadataRequest request, String key) {
+		if (request.getOverrides() == null || !request.getOverrides().containsKey(key)) return null;
+		Object value = request.getOverrides().get(key);
+		return value == null ? null : trimToNull(String.valueOf(value));
 	}
 
 	private static boolean isHttpUrl(String value) {
@@ -223,10 +265,13 @@ public class WorkMetadataEditService {
 		keys.put("description", "description");
 		keys.put("authorName", "authorName");
 		keys.put("author", "authorName");
+		keys.put("authorUsername", "authorUsername");
 		keys.put("authorAvatar", "authorAvatar");
 		keys.put("authorHomepage", "authorHomepage");
+		keys.put("authorSignature", "authorSignature");
 		keys.put("publishTime", "publishTime");
 		keys.put("sourceUrl", "sourceUrl");
+		keys.put("coverUrl", "coverUrl");
 		keys.put("tags", "tags");
 		keys.put("privacy", "privacy");
 		keys.put("favorite", "favorite");

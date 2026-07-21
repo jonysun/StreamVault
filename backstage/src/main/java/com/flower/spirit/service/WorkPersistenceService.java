@@ -3,6 +3,7 @@ package com.flower.spirit.service;
 import java.nio.file.Path;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +18,7 @@ import com.flower.spirit.platform.WorkMediaResource;
 import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.platform.WorkMetadataNormalizer;
 import com.flower.spirit.platform.WorkMetadataValidationException;
+import com.flower.spirit.platform.RawMetadataSanitizer;
 import com.flower.spirit.service.WorkDeduplicationService.ExistingWork;
 
 @Service
@@ -27,15 +29,17 @@ public class WorkPersistenceService {
 	private final VideoDataDao videoDataDao;
 	private final GraphicContentDao graphicContentDao;
 	private final AuthorProfileService authorProfileService;
+	private final MediaPathService mediaPathService;
 
 	public WorkPersistenceService(WorkMetadataNormalizer normalizer, WorkDeduplicationService deduplicationService,
 			VideoDataDao videoDataDao, GraphicContentDao graphicContentDao,
-			AuthorProfileService authorProfileService) {
+			AuthorProfileService authorProfileService, MediaPathService mediaPathService) {
 		this.normalizer = normalizer;
 		this.deduplicationService = deduplicationService;
 		this.videoDataDao = videoDataDao;
 		this.graphicContentDao = graphicContentDao;
 		this.authorProfileService = authorProfileService;
+		this.mediaPathService = mediaPathService;
 	}
 
 	@Transactional
@@ -52,6 +56,14 @@ public class WorkPersistenceService {
 		return result;
 	}
 
+	public Optional<PersistenceResult> findExisting(WorkMetadata input) {
+		WorkMetadata metadata = normalizer.normalize(input);
+		deduplicationService.assertNotBlocked(metadata);
+		return deduplicationService.findExisting(metadata).map(existing -> existing.video() != null
+				? PersistenceResult.video(false, existing.video())
+				: PersistenceResult.graphic(false, existing.graphic(), existing.contentType()));
+	}
+
 	private PersistenceResult persistVideo(WorkMetadata metadata, ExistingWork existing) {
 		VideoDataEntity entity = existing == null ? new VideoDataEntity() : existing.video();
 		if (entity == null) {
@@ -63,6 +75,9 @@ public class WorkPersistenceService {
 				.map(WorkMediaResource::getLocalPath)
 				.filter(path -> path != null)
 				.findFirst().orElse(null);
+		Path localCover = metadata.getMediaResources().stream()
+				.filter(resource -> resource.getType() == WorkMediaResource.Type.IMAGE)
+				.map(WorkMediaResource::getLocalPath).filter(path -> path != null).findFirst().orElse(null);
 		if (created && localVideo == null) {
 			throw new WorkMetadataValidationException("downloaded video local path is required before persistence");
 		}
@@ -74,8 +89,9 @@ public class WorkPersistenceService {
 		if (localVideo != null) {
 			String path = localVideo.normalize().toString();
 			entity.setVideoaddr(path);
-			entity.setVideounrealaddr(path);
+			entity.setVideounrealaddr(mediaPathService.toPublicPath(localVideo));
 		}
+		if (localCover != null) entity.setVideocover(mediaPathService.toPublicPath(localCover));
 		if (created) {
 			entity.setCreatetime(new Date());
 		}
@@ -101,7 +117,7 @@ public class WorkPersistenceService {
 		if (hasText(metadata.getPublishTime())) entity.setPublishtime(metadata.getPublishTime());
 		if (hasText(metadata.getSourceUrl())) entity.setSourceurl(metadata.getSourceUrl());
 		if (hasText(metadata.getCoverUrl())) entity.setVideocover(metadata.getCoverUrl());
-		if (metadata.getRawMetadata() != null) entity.setJsonData(metadata.getRawMetadata());
+		if (metadata.getRawMetadata() != null) entity.setJsonData(RawMetadataSanitizer.sanitize(metadata.getRawMetadata()));
 	}
 
 	private PersistenceResult persistGraphic(WorkMetadata metadata, ExistingWork existing) {
@@ -124,7 +140,7 @@ public class WorkPersistenceService {
 		entity.setContenttype(metadata.getContentType().getValue());
 		setGraphicOptionalFields(entity, metadata);
 		if (!localPaths.isEmpty()) {
-			List<String> paths = localPaths.stream().map(path -> path.normalize().toString()).toList();
+			List<String> paths = localPaths.stream().map(mediaPathService::toPublicPath).toList();
 			entity.setImages(JSON.toJSONString(paths));
 			Path parent = localPaths.get(0).normalize().getParent();
 			if (parent != null) {
@@ -155,7 +171,7 @@ public class WorkPersistenceService {
 		if (hasText(metadata.getAuthorHomepage())) entity.setAuthorhomepage(metadata.getAuthorHomepage());
 		if (hasText(metadata.getPublishTime())) entity.setPublishtime(metadata.getPublishTime());
 		if (hasText(metadata.getSourceUrl())) entity.setSourceurl(metadata.getSourceUrl());
-		if (metadata.getRawMetadata() != null) entity.setJsonData(metadata.getRawMetadata());
+		if (metadata.getRawMetadata() != null) entity.setJsonData(RawMetadataSanitizer.sanitize(metadata.getRawMetadata()));
 	}
 
 	private static boolean hasText(String value) {

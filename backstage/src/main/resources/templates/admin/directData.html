@@ -934,22 +934,22 @@ $(document).ready(function() {
             mediaContent = `
                 <div class="single-video-layout">
                     <div class="video-cover-section">
-                        ${coverUrl ? `<img src="${coverUrl}" class="video-cover-large" alt="视频封面" referrerpolicy="no-referrer">` : ''}
+                        ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" class="video-cover-large" alt="视频封面" referrerpolicy="no-referrer">` : ''}
                     </div>
                     <div class="video-details-section">
                         <h5 class="video-title-large">${escapeHtml(title)}</h5>
                         <div class="video-meta-large">
-                            <span class="meta-tag"><i class="mdi mdi-monitor"></i> ${platform}</span>
+                            <span class="meta-tag"><i class="mdi mdi-monitor"></i> ${escapeHtml(platform)}</span>
                             <span class="meta-tag"><i class="mdi mdi-account"></i> ${escapeHtml(author)}</span>
                             <span class="meta-tag"><i class="mdi mdi-clock"></i> ${duration}</span>
                             ${isDash ? '<span class="meta-tag badge-dash">DASH</span>' : ''}
                             ${needReferer ? '<span class="meta-tag badge-referer">需Referer</span>' : ''}
                         </div>
                         <div class="video-actions-large">
-                            ${videoUrl ? `<button class="btn btn-secondary" onclick="copyToClipboard('${escapeHtml(videoUrl)}')">
+                            ${videoUrl ? `<button class="btn btn-secondary" data-copy-url="${escapeHtml(videoUrl)}">
                                 <i class="mdi mdi-content-copy"></i> 复制链接
                             </button>` : ''}
-                            ${audioUrl ? `<button class="btn btn-info" onclick="copyToClipboard('${escapeHtml(audioUrl)}')">
+                            ${audioUrl ? `<button class="btn btn-info" data-copy-url="${escapeHtml(audioUrl)}">
                                 <i class="mdi mdi-music"></i> 复制音频
                             </button>` : ''}
                         </div>
@@ -965,7 +965,7 @@ $(document).ready(function() {
                         <div class="input-group">
                             <input type="text" class="form-control" value="${escapeHtml(videoUrl)}" readonly>
                             <div class="input-group-append">
-                                <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('${escapeHtml(videoUrl)}')">
+                                <button class="btn btn-outline-secondary" type="button" data-copy-url="${escapeHtml(videoUrl)}">
                                     <i class="mdi mdi-content-copy"></i> 复制
                                 </button>
                             </div>
@@ -978,7 +978,7 @@ $(document).ready(function() {
                         <div class="input-group">
                             <input type="text" class="form-control" value="${escapeHtml(audioUrl)}" readonly>
                             <div class="input-group-append">
-                                <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('${escapeHtml(audioUrl)}')">
+                                <button class="btn btn-outline-secondary" type="button" data-copy-url="${escapeHtml(audioUrl)}">
                                     <i class="mdi mdi-content-copy"></i> 复制
                                 </button>
                             </div>
@@ -991,17 +991,17 @@ $(document).ready(function() {
             mediaContent = `
                 <div class="single-video-layout">
                     <div class="video-cover-section">
-                        ${coverUrl ? `<img src="${coverUrl}" class="video-cover-large" alt="音频封面" referrerpolicy="no-referrer">` : ''}
+                        ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" class="video-cover-large" alt="音频封面" referrerpolicy="no-referrer">` : ''}
                     </div>
                     <div class="video-details-section">
                         <h5 class="video-title-large">${escapeHtml(title)}</h5>
                         <div class="video-meta-large">
-                            <span class="meta-tag"><i class="mdi mdi-music"></i> ${platform}</span>
+                            <span class="meta-tag"><i class="mdi mdi-music"></i> ${escapeHtml(platform)}</span>
                             <span class="meta-tag"><i class="mdi mdi-account"></i> ${escapeHtml(author)}</span>
                             <span class="meta-tag"><i class="mdi mdi-clock"></i> ${duration}</span>
                         </div>
                         <div class="video-actions-large">
-                            ${videoUrl ? `<button class="btn btn-secondary" onclick="copyToClipboard('${escapeHtml(videoUrl)}')">
+                            ${videoUrl ? `<button class="btn btn-secondary" data-copy-url="${escapeHtml(videoUrl)}">
                                 <i class="mdi mdi-content-copy"></i> 复制链接
                             </button>` : ''}
                         </div>
@@ -1017,7 +1017,7 @@ $(document).ready(function() {
                         <div class="input-group">
                             <input type="text" class="form-control" value="${escapeHtml(videoUrl)}" readonly>
                             <div class="input-group-append">
-                                <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('${escapeHtml(videoUrl)}')">
+                                <button class="btn btn-outline-secondary" type="button" data-copy-url="${escapeHtml(videoUrl)}">
                                     <i class="mdi mdi-content-copy"></i> 复制
                                 </button>
                             </div>
@@ -1029,9 +1029,9 @@ $(document).ready(function() {
         } else if (mediaType === 'image') {
             let imagesHtml = imageUrls.map((url, index) => `
                 <div class="image-item">
-                    <img src="${escapeHtml(url)}" class="image-thumb" alt="图片${index + 1}" referrerpolicy="no-referrer" onclick="window.open('${escapeHtml(url)}', '_blank')">
+                    <img src="${escapeHtml(url)}" class="image-thumb" alt="图片${index + 1}" referrerpolicy="no-referrer" data-open-url="${escapeHtml(url)}">
                     <div class="image-actions">
-                        <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeHtml(url)}')">
+                        <button class="btn btn-sm btn-secondary" data-copy-url="${escapeHtml(url)}">
                             <i class="mdi mdi-content-copy"></i> 复制
                         </button>
                     </div>
@@ -1042,7 +1042,7 @@ $(document).ready(function() {
                 <div class="image-gallery-header">
                     <h5 class="video-title-large">${escapeHtml(title)}</h5>
                     <div class="video-meta-large">
-                        <span class="meta-tag"><i class="mdi mdi-image"></i> ${platform}</span>
+                        <span class="meta-tag"><i class="mdi mdi-image"></i> ${escapeHtml(platform)}</span>
                         <span class="meta-tag"><i class="mdi mdi-account"></i> ${escapeHtml(author)}</span>
                         <span class="meta-tag"><i class="mdi mdi-image-multiple"></i> ${imageUrls.length}张</span>
                     </div>
@@ -1061,7 +1061,7 @@ $(document).ready(function() {
                         <div class="video-info">
                             <h6 class="video-title">${index + 1}. ${escapeHtml(resource.type || 'media')}</h6>
                             <div class="video-actions">
-                                <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeHtml(resource.url || '')}')">
+                                <button class="btn btn-sm btn-secondary" data-copy-url="${escapeHtml(resource.url || '')}">
                                     <i class="mdi mdi-content-copy"></i> 复制
                                 </button>
                             </div>
@@ -1078,12 +1078,25 @@ $(document).ready(function() {
             actionButtons = `<div class="videos-list">${resourceRows}</div>`;
         }
 
-        const canonicalMeta = (platformKey || workId || contentType || supportTier) ? `
+        const canonicalDetails = [
+            ['简介', record.description],
+            ['作者 UID', record.authorId],
+            ['作者用户名', record.authorUsername],
+            ['作者头像', record.authorAvatar],
+            ['作者主页', record.authorHomepage],
+            ['作者签名', record.authorSignature],
+            ['发布时间', record.publishTime],
+            ['作品来源', record.sourceUrl]
+        ].filter(item => item[1])
+            .map(item => `<span class="meta-tag"><strong>${escapeHtml(item[0])}：</strong>${escapeHtml(String(item[1]))}</span>`)
+            .join('');
+        const canonicalMeta = (platformKey || workId || contentType || supportTier || canonicalDetails) ? `
             <div class="canonical-meta">
                 ${platformKey ? `<span class="meta-tag"><i class="mdi mdi-tag-outline"></i>${escapeHtml(platformKey)}</span>` : ''}
                 ${workId ? `<span class="meta-tag"><i class="mdi mdi-identifier"></i>${escapeHtml(workId)}</span>` : ''}
                 ${contentType ? `<span class="meta-tag"><i class="mdi mdi-file-outline"></i>${escapeHtml(contentType)}</span>` : ''}
                 ${supportTier ? `<span class="meta-tag"><i class="mdi mdi-shield-check-outline"></i>${escapeHtml(supportTier)}</span>` : ''}
+                ${canonicalDetails}
             </div>` : '';
         
         const resultHtml = `
@@ -1129,10 +1142,10 @@ $(document).ready(function() {
                                 ${isDash ? '<span class="meta-item badge-dash">DASH</span>' : ''}
                             </div>
                             <div class="video-actions">
-                                ${videoUrl ? `<button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeHtml(videoUrl)}')">
+                                ${videoUrl ? `<button class="btn btn-sm btn-secondary" data-copy-url="${escapeHtml(videoUrl)}">
                                     <i class="mdi mdi-content-copy"></i> 复制
                                 </button>` : ''}
-                                ${audioUrl ? `<button class="btn btn-sm btn-info" onclick="copyToClipboard('${escapeHtml(audioUrl)}')">
+                                ${audioUrl ? `<button class="btn btn-sm btn-info" data-copy-url="${escapeHtml(audioUrl)}">
                                     <i class="mdi mdi-music"></i> 音频
                                 </button>` : ''}
                             </div>
@@ -1147,7 +1160,7 @@ $(document).ready(function() {
                 <i class="mdi mdi-information"></i> 检测到 <strong>${totalCount}</strong> 个视频，请选择需要下载的视频
             </div>
             <div class="platform-info mb-3">
-                <strong>平台：</strong>${platform}
+                <strong>平台：</strong>${escapeHtml(platform)}
             </div>
             <div class="videos-list">
                 ${videosHtml}
@@ -1187,8 +1200,17 @@ $(document).ready(function() {
         if (!text) return '';
         const div = document.createElement('div');
         div.textContent = text;
-        return div.innerHTML;
+        return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
+
+	$('#resultContent').on('click', '[data-copy-url]', function() {
+		copyToClipboard($(this).attr('data-copy-url') || '');
+	});
+
+	$('#resultContent').on('click', '[data-open-url]', function() {
+		const url = $(this).attr('data-open-url') || '';
+		if (/^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener,noreferrer');
+	});
     
     /**
      * 复制文本到剪贴板

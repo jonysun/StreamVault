@@ -46,13 +46,14 @@ public class MediaDownloadService {
 			if (result.getStatus() != DownloadResult.Status.COMPLETED) {
 				throw new WorkMetadataValidationException(messageOrDefault(result.getMessage(), "download failed"));
 			}
+			adapter.postProcessDownloaded(metadata, staging, result.getMediaResources());
 			List<ResourcePath> verified = verifyResources(result.getMediaResources(), staging);
-			promote(staging, target, request.isReplaceExisting());
+			Promotion promotion = promote(staging, target, request.isReplaceExisting());
 			List<WorkMediaResource> promoted = verified.stream()
 					.map(resource -> copyWithLocalPath(resource.resource(), target.resolve(resource.relativePath())))
 					.sorted(Comparator.comparingInt(WorkMediaResource::getOrder))
 					.toList();
-			return DownloadOutcome.completed(promoted, target);
+			return DownloadOutcome.completed(promoted, target, promotion.backup(), promotion.targetPreviouslyExisted());
 		} catch (RuntimeException | IOException e) {
 			deleteRecursively(staging);
 			if (e instanceof WorkMetadataValidationException validationException) {
@@ -83,24 +84,46 @@ public class MediaDownloadService {
 		return verified;
 	}
 
-	private void promote(Path staging, Path target, boolean replaceExisting) throws IOException {
+	public void commit(DownloadOutcome outcome) {
+		if (outcome != null && outcome.status() == DownloadResult.Status.COMPLETED) {
+			deleteRecursively(outcome.backupDirectory());
+		}
+	}
+
+	public void rollback(DownloadOutcome outcome) {
+		if (outcome == null || outcome.status() != DownloadResult.Status.COMPLETED) return;
+		try {
+			restorePromotion(outcome.workingDirectory(), outcome.backupDirectory(),
+					outcome.targetPreviouslyExisted());
+		} catch (IOException ignored) {
+		}
+	}
+
+	private Promotion promote(Path staging, Path target, boolean replaceExisting) throws IOException {
 		if (!Files.exists(target)) {
 			move(staging, target);
-			return;
+			return new Promotion(null, false);
 		}
 		if (!replaceExisting) {
 			throw new WorkMetadataValidationException("download target already exists: " + target);
 		}
 		Path backup = target.resolveSibling("." + target.getFileName() + ".backup-" + UUID.randomUUID());
-		move(target, backup);
 		try {
+			move(target, backup);
 			move(staging, target);
-			deleteRecursively(backup);
+			return new Promotion(backup, true);
 		} catch (IOException | RuntimeException e) {
-			if (!Files.exists(target) && Files.exists(backup)) {
-				move(backup, target);
-			}
+			restorePromotion(target, backup, true);
 			throw e;
+		}
+	}
+
+	private void restorePromotion(Path target, Path backup, boolean targetPreviouslyExisted) throws IOException {
+		if (backup != null && Files.exists(backup)) {
+			deleteRecursively(target);
+			move(backup, target);
+		} else if (!targetPreviouslyExisted) {
+			deleteRecursively(target);
 		}
 	}
 
@@ -139,15 +162,24 @@ public class MediaDownloadService {
 	private record ResourcePath(WorkMediaResource resource, Path relativePath) {
 	}
 
+	private record Promotion(Path backup, boolean targetPreviouslyExisted) {
+	}
+
 	public record DownloadOutcome(DownloadResult.Status status, List<WorkMediaResource> mediaResources,
-			String message, Path workingDirectory) {
+			String message, Path workingDirectory, Path backupDirectory, boolean targetPreviouslyExisted) {
 
 		public static DownloadOutcome completed(List<WorkMediaResource> resources, Path directory) {
-			return new DownloadOutcome(DownloadResult.Status.COMPLETED, List.copyOf(resources), null, directory);
+			return completed(resources, directory, null, false);
+		}
+
+		private static DownloadOutcome completed(List<WorkMediaResource> resources, Path directory,
+				Path backupDirectory, boolean targetPreviouslyExisted) {
+			return new DownloadOutcome(DownloadResult.Status.COMPLETED, List.copyOf(resources), null, directory,
+					backupDirectory, targetPreviouslyExisted);
 		}
 
 		public static DownloadOutcome queued(String message, Path directory) {
-			return new DownloadOutcome(DownloadResult.Status.QUEUED, List.of(), message, directory);
+			return new DownloadOutcome(DownloadResult.Status.QUEUED, List.of(), message, directory, null, false);
 		}
 	}
 }

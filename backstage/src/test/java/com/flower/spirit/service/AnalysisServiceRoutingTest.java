@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.after;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -42,6 +43,7 @@ class AnalysisServiceRoutingTest {
 	private String frontend;
 	private boolean pauseAll;
 	private boolean pauseDownload;
+	private String downloadType;
 	private AnalysisService service;
 	private WorkIngestService workIngestService;
 	private ProcessHistoryService processHistoryService;
@@ -54,11 +56,13 @@ class AnalysisServiceRoutingTest {
 		frontend = Global.frontend;
 		pauseAll = Global.backgroundTaskPauseAll;
 		pauseDownload = Global.backgroundTaskPauseDownload;
+		downloadType = Global.downtype;
 		Global.apptoken = "app-token";
 		Global.readonlytoken = "read-token";
 		Global.frontend = "video_standard";
 		Global.backgroundTaskPauseAll = false;
 		Global.backgroundTaskPauseDownload = false;
+		Global.downtype = "http";
 
 		service = spy(new AnalysisService());
 		workIngestService = mock(WorkIngestService.class);
@@ -78,6 +82,7 @@ class AnalysisServiceRoutingTest {
 		Global.frontend = frontend;
 		Global.backgroundTaskPauseAll = pauseAll;
 		Global.backgroundTaskPauseDownload = pauseDownload;
+		Global.downtype = downloadType;
 	}
 
 	@Test
@@ -90,6 +95,20 @@ class AnalysisServiceRoutingTest {
 		assertThat(result.mode()).isEqualTo("legacy");
 		assertThat(result.platformKey()).isEqualTo("youtube");
 		verify(service).processingVideosLegacy("app-token", "https://www.youtube.com/watch?v=legacy");
+		verify(workIngestService, never()).ingest(anyString(), any(Function.class), anyBoolean(), any());
+	}
+
+	@Test
+	void aria2KeepsSupportedDomesticPlatformOnLegacyDownloader() throws Exception {
+		properties.setAdapter(Map.of("douyin", Mode.NEW));
+		Global.downtype = "a2";
+		doNothing().when(service).processingVideosLegacy(anyString(), anyString());
+
+		AnalysisService.SubmissionResult result = service.submitProcessingVideos("app-token",
+				"https://www.douyin.com/video/1234567890");
+
+		assertThat(result.mode()).isEqualTo("legacy");
+		verify(service).processingVideosLegacy("app-token", "https://www.douyin.com/video/1234567890");
 		verify(workIngestService, never()).ingest(anyString(), any(Function.class), anyBoolean(), any());
 	}
 
@@ -128,6 +147,8 @@ class AnalysisServiceRoutingTest {
 		verify(workIngestService, org.mockito.Mockito.timeout(5000)).ingest(
 				anyString(), any(Function.class), eq(false), eq(43));
 		verify(service, never()).processingVideosLegacy(anyString(), anyString());
+		verify(processHistoryService, after(500).never())
+				.failPlatformProcess(eq(43), eq("EXECUTING"), anyString());
 	}
 
 	@Test

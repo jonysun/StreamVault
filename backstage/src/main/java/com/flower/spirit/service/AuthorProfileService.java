@@ -18,6 +18,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -60,11 +61,14 @@ public class AuthorProfileService {
 	@Autowired
 	private GraphicContentDao graphicContentDao;
 
-	public void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar, String homepage) {
+	@Transactional
+	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName,
+			String avatar, String homepage) {
 		upsertAuthor(platform, authoruid, username, displayName, avatar, homepage, null);
 	}
 
-	public void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar,
+	@Transactional
+	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar,
 			String homepage, String signature) {
 		if (platform == null || platform.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
 			return;
@@ -106,12 +110,14 @@ public class AuthorProfileService {
 		}
 	}
 
-	public void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
+	@Transactional
+	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage) {
 		upsertCanonicalAuthor(platformKey, legacyPlatform, authoruid, username, displayName, avatar, homepage, null);
 	}
 
-	public void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
+	@Transactional
+	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage, String signature) {
 		if (platformKey == null || platformKey.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
 			return;
