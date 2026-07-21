@@ -129,6 +129,17 @@ class WorkMetadataEditServiceTest {
 		verify(videoDataDao).save(video);
 	}
 
+	@Test
+	void rejectsLockedFieldsStoredInMetadataOverrides() {
+		VideoDataEntity video = video();
+		video.setMetadataoverrides("{\"platformkey\":\"twitter\"}");
+
+		assertThatThrownBy(() -> service.reapplyStoredOverrides(video))
+				.isInstanceOf(WorkMetadataValidationException.class)
+				.hasMessageContaining("stored metadata overrides are invalid");
+		assertThat(video.getPlatformkey()).isEqualTo("youtube");
+	}
+
 	private VideoDataEntity video() {
 		VideoDataEntity video = new VideoDataEntity();
 		video.setId(7);

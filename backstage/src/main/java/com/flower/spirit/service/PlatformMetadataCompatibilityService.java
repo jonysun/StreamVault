@@ -127,7 +127,7 @@ public class PlatformMetadataCompatibilityService {
 		return List.copyOf(aliases);
 	}
 
-	static String inferGraphicContentType(String rawImages) {
+	public static String inferGraphicContentType(String rawImages) {
 		if (!hasText(rawImages)) {
 			return "graphic";
 		}

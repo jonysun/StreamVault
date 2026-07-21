@@ -48,6 +48,14 @@ public class WorkMetadataEditService {
 		return updateGraphic(request, editor, overrides);
 	}
 
+	public void reapplyStoredOverrides(VideoDataEntity entity) {
+		if (entity != null) applyVideo(entity, parseStoredOverrides(entity.getMetadataoverrides()));
+	}
+
+	public void reapplyStoredOverrides(GraphicContentEntity entity) {
+		if (entity != null) applyGraphic(entity, parseStoredOverrides(entity.getMetadataoverrides()));
+	}
+
 	private EditResult updateVideo(UpdateWorkMetadataRequest request, String editor, Map<String, Object> overrides) {
 		VideoDataEntity entity = videoDataDao.findById(request.getId())
 				.orElseThrow(() -> new WorkMetadataValidationException("video work not found: " + request.getId()));
@@ -112,19 +120,24 @@ public class WorkMetadataEditService {
 
 	private String mergeOverrides(String raw, Map<String, Object> updates) {
 		JSONObject merged = new JSONObject(new LinkedHashMap<>());
-		if (raw != null && !raw.trim().isEmpty()) {
-			try {
-				JSONObject existing = JSON.parseObject(raw);
-				if (existing == null) throw new IllegalArgumentException("not an object");
-				merged.putAll(existing);
-			} catch (RuntimeException e) {
-				throw new WorkMetadataValidationException("stored metadata overrides are invalid", e);
-			}
-		}
+		merged.putAll(parseStoredOverrides(raw));
 		for (Map.Entry<String, Object> entry : canonicalEntries(updates).entrySet()) {
 			merged.put(entry.getKey(), normalizeValue(entry.getKey(), entry.getValue()));
 		}
 		return JSON.toJSONString(merged, SerializerFeature.WriteMapNullValue);
+	}
+
+	private Map<String, Object> parseStoredOverrides(String raw) {
+		if (raw == null || raw.trim().isEmpty()) return Map.of();
+		try {
+			JSONObject existing = JSON.parseObject(raw);
+			if (existing == null) throw new IllegalArgumentException("not an object");
+			Map<String, Object> values = new LinkedHashMap<>(existing);
+			validateEditableKeys(values);
+			return values;
+		} catch (RuntimeException e) {
+			throw new WorkMetadataValidationException("stored metadata overrides are invalid", e);
+		}
 	}
 
 	private Map<String, Object> canonicalEntries(Map<String, Object> overrides) {

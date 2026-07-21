@@ -17,6 +17,7 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.common.RequestEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dto.UpdateWorkMetadataRequest;
+import com.flower.spirit.dto.WorkOperationRequest;
 import com.flower.spirit.entity.BiliConfigEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.BlockedWorkEntity;
@@ -54,6 +55,8 @@ import com.flower.spirit.service.UserService;
 import com.flower.spirit.service.VideoDataService;
 import com.flower.spirit.service.VideoMixService;
 import com.flower.spirit.service.WorkMetadataEditService;
+import com.flower.spirit.service.WorkRedownloadService;
+import com.flower.spirit.service.WorkRefreshService;
 import com.flower.spirit.platform.WorkMetadataValidationException;
 
 
@@ -137,6 +140,12 @@ public class AdminController {
 
 	@Autowired
 	private WorkMetadataEditService workMetadataEditService;
+
+	@Autowired
+	private WorkRefreshService workRefreshService;
+
+	@Autowired
+	private WorkRedownloadService workRedownloadService;
 	
 	/**  
 	
@@ -309,6 +318,41 @@ public class AdminController {
 		} catch (WorkMetadataValidationException e) {
 			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
 		}
+	}
+
+	@PostMapping(value = "/refreshWorkMetadata")
+	public AjaxEntity refreshWorkMetadata(@RequestBody WorkOperationRequest operationRequest,
+			HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Metadata refreshed",
+					workRefreshService.refresh(operationRequest));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
+	@PostMapping(value = "/redownloadWork")
+	public AjaxEntity redownloadWork(@RequestBody WorkOperationRequest operationRequest,
+			HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Redownload processed",
+					workRedownloadService.redownload(operationRequest));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
+	private boolean hasAuthenticatedAdmin(HttpServletRequest request) {
+		Object sessionUser = request.getSession(false) == null ? null
+				: request.getSession(false).getAttribute(Global.user_session_key);
+		return sessionUser instanceof UserEntity user && user.getUsername() != null
+				&& !user.getUsername().trim().isEmpty();
 	}
 	
 	
