@@ -21,6 +21,8 @@ public class KuaishouParser {
         private String title;
         private String author;
         private String authorId;
+        private String authorAvatar;
+        private String authorHomepage;
         private String videoId;
         private Integer duration;
         private Long views;
@@ -29,6 +31,7 @@ public class KuaishouParser {
         private String videoUrl;
         private String h265Url;
         private Long timestamp;
+        private String sourceUrl;
 
         // Getters and Setters
         public String getTitle() {
@@ -53,6 +56,22 @@ public class KuaishouParser {
 
         public void setAuthorId(String authorId) {
             this.authorId = authorId;
+        }
+
+        public String getAuthorAvatar() {
+            return authorAvatar;
+        }
+
+        public void setAuthorAvatar(String authorAvatar) {
+            this.authorAvatar = authorAvatar;
+        }
+
+        public String getAuthorHomepage() {
+            return authorHomepage;
+        }
+
+        public void setAuthorHomepage(String authorHomepage) {
+            this.authorHomepage = authorHomepage;
         }
 
         public String getVideoId() {
@@ -119,6 +138,14 @@ public class KuaishouParser {
             this.timestamp = timestamp;
         }
 
+        public String getSourceUrl() {
+            return sourceUrl;
+        }
+
+        public void setSourceUrl(String sourceUrl) {
+            this.sourceUrl = sourceUrl;
+        }
+
         @Override
         public String toString() {
             try {
@@ -182,9 +209,22 @@ public class KuaishouParser {
             requestBuilder.header("Cookie", cookie);
         }
         Request request = requestBuilder.build();
-        Response response = client.newCall(request).execute();
-        JsonNode data = objectMapper.readTree(response.body().string());
-        System.out.println("API Response: " + data);
+        String responseBody;
+        try (Response response = client.newCall(request).execute()) {
+            if (response.body() == null) {
+                throw new IOException("Kuaishou returned an empty response");
+            }
+            responseBody = response.body().string();
+        }
+
+        return parseResponse(responseBody, realUrl);
+    }
+
+    public static VideoInfo parseResponse(String responseBody, String canonicalUrl) throws IOException {
+        if (responseBody == null || responseBody.trim().isEmpty()) {
+            throw new IOException("Kuaishou returned no response data");
+        }
+        JsonNode data = objectMapper.readTree(responseBody);
 
         // 检查是否需要验证码
         if (data.has("errors")) {
@@ -214,6 +254,8 @@ public class KuaishouParser {
         videoInfo.setTitle(photo.get("caption").asText());
         videoInfo.setAuthor(author.get("name").asText());
         videoInfo.setAuthorId(author.get("id").asText());
+        videoInfo.setAuthorAvatar(author.path("headerUrl").asText(null));
+        videoInfo.setAuthorHomepage("https://www.kuaishou.com/profile/" + videoInfo.getAuthorId());
         videoInfo.setVideoId(photo.get("id").asText());
         videoInfo.setDuration(photo.get("duration").asInt());
         videoInfo.setViews(photo.get("viewCount").asLong());
@@ -223,6 +265,7 @@ public class KuaishouParser {
         videoInfo.setVideoUrl(getBestVideoUrl(photo));
         videoInfo.setH265Url(photo.has("photoH265Url") ? photo.get("photoH265Url").asText() : null);
         videoInfo.setTimestamp(photo.get("timestamp").asLong());
+        videoInfo.setSourceUrl(canonicalUrl);
 
         return videoInfo;
     }
@@ -233,16 +276,19 @@ public class KuaishouParser {
                 .header("User-Agent", USER_AGENT)
                 .build();
 
-        Response response = client.newCall(request).execute();
-        String realUrl = response.request().url().toString();
+        String realUrl;
+        try (Response response = client.newCall(request).execute()) {
+            realUrl = response.request().url().toString();
+        }
 
         if (!realUrl.contains("short-video")) {
             request = new Request.Builder()
                     .url(realUrl)
                     .header("User-Agent", USER_AGENT)
                     .build();
-            response = client.newCall(request).execute();
-            realUrl = response.request().url().toString();
+            try (Response response = client.newCall(request).execute()) {
+                realUrl = response.request().url().toString();
+            }
         }
 
         return realUrl;
