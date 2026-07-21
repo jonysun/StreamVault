@@ -26,12 +26,20 @@ import com.flower.spirit.platform.WorkMetadataValidationException;
 public class YtDlpMetadataParser {
 
 	public WorkMetadata parseSingle(String output, String originalInput, String requestUrl) {
+		return parseSingle(output, originalInput, requestUrl, false);
+	}
+
+	public WorkMetadata parseSingle(String output, String originalInput, String requestUrl,
+			boolean allowMultiVideoPost) {
 		List<JSONObject> objects = parseObjects(output);
 		if (objects.size() != 1) {
 			throw new WorkMetadataValidationException(
 					"single-work parsing requires exactly one yt-dlp JSON object, received " + objects.size());
 		}
 		JSONObject object = objects.get(0);
+		if (allowMultiVideoPost && isCollection(object)) {
+			return parseMultiVideoPost(object, originalInput, requestUrl);
+		}
 		validateSingleVideo(object);
 		String extractor = firstText(object.getString("extractor_key"), object.getString("extractor"));
 		if (extractor == null) {
@@ -67,6 +75,50 @@ public class YtDlpMetadataParser {
 				.build();
 	}
 
+	private WorkMetadata parseMultiVideoPost(JSONObject object, String originalInput, String requestUrl) {
+		if (requestUrl == null || !requestUrl.toLowerCase(Locale.ROOT).contains("/status/")) {
+			throw new WorkMetadataValidationException("Twitter timelines and collections are not single works");
+		}
+		String extractor = firstText(object.getString("extractor_key"), object.getString("extractor"));
+		PlatformDefinition platform = PlatformCatalog.definitionForExtractor(extractor);
+		if (!"twitter".equals(platform.getKey())) {
+			throw new WorkMetadataValidationException("only Twitter multi-video posts are supported as single works");
+		}
+		JSONArray entries = object.getJSONArray("entries");
+		if (entries == null || entries.isEmpty()) {
+			throw new WorkMetadataValidationException("multi-video post has no entries");
+		}
+		List<WorkMediaResource> resources = new ArrayList<>();
+		for (JSONObject entry : jsonObjects(entries)) {
+			WorkMediaResource video = selectResources(entry).stream()
+					.filter(resource -> resource.getType() == WorkMediaResource.Type.VIDEO)
+					.findFirst().orElseThrow(() -> new WorkMetadataValidationException(
+							"multi-video post entry has no downloadable video"));
+			resources.add(new WorkMediaResource(resources.size(), WorkMediaResource.Type.VIDEO,
+					video.getSourceUrl(), null, video.getExpectedExtension(), video.getRequestHeaders()));
+		}
+		String workId = text(object.get("id"));
+		if (workId == null) throw new WorkMetadataValidationException("multi-video post has no work id");
+		String sourceUrl = firstText(object.getString("webpage_url"), object.getString("original_url"), requestUrl);
+		return WorkMetadata.builder()
+				.platform(platform)
+				.workId(workId)
+				.contentType(com.flower.spirit.platform.WorkContentType.MIXED)
+				.title(object.getString("title"))
+				.description(object.getString("description"))
+				.authorId(firstText(object.getString("uploader_id"), object.getString("channel_id")))
+				.authorUsername(object.getString("uploader_id"))
+				.authorName(firstText(object.getString("uploader"), object.getString("channel")))
+				.authorHomepage(firstText(object.getString("uploader_url"), object.getString("channel_url")))
+				.publishTime(publishTime(object))
+				.sourceUrl(sourceUrl)
+				.originalAddress(originalInput)
+				.coverUrl(coverUrl(object))
+				.mediaResources(resources)
+				.rawMetadata(JSON.toJSONString(object))
+				.build();
+	}
+
 	private List<JSONObject> parseObjects(String output) {
 		if (output == null || output.trim().isEmpty()) {
 			throw new WorkMetadataValidationException("yt-dlp returned no metadata");
@@ -91,14 +143,18 @@ public class YtDlpMetadataParser {
 	}
 
 	private void validateSingleVideo(JSONObject object) {
-		String type = object.getString("_type");
-		if ("playlist".equalsIgnoreCase(type) || "multi_video".equalsIgnoreCase(type)
-				|| object.getJSONArray("entries") != null) {
+		if (isCollection(object)) {
 			throw new WorkMetadataValidationException("playlists, channels and multi-video collections are not single works");
 		}
 		if (object.getBooleanValue("is_live") || "is_live".equalsIgnoreCase(object.getString("live_status"))) {
 			throw new WorkMetadataValidationException("active live streams are not supported");
 		}
+	}
+
+	private boolean isCollection(JSONObject object) {
+		String type = object.getString("_type");
+		return "playlist".equalsIgnoreCase(type) || "multi_video".equalsIgnoreCase(type)
+				|| object.getJSONArray("entries") != null;
 	}
 
 	private List<WorkMediaResource> selectResources(JSONObject object) {
