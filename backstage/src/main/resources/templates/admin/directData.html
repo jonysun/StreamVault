@@ -210,6 +210,86 @@
             color: #374151;
             font-size: 14px;
         }
+
+        .mode-switch {
+            display: inline-grid;
+            grid-template-columns: repeat(2, minmax(150px, 1fr));
+            padding: 3px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: #f3f4f6;
+        }
+
+        .mode-option {
+            position: relative;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .mode-option input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .mode-option span {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 38px;
+            padding: 8px 14px;
+            border-radius: 4px;
+            color: #4b5563;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .mode-option input:checked + span {
+            background: #ffffff;
+            color: #1d4ed8;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+        }
+
+        .mode-option input:focus-visible + span {
+            outline: 2px solid #3b82f6;
+            outline-offset: 1px;
+        }
+
+        .submission-result {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+        }
+
+        .submission-field {
+            min-width: 0;
+            padding: 12px;
+            border-left: 3px solid #3b82f6;
+            background: #f9fafb;
+        }
+
+        .submission-label {
+            display: block;
+            margin-bottom: 4px;
+            color: #6b7280;
+            font-size: 12px;
+        }
+
+        .submission-value {
+            display: block;
+            overflow-wrap: anywhere;
+            color: #111827;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .canonical-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
         
         .notice-card {
             background: #f9fafb;
@@ -298,6 +378,12 @@
             
             .ml-1, .ml-2 {
                 margin-left: 0 !important;
+            }
+
+            .mode-switch {
+                display: grid;
+                width: 100%;
+                grid-template-columns: 1fr 1fr;
             }
         }
         
@@ -608,16 +694,20 @@
                                     </div>
                                     
                                     <div class="form-group">
-                                        <div class="form-check">
-                                            <input type="checkbox" class="form-check-input" id="onlyGetLink" checked>
-                                            <label class="form-check-label" for="onlyGetLink">
-                                                仅获取链接地址
+                                        <div class="mode-switch" role="radiogroup" aria-label="处理方式">
+                                            <label class="mode-option">
+                                                <input type="radio" name="operationMode" value="preview" checked>
+                                                <span><i class="mdi mdi-magnify"></i>解析预览</span>
+                                            </label>
+                                            <label class="mode-option">
+                                                <input type="radio" name="operationMode" value="ingest">
+                                                <span><i class="mdi mdi-download"></i>下载入库</span>
                                             </label>
                                         </div>
                                     </div>
                                     
                                     <button type="submit" class="btn btn-primary" id="submitBtn">
-                                        <i class="mdi mdi-send"></i> 提交解析
+                                        <i class="mdi mdi-magnify"></i> 执行预览
                                     </button>
                                 </form>
                                 
@@ -643,20 +733,6 @@
                             </div>
                         </div>
                         
-                        <!-- 注意事项区域 - 移到页底 -->
-                        <div class="card notice-card mt-4">
-                            <div class="card-header">
-                                <h5><i class="mdi mdi-information-outline"></i> 使用说明</h5>
-                            </div>
-                            <div class="card-body">
-                                <ul class="notice-list">
-                                     <li>部分平台视频为DASH流格式，需要分别获取视频和音频链接</li>
-                                     <li>检测到多个视频时会显示视频列表，可分别选择复制链接</li>
-                                     <li>抖音图文类暂不支持直链,会提交到图文模块</li>
-                                     <li>如果是推送单链接建议使用APP 快捷指令 或自编译小程序 或API推送 不建议使用此处推送单链接</li>
-                                 </ul>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -693,6 +769,19 @@
 <script src="../static/js/layer/layer.js" type="text/javascript"></script>
 <script type="text/javascript">
 $(document).ready(function() {
+    $('input[name="operationMode"]').on('change', updateSubmitButton);
+
+    function selectedMode() {
+        return $('input[name="operationMode"]:checked').val() || 'preview';
+    }
+
+    function updateSubmitButton() {
+        const preview = selectedMode() === 'preview';
+        $('#submitBtn').html(preview
+            ? '<i class="mdi mdi-magnify"></i> 执行预览'
+            : '<i class="mdi mdi-download"></i> 下载入库');
+    }
+
     /**
      * 表单提交处理函数
      * 处理视频链接解析的表单提交
@@ -701,7 +790,8 @@ $(document).ready(function() {
         e.preventDefault();
         
         const videoUrl = $('#videoUrl').val().trim();
-        const onlyGetLink = $('#onlyGetLink').is(':checked');
+        const mode = selectedMode();
+        const onlyGetLink = mode === 'preview';
         
         // 验证输入
         if (!videoUrl) {
@@ -710,7 +800,7 @@ $(document).ready(function() {
         }
         
         // 显示加载状态
-        showLoading();
+        showLoading(mode);
         
         // 构建API URL
         let apiUrl = '/admin/api/directData';
@@ -730,7 +820,7 @@ $(document).ready(function() {
             success: function(response) {
                 console.log('API响应成功:', response);
                 hideLoading();
-                handleApiResponse(response, onlyGetLink);
+                handleApiResponse(response, mode);
             },
             error: function(xhr, status, error) {
                 console.error('API请求失败:', error);
@@ -743,10 +833,11 @@ $(document).ready(function() {
     /**
      * 显示加载状态
      */
-    function showLoading() {
+    function showLoading(mode) {
         $('#loadingDiv').show();
         $('#resultDiv').hide();
-        $('#submitBtn').prop('disabled', true).html('<i class="mdi mdi-loading mdi-spin"></i> 解析中...');
+        $('#loadingDiv p').text(mode === 'preview' ? '正在解析...' : '正在提交...');
+        $('#submitBtn').prop('disabled', true).html('<i class="mdi mdi-loading mdi-spin"></i> 处理中...');
     }
     
     /**
@@ -754,17 +845,18 @@ $(document).ready(function() {
      */
     function hideLoading() {
         $('#loadingDiv').hide();
-        $('#submitBtn').prop('disabled', false).html('<i class="mdi mdi-send"></i> 提交解析');
+        $('#submitBtn').prop('disabled', false);
+        updateSubmitButton();
     }
     
     /**
      * 处理API响应
      * @param {Object} response - API响应数据
-     * @param {boolean} onlyGetLink - 是否仅获取链接地址
+     * @param {string} mode - preview 或 ingest
      */
-    function handleApiResponse(response, onlyGetLink) {
+    function handleApiResponse(response, mode) {
         if (response.resCode === '000001') {
-            if (onlyGetLink && response.record) {
+            if (mode === 'preview' && response.record) {
                 const record = response.record;
                 if (record.type === 'multiple') {
                     renderMultipleVideos(record);
@@ -772,8 +864,7 @@ $(document).ready(function() {
                     renderVideoInfo(record);
                 }
             } else {
-                layer.msg(response.message || '提交成功', {icon: 1});
-                $('#resultDiv').hide();
+                renderSubmission(response);
             }
         } else if (response.resCode === '999998' || response.resCode === '999997') {
             layer.msg(response.message || '解析失败', {icon: 2});
@@ -782,6 +873,35 @@ $(document).ready(function() {
             layer.msg(response.message || '解析失败', {icon: 2});
             $('#resultDiv').hide();
         }
+    }
+
+    function renderSubmission(response) {
+        const taskId = response.taskId == null ? '待分配' : response.taskId;
+        const platformKey = response.platformKey || '待识别';
+        const status = response.status || 'submitted';
+        const resultHtml = `
+            <div class="submission-result">
+                <div class="submission-field">
+                    <span class="submission-label">任务 ID</span>
+                    <span class="submission-value">${escapeHtml(String(taskId))}</span>
+                </div>
+                <div class="submission-field">
+                    <span class="submission-label">平台</span>
+                    <span class="submission-value">${escapeHtml(platformKey)}</span>
+                </div>
+                <div class="submission-field">
+                    <span class="submission-label">状态</span>
+                    <span class="submission-value">${escapeHtml(status)}</span>
+                </div>
+            </div>
+            <div class="mt-3">
+                <a class="btn btn-outline-secondary" href="/admin/processHistoryList">
+                    <i class="mdi mdi-history"></i> 提交记录
+                </a>
+            </div>`;
+        $('#resultContent').html(resultHtml);
+        $('#resultDiv').show();
+        layer.msg(response.message || '提交成功', {icon: 1});
     }
     
     /**
@@ -801,6 +921,11 @@ $(document).ready(function() {
         const needReferer = record.needReferer || false;
         const referer = record.referer || '';
         const imageUrls = record.imageUrls || [];
+        const platformKey = record.platformKey || '';
+        const workId = record.workId || '';
+        const contentType = record.contentType || mediaType;
+        const supportTier = record.supportTier || '';
+        const mediaResources = record.mediaResources || [];
         
         let mediaContent = '';
         let actionButtons = '';
@@ -929,9 +1054,40 @@ $(document).ready(function() {
                     ${imagesHtml}
                 </div>
             `;
+        } else if (mediaType === 'mixed') {
+            const resourceRows = mediaResources.map((resource, index) => `
+                <div class="video-item">
+                    <div class="video-item-content">
+                        <div class="video-info">
+                            <h6 class="video-title">${index + 1}. ${escapeHtml(resource.type || 'media')}</h6>
+                            <div class="video-actions">
+                                <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeHtml(resource.url || '')}')">
+                                    <i class="mdi mdi-content-copy"></i> 复制
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`).join('');
+            mediaContent = `
+                <h5 class="video-title-large">${escapeHtml(title)}</h5>
+                <div class="video-meta-large">
+                    <span class="meta-tag"><i class="mdi mdi-monitor"></i> ${escapeHtml(platform)}</span>
+                    <span class="meta-tag"><i class="mdi mdi-account"></i> ${escapeHtml(author)}</span>
+                    <span class="meta-tag"><i class="mdi mdi-layers"></i> ${mediaResources.length}</span>
+                </div>`;
+            actionButtons = `<div class="videos-list">${resourceRows}</div>`;
         }
+
+        const canonicalMeta = (platformKey || workId || contentType || supportTier) ? `
+            <div class="canonical-meta">
+                ${platformKey ? `<span class="meta-tag"><i class="mdi mdi-tag-outline"></i>${escapeHtml(platformKey)}</span>` : ''}
+                ${workId ? `<span class="meta-tag"><i class="mdi mdi-identifier"></i>${escapeHtml(workId)}</span>` : ''}
+                ${contentType ? `<span class="meta-tag"><i class="mdi mdi-file-outline"></i>${escapeHtml(contentType)}</span>` : ''}
+                ${supportTier ? `<span class="meta-tag"><i class="mdi mdi-shield-check-outline"></i>${escapeHtml(supportTier)}</span>` : ''}
+            </div>` : '';
         
         const resultHtml = `
+            ${canonicalMeta}
             ${mediaContent}
             ${actionButtons ? '<hr>' : ''}
             ${actionButtons}
