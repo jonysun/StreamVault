@@ -58,7 +58,10 @@ class MediaFeedServiceTest {
 		graphic.setId(9);
 		graphic.setTitle("graphic title");
 		graphic.setAuthor("author");
+		graphic.setPlatform("rednote");
 		graphic.setImages("[\"/first.jpeg\",\"/second.mp4\"]");
+		graphic.setPrivacy("1");
+		graphic.setFavorite("1");
 
 		AdminMediaFeedItem item = service.toGraphicFeedItemForTest(graphic);
 
@@ -66,6 +69,11 @@ class MediaFeedServiceTest {
 		assertThat(item.getMediaKey()).isEqualTo("graphic:9");
 		assertThat(item.getCover()).isEqualTo("/first.jpeg");
 		assertThat(item.getSlides()).hasSize(2);
+		assertThat(item.getPlatform()).isEqualTo("小红书");
+		assertThat(item.getPlatformkey()).isEqualTo("xiaohongshu");
+		assertThat(item.getContenttype()).isEqualTo("mixed");
+		assertThat(item.getPrivacy()).isEqualTo("1");
+		assertThat(item.getFavorite()).isEqualTo("1");
 	}
 
 	@Test
@@ -91,6 +99,9 @@ class MediaFeedServiceTest {
 		assertThat(item.getPlayurl()).isEqualTo("/video.m3u8");
 		assertThat(item.getFallbackUrl()).isEqualTo("/video.mp4");
 		assertThat(item.getPrivacy()).isEqualTo("1");
+		assertThat(item.getPlatform()).isEqualTo("抖音");
+		assertThat(item.getPlatformkey()).isEqualTo("douyin");
+		assertThat(item.getContenttype()).isEqualTo("video");
 		assertThat(item.getSlides()).isEmpty();
 	}
 

@@ -22,6 +22,9 @@ class AdminVideoListItemTest {
 		video.setVideoname("title");
 		video.setVideodesc("summary");
 		video.setVideoplatform("douyin");
+		video.setPlatformkey("douyin");
+		video.setContenttype("video");
+		video.setAuthorhomepage("https://www.douyin.com/user/MS4wLjABAAAAstable");
 		video.setVideocover("cover.jpg");
 		video.setVideounrealaddr("/video.mp4");
 		video.setPlayurl("/video.m3u8");
@@ -50,6 +53,10 @@ class AdminVideoListItemTest {
 		assertThat(item.getVideoname()).isEqualTo("title");
 		assertThat(item.getVideodesc()).isEqualTo("summary");
 		assertThat(item.getVideoauthor()).isEqualTo("author");
+		assertThat(item.getPlatformkey()).isEqualTo("douyin");
+		assertThat(item.getPlatformDisplayName()).isEqualTo("抖音");
+		assertThat(item.getContenttype()).isEqualTo("video");
+		assertThat(item.getAuthorhomepage()).contains("MS4wLjABAAAAstable");
 		assertThat(item.getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
 		assertThat(item.getSecuid()).isEqualTo("MS4wLjABAAAAstable");
 		assertThat(item.getAuthorusername()).isEqualTo("author-name");

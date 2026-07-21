@@ -77,6 +77,9 @@ public class VideoDataService {
 	@Autowired
 	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
 
+	@Autowired
+	private PlatformMetadataCompatibilityService platformMetadataCompatibilityService;
+
 	private Logger logger = LoggerFactory.getLogger(VideoDataService.class);
 
 	public List<VideoDataEntity> findByVideoid(String videoid) {
@@ -183,6 +186,9 @@ public class VideoDataService {
 				root.get("sourceurl").alias("sourceurl"),
 				root.get("favorite").alias("favorite"),
 				root.get("originaladdress").alias("originaladdress"),
+				root.get("platformkey").alias("platformkey"),
+				root.get("contenttype").alias("contenttype"),
+				root.get("authorhomepage").alias("authorhomepage"),
 				root.get("videoaddr").alias("videoaddr"));
 		query.where(buildLitePredicates(res, root, cb));
 		if (!randomMode) {
@@ -224,14 +230,14 @@ public class VideoDataService {
 			predicates.add(cb.like(root.get("videodesc"), "%" + res.getVideodesc() + "%"));
 		}
 		if (StringUtil.isString(res.getVideoplatform())) {
-			predicates.add(cb.like(root.get("videoplatform"), "%" + res.getVideoplatform() + "%"));
+			predicates.add(buildVideoPlatformPredicate(root, cb, res.getVideoplatform()));
 		}
 		if (StringUtil.isString(res.getExcludePlatform())) {
 			String[] excludePlatforms = res.getExcludePlatform().split(",");
 			for (String platform : excludePlatforms) {
 				String trimmedPlatform = platform != null ? platform.trim() : "";
 				if (!trimmedPlatform.isEmpty()) {
-					predicates.add(cb.notLike(cb.lower(root.get("videoplatform")), "%" + trimmedPlatform.toLowerCase() + "%"));
+					predicates.add(cb.not(buildVideoPlatformPredicate(root, cb, trimmedPlatform)));
 				}
 			}
 		}
@@ -303,6 +309,9 @@ public class VideoDataService {
 		video.setSourceurl(tuple.get("sourceurl", String.class));
 		video.setFavorite(tuple.get("favorite", String.class));
 		video.setOriginaladdress(tuple.get("originaladdress", String.class));
+		video.setPlatformkey(tuple.get("platformkey", String.class));
+		video.setContenttype(tuple.get("contenttype", String.class));
+		video.setAuthorhomepage(tuple.get("authorhomepage", String.class));
 		video.setVideoaddr(tuple.get("videoaddr", String.class));
 		return video;
 	}
@@ -338,7 +347,7 @@ public class VideoDataService {
 	            }
 
 	            if (StringUtil.isString(res.getVideoplatform())) {
-	                predicates.add(cb.like(root.get("videoplatform"), "%" + res.getVideoplatform() + "%"));
+	                predicates.add(buildVideoPlatformPredicate(root, cb, res.getVideoplatform()));
 	            }
 	            
 	            // 排除指定平台的视频（支持多个平台，逗号分隔）
@@ -347,7 +356,7 @@ public class VideoDataService {
 	                for (String platform : excludePlatforms) {
 	                    String trimmedPlatform = platform != null ? platform.trim() : "";
 	                    if (!trimmedPlatform.isEmpty()) {
-	                        predicates.add(cb.notLike(cb.lower(root.get("videoplatform")), "%" + trimmedPlatform.toLowerCase() + "%"));
+	                        predicates.add(cb.not(buildVideoPlatformPredicate(root, cb, trimmedPlatform)));
 	                    }
 	                }
 	            }
@@ -449,6 +458,11 @@ public class VideoDataService {
 			if (item == null) {
 				continue;
 			}
+			if (platformMetadataCompatibilityService != null) {
+				platformMetadataCompatibilityService.enrichVideo(item);
+			} else {
+				PlatformMetadataCompatibilityService.enrichCanonicalVideo(item);
+			}
 			String playUrl = item.getVideounrealaddr();
 			boolean hasHls = Global.hlsEnable && hlsTranscodeService.hasHls(item);
 			if (hasHls) {
@@ -485,6 +499,22 @@ public class VideoDataService {
 		target.setAuthorusername(canonicalUsername);
 		target.setUniqueid(canonicalUsername);
 		return target;
+	}
+
+	private Predicate buildVideoPlatformPredicate(Root<VideoDataEntity> root, CriteriaBuilder cb,
+			String requestedPlatform) {
+		List<Predicate> matches = new ArrayList<>();
+		String canonicalKey = PlatformMetadataCompatibilityService.resolvePlatformKey(null, requestedPlatform);
+		if (canonicalKey != null) {
+			matches.add(cb.equal(cb.lower(root.get("platformkey")), canonicalKey.toLowerCase(java.util.Locale.ROOT)));
+			for (String alias : PlatformMetadataCompatibilityService.resolveFilterAliases(requestedPlatform)) {
+				matches.add(cb.equal(cb.lower(root.get("videoplatform")), alias));
+			}
+		} else {
+			matches.add(cb.like(cb.lower(root.get("videoplatform")),
+					"%" + requestedPlatform.trim().toLowerCase(java.util.Locale.ROOT) + "%"));
+		}
+		return cb.or(matches.toArray(new Predicate[0]));
 	}
 
 	/**

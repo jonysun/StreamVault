@@ -31,6 +31,9 @@ public class AdminMediaFeedItem {
 	private String originaladdress;
 	private String favorite;
 	private String privacy;
+	private String platformkey;
+	private String contenttype;
+	private String authorhomepage;
 	private List<AdminMediaSlide> slides = new ArrayList<>();
 
 	public String getType() {
@@ -231,6 +234,30 @@ public class AdminMediaFeedItem {
 
 	public void setPrivacy(String privacy) {
 		this.privacy = privacy;
+	}
+
+	public String getPlatformkey() {
+		return platformkey;
+	}
+
+	public void setPlatformkey(String platformkey) {
+		this.platformkey = platformkey;
+	}
+
+	public String getContenttype() {
+		return contenttype;
+	}
+
+	public void setContenttype(String contenttype) {
+		this.contenttype = contenttype;
+	}
+
+	public String getAuthorhomepage() {
+		return authorhomepage;
+	}
+
+	public void setAuthorhomepage(String authorhomepage) {
+		this.authorhomepage = authorhomepage;
 	}
 
 	public List<AdminMediaSlide> getSlides() {
