@@ -420,36 +420,55 @@ public class BiliUtil {
 	 * @return
 	 */
 	public static List<Map<String, String>> getVideoDataInfo(String url) {
-		List<Map<String, String>> res = new ArrayList<Map<String, String>>();
 		String parseEntry = BiliUtil.parseEntry(url);
 		String api = "";
-		if (parseEntry.contains("BV")) {
+		if (parseEntry.regionMatches(true, 0, "BV", 0, 2)) {
 			api = "https://api.bilibili.com/x/web-interface/view?bvid=" + parseEntry.substring(2, parseEntry.length());
 		}
-		if (parseEntry.contains("av")) {
+		if (parseEntry.regionMatches(true, 0, "av", 0, 2)) {
 			api = "https://api.bilibili.com/x/web-interface/view?aid=" + parseEntry.substring(2, parseEntry.length());
 		}
+		if (api.isEmpty()) {
+			return null;
+		}
 		String serchPersion = HttpUtil.getSerchPersion(api, "UTF-8");
-		JSONObject videoData = JSONObject.parseObject(serchPersion);
-		if (videoData.getString("code").equals("0")) {
+		return parseVideoDataInfo(serchPersion);
+	}
+
+	public static List<Map<String, String>> parseVideoDataInfo(String response) {
+		List<Map<String, String>> res = new ArrayList<Map<String, String>>();
+		if (response == null || response.trim().isEmpty()) {
+			return null;
+		}
+		JSONObject videoData;
+		try {
+			videoData = JSONObject.parseObject(response);
+		} catch (RuntimeException e) {
+			return null;
+		}
+		if (videoData != null && videoData.getIntValue("code") == 0 && videoData.getJSONObject("data") != null) {
 			// 优化多集问题 从page 里取
 
-			String bvid = videoData.getJSONObject("data").getString("bvid");
-			String aid = videoData.getJSONObject("data").getString("aid");
-			String desc = videoData.getJSONObject("data").getString("desc");
-			JSONObject dimension = videoData.getJSONObject("data").getJSONObject("dimension");
-			Integer width = dimension.getInteger("width");
-			Integer height = dimension.getInteger("height");
-			JSONArray jsonArray = videoData.getJSONObject("data").getJSONArray("pages");
+			JSONObject root = videoData.getJSONObject("data");
+			String bvid = root.getString("bvid");
+			String aid = root.getString("aid");
+			String desc = root.getString("desc");
+			JSONObject dimension = root.getJSONObject("dimension");
+			int width = dimension == null ? 0 : dimension.getIntValue("width");
+			int height = dimension == null ? 0 : dimension.getIntValue("height");
+			JSONArray jsonArray = root.getJSONArray("pages");
+			if (jsonArray == null || jsonArray.isEmpty()) {
+				return res;
+			}
 			for (int i = 0; i < jsonArray.size(); i++) {
 				Map<String, String> data = new HashMap<String, String>();
 				JSONObject jsonObject = jsonArray.getJSONObject(i);
 				String cid = jsonObject.getString("cid");
 				String title = chooseVideoTitle(
-					    videoData.getJSONObject("data") != null ? videoData.getJSONObject("data").getString("title") : "",
+					    root.getString("title") != null ? root.getString("title") : "",
 					    jsonObject.getString("part") != null ? jsonObject.getString("part") : ""
 				);
-				String pic = videoData.getJSONObject("data").getString("pic");
+				String pic = root.getString("pic");
 				data.put("aid", aid);
 				data.put("bvid", bvid);
 				data.put("desc", desc);
@@ -468,8 +487,10 @@ public class BiliUtil {
 				data.put("duration", duration);
 				data.put("width", Integer.toString(width));
 				data.put("height", Integer.toString(height));
-				data.put("owner", videoData.getJSONObject("data").getString("owner"));
-				data.put("ctime", videoData.getJSONObject("data").getString("ctime"));
+				data.put("owner", root.getString("owner"));
+				data.put("ctime", root.getString("ctime"));
+				data.put("page", jsonObject.getString("page"));
+				data.put("part", jsonObject.getString("part"));
 				res.add(data);
 			}
 			return res;
