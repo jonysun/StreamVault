@@ -20,6 +20,12 @@ public interface VideoDataDao
 
 	List<VideoDataEntity> findByVideoidAndVideoplatform(String id, String platform);
 
+	List<VideoDataEntity> findByPlatformkeyAndVideoid(String platformkey, String videoid);
+
+	List<VideoDataEntity> findByVideoidAndVideoplatformIn(String videoid, List<String> platforms);
+
+	List<VideoDataEntity> findByOriginaladdressAndVideoplatformIn(String originaladdress, List<String> platforms);
+
 	List<VideoDataEntity> findByVideoplatform(String videoplatform);
 
 	List<VideoDataEntity> findByOriginaladdress(String originaladdress);

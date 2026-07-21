@@ -52,6 +52,9 @@ public class MediaFeedService {
 	@Autowired
 	private AuthorProfileDao authorProfileDao;
 
+	@Autowired
+	private PlatformMetadataCompatibilityService platformMetadataCompatibilityService;
+
 	public AjaxEntity findPage(VideoDataEntity query) {
 		VideoDataEntity videoQuery = copyVideoQuery(query);
 		GraphicContentEntity graphicQuery = toGraphicQuery(query);
@@ -184,17 +187,21 @@ public class MediaFeedService {
 			return item;
 		}
 		List<AdminMediaSlide> slides = parseGraphicSlidesForTest(graphic.getImages());
+		PlatformMetadataCompatibilityService.enrichCanonicalGraphic(graphic);
 		item.setType("graphic");
 		item.setId(graphic.getId());
 		item.setMediaKey("graphic:" + graphic.getId());
 		item.setVideoid(graphic.getVideoid());
-		item.setPlatform(graphic.getPlatform());
+		item.setPlatformkey(graphic.getPlatformkey());
+		item.setPlatform(PlatformMetadataCompatibilityService.resolveDisplayName(graphic.getPlatformkey(), graphic.getPlatform()));
+		item.setContenttype(graphic.getContenttype());
 		item.setAuthor(graphic.getAuthor());
 		item.setAuthoruid(graphic.getAuthoruid());
 		item.setSecuid(graphic.getSecuid());
 		item.setAuthorusername(graphic.getAuthorusername());
 		item.setUniqueid(graphic.getUniqueid());
 		item.setAuthoravatar(graphic.getAuthoravatar());
+		item.setAuthorhomepage(graphic.getAuthorhomepage());
 		item.setTitle(graphic.getTitle());
 		item.setDesc(graphic.getContent());
 		item.setPublishTime(graphic.getPublishtime());
@@ -202,6 +209,8 @@ public class MediaFeedService {
 		item.setCover(slides.isEmpty() ? null : slides.get(0).getUrl());
 		item.setSourceurl(graphic.getSourceurl());
 		item.setOriginaladdress(graphic.getOriginaladdress());
+		item.setFavorite(graphic.getFavorite());
+		item.setPrivacy(graphic.getPrivacy());
 		item.setSlides(slides);
 		normalizeAuthorIdentity(item);
 		return item;
@@ -218,13 +227,16 @@ public class MediaFeedService {
 			item.setId(video.getId());
 			item.setMediaKey("video:" + video.getId());
 			item.setVideoid(video.getVideoid());
-			item.setPlatform(video.getVideoplatform());
+			item.setPlatformkey(video.getPlatformkey());
+			item.setPlatform(video.getPlatformDisplayName() == null ? video.getVideoplatform() : video.getPlatformDisplayName());
+			item.setContenttype(video.getContenttype());
 			item.setAuthor(video.getVideoauthor());
 			item.setAuthoruid(video.getAuthoruid());
 			item.setSecuid(video.getSecuid());
 			item.setAuthorusername(video.getAuthorusername());
 			item.setUniqueid(video.getUniqueid());
 			item.setAuthoravatar(video.getAuthoravatar());
+			item.setAuthorhomepage(video.getAuthorhomepage());
 			item.setTitle(video.getVideoname());
 			item.setDesc(video.getVideodesc());
 			item.setPublishTime(video.getPublishtime());
@@ -460,17 +472,35 @@ public class MediaFeedService {
 		}
 		normalizeAuthorIdentity(item);
 		String canonicalUid = item.getAuthoruid();
-		if (authorProfileDao == null || canonicalUid == null
+		if (canonicalUid == null
 				|| item.getPlatform() == null || item.getPlatform().trim().isEmpty()) {
 			return;
 		}
+		if (platformMetadataCompatibilityService != null) {
+			platformMetadataCompatibilityService.findAuthorProfile(item.getPlatformkey(), item.getPlatform(), canonicalUid)
+					.ifPresent(profile -> applyAuthorProfile(item, canonicalUid, profile));
+			return;
+		}
+		if (authorProfileDao == null) {
+			return;
+		}
 		authorProfileDao.findByPlatformAndAuthoruid(item.getPlatform().trim(), canonicalUid)
-				.map(AuthorProfileEntity::getDisplayname)
-				.filter(name -> name != null && !name.trim().isEmpty())
-				.ifPresent(name -> {
-					item.setDisplayAuthor(name.trim());
-					item.setProfileAuthorUid(canonicalUid);
-				});
+				.ifPresent(profile -> applyAuthorProfile(item, canonicalUid, profile));
+	}
+
+	private void applyAuthorProfile(AdminMediaFeedItem item, String canonicalUid, AuthorProfileEntity profile) {
+		if (profile == null) {
+			return;
+		}
+		String name = profile.getDisplayname();
+		if (name != null && !name.trim().isEmpty()) {
+			item.setDisplayAuthor(name.trim());
+			item.setProfileAuthorUid(canonicalUid);
+		}
+		if ((item.getAuthorhomepage() == null || item.getAuthorhomepage().trim().isEmpty())
+				&& profile.getHomepage() != null && !profile.getHomepage().trim().isEmpty()) {
+			item.setAuthorhomepage(profile.getHomepage().trim());
+		}
 	}
 
 	private void normalizeAuthorIdentity(AdminMediaFeedItem item) {

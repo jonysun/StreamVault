@@ -79,6 +79,10 @@ public class HlsTranscodeService {
 		return new AjaxEntity(Global.ajax_success, "已入队: " + added, added);
 	}
 
+	public boolean enqueueVideo(Integer videoId) {
+		return enqueue(videoId);
+	}
+
 	public AjaxEntity enqueueMissingLatest(int limit) {
 		int safeLimit = Math.max(1, Math.min(limit, 1000));
 		List<VideoDataEntity> all = videoDataDao.findAll();

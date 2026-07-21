@@ -1,0 +1,2 @@
+{"id":"first","extractor_key":"Youtube","webpage_url":"https://youtube.com/watch?v=first","url":"https://media.example/first.mp4","ext":"mp4","vcodec":"h264","acodec":"aac"}
+{"id":"second","extractor_key":"Youtube","webpage_url":"https://youtube.com/watch?v=second","url":"https://media.example/second.mp4","ext":"mp4","vcodec":"h264","acodec":"aac"}

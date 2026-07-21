@@ -48,6 +48,9 @@ public class GraphicContentService {
 
 	@Autowired
 	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
+
+	@Autowired
+	private PlatformMetadataCompatibilityService platformMetadataCompatibilityService;
 	
 	
 	
@@ -71,7 +74,7 @@ public class GraphicContentService {
 	            }
 
 	            if (StringUtil.isString(res.getPlatform())) {
-	                predicates.add(cb.like(root.get("platform"), "%" + res.getPlatform() + "%"));
+	                predicates.add(buildGraphicPlatformPredicate(root, cb, res.getPlatform()));
 	            }
 	            if (StringUtil.isString(res.getAuthor())) {
 	            	String[] authors = res.getAuthor().split(",");
@@ -149,7 +152,13 @@ public class GraphicContentService {
 				root.get("uniqueid").alias("uniqueid"),
 				root.get("createtime").alias("createtime"),
 				root.get("publishtime").alias("publishtime"),
-				root.get("sourceurl").alias("sourceurl"));
+				root.get("sourceurl").alias("sourceurl"),
+				root.get("platformkey").alias("platformkey"),
+				root.get("contenttype").alias("contenttype"),
+				root.get("authorhomepage").alias("authorhomepage"),
+				root.get("privacy").alias("privacy"),
+				root.get("favorite").alias("favorite"));
+
 		query.where(buildGraphicPredicates(res, root, cb));
 		query.orderBy(buildGraphicOrders(res, root, cb));
 		List<Tuple> tuples = entityManager.createQuery(query)
@@ -187,7 +196,7 @@ public class GraphicContentService {
 				predicates.add(cb.like(root.get("content"), "%" + res.getContent() + "%"));
 			}
 			if (StringUtil.isString(res.getPlatform())) {
-				predicates.add(cb.like(root.get("platform"), "%" + res.getPlatform() + "%"));
+				predicates.add(buildGraphicPlatformPredicate(root, cb, res.getPlatform()));
 			}
 			if (StringUtil.isString(res.getAuthor())) {
 				String[] authors = res.getAuthor().split(",");
@@ -252,6 +261,11 @@ public class GraphicContentService {
 		item.setCreatetime(tuple.get("createtime", Date.class));
 		item.setPublishtime(tuple.get("publishtime", String.class));
 		item.setSourceurl(tuple.get("sourceurl", String.class));
+		item.setPlatformkey(tuple.get("platformkey", String.class));
+		item.setContenttype(tuple.get("contenttype", String.class));
+		item.setAuthorhomepage(tuple.get("authorhomepage", String.class));
+		item.setPrivacy(tuple.get("privacy", String.class));
+		item.setFavorite(tuple.get("favorite", String.class));
 		normalizeResponseIdentity(item, item);
 		return item;
 	}
@@ -273,6 +287,11 @@ public class GraphicContentService {
 		target.setSecuid(canonicalUid);
 		target.setAuthorusername(canonicalUsername);
 		target.setUniqueid(canonicalUsername);
+		if (platformMetadataCompatibilityService != null) {
+			platformMetadataCompatibilityService.enrichGraphic(target);
+		} else {
+			PlatformMetadataCompatibilityService.enrichCanonicalGraphic(target);
+		}
 	}
 
 	private String resolveGraphicSortField(String requestedField) {
@@ -281,6 +300,22 @@ public class GraphicContentService {
 			return candidate;
 		}
 		return "id";
+	}
+
+	private Predicate buildGraphicPlatformPredicate(Root<GraphicContentEntity> root, CriteriaBuilder cb,
+			String requestedPlatform) {
+		List<Predicate> matches = new ArrayList<>();
+		String canonicalKey = PlatformMetadataCompatibilityService.resolvePlatformKey(null, requestedPlatform);
+		if (canonicalKey != null) {
+			matches.add(cb.equal(cb.lower(root.get("platformkey")), canonicalKey.toLowerCase(java.util.Locale.ROOT)));
+			for (String alias : PlatformMetadataCompatibilityService.resolveFilterAliases(requestedPlatform)) {
+				matches.add(cb.equal(cb.lower(root.get("platform")), alias));
+			}
+		} else {
+			matches.add(cb.like(cb.lower(root.get("platform")),
+					"%" + requestedPlatform.trim().toLowerCase(java.util.Locale.ROOT) + "%"));
+		}
+		return cb.or(matches.toArray(new Predicate[0]));
 	}
 
 	private String resolveSortOrder(String requestedOrder) {

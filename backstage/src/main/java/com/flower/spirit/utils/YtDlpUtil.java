@@ -6,8 +6,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.config.Global;
@@ -17,6 +20,103 @@ import org.slf4j.LoggerFactory;
 public class YtDlpUtil {
 
 	private static final Logger logger = LoggerFactory.getLogger(YtDlpUtil.class);
+	private static final String DOWNLOADED_FILE_PREFIX = "__STREAMVAULT_FILE__";
+
+	public static String execSingleMetadata(String url, String platform) throws IOException, InterruptedException {
+		validateUrl(url);
+		String cookiePlatform = platform;
+		if (cookiePlatform == null || cookiePlatform.trim().isEmpty()) {
+			cookiePlatform = getPlatform(url);
+		}
+		List<String> command = new ArrayList<>();
+		command.add("yt-dlp");
+		command.add("--dump-json");
+		command.add("--skip-download");
+		command.add("--no-playlist");
+		addCookieConfig(command, cookiePlatform);
+		addNetworkConfig(command);
+		command.add(url.trim());
+		logger.info("Executing yt-dlp single-work metadata probe for platform={}", platform);
+		return runCommand(command, "metadata probe");
+	}
+
+	public static List<Path> downloadSingleVideo(String url, Path outputDirectory, String platform)
+			throws IOException, InterruptedException {
+		validateUrl(url);
+		if (outputDirectory == null) throw new IllegalArgumentException("output directory is required");
+		Path output = outputDirectory.toAbsolutePath().normalize();
+		Files.createDirectories(output);
+		List<String> command = new ArrayList<>();
+		command.add("yt-dlp");
+		command.add("--no-playlist");
+		command.add("--newline");
+		command.add("-f");
+		command.add("bestvideo+bestaudio/best");
+		command.add("--merge-output-format");
+		command.add("mp4");
+		command.add("--print");
+		command.add("after_move:" + DOWNLOADED_FILE_PREFIX + "%(filepath)s");
+		command.add("-o");
+		command.add(output.resolve("%(id)s.%(ext)s").toString());
+		addCookieConfig(command, platform);
+		addNetworkConfig(command);
+		command.add(url.trim());
+		logger.info("Executing yt-dlp single-work download for platform={}", platform);
+		String result = runCommand(command, "video download");
+		LinkedHashSet<Path> files = new LinkedHashSet<>();
+		for (String line : result.split("\\R")) {
+			if (!line.startsWith(DOWNLOADED_FILE_PREFIX)) continue;
+			Path file = Path.of(line.substring(DOWNLOADED_FILE_PREFIX.length())).toAbsolutePath().normalize();
+			if (!file.startsWith(output)) {
+				throw new IOException("yt-dlp reported a downloaded file outside the output directory");
+			}
+			files.add(file);
+		}
+		if (files.isEmpty()) throw new IOException("yt-dlp completed without reporting a downloaded video file");
+		return List.copyOf(files);
+	}
+
+	private static String runCommand(List<String> command, String operation)
+			throws IOException, InterruptedException {
+		Process process = new ProcessBuilder(command).start();
+		Thread stderrReader = new Thread(() -> drainStream(process.getErrorStream()),
+				"yt-dlp-stderr-" + System.currentTimeMillis());
+		stderrReader.setDaemon(true);
+		stderrReader.start();
+		String stdout;
+		try (InputStream input = process.getInputStream()) {
+			stdout = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+		}
+		int exitCode = process.waitFor();
+		stderrReader.join();
+		if (exitCode != 0) {
+			throw new IOException("yt-dlp " + operation + " failed with exit code " + exitCode);
+		}
+		return stdout;
+	}
+
+	private static void drainStream(InputStream stream) {
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+			while (reader.readLine() != null) { }
+		} catch (IOException e) {
+			logger.debug("Failed to read yt-dlp stderr", e);
+		}
+	}
+
+	private static void addNetworkConfig(List<String> command) {
+		if (Global.proxyinfo != null && !Global.proxyinfo.trim().isEmpty()) {
+			command.add("--proxy");
+			command.add(Global.proxyinfo);
+		}
+		if (Global.useragent != null && !Global.useragent.trim().isEmpty()) {
+			command.add("--user-agent");
+			command.add(Global.useragent);
+		}
+	}
+
+	private static void validateUrl(String url) {
+		if (url == null || url.trim().isEmpty()) throw new IllegalArgumentException("URL must not be blank");
+	}
 
 	public static String exec(String url, String outpath, String p, Boolean createnfo)
 			throws IOException, InterruptedException {

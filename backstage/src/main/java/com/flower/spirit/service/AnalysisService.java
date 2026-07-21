@@ -2,6 +2,7 @@ package com.flower.spirit.service;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -26,11 +27,16 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.config.PlatformAdapterProperties;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.ProcessHistoryEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.executor.HongShuExecutor;
 import com.flower.spirit.executor.WeiBoExecutor;
+import com.flower.spirit.platform.PlatformResolver;
+import com.flower.spirit.platform.WorkContentType;
+import com.flower.spirit.platform.WorkMediaResource;
+import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.utils.Aria2Util;
 import com.flower.spirit.utils.BiliUtil;
 import com.flower.spirit.utils.DateUtils;
@@ -99,6 +105,15 @@ public class AnalysisService {
 	@Autowired
 	private BlockedWorkService blockedWorkService;
 
+	@Autowired
+	private PlatformResolver platformResolver;
+
+	@Autowired
+	private PlatformAdapterProperties platformAdapterProperties;
+
+	@Autowired
+	private WorkIngestService workIngestService;
+
 
 	/**
 	 * 解析资源
@@ -108,6 +123,40 @@ public class AnalysisService {
 	 * @throws Exception
 	 */
 	public void processingVideos(String token, String video) throws Exception {
+		submitProcessingVideos(token, video);
+	}
+
+	public SubmissionResult submitProcessingVideos(String token, String video) throws Exception {
+		if (!Objects.equals(token, Global.apptoken) || StringUtils.isBlank(video) || video.length() < 5) {
+			processingVideosLegacy(token, video);
+			return new SubmissionResult(null, resolvedPlatformKey(video), "legacy", "rejected");
+		}
+		PlatformResolver.Resolution resolution = platformResolver.resolve(video).orElse(null);
+		if (resolution == null || !platformAdapterProperties.useNewAdapter(resolution.platform().getKey())
+				|| requiresLegacyAria2(resolution.platform().getKey())) {
+			processingVideosLegacy(token, video);
+			return new SubmissionResult(null, resolution == null ? null : resolution.platform().getKey(),
+					"legacy", "submitted");
+		}
+		if (Global.isDownloadPaused()) {
+			return new SubmissionResult(null, resolution.platform().getKey(), "new", "paused");
+		}
+		ProcessHistoryEntity history = processHistoryService.beginPlatformProcess(video,
+				resolution.platform().getDisplayName(), "SUBMITTED");
+		Integer historyId = history == null ? null : history.getId();
+		ExecutorService executor = executorFor(resolution.platform().getKey());
+		boolean accepted = executeTask(executor, historyId, "queued for unified platform ingest", true, () ->
+				workIngestService.ingest(video, this::adapterOutputDirectory, false, historyId));
+		return new SubmissionResult(historyId, resolution.platform().getKey(), "new",
+				accepted ? "submitted" : "rejected");
+	}
+
+	private boolean requiresLegacyAria2(String platformKey) {
+		return "a2".equalsIgnoreCase(Global.downtype) && ("douyin".equals(platformKey)
+				|| "bilibili".equals(platformKey) || "kuaishou".equals(platformKey));
+	}
+
+	void processingVideosLegacy(String token, String video) throws Exception {
 		ProcessHistoryEntity history = null;
 		if (null == token || !token.equals(Global.apptoken)) {
 			logger.error("无效的token");
@@ -168,6 +217,35 @@ public class AnalysisService {
 			}
 
 		}
+	}
+
+	private String resolvedPlatformKey(String input) {
+		if (platformResolver == null) return null;
+		return platformResolver.resolve(input).map(value -> value.platform().getKey()).orElse(null);
+	}
+
+	private ExecutorService executorFor(String platformKey) {
+		if ("bilibili".equals(platformKey)) return bilibili;
+		if ("youtube".equals(platformKey) || "twitter".equals(platformKey)
+				|| "instagram".equals(platformKey) || "tiktok".equals(platformKey)
+				|| "generic".equals(platformKey)) {
+			return ytdlp;
+		}
+		return domestic;
+	}
+
+	private Path adapterOutputDirectory(WorkMetadata metadata) {
+		String platform = metadata.getPlatformDisplayName() == null
+				? metadata.getPlatformKey() : metadata.getPlatformDisplayName();
+		String filename = FileNameTemplateUtil.resolveFileName(metadata.getTitle(), metadata.getWorkId(),
+				metadata.getAuthorName(), metadata.getPublishTime(), platform);
+		String directory = metadata.getContentType() == WorkContentType.VIDEO
+				? FileUtil.generateDir(true, platform, true, filename, null, null)
+				: FileUtil.generateDir(true, platform, filename, null, null, 0);
+		return Path.of(directory);
+	}
+
+	public record SubmissionResult(Integer taskId, String platformKey, String mode, String status) {
 	}
 
 	private void xiaohongshu(String platform, String url) throws Exception {
@@ -319,11 +397,16 @@ public class AnalysisService {
 	 * @param executor 线程池
 	 * @param task     要执行的任务
 	 */
-	private void executeTask(ExecutorService executor, Integer historyId, String queueLog, ExceptionRunnable task) {
+	private boolean executeTask(ExecutorService executor, Integer historyId, String queueLog, ExceptionRunnable task) {
+		return executeTask(executor, historyId, queueLog, false, task);
+	}
+
+	private boolean executeTask(ExecutorService executor, Integer historyId, String queueLog,
+			boolean taskManagesHistory, ExceptionRunnable task) {
 		if (Global.isDownloadPaused()) {
 			logger.info("下载任务已暂停，未进入执行队列 historyId={}", historyId);
 			processHistoryService.markProcessLog(historyId, "已暂停", "下载任务已暂停，未进入执行队列");
-			return;
+			return false;
 		}
 		if (historyId != null && StringUtils.isNotBlank(queueLog)) {
 			processHistoryService.markProcessLog(historyId, "已提交未执行", queueLog);
@@ -332,15 +415,19 @@ public class AnalysisService {
 			executor.execute(() -> {
 				try {
 					task.run();
-					processHistoryService.completeProcess(historyId, "任务执行完成");
+					if (!taskManagesHistory) processHistoryService.completePlatformProcess(historyId);
 				} catch (Exception e) {
 					logger.error("任务执行失败: " + e.getMessage(), e);
-					processHistoryService.completeProcess(historyId, "任务执行失败: " + e.getMessage());
+					if (!taskManagesHistory) {
+						processHistoryService.failPlatformProcess(historyId, "EXECUTING", e.getMessage());
+					}
 				}
 			});
+			return true;
 		} catch (RejectedExecutionException e) {
 			logger.warn("任务队列已满，拒绝新任务 historyId={}", historyId);
-			processHistoryService.completeProcess(historyId, "任务队列已满，请稍后重试");
+			processHistoryService.failPlatformProcess(historyId, "REJECTED", "task queue is full");
+			return false;
 		}
 	}
 
@@ -953,20 +1040,37 @@ public class AnalysisService {
 
 	public AjaxEntity directData(VideoDataEntity video,HttpServletRequest resq) {
 		String type = resq.getParameter("type");
-		if(type.equals("1")) {
+		if("1".equals(type)) {
 			try {
-				processingVideos(Global.apptoken, video.getOriginaladdress());
-				return new AjaxEntity(Global.ajax_success, "提交成功", null);
+				SubmissionResult result = submitProcessingVideos(Global.apptoken, video.getOriginaladdress());
+				return applySubmission(new AjaxEntity(Global.ajax_success, "提交成功", null), result);
 			} catch (Exception e) {
-			
+				return new AjaxEntity(Global.ajax_uri_error, "submission failed: " + e.getMessage(), null);
 			}
 		}else {
 			return directData(Global.apptoken, video.getOriginaladdress(),"local");
 		}
-		return null;
 	}
 	
 	public AjaxEntity directData(String token, String video,String type) {
+		if ("http".equals(type) && !"video_standard".equals(Global.frontend)) {
+			return null;
+		}
+		if (!(Objects.equals(token, Global.apptoken) || Objects.equals(token, Global.readonlytoken))) {
+			return new AjaxEntity(Global.ajax_uri_error, "token 错误", null);
+		}
+		PlatformResolver.Resolution resolution = platformResolver.resolve(video).orElse(null);
+		if (resolution != null && platformAdapterProperties.useNewAdapter(resolution.platform().getKey())) {
+			try {
+				return newAdapterPreview(video);
+			} catch (RuntimeException e) {
+				return handlePlatformError(resolution.platform().getDisplayName(), e);
+			}
+		}
+		return legacyDirectData(token, video, type);
+	}
+
+	AjaxEntity legacyDirectData(String token, String video,String type) {
 		if ("http".equals(type) && !"video_standard".equals(Global.frontend)) {
 		    logger.info("当前主页模式不支持该接口调用");
 		    return null;
@@ -1200,6 +1304,83 @@ public class AnalysisService {
 		} catch (Exception e) {
 			return handlePlatformError(platform, e);
 		}
+	}
+
+	private AjaxEntity newAdapterPreview(String input) {
+		WorkMetadata metadata = workIngestService.preview(input);
+		Map<String, Object> result = new HashMap<>();
+		result.put("platform", metadata.getPlatformDisplayName());
+		result.put("platformKey", metadata.getPlatformKey());
+		result.put("workId", metadata.getWorkId());
+		result.put("contentType", metadata.getContentType().getValue());
+		result.put("supportTier", metadata.getSupportTier() == null ? null
+				: metadata.getSupportTier().name().toLowerCase());
+		result.put("sourceUrl", metadata.getSourceUrl());
+		result.put("originalAddress", metadata.getOriginalAddress());
+		result.put("title", metadata.getTitle());
+		result.put("description", metadata.getDescription());
+		result.put("author", metadata.getAuthorName());
+		result.put("authorId", metadata.getAuthorId());
+		result.put("authorUsername", metadata.getAuthorUsername());
+		result.put("authorAvatar", metadata.getAuthorAvatar());
+		result.put("authorHomepage", metadata.getAuthorHomepage());
+		result.put("authorSignature", metadata.getAuthorSignature());
+		result.put("publishTime", metadata.getPublishTime());
+		result.put("coverUrl", metadata.getCoverUrl());
+		List<Map<String, Object>> resources = new ArrayList<>();
+		List<String> visualUrls = new ArrayList<>();
+		String firstVideo = null;
+		String firstAudio = null;
+		String referer = null;
+		for (WorkMediaResource resource : metadata.getMediaResources()) {
+			Map<String, Object> item = new HashMap<>();
+			item.put("order", resource.getOrder());
+			item.put("type", resource.getType().name().toLowerCase());
+			item.put("url", resource.getSourceUrl());
+			item.put("extension", resource.getExpectedExtension());
+			resources.add(item);
+			if (resource.getType() != WorkMediaResource.Type.AUDIO && resource.getSourceUrl() != null) {
+				visualUrls.add(resource.getSourceUrl());
+			}
+			if (firstVideo == null && resource.getType() == WorkMediaResource.Type.VIDEO) {
+				firstVideo = resource.getSourceUrl();
+			}
+			if (firstAudio == null && resource.getType() == WorkMediaResource.Type.AUDIO) {
+				firstAudio = resource.getSourceUrl();
+			}
+			if (referer == null) referer = firstHeader(resource.getRequestHeaders(), "Referer");
+		}
+		result.put("mediaResources", resources);
+		result.put("videoUrl", firstVideo == null && !visualUrls.isEmpty() ? visualUrls.get(0) : firstVideo);
+		result.put("audioUrl", firstAudio);
+		result.put("imageUrls", metadata.getContentType() == WorkContentType.VIDEO ? null : visualUrls);
+		result.put("mediaType", metadata.getContentType() == WorkContentType.VIDEO ? "video"
+				: metadata.getContentType() == WorkContentType.GRAPHIC ? "image" : "mixed");
+		result.put("isDash", firstAudio != null);
+		result.put("needReferer", referer != null);
+		result.put("referer", referer);
+		AjaxEntity response = new AjaxEntity(Global.ajax_success, "parsed", result);
+		response.setPlatformKey(metadata.getPlatformKey());
+		response.setMode("new");
+		response.setStatus("preview");
+		return response;
+	}
+
+	private String firstHeader(Map<String, String> headers, String key) {
+		if (headers == null) return null;
+		for (Map.Entry<String, String> entry : headers.entrySet()) {
+			if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(key)) return entry.getValue();
+		}
+		return null;
+	}
+
+	public AjaxEntity applySubmission(AjaxEntity response, SubmissionResult result) {
+		if (response == null || result == null) return response;
+		response.setTaskId(result.taskId());
+		response.setPlatformKey(result.platformKey());
+		response.setMode(result.mode());
+		response.setStatus(result.status());
+		return response;
 	}
 
 	private String extractBestCoverUrl(JSONObject jsonObject) {

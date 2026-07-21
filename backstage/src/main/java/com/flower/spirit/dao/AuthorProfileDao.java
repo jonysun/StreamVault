@@ -17,5 +17,7 @@ public interface AuthorProfileDao extends JpaRepository<AuthorProfileEntity, Int
 
 	Optional<AuthorProfileEntity> findByPlatformAndAuthoruid(String platform, String authoruid);
 
+	Optional<AuthorProfileEntity> findByPlatformkeyAndAuthoruid(String platformkey, String authoruid);
+
 	List<AuthorProfileEntity> findByPlatform(String platform);
 }

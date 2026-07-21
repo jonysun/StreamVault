@@ -3,6 +3,7 @@ package com.flower.spirit.dto;
 import java.util.Date;
 
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.service.PlatformMetadataCompatibilityService;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 
 public class AdminVideoListItem {
@@ -29,6 +30,10 @@ public class AdminVideoListItem {
 	private String sourceurl;
 	private String favorite;
 	private String originaladdress;
+	private String platformkey;
+	private String platformDisplayName;
+	private String contenttype;
+	private String authorhomepage;
 
 	public static AdminVideoListItem from(VideoDataEntity video) {
 		AdminVideoListItem item = new AdminVideoListItem();
@@ -59,6 +64,13 @@ public class AdminVideoListItem {
 		item.setSourceurl(video.getSourceurl());
 		item.setFavorite(video.getFavorite());
 		item.setOriginaladdress(video.getOriginaladdress());
+		String platformKey = PlatformMetadataCompatibilityService.resolvePlatformKey(video.getPlatformkey(),
+				video.getVideoplatform());
+		item.setPlatformkey(platformKey);
+		item.setPlatformDisplayName(PlatformMetadataCompatibilityService.resolveDisplayName(platformKey,
+				video.getVideoplatform()));
+		item.setContenttype(video.getContenttype() == null ? "video" : video.getContenttype());
+		item.setAuthorhomepage(video.getAuthorhomepage());
 		return item;
 	}
 
@@ -236,5 +248,37 @@ public class AdminVideoListItem {
 
 	public void setOriginaladdress(String originaladdress) {
 		this.originaladdress = originaladdress;
+	}
+
+	public String getPlatformkey() {
+		return platformkey;
+	}
+
+	public void setPlatformkey(String platformkey) {
+		this.platformkey = platformkey;
+	}
+
+	public String getPlatformDisplayName() {
+		return platformDisplayName;
+	}
+
+	public void setPlatformDisplayName(String platformDisplayName) {
+		this.platformDisplayName = platformDisplayName;
+	}
+
+	public String getContenttype() {
+		return contenttype;
+	}
+
+	public void setContenttype(String contenttype) {
+		this.contenttype = contenttype;
+	}
+
+	public String getAuthorhomepage() {
+		return authorhomepage;
+	}
+
+	public void setAuthorhomepage(String authorhomepage) {
+		this.authorhomepage = authorhomepage;
 	}
 }

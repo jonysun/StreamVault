@@ -58,7 +58,7 @@ public class WeiBoExecutor {
 	
     // 微博ID提取正则表达式
     private static final Pattern WEIBO_ID_PATTERN = Pattern.compile(
-        "(?:https?://)?(?:www\\.)?(?:weibo\\.com|weibo\\.cn|m\\.weibo\\.cn)/(?:\\d{10}|status)/(\\w{9}|\\w{16})(?:/|\\?|#.*$|$)"
+        "(?:https?://)?(?:www\\.)?(?:weibo\\.com|weibo\\.cn|m\\.weibo\\.cn)/(?:\\d{10}|status|detail)/(\\w{8,20})(?:/|\\?|#.*$|$)"
     );
     
     private static String showDetail = "https://weibo.com/ajax/statuses/show";
@@ -221,6 +221,67 @@ public class WeiBoExecutor {
     /**
      * 微博请求回调接口
      */
+    public static String fetchWeiboDetailStrict(String weiboId, String cookie) throws IOException {
+        HttpUrl.Builder urlBuilder = HttpUrl.parse(showDetail).newBuilder();
+        urlBuilder.addQueryParameter("id", weiboId);
+        urlBuilder.addQueryParameter("locale", "zh-CN");
+        Request.Builder request = new Request.Builder()
+                .url(urlBuilder.build())
+                .addHeader("User-Agent", DouUtil.ua)
+                .addHeader("Accept", "application/json, text/plain, */*")
+                .addHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .addHeader("Referer", "https://weibo.com/")
+                .addHeader("X-Requested-With", "XMLHttpRequest");
+        if (cookie != null && !cookie.trim().isEmpty()) request.addHeader("Cookie", cookie);
+        try (Response response = client.newCall(request.get().build()).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                throw new IOException("Weibo detail request failed with HTTP " + response.code());
+            }
+            return response.body().string();
+        }
+    }
+
+    public static ParsedPost parseDetailJson(String detailJson, String sourceUrl, String workId) {
+        if (detailJson == null || detailJson.trim().isEmpty()) {
+            throw new IllegalArgumentException("Weibo detail JSON is required");
+        }
+        JSONObject object = JSONObject.parseObject(detailJson);
+        JSONObject user = object.getJSONObject("user");
+        List<ParsedMedia> media = new ArrayList<>();
+        JSONArray picIds = object.getJSONArray("pic_ids");
+        if (picIds != null) {
+            for (int i = 0; i < picIds.size(); i++) {
+                String picId = picIds.getString(i);
+                if (picId != null && !picId.trim().isEmpty()) {
+                    media.add(new ParsedMedia(false, buildHighestQualityImageUrl(picId), "jpeg"));
+                }
+            }
+        }
+        String videoUrl = extractHighestQualityVideo(object);
+        if (videoUrl != null && !videoUrl.trim().isEmpty()) {
+            media.add(new ParsedMedia(true, videoUrl, "mp4"));
+        }
+        String authorId = user == null ? null : user.getString("idstr");
+        return new ParsedPost(workId, firstText(object.getString("text_raw"), object.getString("text")),
+                object.getString("created_at"), authorId, user == null ? null : user.getString("screen_name"),
+                user == null ? null : user.getString("avatar_hd"),
+                authorId == null ? null : "https://weibo.com/u/" + authorId, sourceUrl,
+                List.copyOf(media), object.toJSONString());
+    }
+
+    private static String firstText(String first, String second) {
+        return first != null && !first.trim().isEmpty() ? first.trim()
+                : second == null || second.trim().isEmpty() ? null : second.trim();
+    }
+
+    public record ParsedPost(String workId, String description, String publishTime, String authorId,
+            String authorName, String authorAvatar, String authorHomepage, String sourceUrl,
+            List<ParsedMedia> media, String rawMetadata) {
+    }
+
+    public record ParsedMedia(boolean video, String url, String extension) {
+    }
+
     public interface WeiboCallback {
         /**
          * 请求成功回调
@@ -266,7 +327,6 @@ public class WeiBoExecutor {
             String videoUrl = extractHighestQualityVideo(weiboDetailJson);
             if (videoUrl != null && !videoUrl.isEmpty()) {
                 mediaInfo.setVideoUrl(videoUrl);
-                logger.info("成功提取视频URL: " + videoUrl);
             }
             
             // 判断是否为视频微博
@@ -298,7 +358,6 @@ public class WeiBoExecutor {
                         // 构建最高清晰度图片URL
                         String imageUrl = buildHighestQualityImageUrl(picId);
                         imageUrls.add(imageUrl);
-                        logger.info("构建图片URL: " + imageUrl);
                     }
                 }
             }
@@ -453,7 +512,7 @@ public class WeiBoExecutor {
         public String toString() {
             return "MediaInfo{" +
                     "图片数量=" + imageUrls.size() +
-                    ", 视频URL='" + videoUrl + '\'' +
+                    ", 包含视频=" + (videoUrl != null && !videoUrl.isEmpty()) +
                     ", 是否为视频=" + isVideo +
                     '}';
         }
@@ -466,8 +525,6 @@ public class WeiBoExecutor {
     	JSONObject weiboJson = JSONObject.parseObject(result);
         MediaInfo mediaInfo = extractMediaInfo(weiboJson);
         System.out.println("提取结果: " + mediaInfo);
-        System.out.println("图片URLs: " + mediaInfo.getImageUrls());
-        System.out.println("视频URL: " + mediaInfo.getVideoUrl());
 //    	System.out.println(result);
 	}
 }

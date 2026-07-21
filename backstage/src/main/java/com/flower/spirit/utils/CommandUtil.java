@@ -157,6 +157,12 @@ public class CommandUtil {
                 cmdList.add("--aweme_id"); cmdList.add(aid);
                 break;
 
+            case "fetch_work_data":
+                cmdList.add("fetch_work_data");
+                cmdList.add("--cookie"); cmdList.add(cookie);
+                cmdList.add("--aweme_id"); cmdList.add(aid);
+                break;
+
             case "fetch_user_like_videos":
             case "fetch_user_post_videos":
                 cmdList.add(fuc);
@@ -199,11 +205,15 @@ public class CommandUtil {
 
         logger.info("[F2] command={}", buildSafeCommandString(cmdList));
 
-        String output = runCommandList(cmdList);
+        String output = runCommandList(cmdList, "fetch_work_data".equals(fuc));
         return output;
     }
     
     public static String runCommandList(List<String> cmdList) {
+        return runCommandList(cmdList, false);
+    }
+
+    private static String runCommandList(List<String> cmdList, boolean suppressOutputPreview) {
         StringBuilder output = new StringBuilder();
         Process process = null;
         long startMs = System.currentTimeMillis();
@@ -227,6 +237,8 @@ public class CommandUtil {
             logger.info("[F2] process finished exitCode={} outputLength={}", exitCode, output.length());
             if (output.length() == 0) {
                 logger.warn("[F2] process returned empty output");
+            } else if (suppressOutputPreview) {
+                logger.info("[F2] output preview suppressed for signed media metadata");
             } else {
                 String preview = previewOutput(output.toString());
                 logger.info("[F2] output preview={}", preview);

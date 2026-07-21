@@ -53,6 +53,38 @@ public class ProcessHistoryService {
 		return saved;
 	}
 
+	public ProcessHistoryEntity beginPlatformProcess(String originaladdress, String platform, String stage) {
+		ProcessHistoryEntity history = saveProcess(null, originaladdress, platform, stage);
+		if (history != null && history.getId() != null) {
+			markProcessLog(history.getId(), stage, stage);
+		}
+		return history;
+	}
+
+	public void recordPlatformStage(Integer historyId, String stage) {
+		markProcessLog(historyId, stage, stage);
+	}
+
+	public void failPlatformProcess(Integer historyId, String stage, String message) {
+		String detail = message == null || message.trim().isEmpty() ? stage : stage + ": " + message.trim();
+		markProcessLog(historyId, "FAILED", detail);
+	}
+
+	public void completePlatformProcess(Integer historyId) {
+		if (!Global.openprocesshistory || historyId == null) {
+			return;
+		}
+		java.util.Optional<ProcessHistoryEntity> opt = processHistoryDao.findById(historyId);
+		if (opt.isEmpty()) {
+			return;
+		}
+		ProcessHistoryEntity item = opt.get();
+		item.setStatus("COMPLETED");
+		item.setTasklog("COMPLETED");
+		item.setCreatetime(DateUtils.formatDateTime(new Date()));
+		processHistoryDao.save(item);
+	}
+
 	public void markProcessLog(Integer id, String status, String tasklog) {
 		if (!Global.openprocesshistory || id == null) {
 			return;

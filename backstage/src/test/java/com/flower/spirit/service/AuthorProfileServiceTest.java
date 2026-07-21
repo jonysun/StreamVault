@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.dao.AuthorNameHistoryDao;
@@ -47,6 +49,18 @@ class AuthorProfileServiceTest {
 
 	@InjectMocks
 	private AuthorProfileService service;
+
+	@Test
+	void everyPublicAuthorUpsertEntryPointIsTransactionalAndSynchronized() {
+		assertThat(List.of(AuthorProfileService.class.getDeclaredMethods()).stream()
+				.filter(method -> method.getName().equals("upsertAuthor")
+						|| method.getName().equals("upsertCanonicalAuthor")))
+				.isNotEmpty()
+				.allSatisfy(method -> {
+					assertThat(method.isAnnotationPresent(Transactional.class)).isTrue();
+					assertThat(Modifier.isSynchronized(method.getModifiers())).isTrue();
+				});
+	}
 
 	@Test
 	void preferDouyinAuthorUidUsesSecUidWhenAvailable() {
@@ -93,6 +107,33 @@ class AuthorProfileServiceTest {
 		assertThat(historyCaptor.getValue().getDisplayname()).isEqualTo("new name");
 		assertThat(historyCaptor.getValue().getFirstseentime()).isNotNull();
 		assertThat(historyCaptor.getValue().getLastseentime()).isNotNull();
+	}
+
+	@Test
+	void canonicalUpsertReusesLegacyProfileAndAddsPlatformKey() {
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setId(9);
+		profile.setPlatform("YouTube");
+		profile.setAuthoruid("channel-1");
+		when(authorProfileDao.findByPlatformkeyAndAuthoruid("youtube", "channel-1"))
+				.thenReturn(Optional.empty());
+		when(authorProfileDao.findByPlatformAndAuthoruid("youtube", "channel-1"))
+				.thenReturn(Optional.empty());
+		when(authorProfileDao.findByPlatformAndAuthoruid("YouTube", "channel-1"))
+				.thenReturn(Optional.of(profile));
+		when(authorProfileDao.save(any(AuthorProfileEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(9, "Creator"))
+				.thenReturn(Optional.empty());
+
+		service.upsertCanonicalAuthor("youtube", "YouTube", "channel-1", "creator", "Creator",
+				"https://cdn.example/avatar.jpg", "https://youtube.com/@creator", "Creator signature");
+
+		assertThat(profile.getPlatformkey()).isEqualTo("youtube");
+		assertThat(profile.getPlatform()).isEqualTo("YouTube");
+		assertThat(profile.getDisplayname()).isEqualTo("Creator");
+		assertThat(profile.getHomepage()).isEqualTo("https://youtube.com/@creator");
+		assertThat(profile.getSignature()).isEqualTo("Creator signature");
+		verify(authorProfileDao).save(profile);
 	}
 
 	@Test

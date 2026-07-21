@@ -236,13 +236,76 @@ public class HongShuExecutor {
 		return res;
 	}
 
+	public static ParsedNote parsePage(String htmlContent, String sourceUrl) {
+		String initialState = extractJsonString(htmlContent);
+		if (initialState == null || initialState.trim().isEmpty()) {
+			throw new IllegalArgumentException("Xiaohongshu page has no initial state");
+		}
+		JSONObject root = JSONObject.parseObject(initialState);
+		JSONObject noteDetailMap = root.getJSONObject("note").getJSONObject("noteDetailMap");
+		if (noteDetailMap == null || noteDetailMap.isEmpty()) {
+			throw new IllegalArgumentException("Xiaohongshu page has no note detail");
+		}
+		String noteId = noteDetailMap.keySet().iterator().next();
+		JSONObject note = noteDetailMap.getJSONObject(noteId).getJSONObject("note");
+		if (note == null) throw new IllegalArgumentException("Xiaohongshu note data is missing");
+		JSONObject user = note.getJSONObject("user");
+		List<ParsedMedia> images = new ArrayList<>();
+		JSONArray imageList = note.getJSONArray("imageList");
+		if (imageList != null) {
+			for (int i = 0; i < imageList.size(); i++) {
+				String mediaUrl = imageList.getJSONObject(i).getString("urlDefault");
+				if (mediaUrl != null && !mediaUrl.trim().isEmpty()) {
+					images.add(new ParsedMedia(false, mediaUrl, "jpeg"));
+				}
+			}
+		}
+		List<ParsedMedia> videos = new ArrayList<>();
+		JSONObject video = note.getJSONObject("video");
+		JSONObject media = video == null ? null : video.getJSONObject("media");
+		JSONObject stream = media == null ? null : media.getJSONObject("stream");
+		JSONArray h264 = stream == null ? null : stream.getJSONArray("h264");
+		if (h264 != null) {
+			for (int i = 0; i < h264.size(); i++) {
+				String mediaUrl = h264.getJSONObject(i).getString("masterUrl");
+				if (mediaUrl != null && !mediaUrl.trim().isEmpty()) {
+					videos.add(new ParsedMedia(true, mediaUrl, "mp4"));
+				}
+			}
+		}
+		boolean singleVideo = "video".equals(note.getString("type")) && videos.size() == 1 && images.size() <= 1
+				&& h264.getJSONObject(0).getLongValue("duration") > 6000;
+		List<ParsedMedia> resources = new ArrayList<>();
+		if (singleVideo) resources.addAll(videos);
+		else {
+			resources.addAll(images);
+			resources.addAll(videos);
+		}
+		String authorId = user == null ? null : user.getString("userId");
+		return new ParsedNote(noteId, note.getString("title"), note.getString("desc"),
+				note.getString("time"), authorId, user == null ? null : user.getString("nickname"),
+				user == null ? null : user.getString("avatar"),
+				authorId == null ? null : "https://www.xiaohongshu.com/user/profile/" + authorId,
+				sourceUrl, images.isEmpty() ? null : images.get(0).url(), singleVideo,
+				List.copyOf(resources), note.toJSONString());
+	}
+
+	public record ParsedNote(String workId, String title, String description, String publishTime,
+			String authorId, String authorName, String authorAvatar, String authorHomepage,
+			String sourceUrl, String coverUrl, boolean singleVideo, List<ParsedMedia> media,
+			String rawMetadata) {
+	}
+
+	public record ParsedMedia(boolean video, String url, String extension) {
+	}
+
     
     /**
      * 从HTML内容中提取__INITIAL_STATE__的JSON字符串
      * @param htmlContent HTML内容
      * @return JSON字符串
      */
-    private static String extractJsonString(String htmlContent) {
+    public static String extractJsonString(String htmlContent) {
         // 使用正则表达式匹配window.__INITIAL_STATE__ = {...}
         Pattern pattern = Pattern.compile("window\\.__INITIAL_STATE__\\s*=\\s*(.+?)(?=</script>)", Pattern.DOTALL);
         Matcher matcher = pattern.matcher(htmlContent);
