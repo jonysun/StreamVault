@@ -37,7 +37,12 @@ public class PlatformAdapterRegistry {
 		if (!hasText(platformKey)) {
 			return Optional.empty();
 		}
-		return Optional.ofNullable(adaptersByPlatform.get(canonicalKey(platformKey)));
+		PlatformWorkAdapter exact = adaptersByPlatform.get(canonicalKey(platformKey));
+		if (exact != null) return Optional.of(exact);
+		if (PlatformCatalog.findByAlias(platformKey).isEmpty()) {
+			return Optional.ofNullable(adaptersByPlatform.get("generic"));
+		}
+		return Optional.empty();
 	}
 
 	public PlatformWorkAdapter requireByPlatformKey(String platformKey) {

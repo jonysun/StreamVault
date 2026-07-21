@@ -42,6 +42,17 @@ class PlatformAdapterRegistryTest {
 				.hasMessageContaining("multiple platform adapters");
 	}
 
+	@Test
+	void fallsBackToGenericOnlyForUnknownStoredPlatformKeys() {
+		PlatformWorkAdapter generic = adapter("generic", "generic-host");
+		PlatformAdapterRegistry registry = new PlatformAdapterRegistry(List.of(generic));
+
+		assertThat(registry.requireByPlatformKey("vimeo_on_demand")).isSameAs(generic);
+		assertThatThrownBy(() -> registry.requireByPlatformKey("youtube"))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("youtube");
+	}
+
 	private PlatformWorkAdapter adapter(String platformKey, String marker) {
 		return new PlatformWorkAdapter() {
 			@Override
