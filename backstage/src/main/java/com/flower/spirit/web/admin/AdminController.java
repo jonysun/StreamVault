@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.common.RequestEntity;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.dto.UpdateWorkMetadataRequest;
 import com.flower.spirit.entity.BiliConfigEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.BlockedWorkEntity;
@@ -52,6 +53,8 @@ import com.flower.spirit.service.TikTokConfigService;
 import com.flower.spirit.service.UserService;
 import com.flower.spirit.service.VideoDataService;
 import com.flower.spirit.service.VideoMixService;
+import com.flower.spirit.service.WorkMetadataEditService;
+import com.flower.spirit.platform.WorkMetadataValidationException;
 
 
 /**
@@ -131,6 +134,9 @@ public class AdminController {
 
 	@Autowired
 	private DouyinCookieHealthService douyinCookieHealthService;
+
+	@Autowired
+	private WorkMetadataEditService workMetadataEditService;
 	
 	/**  
 	
@@ -286,6 +292,23 @@ public class AdminController {
 	@PostMapping(value = "/redownloadVideoData")
 	public AjaxEntity redownloadVideoData(Integer id) {
 		return videoDataService.redownloadVideoData(id);
+	}
+
+	@PostMapping(value = "/updateWorkMetadata")
+	public AjaxEntity updateWorkMetadata(@RequestBody UpdateWorkMetadataRequest updateRequest,
+			HttpServletRequest request) {
+		Object sessionUser = request.getSession(false) == null ? null
+				: request.getSession(false).getAttribute(Global.user_session_key);
+		if (!(sessionUser instanceof UserEntity user) || user.getUsername() == null
+				|| user.getUsername().trim().isEmpty()) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Metadata updated",
+					workMetadataEditService.update(updateRequest, user.getUsername()));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
 	}
 	
 	

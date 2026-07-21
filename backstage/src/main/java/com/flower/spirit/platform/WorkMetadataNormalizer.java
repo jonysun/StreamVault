@@ -67,7 +67,7 @@ public class WorkMetadataNormalizer {
 				.build();
 	}
 
-	String normalizePublishTime(String value) {
+	public String normalizePublishTime(String value) {
 		if (!hasText(value)) {
 			return null;
 		}
