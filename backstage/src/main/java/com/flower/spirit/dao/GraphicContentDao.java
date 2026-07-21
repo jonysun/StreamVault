@@ -25,6 +25,12 @@ public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, I
 
 	Optional<GraphicContentEntity> findByVideoidAndPlatform(String post, String name);
 
+	List<GraphicContentEntity> findByPlatformkeyAndVideoid(String platformkey, String videoid);
+
+	List<GraphicContentEntity> findByVideoidAndPlatformIn(String videoid, List<String> platforms);
+
+	List<GraphicContentEntity> findByOriginaladdressAndPlatformIn(String originaladdress, List<String> platforms);
+
 	Optional<GraphicContentEntity> findByOriginaladdressAndPlatform(String url, String name);
 
 	List<GraphicContentEntity> findByPlatform(String platform);

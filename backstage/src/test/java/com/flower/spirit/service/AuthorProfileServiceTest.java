@@ -96,6 +96,32 @@ class AuthorProfileServiceTest {
 	}
 
 	@Test
+	void canonicalUpsertReusesLegacyProfileAndAddsPlatformKey() {
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setId(9);
+		profile.setPlatform("YouTube");
+		profile.setAuthoruid("channel-1");
+		when(authorProfileDao.findByPlatformkeyAndAuthoruid("youtube", "channel-1"))
+				.thenReturn(Optional.empty());
+		when(authorProfileDao.findByPlatformAndAuthoruid("youtube", "channel-1"))
+				.thenReturn(Optional.empty());
+		when(authorProfileDao.findByPlatformAndAuthoruid("YouTube", "channel-1"))
+				.thenReturn(Optional.of(profile));
+		when(authorProfileDao.save(any(AuthorProfileEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(9, "Creator"))
+				.thenReturn(Optional.empty());
+
+		service.upsertCanonicalAuthor("youtube", "YouTube", "channel-1", "creator", "Creator",
+				"https://cdn.example/avatar.jpg", "https://youtube.com/@creator");
+
+		assertThat(profile.getPlatformkey()).isEqualTo("youtube");
+		assertThat(profile.getPlatform()).isEqualTo("YouTube");
+		assertThat(profile.getDisplayname()).isEqualTo("Creator");
+		assertThat(profile.getHomepage()).isEqualTo("https://youtube.com/@creator");
+		verify(authorProfileDao).save(profile);
+	}
+
+	@Test
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	void profileSummaryRejectsNumericDouyinUidAndHomepageButKeepsUsernameFallback() {
 		when(videoDataDao.count(any(Specification.class))).thenReturn(0L);

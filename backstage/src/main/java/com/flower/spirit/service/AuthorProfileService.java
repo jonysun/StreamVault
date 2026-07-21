@@ -34,6 +34,8 @@ import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.platform.PlatformCatalog;
+import com.flower.spirit.platform.PlatformDefinition;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.DouyinSourceUrlUtil;
@@ -96,6 +98,62 @@ public class AuthorProfileService {
 		}
 		if (signature != null && !signature.trim().isEmpty()) {
 			entity.setSignature(signature.trim());
+		}
+		entity.setUpdatetime(now);
+		AuthorProfileEntity saved = authorProfileDao.save(entity);
+		if (saved.getId() != null && displayName != null && !displayName.trim().isEmpty()) {
+			upsertNameHistory(saved.getId(), displayName.trim(), now);
+		}
+	}
+
+	public void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
+			String displayName, String avatar, String homepage) {
+		if (platformKey == null || platformKey.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
+			return;
+		}
+		Optional<PlatformDefinition> definition = PlatformCatalog.findByAlias(platformKey);
+		if (definition.isEmpty()) {
+			definition = PlatformCatalog.findByAlias(legacyPlatform);
+		}
+		String canonicalKey = definition.map(PlatformDefinition::getKey)
+				.orElseGet(() -> platformKey.trim().toLowerCase(Locale.ROOT));
+		String safePlatform = definition.map(PlatformDefinition::getDisplayName)
+				.orElseGet(() -> legacyPlatform == null || legacyPlatform.trim().isEmpty()
+						? platformKey.trim() : legacyPlatform.trim());
+		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
+		if (safeUid == null) {
+			return;
+		}
+		Optional<AuthorProfileEntity> existing = authorProfileDao.findByPlatformkeyAndAuthoruid(canonicalKey, safeUid);
+		if (existing.isEmpty() && definition.isPresent()) {
+			for (String alias : definition.get().getAliases()) {
+				existing = authorProfileDao.findByPlatformAndAuthoruid(alias, safeUid);
+				if (existing.isPresent()) {
+					break;
+				}
+			}
+		}
+		AuthorProfileEntity entity = existing.orElseGet(AuthorProfileEntity::new);
+		Date now = new Date();
+		if (entity.getId() == null) {
+			entity.setCreatetime(now);
+		}
+		entity.setPlatform(safePlatform);
+		entity.setPlatformkey(canonicalKey);
+		entity.setAuthoruid(safeUid);
+		String safeUsername = AuthorIdentityUtil.canonicalUsername(username, null);
+		if (safeUsername != null) {
+			entity.setUsername(safeUsername);
+		}
+		if (displayName != null && !displayName.trim().isEmpty()) {
+			entity.setDisplayname(displayName.trim());
+		}
+		if (avatar != null && !avatar.trim().isEmpty()) {
+			entity.setAvatar(avatar.trim());
+		}
+		String safeHomepage = AuthorIdentityUtil.sanitizeHomepage(safePlatform, safeUid, homepage);
+		if (safeHomepage != null) {
+			entity.setHomepage(safeHomepage);
 		}
 		entity.setUpdatetime(now);
 		AuthorProfileEntity saved = authorProfileDao.save(entity);
