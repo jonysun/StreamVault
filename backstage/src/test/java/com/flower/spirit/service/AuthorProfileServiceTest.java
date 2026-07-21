@@ -112,12 +112,13 @@ class AuthorProfileServiceTest {
 				.thenReturn(Optional.empty());
 
 		service.upsertCanonicalAuthor("youtube", "YouTube", "channel-1", "creator", "Creator",
-				"https://cdn.example/avatar.jpg", "https://youtube.com/@creator");
+				"https://cdn.example/avatar.jpg", "https://youtube.com/@creator", "Creator signature");
 
 		assertThat(profile.getPlatformkey()).isEqualTo("youtube");
 		assertThat(profile.getPlatform()).isEqualTo("YouTube");
 		assertThat(profile.getDisplayname()).isEqualTo("Creator");
 		assertThat(profile.getHomepage()).isEqualTo("https://youtube.com/@creator");
+		assertThat(profile.getSignature()).isEqualTo("Creator signature");
 		verify(authorProfileDao).save(profile);
 	}
 

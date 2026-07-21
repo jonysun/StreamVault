@@ -92,6 +92,23 @@ async def fetch_post_data(cookie: str, aweme_id: str, output_file: str):
     if write_to_file(video._to_raw(), output_file):
         print("stream-vault-ok")
 
+# Return one raw work as JSON without creating an output file. The Java adapter
+# uses this path for parse/preview so media and persistence remain side-effect free.
+async def fetch_work_data(cookie: str, aweme_id: str):
+    kwargs = {
+        "headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+            "Referer": "https://www.douyin.com/",
+        },
+        "cookie": cookie,
+        "proxies": {"http": None, "https": None},
+    }
+
+    handler = DouyinHandler(kwargs)
+    setattr(handler, "enable_bark", False)
+    work = await handler.fetch_one_video(aweme_id=aweme_id)
+    print(json.dumps(work._to_raw(), ensure_ascii=False))
+
 # 获取用户点赞列表方法
 async def fetch_user_like_videos(cookie: str, uid: str, maxc: str, output_file: str):
     kwargs = {
@@ -318,6 +335,10 @@ async def main():
     fetch_user_post_parser.add_argument("--aweme_id", type=str, required=True, help="Aweme ID of the video")
     fetch_user_post_parser.add_argument("--output", type=str, required=True, help="Output file path")
 
+    fetch_work_data_parser = subparsers.add_parser("fetch_work_data", help="Fetch one raw work as JSON")
+    fetch_work_data_parser.add_argument("--cookie", type=str, required=True, help="Douyin cookie")
+    fetch_work_data_parser.add_argument("--aweme_id", type=str, required=True, help="Aweme ID")
+
     args = parser.parse_args()
     
     if args.command == "fetch_video":
@@ -334,6 +355,8 @@ async def main():
         await fetch_user_feed_videos(args.cookie, args.uid, args.output)
     if args.command == "fetch_post_data":
     	await fetch_post_data(args.cookie, args.aweme_id, args.output)
+    if args.command == "fetch_work_data":
+        await fetch_work_data(args.cookie, args.aweme_id)
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -48,7 +48,7 @@ public class WorkPersistenceService {
 				: persistGraphic(metadata, existing);
 		authorProfileService.upsertCanonicalAuthor(metadata.getPlatformKey(), metadata.getPlatformDisplayName(),
 				metadata.getAuthorId(), metadata.getAuthorUsername(), metadata.getAuthorName(),
-				metadata.getAuthorAvatar(), metadata.getAuthorHomepage());
+				metadata.getAuthorAvatar(), metadata.getAuthorHomepage(), metadata.getAuthorSignature());
 		return result;
 	}
 

@@ -72,7 +72,7 @@ class WorkPersistenceServiceTest {
 		assertThat(video.getJsonData()).isEqualTo("{\"id\":\"work-1\"}");
 		assertThat(video.getVideoaddr()).endsWith("video.mp4");
 		verify(authorProfileService).upsertCanonicalAuthor("youtube", "YouTube", "author-1", "author-name",
-				"author", "https://cdn.example/avatar.jpg", "https://youtube.com/@author");
+				"author", "https://cdn.example/avatar.jpg", "https://youtube.com/@author", "author signature");
 	}
 
 	@Test
@@ -130,6 +130,7 @@ class WorkPersistenceServiceTest {
 				.authorName("author")
 				.authorAvatar("https://cdn.example/avatar.jpg")
 				.authorHomepage("https://youtube.com/@author")
+				.authorSignature("author signature")
 				.publishTime("20240101")
 				.sourceUrl("https://youtube.com/watch?v=work-1")
 				.originalAddress("shared text")

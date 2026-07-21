@@ -58,6 +58,7 @@ public class WorkMetadataNormalizer {
 				.authorName(metadata.getAuthorName())
 				.authorAvatar(metadata.getAuthorAvatar())
 				.authorHomepage(metadata.getAuthorHomepage())
+				.authorSignature(metadata.getAuthorSignature())
 				.publishTime(normalizePublishTime(metadata.getPublishTime()))
 				.sourceUrl(metadata.getSourceUrl())
 				.originalAddress(metadata.getOriginalAddress())

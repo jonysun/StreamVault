@@ -19,6 +19,7 @@ public final class WorkMetadata {
 	private final String authorName;
 	private final String authorAvatar;
 	private final String authorHomepage;
+	private final String authorSignature;
 	private final String publishTime;
 	private final String sourceUrl;
 	private final String originalAddress;
@@ -39,6 +40,7 @@ public final class WorkMetadata {
 		this.authorName = trimToNull(builder.authorName);
 		this.authorAvatar = trimToNull(builder.authorAvatar);
 		this.authorHomepage = trimToNull(builder.authorHomepage);
+		this.authorSignature = trimToNull(builder.authorSignature);
 		this.publishTime = trimToNull(builder.publishTime);
 		this.sourceUrl = trimToNull(builder.sourceUrl);
 		this.originalAddress = trimToNull(builder.originalAddress);
@@ -105,6 +107,10 @@ public final class WorkMetadata {
 		return authorHomepage;
 	}
 
+	public String getAuthorSignature() {
+		return authorSignature;
+	}
+
 	public String getPublishTime() {
 		return publishTime;
 	}
@@ -143,6 +149,7 @@ public final class WorkMetadata {
 		private String authorName;
 		private String authorAvatar;
 		private String authorHomepage;
+		private String authorSignature;
 		private String publishTime;
 		private String sourceUrl;
 		private String originalAddress;
@@ -218,6 +225,11 @@ public final class WorkMetadata {
 
 		public Builder authorHomepage(String authorHomepage) {
 			this.authorHomepage = authorHomepage;
+			return this;
+		}
+
+		public Builder authorSignature(String authorSignature) {
+			this.authorSignature = authorSignature;
 			return this;
 		}
 

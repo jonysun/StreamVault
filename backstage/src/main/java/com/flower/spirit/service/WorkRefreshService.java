@@ -107,6 +107,7 @@ public class WorkRefreshService {
 				.authorName(latest.getAuthorName())
 				.authorAvatar(latest.getAuthorAvatar())
 				.authorHomepage(latest.getAuthorHomepage())
+				.authorSignature(latest.getAuthorSignature())
 				.publishTime(latest.getPublishTime())
 				.sourceUrl(sourceUrl)
 				.originalAddress(originalAddress)

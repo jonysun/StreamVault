@@ -356,6 +356,38 @@ public class DouUtil {
 			return null;
 		}
 	}
+
+	public static String resolveWorkUrl(String url) throws IOException {
+		if (url == null || url.trim().isEmpty()) {
+			throw new IOException("Douyin URL is empty");
+		}
+		Document document = Jsoup.connect(url).userAgent(ua).get();
+		String resolved = document.baseUri();
+		return resolved == null || resolved.trim().isEmpty() ? url.trim() : resolved.trim();
+	}
+
+	public static String extractWorkId(String resolvedUrl) {
+		String videoId = extractVideoId(resolvedUrl);
+		return videoId == null ? extractNoteId(resolvedUrl) : videoId;
+	}
+
+	public static String fetchWorkDataJson(String awemeId, String cookie) {
+		if (awemeId == null || awemeId.trim().isEmpty() || cookie == null || cookie.trim().isEmpty()) {
+			return null;
+		}
+		String output = CommandUtil.f2cmd(cookie, awemeId, "fetch_work_data", null, null, null, null);
+		if (output == null || output.trim().isEmpty()) {
+			return null;
+		}
+		try {
+			JSONObject object = JSONObject.parseObject(output.trim());
+			return object == null ? null : object.toJSONString();
+		} catch (RuntimeException e) {
+			logger.warn("[DouyinSingle] fetch_work_data returned invalid JSON awemeId={} outputLength={}",
+					awemeId, output.length());
+			return null;
+		}
+	}
 	
 	/**
 	 * 从URL中提取视频ID

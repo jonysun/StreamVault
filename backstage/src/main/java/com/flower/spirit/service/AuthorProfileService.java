@@ -108,6 +108,11 @@ public class AuthorProfileService {
 
 	public void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage) {
+		upsertCanonicalAuthor(platformKey, legacyPlatform, authoruid, username, displayName, avatar, homepage, null);
+	}
+
+	public void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
+			String displayName, String avatar, String homepage, String signature) {
 		if (platformKey == null || platformKey.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
 			return;
 		}
@@ -154,6 +159,9 @@ public class AuthorProfileService {
 		String safeHomepage = AuthorIdentityUtil.sanitizeHomepage(safePlatform, safeUid, homepage);
 		if (safeHomepage != null) {
 			entity.setHomepage(safeHomepage);
+		}
+		if (signature != null && !signature.trim().isEmpty()) {
+			entity.setSignature(signature.trim());
 		}
 		entity.setUpdatetime(now);
 		AuthorProfileEntity saved = authorProfileDao.save(entity);

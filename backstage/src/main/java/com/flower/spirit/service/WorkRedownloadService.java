@@ -122,6 +122,7 @@ public class WorkRedownloadService {
 				.authorName(metadata.getAuthorName())
 				.authorAvatar(metadata.getAuthorAvatar())
 				.authorHomepage(metadata.getAuthorHomepage())
+				.authorSignature(metadata.getAuthorSignature())
 				.publishTime(metadata.getPublishTime())
 				.sourceUrl(metadata.getSourceUrl())
 				.originalAddress(metadata.getOriginalAddress())
