@@ -7,6 +7,7 @@ import jakarta.transaction.Transactional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -27,6 +28,16 @@ public interface VideoDataDao
 	List<VideoDataEntity> findByOriginaladdressAndVideoplatformIn(String originaladdress, List<String> platforms);
 
 	List<VideoDataEntity> findByVideoplatform(String videoplatform);
+
+	List<VideoDataEntity> findByVideoplatformInAndIdGreaterThanOrderByIdAsc(List<String> platforms, Integer id,
+			Pageable pageable);
+
+	long countByVideoplatformIn(List<String> platforms);
+
+	@Query("select count(v) from VideoDataEntity v where v.videoplatform in :platforms and ("
+			+ "v.authoruid is null or v.authoruid not like 'MS4%' or v.secuid is null or v.secuid not like 'MS4%' "
+			+ "or v.authorusername is null or trim(v.authorusername) = '' or v.authoravatar is null or trim(v.authoravatar) = '')")
+	long countDouyinAuthorRepairCandidates(@Param("platforms") List<String> platforms);
 
 	List<VideoDataEntity> findByOriginaladdress(String originaladdress);
 

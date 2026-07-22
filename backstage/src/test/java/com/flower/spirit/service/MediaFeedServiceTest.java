@@ -22,10 +22,12 @@ import org.springframework.data.domain.Pageable;
 
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.dao.AuthorProfileDao;
 import com.flower.spirit.dto.AdminMediaFeedItem;
 import com.flower.spirit.dto.AdminMediaSlide;
 import com.flower.spirit.dto.AdminVideoListItem;
 import com.flower.spirit.entity.GraphicContentEntity;
+import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,6 +38,9 @@ class MediaFeedServiceTest {
 
 	@Mock
 	private GraphicContentService graphicContentService;
+
+	@Mock
+	private AuthorProfileDao authorProfileDao;
 
 	@InjectMocks
 	private MediaFeedService service;
@@ -132,6 +137,34 @@ class MediaFeedServiceTest {
 
 		assertThat(item.getAuthoruid()).isNull();
 		assertThat(item.getSecuid()).isNull();
+	}
+
+	@Test
+	void feedBatchEnrichmentUsesCurrentProfileMetadata() {
+		AdminMediaFeedItem item = new AdminMediaFeedItem();
+		item.setPlatform("抖音");
+		item.setPlatformkey("douyin");
+		item.setAuthoruid("MS4wLjABAAAAstable");
+		item.setSecuid("MS4wLjABAAAAstable");
+		item.setAuthor("snapshot name");
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setPlatform("抖音");
+		profile.setPlatformkey("douyin");
+		profile.setAuthoruid("MS4wLjABAAAAstable");
+		profile.setDisplayname("current name");
+		profile.setUsername("current-user");
+		profile.setAvatar("https://img.example/current.jpg");
+		profile.setHomepage("https://www.douyin.com/user/MS4wLjABAAAAstable");
+		when(authorProfileDao.findByAuthoruidIn(any())).thenReturn(List.of(profile));
+
+		service.enrichDisplayAuthorsForTest(List.of(item));
+
+		assertThat(item.getAuthor()).isEqualTo("snapshot name");
+		assertThat(item.getDisplayAuthor()).isEqualTo("current name");
+		assertThat(item.getAuthorusername()).isEqualTo("current-user");
+		assertThat(item.getAuthoravatar()).isEqualTo("https://img.example/current.jpg");
+		assertThat(item.getProfileAuthorUid()).isEqualTo("MS4wLjABAAAAstable");
+		verify(authorProfileDao).findByAuthoruidIn(any());
 	}
 
 	@Test

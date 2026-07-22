@@ -40,6 +40,7 @@ import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.CollectDataDetailEntity;
 import com.flower.spirit.entity.CollectDataEntity;
+import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.executor.DouYinExecutor;
 import com.flower.spirit.task.QuartzTaskService;
@@ -520,6 +521,7 @@ public class CollectDataService {
 			entity.setTaskstatus("已开始处理");
 			collectdDataDao.save(entity);
 			JSONArray planItems = new JSONArray();
+			Map<String, JSONObject> authorReconcileProfileCache = new HashMap<>();
 			for (int i = 0; i < allDYData.size(); i++) {
 				if (successThisRun >= targetSuccess) {
 					logger.info("[CollectTask] 已达到本轮目标成功数，停止本轮处理 targetSuccess={} successThisRun={}", targetSuccess, successThisRun);
@@ -582,9 +584,15 @@ public class CollectDataService {
 						continue;
 					}
 					CollectDataDetailEntity existingDetail = collectDataDetailService.findByVideoAndDataid(awemeId, entity.getId());
+					Optional<GraphicContentEntity> existingGraphic = graphicContentDao
+							.findByVideoidAndPlatform(awemeId, Global.platform.douyin.name());
+					if (existingGraphic.isPresent()) {
+						authorProfileService.reconcileDouyinGraphic(existingGraphic.get(), observedDouyinAuthor(aweme_detail),
+								authorReconcileProfileCache);
+					}
 					planItem.put("detailExists", existingDetail != null);
 					if (existingDetail != null) {
-						boolean graphicExists = graphicContentDao.findByVideoidAndPlatform(awemeId, Global.platform.douyin.name()).isPresent();
+						boolean graphicExists = existingGraphic.isPresent();
 						planItem.put("graphicExists", graphicExists);
 						if (graphicExists) {
 							appendLog(processLog, "skip", "detail exists in collect_data_detail and graphic exists");
@@ -691,6 +699,9 @@ public class CollectDataService {
 						appendLog(processLog, "dedup", "db exists but file missing, force redownload");
 						planItem.put("reason", "video db record exists but file missing");
 						findByVideoid = new ArrayList<>();
+					} else {
+						authorProfileService.reconcileDouyinVideo(existsVideo, observedDouyinAuthor(aweme_detail),
+								authorReconcileProfileCache);
 					}
 				}
 				appendLog(processLog, "dedup", "exists=" + (findByVideoid.size() > 0));
@@ -2110,6 +2121,14 @@ public class CollectDataService {
 
 	private void markCollectTaskFinished() {
 		lastCollectTaskFinishedAt = System.currentTimeMillis();
+	}
+
+	private JSONObject observedDouyinAuthor(JSONObject awemeDetail) {
+		if (awemeDetail == null) {
+			return null;
+		}
+		JSONObject author = awemeDetail.getJSONObject("author");
+		return author == null ? awemeDetail : author;
 	}
 
 	private String firstNotBlank(String first, String second) {

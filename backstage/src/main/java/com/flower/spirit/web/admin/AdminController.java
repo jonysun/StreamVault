@@ -43,6 +43,7 @@ import com.flower.spirit.service.ConfigService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
 import com.flower.spirit.service.DouyinCookieHealthService;
+import com.flower.spirit.service.DouyinAuthorReconciliationService;
 import com.flower.spirit.service.DouyinWorkMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
@@ -137,6 +138,9 @@ public class AdminController {
 
 	@Autowired
 	private DouyinCookieHealthService douyinCookieHealthService;
+
+	@Autowired
+	private DouyinAuthorReconciliationService douyinAuthorReconciliationService;
 
 	@Autowired
 	private WorkMetadataEditService workMetadataEditService;
@@ -677,8 +681,35 @@ public class AdminController {
 	}
 
 	@PostMapping(value = "/rebuildDouyinAuthors")
-	public AjaxEntity rebuildDouyinAuthors() {
-		return authorProfileService.rebuildDouyinAuthors();
+	public AjaxEntity rebuildDouyinAuthors(HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return douyinAuthorReconciliationService.start();
+	}
+
+	@GetMapping(value = "/douyinAuthorReconcilePreview")
+	public AjaxEntity douyinAuthorReconcilePreview(HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return douyinAuthorReconciliationService.preview();
+	}
+
+	@PostMapping(value = "/startDouyinAuthorReconcile")
+	public AjaxEntity startDouyinAuthorReconcile(HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return douyinAuthorReconciliationService.start();
+	}
+
+	@GetMapping(value = "/douyinAuthorReconcileStatus")
+	public AjaxEntity douyinAuthorReconcileStatus(HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return douyinAuthorReconciliationService.getStatus();
 	}
 
 	@PostMapping(value = "/repairDouyinMetadata")

@@ -432,6 +432,12 @@
             box-shadow: 0 3px 12px rgba(0,0,0,0.32);
         }
 
+		.feed-author-avatar-btn:disabled {
+			cursor: not-allowed;
+			opacity: 0.68;
+			filter: grayscale(0.45);
+		}
+
         .feed-controls.profile-open #feedAuthorBtn {
             display: none !important;
         }
@@ -2118,13 +2124,11 @@
         var authorUid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
         var authorUsername = item.authorusername || item.uniqueid || '';
         var rawAuthor = authorValue || item.author || item.videoauthor || '';
-        if (isDouyinFeedPlatform(item.platform || item.videoplatform) && !authorUid) {
+        var pendingDouyinAuthor = isDouyinFeedPlatform(item.platform || item.videoplatform) && !authorUid;
+        if (!rawAuthor && !authorUid && !authorUsername && !item.authoravatar && !item.authorAvatar) {
             return '';
         }
-        if (!rawAuthor && !authorUid && !authorUsername) {
-            return '';
-        }
-        var authorName = rawAuthor || 'Unknown';
+        var authorName = rawAuthor || (pendingDouyinAuthor ? '待修复' : 'Unknown');
         var avatar = item.authoravatar || item.authorAvatar || '';
         var avatarHtml = avatar
             ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(authorName) + '" onerror="this.parentNode.textContent=\'' + escapeHtml(authorInitial(authorName)) + '\'">'
@@ -2162,7 +2166,8 @@
             : escapeHtml(authorInitial(authorName));
         var html = '<div class="feed-author-action-rail">';
         if (rawAuthor || authorUid || authorUsername || avatar) {
-            html += '<button type="button" class="feed-author-avatar-btn" title="作者主页"'
+            html += '<button type="button" class="feed-author-avatar-btn" title="' + (pendingDouyinAuthor ? '作者 UID 待修复' : '作者主页') + '"'
+				+ (pendingDouyinAuthor ? ' disabled' : '')
                 + ' data-platform="' + escapeHtml(item.platform || item.videoplatform || '') + '"'
                 + ' data-author="' + escapeHtml(authorName || '') + '"'
                 + ' data-authoruid="' + escapeHtml(authorUid) + '"'

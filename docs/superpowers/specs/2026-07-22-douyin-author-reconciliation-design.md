@@ -19,10 +19,10 @@ The change must:
 
 The synchronized project database demonstrates that the data exists but is not normalized:
 
-- 7,995 Douyin video rows exist, but only 9 have a structured `MS4...` UID.
-- 7,786 video `jsonData` values contain `sec_uid` and `unique_id`.
-- 1,943 graphic rows exist; 1,308 have a structured canonical UID and 316 of those have no structured username.
-- Author profiles are split between 60 canonical `MS4...` records and 64 legacy numeric or invalid records.
+- 15,002 Douyin video rows exist, but only 9 have a structured `MS4...` UID in the structured columns.
+- 14,940 video `jsonData` values contain a canonical `sec_uid`.
+- 5,737 graphic rows exist; 5,102 have a structured canonical UID.
+- Author profiles are split between 135 canonical `MS4...` records and 64 legacy numeric or invalid records.
 
 The regression has four causes:
 
@@ -50,13 +50,13 @@ Non-Douyin platforms retain their current identity behavior.
 
 ## Reconciliation Architecture
 
-### 1. Bounded Background Migration
+### 1. Explicit Bounded Background Repair
 
-Add an idempotent Douyin reconciliation job that runs asynchronously after application startup. It must not block the application-ready path.
+Add an idempotent Douyin reconciliation job that can only be started from an explicit administrator maintenance action. Application startup must never scan or mutate media and author rows automatically.
 
 The job processes videos and graphics in stable ID-ordered pages. Each page is handled and committed independently so memory use is bounded and a restart can safely repeat completed work. It must never call `findAll()` for media rows containing `jsonData`.
 
-A persistent migration version and per-table last-processed ID are stored through the application's normal configuration persistence. A completed version is not rescanned on every restart. An interrupted or failed version resumes from its last committed page, while an explicit maintenance rerun can reset the checkpoint. Startup and manual triggers share a single-flight guard, so only one reconciliation run can mutate author data at a time.
+The author-list page provides a read-only impact preview, an explicit confirmation step, a background start action and a status/progress view. The preview runs SQLite `PRAGMA quick_check(1)` first; a failed integrity check disables the repair action and performs no writes. A single-flight guard allows only one reconciliation run to mutate author data at a time. An interrupted run may be started again safely because every repair operation is idempotent and every page is committed independently. No migration state columns are added to the normal configuration table.
 
 For each work, resolution order is:
 
@@ -66,7 +66,7 @@ For each work, resolution order is:
 
 The migration writes a work only when it improves canonical identity or author metadata. Existing nonblank values are not cleared after parse or network failure. API results are cached by canonical UID for the duration of a run.
 
-Migration state reports running/completed/failed status and counters for scanned, locally resolved, API-enriched, updated, merged and unresolved records. A failed run remains retryable. The operation may also be triggered explicitly by the existing maintenance action.
+Runtime status reports running/completed/failed status and counters for scanned, locally resolved, API-enriched, updated, merged and unresolved records. A failed or interrupted run remains retryable from the administrator entry.
 
 ### 2. Canonical Profile Merge
 
@@ -118,7 +118,7 @@ After reconciliation, all locally resolvable Douyin rows expose their canonical 
 
 ## Performance And Failure Handling
 
-- Startup is not blocked by reconciliation.
+- Startup never starts reconciliation and is not blocked by it.
 - Media rows are read in bounded pages and page persistence uses bounded transactions.
 - Normal feed requests never parse large work JSON.
 - Profile enrichment avoids per-item queries by loading required canonical profiles in a bounded batch.
@@ -126,6 +126,7 @@ After reconciliation, all locally resolvable Douyin rows expose their canonical 
 - Parse errors and API failures retain existing values, increment diagnostics and allow later retries.
 - Concurrent collection and migration updates are monotonic: nonblank canonical values win, and no path clears valid identity.
 - The checked-in database remains read-only during development verification.
+- Production database mutations are available only through clearly labelled administrator maintenance operations with preview and confirmation.
 
 ## Validation
 
