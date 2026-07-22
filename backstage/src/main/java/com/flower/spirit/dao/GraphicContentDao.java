@@ -8,6 +8,7 @@ import jakarta.transaction.Transactional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -34,6 +35,16 @@ public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, I
 	Optional<GraphicContentEntity> findByOriginaladdressAndPlatform(String url, String name);
 
 	List<GraphicContentEntity> findByPlatform(String platform);
+
+	List<GraphicContentEntity> findByPlatformInAndIdGreaterThanOrderByIdAsc(List<String> platforms, Integer id,
+			Pageable pageable);
+
+	long countByPlatformIn(List<String> platforms);
+
+	@Query("select count(g) from GraphicContentEntity g where g.platform in :platforms and ("
+			+ "g.authoruid is null or g.authoruid not like 'MS4%' or g.secuid is null or g.secuid not like 'MS4%' "
+			+ "or g.authorusername is null or trim(g.authorusername) = '' or g.authoravatar is null or trim(g.authoravatar) = '')")
+	long countDouyinAuthorRepairCandidates(@Param("platforms") List<String> platforms);
 
 	/**
 	 * 按平台分组统计图文内容数量

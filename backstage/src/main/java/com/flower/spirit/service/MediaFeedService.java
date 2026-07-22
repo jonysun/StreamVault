@@ -4,9 +4,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -30,6 +32,7 @@ import com.flower.spirit.dto.AdminVideoListItem;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 
 @Service
@@ -51,9 +54,6 @@ public class MediaFeedService {
 
 	@Autowired
 	private AuthorProfileDao authorProfileDao;
-
-	@Autowired
-	private PlatformMetadataCompatibilityService platformMetadataCompatibilityService;
 
 	public AjaxEntity findPage(VideoDataEntity query) {
 		VideoDataEntity videoQuery = copyVideoQuery(query);
@@ -94,6 +94,7 @@ public class MediaFeedService {
 		int from = Math.min(pageNo * pageSize, orderedItems.size());
 		int to = Math.min(from + pageSize, orderedItems.size());
 		List<AdminMediaFeedItem> pageItems = from >= to ? List.of() : new ArrayList<>(orderedItems.subList(from, to));
+		enrichDisplayAuthors(pageItems);
 		Page<AdminMediaFeedItem> page = new PageImpl<>(pageItems, PageRequest.of(pageNo, pageSize), totalElements);
 		return new AjaxEntity(Global.ajax_success, "success", page);
 	}
@@ -114,7 +115,6 @@ public class MediaFeedService {
 		}
 		for (Object row : videoPage.getContent()) {
 			AdminMediaFeedItem item = toVideoFeedItem(row);
-			enrichDisplayAuthor(item);
 			putMediaItem(mergedItems, item);
 		}
 		return countTotal ? videoPage.getTotalElements() : 0;
@@ -138,7 +138,6 @@ public class MediaFeedService {
 			if (row instanceof GraphicContentEntity graphic) {
 				AdminMediaFeedItem item = toGraphicFeedItemForTest(graphic);
 				if (!item.getSlides().isEmpty()) {
-					enrichDisplayAuthor(item);
 					putMediaItem(mergedItems, item);
 				}
 			}
@@ -466,39 +465,75 @@ public class MediaFeedService {
 		return ascending ? result : -result;
 	}
 
-	private void enrichDisplayAuthor(AdminMediaFeedItem item) {
-		if (item == null) {
+	private void enrichDisplayAuthors(List<AdminMediaFeedItem> items) {
+		if (items == null || items.isEmpty() || authorProfileDao == null) {
 			return;
 		}
-		normalizeAuthorIdentity(item);
-		String canonicalUid = item.getAuthoruid();
-		if (canonicalUid == null
-				|| item.getPlatform() == null || item.getPlatform().trim().isEmpty()) {
+		Set<String> authorUids = new LinkedHashSet<>();
+		for (AdminMediaFeedItem item : items) {
+			normalizeAuthorIdentity(item);
+			if (item != null && item.getAuthoruid() != null) {
+				authorUids.add(item.getAuthoruid());
+			}
+		}
+		if (authorUids.isEmpty()) {
 			return;
 		}
-		if (platformMetadataCompatibilityService != null) {
-			platformMetadataCompatibilityService.findAuthorProfile(item.getPlatformkey(), item.getPlatform(), canonicalUid)
-					.ifPresent(profile -> applyAuthorProfile(item, canonicalUid, profile));
-			return;
+		Map<String, AuthorProfileEntity> profiles = new LinkedHashMap<>();
+		for (AuthorProfileEntity profile : authorProfileDao.findByAuthoruidIn(authorUids)) {
+			if (profile == null || profile.getAuthoruid() == null) {
+				continue;
+			}
+			String key = authorProfileKey(profile.getPlatformkey(), profile.getPlatform(), profile.getAuthoruid());
+			profiles.merge(key, profile, this::newerProfile);
 		}
-		if (authorProfileDao == null) {
-			return;
+		for (AdminMediaFeedItem item : items) {
+			if (item == null || item.getAuthoruid() == null) {
+				continue;
+			}
+			String key = authorProfileKey(item.getPlatformkey(), item.getPlatform(), item.getAuthoruid());
+			AuthorProfileEntity profile = profiles.get(key);
+			if (profile != null) {
+				applyAuthorProfile(item, item.getAuthoruid(), profile);
+			}
 		}
-		authorProfileDao.findByPlatformAndAuthoruid(item.getPlatform().trim(), canonicalUid)
-				.ifPresent(profile -> applyAuthorProfile(item, canonicalUid, profile));
+	}
+
+	void enrichDisplayAuthorsForTest(List<AdminMediaFeedItem> items) {
+		enrichDisplayAuthors(items);
+	}
+
+	private AuthorProfileEntity newerProfile(AuthorProfileEntity left, AuthorProfileEntity right) {
+		if (left.getUpdatetime() == null) return right;
+		if (right.getUpdatetime() == null) return left;
+		return right.getUpdatetime().after(left.getUpdatetime()) ? right : left;
+	}
+
+	private String authorProfileKey(String platformKey, String platform, String authorUid) {
+		String canonicalKey = platformKey == null ? null : platformKey.trim().toLowerCase(Locale.ROOT);
+		if (canonicalKey == null || canonicalKey.isEmpty()) {
+			canonicalKey = PlatformCatalog.findByAlias(platform).map(definition -> definition.getKey()).orElse("");
+		}
+		return canonicalKey + "\u0001" + authorUid;
 	}
 
 	private void applyAuthorProfile(AdminMediaFeedItem item, String canonicalUid, AuthorProfileEntity profile) {
 		if (profile == null) {
 			return;
 		}
+		item.setProfileAuthorUid(canonicalUid);
 		String name = profile.getDisplayname();
 		if (name != null && !name.trim().isEmpty()) {
 			item.setDisplayAuthor(name.trim());
-			item.setProfileAuthorUid(canonicalUid);
 		}
-		if ((item.getAuthorhomepage() == null || item.getAuthorhomepage().trim().isEmpty())
-				&& profile.getHomepage() != null && !profile.getHomepage().trim().isEmpty()) {
+		if (profile.getUsername() != null && !profile.getUsername().trim().isEmpty()) {
+			item.setAuthorusername(profile.getUsername().trim());
+			item.setUniqueid(profile.getUsername().trim());
+		}
+		if (profile.getAvatar() != null && !profile.getAvatar().trim().isEmpty()) {
+			item.setAuthoravatar(profile.getAvatar().trim());
+		}
+		if (profile.getHomepage() != null && !profile.getHomepage().trim().isEmpty()) {
 			item.setAuthorhomepage(profile.getHomepage().trim());
 		}
 	}

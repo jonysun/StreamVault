@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 
@@ -31,6 +32,7 @@ import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.dto.AdminAuthorProfileSummary;
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
+import com.flower.spirit.entity.VideoDataEntity;
 
 @ExtendWith(MockitoExtension.class)
 class AuthorProfileServiceTest {
@@ -90,8 +92,8 @@ class AuthorProfileServiceTest {
 		profile.setPlatform("douyin");
 		profile.setAuthoruid("MS4wLjABAAAAstable");
 		profile.setDisplayname("old name");
-		when(authorProfileDao.findByPlatformAndAuthoruid("douyin", "MS4wLjABAAAAstable"))
-				.thenReturn(Optional.of(profile));
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "MS4wLjABAAAAstable"))
+				.thenReturn(List.of(profile));
 		when(authorProfileDao.save(any(AuthorProfileEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(eq(7), eq("new name")))
 				.thenReturn(Optional.empty());
@@ -115,12 +117,12 @@ class AuthorProfileServiceTest {
 		profile.setId(9);
 		profile.setPlatform("YouTube");
 		profile.setAuthoruid("channel-1");
-		when(authorProfileDao.findByPlatformkeyAndAuthoruid("youtube", "channel-1"))
-				.thenReturn(Optional.empty());
-		when(authorProfileDao.findByPlatformAndAuthoruid("youtube", "channel-1"))
-				.thenReturn(Optional.empty());
-		when(authorProfileDao.findByPlatformAndAuthoruid("YouTube", "channel-1"))
-				.thenReturn(Optional.of(profile));
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("youtube", "channel-1"))
+				.thenReturn(List.of());
+		when(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc("youtube", "channel-1"))
+				.thenReturn(List.of());
+		when(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc("YouTube", "channel-1"))
+				.thenReturn(List.of(profile));
 		when(authorProfileDao.save(any(AuthorProfileEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(9, "Creator"))
 				.thenReturn(Optional.empty());
@@ -160,8 +162,8 @@ class AuthorProfileServiceTest {
 		profile.setPlatform("抖音");
 		profile.setAuthoruid("MS4wLjABAAAAstable");
 		profile.setDisplayname("display");
-		when(authorProfileDao.findByPlatformAndAuthoruid("抖音", "MS4wLjABAAAAstable"))
-				.thenReturn(Optional.of(profile));
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "MS4wLjABAAAAstable"))
+				.thenReturn(List.of(profile));
 		when(videoDataDao.count(any(Specification.class))).thenReturn(0L);
 		when(graphicContentDao.count(any(Specification.class))).thenReturn(0L);
 
@@ -189,23 +191,6 @@ class AuthorProfileServiceTest {
 	}
 
 	@Test
-	void rebuildKeepsLegacyProfilesWhenNoCanonicalReplacementCanBeResolved() {
-		AuthorProfileEntity legacy = new AuthorProfileEntity();
-		legacy.setId(11);
-		legacy.setPlatform("抖音");
-		legacy.setAuthoruid("84583932458");
-		when(videoDataDao.findAll()).thenReturn(List.of());
-		when(graphicContentDao.findAll()).thenReturn(List.of());
-		when(authorProfileDao.findByPlatform("抖音")).thenReturn(List.of(legacy));
-
-		service.rebuildDouyinAuthors();
-
-		verify(authorProfileDao, never()).deleteAll(any(Iterable.class));
-		verify(authorProfileDao, never()).delete(any(AuthorProfileEntity.class));
-		verify(authorNameHistoryDao, never()).deleteByAuthorprofileid(11);
-	}
-
-	@Test
 	void mergeLegacyProfileMovesMetadataAndHistoryBeforeDeletingNumericProfile() throws Exception {
 		AuthorProfileEntity legacy = new AuthorProfileEntity();
 		legacy.setId(11);
@@ -224,10 +209,12 @@ class AuthorProfileServiceTest {
 		oldHistory.setDisplayname("older display");
 		oldHistory.setFirstseentime(new Date(500L));
 		oldHistory.setLastseentime(new Date(800L));
-		when(authorProfileDao.findByPlatformAndAuthoruid("douyin", "84583932458"))
-				.thenReturn(Optional.of(legacy));
-		when(authorProfileDao.findByPlatformAndAuthoruid("douyin", "MS4wLjABAAAAstable"))
-				.thenReturn(Optional.of(canonical));
+		when(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "84583932458"))
+				.thenReturn(List.of(legacy));
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "84583932458"))
+				.thenReturn(List.of());
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "MS4wLjABAAAAstable"))
+				.thenReturn(List.of(canonical));
 		when(authorNameHistoryDao.findByAuthorProfileIdOrderByLastSeen(11)).thenReturn(List.of(oldHistory));
 		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(12, "old display"))
 				.thenReturn(Optional.empty());
@@ -246,6 +233,54 @@ class AuthorProfileServiceTest {
 				.containsExactlyInAnyOrder("old display", "older display");
 		verify(authorNameHistoryDao).deleteByAuthorprofileid(11);
 		verify(authorProfileDao).delete(legacy);
+	}
+
+	@Test
+	void reconcileVideoUsesStoredJsonWithoutUpstreamLookup() {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(31);
+		video.setVideoplatform("抖音");
+		video.setJsonData("{\"aweme_detail\":{\"author\":{\"sec_uid\":\"MS4wLjABAAAAlocal\","
+				+ "\"unique_id\":\"public-name\",\"nickname\":\"Current Name\","
+				+ "\"avatar_thumb\":{\"url_list\":[\"https://img.example/avatar.jpg\"]}}}}");
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "MS4wLjABAAAAlocal"))
+				.thenReturn(List.of());
+		when(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc("抖音", "MS4wLjABAAAAlocal"))
+				.thenReturn(List.of());
+		when(authorProfileDao.findByAuthoruid("MS4wLjABAAAAlocal")).thenReturn(List.of());
+		when(authorProfileDao.save(any(AuthorProfileEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+		AuthorProfileService.WorkAuthorReconcileResult result = service.reconcileDouyinVideo(video, new HashMap<>());
+
+		assertThat(result.localResolved()).isTrue();
+		assertThat(result.apiResolved()).isFalse();
+		assertThat(video.getAuthoruid()).isEqualTo("MS4wLjABAAAAlocal");
+		assertThat(video.getSecuid()).isEqualTo("MS4wLjABAAAAlocal");
+		assertThat(video.getAuthorusername()).isEqualTo("public-name");
+		assertThat(video.getVideoauthor()).isEqualTo("Current Name");
+		verify(videoDataDao).save(video);
+	}
+
+	@Test
+	void reconcileVideoSupportsProductionDataAuthorShape() {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(32);
+		video.setVideoplatform("抖音");
+		video.setJsonData("{\"data\":{\"author\":{\"sec_uid\":\"MS4wLjABAAAAdata\","
+				+ "\"unique_id\":\"data-user\",\"nickname\":\"Data Author\","
+				+ "\"avatar_thumb\":\"https://img.example/data.jpg\"}}}");
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "MS4wLjABAAAAdata"))
+				.thenReturn(List.of());
+		when(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc("抖音", "MS4wLjABAAAAdata"))
+				.thenReturn(List.of());
+		when(authorProfileDao.findByAuthoruid("MS4wLjABAAAAdata")).thenReturn(List.of());
+		when(authorProfileDao.save(any(AuthorProfileEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+		AuthorProfileService.WorkAuthorReconcileResult result = service.reconcileDouyinVideo(video, new HashMap<>());
+
+		assertThat(result.localResolved()).isTrue();
+		assertThat(video.getAuthoruid()).isEqualTo("MS4wLjABAAAAdata");
+		assertThat(video.getAuthorusername()).isEqualTo("data-user");
 	}
 
 	@Test

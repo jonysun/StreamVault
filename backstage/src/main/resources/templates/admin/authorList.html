@@ -15,17 +15,21 @@
 		.avatar { width:40px; height:40px; border-radius:20px; object-fit:cover; background:#f3f4f6; }
 		.mono { font-family: Consolas, monospace; font-size: 12px; }
 		.text-ellipsis { max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+		.repair-status { margin:0 0 16px; display:none; }
+		.repair-status strong { margin-right:12px; }
 	</style>
 </head>
 <body>
 <div class="lyear-layout-web"><div class="lyear-layout-container"><div th:insert="~{admin/include/common :: headermenu}"></div>
-<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索名称/用户名/UID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button><button id="repairDouyinMetadataBtn" class="btn btn-info btn-sm"><i class="mdi mdi-auto-fix"></i> 修复抖音元数据</button><button id="rebuildDouyinBtn" class="btn btn-warning btn-sm"><i class="mdi mdi-account-convert"></i> 修复并合并抖音作者</button><button id="cleanupHistoryBtn" class="btn btn-danger btn-sm"><i class="mdi mdi-delete-sweep"></i> 清理重复处理历史</button></div></div><div class="card-body"><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>头像</th><th>当前显示名</th><th>用户名</th><th>UID</th><th>主页</th><th>更新时间</th><th>历史名</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
+<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索名称/用户名/UID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button><button id="repairDouyinMetadataBtn" class="btn btn-info btn-sm"><i class="mdi mdi-auto-fix"></i> 修复抖音元数据</button><button id="previewDouyinAuthorsBtn" class="btn btn-default btn-sm"><i class="mdi mdi-database-search"></i> 检查作者数据</button><button id="rebuildDouyinBtn" class="btn btn-warning btn-sm" disabled><i class="mdi mdi-account-convert"></i> 执行作者修复</button><button id="cleanupHistoryBtn" class="btn btn-danger btn-sm"><i class="mdi mdi-delete-sweep"></i> 清理重复处理历史</button></div></div><div class="card-body"><div id="authorRepairStatus" class="alert alert-info repair-status"></div><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>头像</th><th>当前显示名</th><th>用户名</th><th>UID</th><th>主页</th><th>更新时间</th><th>历史名</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
 <script type="text/javascript" src="../static/js/jquery.min.js"></script>
 <script type="text/javascript" src="../static/js/bootstrap.min.js"></script>
 <script type="text/javascript" src="../static/js/laypage.js"></script>
 <script src="../static/js/layer/layer.js"></script>
 	<script>
 		var currentPage = 1;
+		var authorRepairPollTimer = null;
+		var authorRepairPreview = null;
 		function findList(page){
 			var option = { pageNo: page, pageSize: 15, keyword: $('#keyword').val(), platform: $('#platform').val() };
 			$('#tableData').html('<tr><td colspan="9" class="text-center text-muted">加载中...</td></tr>');
@@ -78,17 +82,66 @@
 			}).fail(function(){ layer.close(loading); layer.msg('请求失败'); });
 		});
 	});
+	function renderAuthorRepairStatus(r){
+		r = r || {};
+		var total = (r.totalVideos || 0) + (r.totalGraphics || 0);
+		var scanned = (r.scannedVideos || 0) + (r.scannedGraphics || 0);
+		var percent = total > 0 ? Math.min(100, Math.round(scanned * 100 / total)) : 0;
+		var html = '<strong>状态：'+ (r.phase || r.state || '等待') +'</strong>';
+		html += '进度：'+ scanned +'/'+ total +' ('+ percent +'%)';
+		html += '，已更新：'+ ((r.updatedVideos || 0) + (r.updatedGraphics || 0));
+		html += '，本地解析：'+ (r.localResolved || 0);
+		html += '，资料 API 补全：'+ (r.apiResolved || 0);
+		html += '，合并档案：'+ (r.mergedProfiles || 0);
+		html += '，未解析：'+ (r.unresolved || 0);
+		html += '，单条失败：'+ (r.failedRows || 0);
+		if(r.message){ html += '<br>'+ r.message; }
+		$('#authorRepairStatus').html(html).show();
+		var running = r.state === 'running';
+		$('#rebuildDouyinBtn').prop('disabled', running || !authorRepairPreview);
+		$('#previewDouyinAuthorsBtn').prop('disabled', running);
+		if(!running && authorRepairPollTimer){
+			clearInterval(authorRepairPollTimer); authorRepairPollTimer = null;
+			if(r.state === 'completed'){ findList(currentPage); }
+		}
+	}
+	function loadAuthorRepairStatus(){
+		$.get('/admin/api/douyinAuthorReconcileStatus', function(res){
+			if(res.resCode === '000001'){
+				renderAuthorRepairStatus(res.record);
+				if(res.record && res.record.state === 'running' && !authorRepairPollTimer){
+					authorRepairPollTimer = setInterval(loadAuthorRepairStatus, 1500);
+				}
+			}
+		});
+	}
+	function startAuthorRepairPolling(){
+		if(authorRepairPollTimer){ clearInterval(authorRepairPollTimer); }
+		authorRepairPollTimer = setInterval(loadAuthorRepairStatus, 1500);
+		loadAuthorRepairStatus();
+	}
+	$('#previewDouyinAuthorsBtn').click(function(){
+		var loading = layer.load(1, {shade:[0.1, '#000']});
+		$.get('/admin/api/douyinAuthorReconcilePreview', function(res){
+			layer.close(loading);
+			if(res.resCode !== '000001'){ layer.msg(res.message || '检查失败'); return; }
+			authorRepairPreview = res.record || {};
+			var r = authorRepairPreview;
+			var integrity = r.safeToRun ? '正常' : (r.databaseIntegrity || '未通过');
+			$('#authorRepairStatus').html('<strong>只读检查完成</strong>数据库：'+integrity+'；视频：'+(r.videos||0)+'，候选修复：'+(r.videoCandidates||0)+'；图文：'+(r.graphics||0)+'，候选修复：'+(r.graphicCandidates||0)+'；作者档案：'+(r.profiles||0)+'，旧 UID 档案：'+(r.legacyProfiles||0)).show();
+			$('#rebuildDouyinBtn').prop('disabled', !r.safeToRun);
+			if(!r.safeToRun){ layer.alert('数据库完整性检查未通过，已禁止执行修复。请先检查生产数据库及其 WAL/SHM 文件是否完整。'); }
+		}).fail(function(){ layer.close(loading); layer.msg('检查请求失败'); });
+	});
 	$('#rebuildDouyinBtn').click(function(){
-		layer.confirm('将优先从本地 JSON 修复作者身份，必要时调用 API；只有规范作者档案保存成功后才合并对应的数字 UID 旧档案。无法解析的资料会原样保留，是否继续？', {title:'确认修复'}, function(index){
+		var r = authorRepairPreview || {};
+		layer.confirm('将分页扫描 '+((r.videos||0)+(r.graphics||0))+' 条抖音作品，优先使用本地 JSON，必要时按 UID 调用作者资料 API。任务在后台执行，无法解析的数据保持不变。是否继续？', {title:'确认执行作者修复'}, function(index){
 			layer.close(index);
-			var loading = layer.load(1, {shade:[0.2, '#000']});
-			$.post('/admin/api/rebuildDouyinAuthors', {}, function(res){
-				layer.close(loading);
+			$.post('/admin/api/startDouyinAuthorReconcile', {}, function(res){
 				if(res.resCode !== '000001'){ layer.msg(res.message || '修复失败'); return; }
-				var r = res.record || {};
-				layer.alert('修复完成<br>扫描视频：'+(r.scannedVideos||0)+'，修复：'+(r.repairedVideos||0)+'<br>扫描图文：'+(r.scannedGraphics||0)+'，修复：'+(r.repairedGraphics||0)+'<br>本地 JSON 解析：'+(r.localResolved||0)+'<br>Hybrid API成功：'+(r.hybridApiSuccess||0)+'<br>用户资料API成功：'+(r.profileApiSuccess||0)+'<br>API失败：'+(r.apiFailed||0)+'<br>未解析：'+(r.unresolved||0)+'<br>合并旧档案：'+(r.mergedProfiles||0)+'<br>规范作者：'+(r.rebuiltAuthors||0));
-				findList(currentPage);
-			}).fail(function(){ layer.close(loading); layer.msg('请求失败'); });
+				renderAuthorRepairStatus(res.record);
+				startAuthorRepairPolling();
+			}).fail(function(){ layer.msg('请求失败'); });
 		});
 	});
 	$('#cleanupHistoryBtn').click(function(){
@@ -102,6 +155,6 @@
 		});
 	});
 	$('#keyword, #platform').on('keydown', function(e){ if(e.key === 'Enter'){ currentPage = 1; findList(1); } });
-	$(function(){ findList(1); });
+	$(function(){ findList(1); loadAuthorRepairStatus(); });
 	</script>
 </body></html>

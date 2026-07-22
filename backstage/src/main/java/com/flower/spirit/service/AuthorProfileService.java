@@ -3,12 +3,12 @@ package com.flower.spirit.service;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,7 +39,6 @@ import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformDefinition;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
-import com.flower.spirit.utils.DouyinSourceUrlUtil;
 
 import jakarta.persistence.criteria.Predicate;
 
@@ -78,13 +77,17 @@ public class AuthorProfileService {
 		if (safeUid == null) {
 			return;
 		}
+		String platformKey = PlatformCatalog.findByAlias(safePlatform)
+				.map(PlatformDefinition::getKey)
+				.orElseGet(() -> safePlatform.toLowerCase(Locale.ROOT));
 		Date now = new Date();
-		Optional<AuthorProfileEntity> opt = authorProfileDao.findByPlatformAndAuthoruid(safePlatform, safeUid);
+		Optional<AuthorProfileEntity> opt = findPreferredProfile(platformKey, safePlatform, safeUid);
 		AuthorProfileEntity entity = opt.orElseGet(AuthorProfileEntity::new);
 		if (entity.getId() == null) {
 			entity.setCreatetime(now);
 		}
 		entity.setPlatform(safePlatform);
+		entity.setPlatformkey(platformKey);
 		entity.setAuthoruid(safeUid);
 		String safeUsername = AuthorIdentityUtil.canonicalUsername(username, null);
 		if (safeUsername != null) {
@@ -135,10 +138,12 @@ public class AuthorProfileService {
 		if (safeUid == null) {
 			return;
 		}
-		Optional<AuthorProfileEntity> existing = authorProfileDao.findByPlatformkeyAndAuthoruid(canonicalKey, safeUid);
+		Optional<AuthorProfileEntity> existing = firstProfile(
+				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(canonicalKey, safeUid));
 		if (existing.isEmpty() && definition.isPresent()) {
 			for (String alias : definition.get().getAliases()) {
-				existing = authorProfileDao.findByPlatformAndAuthoruid(alias, safeUid);
+				existing = firstProfile(
+						authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc(alias, safeUid));
 				if (existing.isPresent()) {
 					break;
 				}
@@ -463,7 +468,10 @@ public class AuthorProfileService {
 			return null;
 		}
 		if (safePlatform != null && safeUid != null) {
-			Optional<AuthorProfileEntity> byUid = authorProfileDao.findByPlatformAndAuthoruid(safePlatform, safeUid);
+			String platformKey = PlatformCatalog.findByAlias(safePlatform)
+					.map(PlatformDefinition::getKey)
+					.orElseGet(() -> safePlatform.toLowerCase(Locale.ROOT));
+			Optional<AuthorProfileEntity> byUid = findPreferredProfile(platformKey, safePlatform, safeUid);
 			if (byUid.isPresent()) {
 				return byUid.get();
 			}
@@ -630,147 +638,192 @@ public class AuthorProfileService {
 		return -left.compareTo(right);
 	}
 
-	public AjaxEntity rebuildDouyinAuthors() {
-		int scannedVideos = 0;
-		int repairedVideos = 0;
-		int scannedGraphics = 0;
-		int repairedGraphics = 0;
-		int localResolved = 0;
-		int hybridApiSuccess = 0;
-		int profileApiSuccess = 0;
-		int apiFailed = 0;
-		int unresolved = 0;
-		int mergedProfiles = 0;
-		Map<String, JSONObject> profileAuthorCache = new HashMap<>();
+	public WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, JSONObject observedAuthor,
+			Map<String, JSONObject> profileCache) {
+		if (video == null || !isDouyinPlatform(video.getVideoplatform())) {
+			return WorkAuthorReconcileResult.skipped();
+		}
+		String before = videoIdentityFingerprint(video);
+		String legacyUid = trimToNull(video.getAuthoruid());
+		JSONObject localAuthor = observedAuthor == null ? findStoredAuthor(video.getJsonData()) : observedAuthor;
+		applyVideoAuthorFromAuthor(video, localAuthor);
 
-		for (VideoDataEntity video : videoDataDao.findAll()) {
-			if (video == null || !isDouyinPlatform(video.getVideoplatform())) {
-				continue;
-			}
-			scannedVideos++;
-			String legacyUid = trimToNull(video.getAuthoruid());
-			JSONObject resolvedAuthor = findStoredAuthor(video.getJsonData());
-			if (hasCanonicalDouyinUid(resolvedAuthor)) {
-				localResolved++;
-			}
-			applyVideoAuthorFromAuthor(video, resolvedAuthor);
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
+		boolean localResolved = localAuthor != null && canonicalUid != null;
+		JSONObject profileAuthor = needsProfileEnrichment(video, canonicalUid)
+				? resolveProfileAuthorCached(profileCache, canonicalUid) : null;
+		applyVideoAuthorFromAuthor(video, profileAuthor);
+		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
+		if (canonicalUid == null) {
+			return WorkAuthorReconcileResult.unresolvedResult();
+		}
 
-			String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
-			String username = AuthorIdentityUtil.canonicalUsername(video.getAuthorusername(), video.getUniqueid());
-			JSONObject profileAuthor = resolveProfileAuthorCached(profileAuthorCache, canonicalUid);
-			if (profileAuthor != null) {
-				profileApiSuccess++;
-				applyVideoAuthorFromAuthor(video, profileAuthor);
-				canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
-				username = AuthorIdentityUtil.canonicalUsername(video.getAuthorusername(), video.getUniqueid());
-			}
-
-			JSONObject hybridAuthor = resolvedAuthor;
-			if (canonicalUid == null) {
-				String sourceUrl = firstNotBlank(video.getOriginaladdress(), DouyinSourceUrlUtil.video(video.getVideoid()));
-				JSONObject hybrid = DouUtil.fetchHybridVideoData(sourceUrl);
-				if (hybrid != null) {
-					hybridApiSuccess++;
-					video.setJsonData(hybrid.toJSONString());
-					hybridAuthor = findHybridAuthor(hybrid);
-					applyVideoAuthorFromAuthor(video, hybridAuthor);
-				} else {
-					apiFailed++;
-				}
-				canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
-				username = AuthorIdentityUtil.canonicalUsername(video.getAuthorusername(), video.getUniqueid());
-			}
-
-			if (canonicalUid == null) {
-				unresolved++;
-				continue;
-			}
-			video.setAuthoruid(canonicalUid);
-			video.setSecuid(canonicalUid);
-			video.setAuthorusername(username);
-			video.setUniqueid(username);
-			video.setSourceurl(DouyinSourceUrlUtil.video(video.getVideoid()));
-			upsertAuthor("抖音", canonicalUid, username, video.getVideoauthor(), video.getAuthoravatar(),
-					AuthorIdentityUtil.douyinHomepage(canonicalUid), authorSignature(profileAuthor, hybridAuthor));
+		video.setAuthoruid(canonicalUid);
+		video.setSecuid(canonicalUid);
+		String username = AuthorIdentityUtil.canonicalUsername(video.getAuthorusername(), video.getUniqueid());
+		video.setAuthorusername(username);
+		video.setUniqueid(username);
+		upsertReconciledDouyinAuthor(canonicalUid, username, video.getVideoauthor(), video.getAuthoravatar(),
+				profileAuthor, localAuthor);
+		boolean merged = mergeLegacyProfile("抖音", legacyUid, canonicalUid);
+		merged = mergeCanonicalDuplicateProfiles(canonicalUid) || merged;
+		boolean changed = !Objects.equals(before, videoIdentityFingerprint(video));
+		if (changed) {
 			videoDataDao.save(video);
-			repairedVideos++;
-			if (mergeLegacyProfile("抖音", legacyUid, canonicalUid)) {
-				mergedProfiles++;
-			}
+		}
+		return new WorkAuthorReconcileResult(changed, merged, localResolved, profileAuthor != null, false);
+	}
+
+	public WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, Map<String, JSONObject> profileCache) {
+		return reconcileDouyinVideo(video, null, profileCache);
+	}
+
+	public WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic, JSONObject observedAuthor,
+			Map<String, JSONObject> profileCache) {
+		if (graphic == null || !isDouyinPlatform(graphic.getPlatform())) {
+			return WorkAuthorReconcileResult.skipped();
+		}
+		String before = graphicIdentityFingerprint(graphic);
+		String legacyUid = trimToNull(graphic.getAuthoruid());
+		JSONObject localAuthor = observedAuthor == null ? findStoredAuthor(graphic.getJsonData()) : observedAuthor;
+		applyGraphicAuthorFromAuthor(graphic, localAuthor);
+
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
+		boolean localResolved = localAuthor != null && canonicalUid != null;
+		JSONObject profileAuthor = needsProfileEnrichment(graphic, canonicalUid)
+				? resolveProfileAuthorCached(profileCache, canonicalUid) : null;
+		applyGraphicAuthorFromAuthor(graphic, profileAuthor);
+		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
+		if (canonicalUid == null) {
+			return WorkAuthorReconcileResult.unresolvedResult();
 		}
 
-		for (GraphicContentEntity item : graphicContentDao.findAll()) {
-			if (item == null || !isDouyinPlatform(item.getPlatform())) {
+		graphic.setAuthoruid(canonicalUid);
+		graphic.setSecuid(canonicalUid);
+		String username = AuthorIdentityUtil.canonicalUsername(graphic.getAuthorusername(), graphic.getUniqueid());
+		graphic.setAuthorusername(username);
+		graphic.setUniqueid(username);
+		upsertReconciledDouyinAuthor(canonicalUid, username, graphic.getAuthor(), graphic.getAuthoravatar(),
+				profileAuthor, localAuthor);
+		boolean merged = mergeLegacyProfile("抖音", legacyUid, canonicalUid);
+		merged = mergeCanonicalDuplicateProfiles(canonicalUid) || merged;
+		boolean changed = !Objects.equals(before, graphicIdentityFingerprint(graphic));
+		if (changed) {
+			graphicContentDao.save(graphic);
+		}
+		return new WorkAuthorReconcileResult(changed, merged, localResolved, profileAuthor != null, false);
+	}
+
+	public WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic,
+			Map<String, JSONObject> profileCache) {
+		return reconcileDouyinGraphic(graphic, null, profileCache);
+	}
+
+	private void upsertReconciledDouyinAuthor(String canonicalUid, String username, String workNickname, String avatar,
+			JSONObject profileAuthor, JSONObject fallbackAuthor) {
+		AuthorProfileEntity existing = findCanonicalDouyinProfile(canonicalUid);
+		String profileNickname = profileAuthor == null ? null : profileAuthor.getString("nickname");
+		String currentNickname = firstNotBlank(profileNickname,
+				firstNotBlank(existing == null ? null : existing.getDisplayname(), workNickname));
+		String currentUsername = firstNotBlank(profileAuthor == null ? null : profileAuthor.getString("unique_id"),
+				firstNotBlank(existing == null ? null : existing.getUsername(), username));
+		String currentAvatar = firstNotBlank(profileAuthor == null ? null : DouUtil.extractAvatar(profileAuthor),
+				firstNotBlank(existing == null ? null : existing.getAvatar(), avatar));
+		upsertAuthor("抖音", canonicalUid, currentUsername, currentNickname, currentAvatar,
+				AuthorIdentityUtil.douyinHomepage(canonicalUid), authorSignature(profileAuthor, fallbackAuthor));
+		AuthorProfileEntity canonical = findCanonicalDouyinProfile(canonicalUid);
+		if (canonical != null && canonical.getId() != null && hasText(workNickname)) {
+			upsertNameHistory(canonical.getId(), workNickname.trim(), new Date());
+		}
+	}
+
+	private AuthorProfileEntity findCanonicalDouyinProfile(String canonicalUid) {
+		Optional<AuthorProfileEntity> byKey = firstProfile(
+				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", canonicalUid));
+		if (byKey.isPresent()) {
+			return byKey.get();
+		}
+		for (String platform : List.of("抖音", "douyin")) {
+			Optional<AuthorProfileEntity> byPlatform = firstProfile(
+					authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc(platform, canonicalUid));
+			if (byPlatform.isPresent()) {
+				return byPlatform.get();
+			}
+		}
+		return null;
+	}
+
+	private boolean mergeCanonicalDuplicateProfiles(String canonicalUid) {
+		List<AuthorProfileEntity> profiles = authorProfileDao.findByAuthoruid(canonicalUid).stream()
+				.filter(profile -> profile != null && (AuthorIdentityUtil.isDouyinPlatform(profile.getPlatform())
+						|| "douyin".equalsIgnoreCase(trimToNull(profile.getPlatformkey()))))
+				.sorted(Comparator.comparing(AuthorProfileEntity::getUpdatetime,
+						Comparator.nullsLast(Comparator.reverseOrder())))
+				.toList();
+		if (profiles.size() < 2) {
+			return false;
+		}
+		AuthorProfileEntity primary = profiles.get(0);
+		for (AuthorProfileEntity duplicate : profiles) {
+			if (duplicate.getId() == null || duplicate.getId().equals(primary.getId())) {
 				continue;
 			}
-			scannedGraphics++;
-			String legacyUid = trimToNull(item.getAuthoruid());
-			JSONObject resolvedAuthor = findStoredAuthor(item.getJsonData());
-			if (hasCanonicalDouyinUid(resolvedAuthor)) {
-				localResolved++;
-			}
-			applyGraphicAuthorFromAuthor(item, resolvedAuthor);
-
-			String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(item.getPlatform(), item.getAuthoruid(), item.getSecuid());
-			String username = AuthorIdentityUtil.canonicalUsername(item.getAuthorusername(), item.getUniqueid());
-			JSONObject profileAuthor = resolveProfileAuthorCached(profileAuthorCache, canonicalUid);
-			if (profileAuthor != null) {
-				profileApiSuccess++;
-				applyGraphicAuthorFromAuthor(item, profileAuthor);
-				canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(item.getPlatform(), item.getAuthoruid(), item.getSecuid());
-				username = AuthorIdentityUtil.canonicalUsername(item.getAuthorusername(), item.getUniqueid());
-			}
-
-			JSONObject hybridAuthor = resolvedAuthor;
-			if (canonicalUid == null) {
-				String sourceUrl = firstNotBlank(item.getOriginaladdress(), DouyinSourceUrlUtil.note(item.getVideoid()));
-				JSONObject hybrid = DouUtil.fetchHybridVideoData(sourceUrl);
-				if (hybrid != null) {
-					hybridApiSuccess++;
-					item.setJsonData(hybrid.toJSONString());
-					hybridAuthor = findHybridAuthor(hybrid);
-					applyGraphicAuthorFromAuthor(item, hybridAuthor);
-				} else {
-					apiFailed++;
+			primary.setUsername(firstNotBlank(primary.getUsername(), duplicate.getUsername()));
+			primary.setDisplayname(firstNotBlank(primary.getDisplayname(), duplicate.getDisplayname()));
+			primary.setAvatar(firstNotBlank(primary.getAvatar(), duplicate.getAvatar()));
+			primary.setSignature(firstNotBlank(primary.getSignature(), duplicate.getSignature()));
+			mergeNameHistory(primary.getId(), duplicate.getDisplayname(), duplicate.getCreatetime(), duplicate.getUpdatetime());
+			for (AuthorNameHistoryEntity history : authorNameHistoryDao.findByAuthorProfileIdOrderByLastSeen(duplicate.getId())) {
+				if (history != null) {
+					mergeNameHistory(primary.getId(), history.getDisplayname(), history.getFirstseentime(), history.getLastseentime());
 				}
-				canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(item.getPlatform(), item.getAuthoruid(), item.getSecuid());
-				username = AuthorIdentityUtil.canonicalUsername(item.getAuthorusername(), item.getUniqueid());
 			}
+			authorNameHistoryDao.deleteByAuthorprofileid(duplicate.getId());
+			authorProfileDao.delete(duplicate);
+		}
+		primary.setPlatform("抖音");
+		primary.setPlatformkey("douyin");
+		primary.setHomepage(AuthorIdentityUtil.douyinHomepage(canonicalUid));
+		primary.setUpdatetime(new Date());
+		authorProfileDao.save(primary);
+		return true;
+	}
 
-			if (canonicalUid == null) {
-				unresolved++;
-				continue;
-			}
-			item.setAuthoruid(canonicalUid);
-			item.setSecuid(canonicalUid);
-			item.setAuthorusername(username);
-			item.setUniqueid(username);
-			String graphicSourceUrl = DouyinSourceUrlUtil.graphic(canonicalUid, item.getVideoid());
-			if (graphicSourceUrl != null) {
-				item.setSourceurl(graphicSourceUrl);
-			}
-			upsertAuthor("抖音", canonicalUid, username, item.getAuthor(), item.getAuthoravatar(),
-					AuthorIdentityUtil.douyinHomepage(canonicalUid), authorSignature(profileAuthor, hybridAuthor));
-			graphicContentDao.save(item);
-			repairedGraphics++;
-			if (mergeLegacyProfile("抖音", legacyUid, canonicalUid)) {
-				mergedProfiles++;
-			}
+	private boolean needsProfileEnrichment(VideoDataEntity video, String canonicalUid) {
+		return canonicalUid != null && (!hasText(video.getAuthorusername()) || !hasText(video.getVideoauthor())
+				|| !hasText(video.getAuthoravatar()));
+	}
+
+	private boolean needsProfileEnrichment(GraphicContentEntity graphic, String canonicalUid) {
+		return canonicalUid != null && (!hasText(graphic.getAuthorusername()) || !hasText(graphic.getAuthor())
+				|| !hasText(graphic.getAuthoravatar()));
+	}
+
+	private String videoIdentityFingerprint(VideoDataEntity video) {
+		return String.join("\u0001", safeFingerprint(video.getAuthoruid()), safeFingerprint(video.getSecuid()),
+				safeFingerprint(video.getAuthorusername()), safeFingerprint(video.getUniqueid()),
+				safeFingerprint(video.getVideoauthor()), safeFingerprint(video.getAuthoravatar()));
+	}
+
+	private String graphicIdentityFingerprint(GraphicContentEntity graphic) {
+		return String.join("\u0001", safeFingerprint(graphic.getAuthoruid()), safeFingerprint(graphic.getSecuid()),
+				safeFingerprint(graphic.getAuthorusername()), safeFingerprint(graphic.getUniqueid()),
+				safeFingerprint(graphic.getAuthor()), safeFingerprint(graphic.getAuthoravatar()));
+	}
+
+	private String safeFingerprint(String value) {
+		return value == null ? "" : value;
+	}
+
+	public record WorkAuthorReconcileResult(boolean updated, boolean merged, boolean localResolved,
+			boolean apiResolved, boolean unresolved) {
+		static WorkAuthorReconcileResult skipped() {
+			return new WorkAuthorReconcileResult(false, false, false, false, false);
 		}
 
-		Map<String, Object> result = new HashMap<>();
-		result.put("scannedVideos", scannedVideos);
-		result.put("repairedVideos", repairedVideos);
-		result.put("scannedGraphics", scannedGraphics);
-		result.put("repairedGraphics", repairedGraphics);
-		result.put("localResolved", localResolved);
-		result.put("hybridApiSuccess", hybridApiSuccess);
-		result.put("profileApiSuccess", profileApiSuccess);
-		result.put("apiFailed", apiFailed);
-		result.put("unresolved", unresolved);
-		result.put("mergedProfiles", mergedProfiles);
-		result.put("rebuiltAuthors", authorProfileDao.findByPlatform("抖音").size());
-		return new AjaxEntity(Global.ajax_success, "修复完成", result);
+		static WorkAuthorReconcileResult unresolvedResult() {
+			return new WorkAuthorReconcileResult(false, false, false, false, true);
+		}
 	}
 
 	private JSONObject findStoredAuthor(String rawJson) {
@@ -783,19 +836,22 @@ public class AuthorProfileService {
 			if (author == null) {
 				author = payload.getJSONObject("author");
 			}
+			if (author == null) {
+				JSONObject data = payload.getJSONObject("data");
+				author = data == null ? null : data.getJSONObject("author");
+			}
 			return author != null ? author : extractProfileUser(payload);
 		} catch (Exception e) {
 			return null;
 		}
 	}
 
-	private boolean hasCanonicalDouyinUid(JSONObject author) {
-		return author != null && AuthorIdentityUtil.isDouyinSecUid(author.getString("sec_uid"));
-	}
-
 	private JSONObject resolveProfileAuthorCached(Map<String, JSONObject> cache, String canonicalUid) {
 		if (!AuthorIdentityUtil.isDouyinSecUid(canonicalUid)) {
 			return null;
+		}
+		if (cache == null) {
+			return resolveProfileAuthor(canonicalUid);
 		}
 		String key = "uid:" + canonicalUid;
 		if (cache.containsKey(key)) {
@@ -811,8 +867,8 @@ public class AuthorProfileService {
 				|| canonicalUid.equals(legacyUid) || AuthorIdentityUtil.isDouyinSecUid(legacyUid)) {
 			return false;
 		}
-		Optional<AuthorProfileEntity> legacyOpt = authorProfileDao.findByPlatformAndAuthoruid(platform, legacyUid.trim());
-		Optional<AuthorProfileEntity> canonicalOpt = authorProfileDao.findByPlatformAndAuthoruid(platform, canonicalUid);
+		Optional<AuthorProfileEntity> legacyOpt = findPreferredProfile("douyin", platform, legacyUid.trim());
+		Optional<AuthorProfileEntity> canonicalOpt = findPreferredProfile("douyin", platform, canonicalUid);
 		if (legacyOpt.isEmpty() || canonicalOpt.isEmpty()) {
 			return false;
 		}
@@ -964,6 +1020,19 @@ public class AuthorProfileService {
 			return null;
 		}
 		return value.trim();
+	}
+
+	private Optional<AuthorProfileEntity> findPreferredProfile(String platformKey, String platform, String authorUid) {
+		Optional<AuthorProfileEntity> byKey = firstProfile(
+				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(platformKey, authorUid));
+		if (byKey.isPresent()) {
+			return byKey;
+		}
+		return firstProfile(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc(platform, authorUid));
+	}
+
+	private Optional<AuthorProfileEntity> firstProfile(List<AuthorProfileEntity> profiles) {
+		return profiles == null || profiles.isEmpty() ? Optional.empty() : Optional.ofNullable(profiles.get(0));
 	}
 
 	private String firstNotBlank(String first, String second) {
