@@ -206,8 +206,61 @@ function testFeedOriginalUrlNormalization() {
     }), 'https://www.douyin.com/video/7622696915705286079');
 }
 
+function testFeedAuthorActionRendering() {
+    const html = fs.readFileSync(
+        path.resolve(__dirname, '../../main/resources/templates/admin/index.html'),
+        'utf8'
+    );
+    const names = [
+        'isDouyinFeedPlatform',
+        'canonicalFeedAuthorUid',
+        'authorInitial',
+        'escapeHtml',
+        'buildFeedAuthorActionHtml'
+    ];
+    const context = vm.createContext({ Array, encodeURIComponent });
+    vm.runInContext(names.map((name) => extractFunction(html, name)).join('\n'), context);
+
+    const pending = context.buildFeedAuthorActionHtml({
+        platform: 'douyin',
+        author: '待修复作者',
+        authoravatar: 'https://img.example/avatar.jpg'
+    }, false, '待修复作者');
+    assert.match(pending, /作者 UID 待修复/);
+    assert.match(pending, /disabled/);
+
+    const normal = context.buildFeedAuthorActionHtml({
+        platform: 'douyin',
+        author: '作者',
+        authoruid: 'MS4wLjABAAAAstable'
+    }, false, '作者');
+    assert.match(normal, /作者主页/);
+    assert.doesNotMatch(normal, /disabled/);
+
+    assert.strictEqual(context.buildFeedAuthorActionHtml({ platform: 'douyin' }, false, ''), '');
+}
+
+function testTemplateHasUniqueTopLevelFunctions() {
+    const html = fs.readFileSync(
+        path.resolve(__dirname, '../../main/resources/templates/admin/index.html'),
+        'utf8'
+    );
+    const counts = new Map();
+    const declaration = /^    function\s+([A-Za-z_$][\w$]*)\s*\(/gm;
+    let match;
+    while ((match = declaration.exec(html)) !== null) {
+        counts.set(match[1], (counts.get(match[1]) || 0) + 1);
+    }
+    const duplicates = Array.from(counts.entries())
+        .filter((entry) => entry[1] > 1)
+        .map((entry) => entry[0]);
+    assert.deepStrictEqual(duplicates, [], 'duplicate top-level functions: ' + duplicates.join(', '));
+}
+
 const window = loadModules();
 testPlayerReuse(window);
 testIncrementalProfileActivation(window);
 testFeedOriginalUrlNormalization();
+testFeedAuthorActionRendering();
+testTemplateHasUniqueTopLevelFunctions();
 console.log('admin-feed module tests passed');

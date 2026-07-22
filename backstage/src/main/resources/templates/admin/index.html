@@ -2013,55 +2013,6 @@
         return mediaHomeMode === 'feed' ? '/admin/api/findMediaFeedList' : '/admin/api/findVideoDataList';
     }
 
-    function buildFeedItemHtml(item, isPrivate) {
-        var itemType = item.type || 'video';
-        var titleValue = item.title || item.videoname || 'Untitled';
-        var platformValue = item.platform || item.videoplatform || 'Unknown';
-        var authorValue = item.displayAuthor || item.author || item.videoauthor || 'Unknown';
-        item.authoruid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
-        item.secuid = item.authoruid;
-        item.profileAuthorUid = item.authoruid;
-        var timeValue = item.publishTime || item.publishtime || item.createTime || item.createtime;
-        if (itemType === 'graphic') {
-            return buildGraphicFeedItemHtml(item, isPrivate, titleValue, platformValue, authorValue, timeValue);
-        }
-        item.videoname = titleValue;
-        item.videoplatform = platformValue;
-        item.videoauthor = authorValue;
-        item.publishtime = timeValue;
-        item.videocover = item.cover || item.videocover;
-        item.videounrealaddr = item.fallbackUrl || item.videounrealaddr || item.playurl;
-        item.videoprivacy = item.privacy || item.videoprivacy;
-        var safeTitle = isPrivate ? '******' : (item.videoname || '未命名视频');
-        var safePlatform = isPrivate ? '****' : (item.videoplatform || '未知平台');
-        var safeAuthor = isPrivate ? '****' : (item.videoauthor || '未知作者');
-		var timeText = formatTime(item.publishtime || item.createtime);
-        var itemKey = escapeHtml(getFeedItemKey(item));
-        var html = '<div class="feed-item" data-private="' + isPrivate + '">';
-        html += '<div class="feed-video-host" data-src="' + (item.playurl || item.videounrealaddr || '') + '" data-fallback="' + (item.videounrealaddr || '') + '" data-playurl="' + (item.playurl || '') + '" data-mp4="' + (item.videounrealaddr || item.playurl || '') + '"></div>';
-        if (isPrivate) {
-            html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
-        }
-        html += '<div class="feed-overlay">';
-        html += '<div class="feed-title">' + safeTitle + '</div>';
-        var authorChip = '';
-        if (!isPrivate && safeAuthor !== '未知作者') {
-            authorChip = '<span class="feed-author-chip" data-author="' + escapeHtml(safeAuthor) + '" data-authoruid="' + escapeHtml(item.authoruid || '') + '">' + safeAuthor + '</span>';
-        }
-        html += '<div class="feed-meta">' + safePlatform + ' · ' + timeText + authorChip + '</div>';
-        html += '</div>';
-        html += '<button type="button" class="feed-debug-btn" title="播放信息"><i class="mdi mdi-information-outline"></i></button>';
-        html += '<div class="feed-debug-panel"></div>';
-        html += '<div class="feed-source-badge"><i class="mdi mdi-file-video"></i><span>MP4</span></div>';
-        html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '">';
-        html += '<div class="feed-controls-topline"><span class="feed-controls-time">0:00 / 0:00</span><div class="feed-controls-actions"><button type="button" class="feed-inline-btn feed-play-toggle" title="播放/暂停"><i class="mdi mdi-play"></i></button><button type="button" class="feed-inline-btn feed-mute-toggle" title="静音"><i class="mdi mdi-volume-' + (feedMuted ? 'off' : 'high') + '"></i></button><button type="button" class="feed-inline-btn feed-fullscreen-toggle" title="全屏"><i class="mdi mdi-fullscreen"></i></button></div></div>';
-        html += '<div class="feed-progress-track"><div class="feed-progress-buffer"></div><div class="feed-progress-played"></div><div class="feed-progress-thumb"></div></div>';
-        html += '</div>';
-        html += '<div class="feed-bottom-hover-zone"></div>';
-        html += '</div>';
-        return html;
-    }
-
     function normalizeGraphicSlides(item) {
         var slides = Array.isArray(item.slides) ? item.slides : [];
         return slides.filter(function(slide) {
@@ -2117,10 +2068,11 @@
         return html;
     }
 
-    function buildFeedAuthorActionHtmlLegacy(item, isPrivate, authorValue) {
+    function buildFeedAuthorActionHtml(item, isPrivate, authorValue) {
         if (isPrivate) {
             return '';
         }
+        item = item || {};
         var authorUid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
         var authorUsername = item.authorusername || item.uniqueid || '';
         var rawAuthor = authorValue || item.author || item.videoauthor || '';
@@ -2131,38 +2083,7 @@
         var authorName = rawAuthor || (pendingDouyinAuthor ? '待修复' : 'Unknown');
         var avatar = item.authoravatar || item.authorAvatar || '';
         var avatarHtml = avatar
-            ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(authorName) + '" onerror="this.parentNode.textContent=\'' + escapeHtml(authorInitial(authorName)) + '\'">'
-            : escapeHtml(authorInitial(authorName));
-        var html = '<div class="feed-author-action-rail">';
-        html += '<button type="button" class="feed-author-avatar-btn" title="作者主页"'
-            + ' data-platform="' + escapeHtml(item.platform || item.videoplatform || '') + '"'
-            + ' data-author="' + escapeHtml(authorName || '') + '"'
-            + ' data-authoruid="' + escapeHtml(authorUid) + '"'
-            + ' data-authorusername="' + escapeHtml(authorUsername) + '"'
-            + ' data-authoravatar="' + escapeHtml(avatar || '') + '">';
-        html += '<span class="feed-author-action-avatar">' + avatarHtml + '</span>';
-        html += '</button></div>';
-        return html;
-    }
-
-    function buildFeedAuthorActionHtml(item, isPrivate, authorValue) {
-        if (isPrivate) {
-            return '';
-        }
-        item = item || {};
-        var authorUid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
-        var authorUsername = item.authorusername || item.uniqueid || '';
-        var rawAuthor = authorValue || item.author || item.videoauthor || '';
-        if (isDouyinFeedPlatform(item.platform || item.videoplatform) && !authorUid) {
-            return '';
-        }
-        if (!rawAuthor && !authorUid && !authorUsername) {
-            return '';
-        }
-        var authorName = rawAuthor || 'Unknown';
-        var avatar = item.authoravatar || item.authorAvatar || '';
-        var avatarHtml = avatar
-            ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(authorName) + '" onerror="this.parentNode.textContent=\'' + escapeHtml(authorInitial(authorName)) + '\'">'
+            ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(authorInitial(authorName)) + '" onerror="this.onerror=null;this.parentNode.textContent=this.alt||\'?\'">'
             : escapeHtml(authorInitial(authorName));
         var html = '<div class="feed-author-action-rail">';
         if (rawAuthor || authorUid || authorUsername || avatar) {
@@ -4586,31 +4507,6 @@
         playWithSync(video);
     }
 
-    function renderFeedPlaylist() {
-        if (mediaHomeMode !== 'feed') {
-            return;
-        }
-        var wrap = $('#feedPlaylistList');
-        if (!wrap.length) {
-            return;
-        }
-        var html = '';
-        for (var i = 0; i < feedAllItems.length; i++) {
-            var item = feedAllItems[i] || {};
-            var title = item.videoprivacy === '1' ? '******' : (item.videoname || '未命名视频');
-            var author = item.videoprivacy === '1' ? '****' : (item.videoauthor || '未知作者');
-            var activeCls = i === feedCurrentAbsIndex ? ' active' : '';
-            html += '<button type="button" class="feed-playlist-item' + activeCls + '" data-abs="' + i + '">';
-            html += '<span>' + escapeHtml((i + 1) + '. ' + title) + '</span>';
-            html += '<span class="meta">@' + escapeHtml(author) + '</span>';
-            html += '</button>';
-        }
-        if (!html) {
-            html = '<div style="padding:12px;color:#cbd5e1;font-size:12px;">暂无播放项</div>';
-        }
-        wrap.html(html);
-    }
-
     function renderFeedAuthorDrawer() {
         var wrap = $('#feedAuthorList');
         if (!wrap.length) {
@@ -4633,51 +4529,6 @@
     }
 
     function loadRandomPoolAndRender() { return; }
-
-    function renderNextRandomBatch(forceFirst) {
-        if (feedOrder !== 'random') {
-            return;
-        }
-        if (forceFirst) {
-            $('#videoFeed').empty();
-        }
-        if (!feedRandomPool || feedRandomPool.length === 0) {
-            hasMore = false;
-            return;
-        }
-        var start = feedRandomCursor;
-        var end = Math.min(feedRandomCursor + feedRandomBatchSize, feedRandomPool.length);
-        if (start >= end) {
-            hasMore = false;
-            return;
-        }
-        feedAllItems = feedAllItems.concat(feedRandomPool.slice(start, end));
-        feedRandomCursor = end;
-        hasMore = feedRandomCursor < feedRandomPool.length;
-        requestAnimationFrame(function() {
-            if (feedCurrentAbsIndex < 0 && feedAllItems.length > 0) {
-                switchFeedTo(0, { animate: false, forcePlay: true });
-            } else {
-                renderFeedWindow({ forcePlay: false });
-            }
-        });
-    }
-
-    function appendFeedAuthorOptions(list) {
-        for (var i = 0; i < list.length; i++) {
-            var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
-            var uid = canonicalFeedAuthorUid(list[i].platform || list[i].videoplatform,
-                    list[i].profileAuthorUid, list[i].secuid, list[i].authoruid);
-            var key = uid ? ('uid:' + uid) : ('name:' + author);
-            if (!author || (isDouyinFeedPlatform(list[i].platform || list[i].videoplatform) && !uid) || feedAuthorSet[key]) {
-                continue;
-            }
-            feedAuthorSet[key] = {
-                label: author,
-                authoruid: uid
-            };
-        }
-    }
 
     function renderFeedPlaylist() {
         if (mediaHomeMode !== 'feed') {

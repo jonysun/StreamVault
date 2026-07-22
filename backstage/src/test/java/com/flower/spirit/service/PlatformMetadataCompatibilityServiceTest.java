@@ -3,7 +3,7 @@ package com.flower.spirit.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
-import java.util.Optional;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,8 +55,8 @@ class PlatformMetadataCompatibilityServiceTest {
 	void fillsAuthorHomepageOnlyFromMatchingCanonicalProfile() {
 		AuthorProfileEntity profile = new AuthorProfileEntity();
 		profile.setHomepage("https://www.youtube.com/@author");
-		when(authorProfileDao.findByPlatformkeyAndAuthoruid("youtube", "channel-1"))
-				.thenReturn(Optional.of(profile));
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("youtube", "channel-1"))
+				.thenReturn(List.of(profile));
 		VideoDataEntity video = new VideoDataEntity();
 		video.setVideoplatform("YouTube");
 		video.setAuthoruid("channel-1");
@@ -64,6 +64,23 @@ class PlatformMetadataCompatibilityServiceTest {
 		new PlatformMetadataCompatibilityService(authorProfileDao).enrichVideo(video);
 
 		assertThat(video.getAuthorhomepage()).isEqualTo("https://www.youtube.com/@author");
+	}
+
+	@Test
+	void toleratesDuplicateProfilesByUsingTheFirstOrderedRecord() {
+		AuthorProfileEntity newest = new AuthorProfileEntity();
+		newest.setHomepage("https://www.youtube.com/@newest");
+		AuthorProfileEntity older = new AuthorProfileEntity();
+		older.setHomepage("https://www.youtube.com/@older");
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("youtube", "channel-1"))
+				.thenReturn(List.of(newest, older));
+		VideoDataEntity video = new VideoDataEntity();
+		video.setVideoplatform("YouTube");
+		video.setAuthoruid("channel-1");
+
+		new PlatformMetadataCompatibilityService(authorProfileDao).enrichVideo(video);
+
+		assertThat(video.getAuthorhomepage()).isEqualTo("https://www.youtube.com/@newest");
 	}
 
 	@Test

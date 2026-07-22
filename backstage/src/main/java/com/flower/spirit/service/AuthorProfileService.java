@@ -411,7 +411,11 @@ public class AuthorProfileService {
 		if (trimToNull(item.getPlatform()) == null || canonicalUid == null) {
 			return;
 		}
-		authorProfileDao.findByPlatformAndAuthoruid(item.getPlatform().trim(), canonicalUid)
+		String platform = item.getPlatform().trim();
+		String platformKey = PlatformCatalog.findByAlias(platform)
+				.map(PlatformDefinition::getKey)
+				.orElseGet(() -> platform.toLowerCase(Locale.ROOT));
+		findPreferredProfile(platformKey, platform, canonicalUid)
 				.map(AuthorProfileEntity::getDisplayname)
 				.filter(name -> name != null && !name.trim().isEmpty())
 				.ifPresent(name -> {
