@@ -55,24 +55,32 @@ public class PlatformMetadataCompatibilityService {
 		if (authorProfileDao == null || !hasText(platformKey) || !hasText(authorUid)) {
 			return Optional.empty();
 		}
-		Optional<AuthorProfileEntity> canonical = authorProfileDao.findByPlatformkeyAndAuthoruid(platformKey.trim(),
-				authorUid.trim());
+		Optional<AuthorProfileEntity> canonical = firstProfile(
+				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(
+						platformKey.trim(), authorUid.trim()));
 		if (canonical.isPresent()) {
 			return canonical;
 		}
 		Optional<PlatformDefinition> definition = PlatformCatalog.findByAlias(platformKey);
 		if (definition.isPresent()) {
 			for (String alias : definition.get().getAliases()) {
-				Optional<AuthorProfileEntity> legacy = authorProfileDao.findByPlatformAndAuthoruid(alias, authorUid.trim());
+				Optional<AuthorProfileEntity> legacy = firstProfile(
+						authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc(
+								alias, authorUid.trim()));
 				if (legacy.isPresent()) {
 					return legacy;
 				}
 			}
 		}
 		if (hasText(legacyPlatform)) {
-			return authorProfileDao.findByPlatformAndAuthoruid(legacyPlatform.trim(), authorUid.trim());
+			return firstProfile(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc(
+					legacyPlatform.trim(), authorUid.trim()));
 		}
 		return Optional.empty();
+	}
+
+	private Optional<AuthorProfileEntity> firstProfile(List<AuthorProfileEntity> profiles) {
+		return profiles == null || profiles.isEmpty() ? Optional.empty() : Optional.ofNullable(profiles.get(0));
 	}
 
 	public static void enrichCanonicalVideo(VideoDataEntity video) {
