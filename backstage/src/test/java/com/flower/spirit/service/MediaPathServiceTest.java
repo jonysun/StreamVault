@@ -28,4 +28,14 @@ class MediaPathServiceTest {
 				.isInstanceOf(WorkMetadataValidationException.class)
 				.hasMessageContaining("outside configured storage root");
 	}
+
+	@Test
+	void validatesStoredPathsWithoutAllowingTheStorageRootItself() {
+		assertThat(service.requireOwnedLocalPath("youtube/work/video.mp4"))
+				.isEqualTo(Path.of("C:/media/youtube/work/video.mp4").toAbsolutePath().normalize());
+		assertThatThrownBy(() -> service.requireOwnedLocalPath("C:/media"))
+				.isInstanceOf(WorkMetadataValidationException.class);
+		assertThatThrownBy(() -> service.requireOwnedLocalPath("C:/outside/video.mp4"))
+				.isInstanceOf(WorkMetadataValidationException.class);
+	}
 }

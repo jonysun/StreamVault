@@ -19,8 +19,10 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dto.UpdateWorkMetadataRequest;
 import com.flower.spirit.dto.WorkOperationRequest;
+import com.flower.spirit.dto.AdminDeleteWorkRequest;
 import com.flower.spirit.entity.UserEntity;
 import com.flower.spirit.service.WorkMetadataEditService;
+import com.flower.spirit.service.AdminMediaManagementService;
 import com.flower.spirit.service.WorkMetadataEditService.EditResult;
 import com.flower.spirit.service.WorkRedownloadService;
 import com.flower.spirit.service.WorkRefreshService;
@@ -31,6 +33,7 @@ class AdminControllerWorkMetadataTest {
 	@Mock private WorkMetadataEditService editService;
 	@Mock private WorkRefreshService refreshService;
 	@Mock private WorkRedownloadService redownloadService;
+	@Mock private AdminMediaManagementService managementService;
 
 	private AdminController controller;
 	private UpdateWorkMetadataRequest updateRequest;
@@ -41,9 +44,25 @@ class AdminControllerWorkMetadataTest {
 		ReflectionTestUtils.setField(controller, "workMetadataEditService", editService);
 		ReflectionTestUtils.setField(controller, "workRefreshService", refreshService);
 		ReflectionTestUtils.setField(controller, "workRedownloadService", redownloadService);
+		ReflectionTestUtils.setField(controller, "adminMediaManagementService", managementService);
 		updateRequest = new UpdateWorkMetadataRequest();
 		updateRequest.setWorkType("video");
 		updateRequest.setId(7);
+	}
+
+	@Test
+	void protectsNewWorkManagementEndpointsWithAdminSession() {
+		AdminDeleteWorkRequest deleteRequest = new AdminDeleteWorkRequest();
+		deleteRequest.setWorkType("video");
+		deleteRequest.setId(7);
+
+		AjaxEntity metadata = controller.workMetadata("video", 7, new MockHttpServletRequest());
+		AjaxEntity deletion = controller.deleteWork(deleteRequest, new MockHttpServletRequest());
+
+		assertThat(metadata.getResCode()).isEqualTo(Global.ajax_login_err);
+		assertThat(deletion.getResCode()).isEqualTo(Global.ajax_login_err);
+		verify(managementService, never()).findWorkMetadata(any(), any());
+		verify(managementService, never()).deleteWork(any());
 	}
 
 	@Test
