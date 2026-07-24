@@ -56,6 +56,16 @@ class AdminTemplateScriptSanityTest {
 				"authorFieldsUpdated", "videosUpdated", "graphicsUpdated");
 	}
 
+	@Test
+	void indexGroupsInfrequentActionsInMoreMenu() throws IOException {
+		String index = template("index.html");
+
+		assertThat(index).contains("id=\"feedMoreActions\"", "id=\"feedMoreBtn\"",
+				"id=\"feedMoreMenu\"", "id=\"feedEditBtn\"", "id=\"feedAutoNextBtn\"",
+				"id=\"feedDeleteBtn\"", "function setFeedMoreMenuOpen(open)",
+				"function closeFeedMoreMenu()", "click.feedMoreOutside", "keydown.feedMoreEscape");
+	}
+
 	private String template(String name) throws IOException {
 		try (var input = getClass().getResourceAsStream("/templates/admin/" + name)) {
 			if (input == null) throw new IOException(name + " template not found");

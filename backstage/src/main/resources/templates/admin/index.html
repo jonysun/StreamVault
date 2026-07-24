@@ -92,14 +92,6 @@
             background: rgba(0, 0, 0, 0.62);
         }
 
-        #feedDeleteBtn {
-            background: rgba(190, 24, 49, 0.82);
-        }
-
-        #feedDeleteBtn:hover {
-            background: rgba(220, 38, 64, 0.94);
-        }
-
         .feed-control-btn:disabled {
             opacity: 0.38;
             cursor: not-allowed;
@@ -118,6 +110,91 @@
         .feed-control-btn span {
             line-height: 1;
             transform: scale(0.95);
+        }
+
+        .feed-more-actions {
+            position: relative;
+            width: 48px;
+            height: 48px;
+            flex: 0 0 auto;
+        }
+
+        .feed-more-menu {
+            position: absolute;
+            right: calc(100% + 10px);
+            bottom: 0;
+            width: 164px;
+            padding: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            background: rgba(18, 18, 22, 0.94);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transform: translateX(8px);
+            transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+        }
+
+        .feed-more-actions.open .feed-more-menu {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transform: translateX(0);
+        }
+
+        .feed-more-actions.open #feedMoreBtn {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .feed-more-menu-btn {
+            width: 100%;
+            min-height: 40px;
+            border: 0;
+            border-radius: 6px;
+            padding: 0 11px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+            background: transparent;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .feed-more-menu-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .feed-more-menu-btn:disabled {
+            opacity: 0.38;
+            cursor: not-allowed;
+        }
+
+        .feed-more-menu-btn:disabled:hover {
+            background: transparent;
+        }
+
+        .feed-more-menu-btn i {
+            width: 18px;
+            flex: 0 0 18px;
+            font-size: 18px;
+            line-height: 1;
+            text-align: center;
+        }
+
+        #feedDeleteBtn {
+            color: #ff8798;
+        }
+
+        #feedDeleteBtn:hover {
+            background: rgba(190, 24, 49, 0.26);
+        }
+
+        #feedDeleteBtn:disabled:hover {
+            background: transparent;
         }
 
         .feed-playlist-drawer {
@@ -1544,9 +1621,15 @@
             }
 
             .feed-control-btn,
-            .feed-author-avatar-btn {
+            .feed-author-avatar-btn,
+            .feed-more-actions {
                 width: 42px;
                 height: 42px;
+            }
+
+            .feed-more-menu {
+                right: calc(100% + 8px);
+                width: 156px;
             }
 
             .feed-control-btn {
@@ -1674,15 +1757,22 @@
                                     <button type="button" class="feed-control-btn" id="feedOriginBtn" title="当前作品没有原链" disabled>
                                         <i class="mdi mdi-link-variant"></i><span>原链</span>
                                     </button>
-                                    <button type="button" class="feed-control-btn" id="feedEditBtn" title="编辑当前作品" disabled>
-                                        <i class="mdi mdi-pencil"></i><span>编辑</span>
-                                    </button>
-                                    <button type="button" class="feed-control-btn" id="feedDeleteBtn" title="删除当前作品" disabled>
-                                        <i class="mdi mdi-delete-outline"></i><span>删除</span>
-                                    </button>
-                                    <button type="button" class="feed-control-btn" id="feedAutoNextBtn" title="播放模式">
-                                        <i class="mdi mdi-skip-next-circle"></i><span>自动下一条</span>
-                                    </button>
+                                    <div class="feed-more-actions" id="feedMoreActions">
+                                        <button type="button" class="feed-control-btn" id="feedMoreBtn" title="更多操作" aria-haspopup="menu" aria-expanded="false">
+                                            <i class="mdi mdi-dots-horizontal"></i><span>更多</span>
+                                        </button>
+                                        <div class="feed-more-menu" id="feedMoreMenu" role="menu" aria-hidden="true">
+                                            <button type="button" class="feed-more-menu-btn" id="feedEditBtn" title="编辑当前作品" role="menuitem" disabled>
+                                                <i class="mdi mdi-pencil"></i><span>编辑</span>
+                                            </button>
+                                            <button type="button" class="feed-more-menu-btn" id="feedAutoNextBtn" title="播放模式" role="menuitem">
+                                                <i class="mdi mdi-skip-next-circle"></i><span>自动下一条</span>
+                                            </button>
+                                            <button type="button" class="feed-more-menu-btn" id="feedDeleteBtn" title="删除当前作品" role="menuitem" disabled>
+                                                <i class="mdi mdi-delete-outline"></i><span>删除</span>
+                                            </button>
+                                        </div>
+                                    </div>
                                     <button type="button" class="feed-control-btn" id="feedPlaylistBtn" title="播放列表">
                                         <i class="mdi mdi-format-list-bulleted"></i><span>列表</span>
                                     </button>
@@ -2789,6 +2879,7 @@
     }
 
     function switchFeedTo(absIndex, options) {
+        closeFeedMoreMenu();
         options = options || {};
         absIndex = Number(absIndex);
         if (!isFinite(absIndex) || absIndex < 0) {
@@ -3726,7 +3817,22 @@
         }, { passive: true });
     }
 
+    function setFeedMoreMenuOpen(open) {
+        var isOpen = !!open;
+        $('#feedMoreActions').toggleClass('open', isOpen);
+        $('#feedMoreBtn').attr('aria-expanded', isOpen ? 'true' : 'false');
+        $('#feedMoreMenu').attr('aria-hidden', isOpen ? 'false' : 'true');
+    }
+
+    function closeFeedMoreMenu() {
+        setFeedMoreMenuOpen(false);
+    }
+
     function bindFeedControls() {
+        $('#feedMoreBtn').on('click', function() {
+            setFeedMoreMenuOpen(!$('#feedMoreActions').hasClass('open'));
+        });
+
         $('#feedOrderBtn').on('click', function() {
             if (feedOrder === 'desc') {
                 feedOrder = 'asc';
@@ -3754,6 +3860,7 @@
         });
 
         $('#feedAuthorBtn').on('click', function() {
+            closeFeedMoreMenu();
             if (feedAuthorContext) {
                 clearFeedAuthorContext();
                 reloadFeed();
@@ -3771,10 +3878,12 @@
         });
 
         $('#feedEditBtn').on('click', function() {
+            closeFeedMoreMenu();
             openFeedEditModal();
         });
 
         $('#feedDeleteBtn').on('click', function() {
+            closeFeedMoreMenu();
             confirmDeleteCurrentFeedWork();
         });
 
@@ -3787,12 +3896,14 @@
         });
 
         $('#feedAutoNextBtn').on('click', function() {
+            closeFeedMoreMenu();
             feedPlaybackMode = feedPlaybackMode === 'auto_next' ? 'single_loop' : 'auto_next';
             persistFeedPlaybackMode();
             updateFeedButtons();
         });
 
         $('#feedPlaylistBtn').on('click', function() {
+            closeFeedMoreMenu();
             $('#feedPlaylistDrawer').toggleClass('open');
             renderFeedPlaylist();
         });
@@ -3928,6 +4039,20 @@
             drawer.classList.remove('open');
         });
 
+        $(document).on('click.feedMoreOutside', function(e) {
+            var actions = document.getElementById('feedMoreActions');
+            if (!actions || !actions.classList.contains('open') || actions.contains(e.target)) {
+                return;
+            }
+            closeFeedMoreMenu();
+        });
+
+        $(document).on('keydown.feedMoreEscape', function(e) {
+            if (e.key === 'Escape') {
+                closeFeedMoreMenu();
+            }
+        });
+
         $(document).on('click.feedAuthorOutside', function(e) {
             var drawer = document.getElementById('feedAuthorDrawer');
             if (!drawer || !drawer.classList.contains('open')) {
@@ -3957,6 +4082,7 @@
     }
 
     function openFeedAuthorProfile(query) {
+        closeFeedMoreMenu();
         feedAuthorProfileQuery = query || {};
         feedAuthorProfileType = '';
         feedAuthorProfileSearch = '';
