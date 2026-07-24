@@ -47,6 +47,7 @@ import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
 import com.flower.spirit.service.DouyinCookieHealthService;
 import com.flower.spirit.service.DouyinAuthorReconciliationService;
+import com.flower.spirit.service.DouyinAuthorProfileRefreshService;
 import com.flower.spirit.service.DouyinWorkMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
@@ -120,6 +121,9 @@ public class AdminController {
 
 	@Autowired
 	private AuthorProfileService authorProfileService;
+
+	@Autowired
+	private DouyinAuthorProfileRefreshService douyinAuthorProfileRefreshService;
 
 	@Autowired
 	private BlockedWorkService blockedWorkService;
@@ -748,6 +752,19 @@ public class AdminController {
 	@GetMapping(value = "/findAuthorNameHistory")
 	public AjaxEntity findAuthorNameHistory(Integer authorProfileId) {
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", authorProfileService.findNameHistory(authorProfileId));
+	}
+
+	@PostMapping(value = "/refreshDouyinAuthorProfile")
+	public AjaxEntity refreshDouyinAuthorProfile(@RequestParam Integer authorProfileId, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "作者资料刷新完成",
+					douyinAuthorProfileRefreshService.refresh(authorProfileId));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
 	}
 
 	@GetMapping(value = "/authorProfileSummary")

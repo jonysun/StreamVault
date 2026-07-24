@@ -302,6 +302,61 @@ class AuthorProfileServiceTest {
 		assertThat(user.getString("unique_id")).isEqualTo("name");
 	}
 
+	@Test
+	void applyExternalProfileUpdatesProfileAndCanonicalWorksInBulk() {
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setId(41);
+		profile.setPlatform("抖音");
+		profile.setPlatformkey("douyin");
+		profile.setAuthoruid("MS4wLjABAAAArefresh");
+		profile.setDisplayname("旧名称");
+		profile.setUsername("old-user");
+		when(authorProfileDao.findById(41)).thenReturn(Optional.of(profile));
+		when(authorProfileDao.save(any(AuthorProfileEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(authorNameHistoryDao.findByAuthorprofileidAndDisplayname(41, "新名称"))
+				.thenReturn(Optional.empty());
+		when(videoDataDao.updateDouyinAuthorMetadata(eq("MS4wLjABAAAArefresh"), eq("新名称"),
+				eq("new-user"), eq("https://img.example/new.jpg"),
+				eq("https://www.douyin.com/user/MS4wLjABAAAArefresh"), any(List.class))).thenReturn(12);
+		when(graphicContentDao.updateDouyinAuthorMetadata(eq("MS4wLjABAAAArefresh"), eq("新名称"),
+				eq("new-user"), eq("https://img.example/new.jpg"),
+				eq("https://www.douyin.com/user/MS4wLjABAAAArefresh"), any(List.class))).thenReturn(3);
+		JSONObject profileUser = JSONObject.parseObject("{\"sec_uid\":\"MS4wLjABAAAArefresh\","
+				+ "\"unique_id\":\"new-user\",\"nickname\":\"新名称\","
+				+ "\"signature\":\"新的签名\",\"avatar_thumb\":\"https://img.example/new.jpg\"}");
+
+		AuthorProfileService.AuthorProfileRefreshResult result = service.applyExternalDouyinProfile(41, profileUser);
+
+		assertThat(profile.getDisplayname()).isEqualTo("新名称");
+		assertThat(profile.getUsername()).isEqualTo("new-user");
+		assertThat(profile.getSignature()).isEqualTo("新的签名");
+		assertThat(result.videosUpdated()).isEqualTo(12);
+		assertThat(result.graphicsUpdated()).isEqualTo(3);
+		assertThat(result.authorFieldsUpdated()).isEqualTo(5);
+		verify(videoDataDao).updateDouyinAuthorMetadata(eq("MS4wLjABAAAArefresh"), eq("新名称"),
+				eq("new-user"), eq("https://img.example/new.jpg"), any(), any(List.class));
+		verify(graphicContentDao).updateDouyinAuthorMetadata(eq("MS4wLjABAAAArefresh"), eq("新名称"),
+				eq("new-user"), eq("https://img.example/new.jpg"), any(), any(List.class));
+	}
+
+	@Test
+	void applyExternalProfileRejectsMismatchedUidBeforeWriting() {
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setId(42);
+		profile.setPlatform("抖音");
+		profile.setAuthoruid("MS4wLjABAAAAexpected");
+		when(authorProfileDao.findById(42)).thenReturn(Optional.of(profile));
+		JSONObject profileUser = JSONObject.parseObject("{\"sec_uid\":\"MS4wLjABAAAAother\","
+				+ "\"nickname\":\"其他作者\"}");
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.applyExternalDouyinProfile(42, profileUser))
+				.hasMessageContaining("其他作者");
+
+		verify(authorProfileDao, never()).save(any(AuthorProfileEntity.class));
+		verify(videoDataDao, never()).updateDouyinAuthorMetadata(any(), any(), any(), any(), any(), any());
+		verify(graphicContentDao, never()).updateDouyinAuthorMetadata(any(), any(), any(), any(), any(), any());
+	}
+
 	private JSONObject invokeExtractProfileUser(AuthorProfileService service, JSONObject payload) throws Exception {
 		Method method = AuthorProfileService.class.getDeclaredMethod("extractProfileUser", JSONObject.class);
 		method.setAccessible(true);

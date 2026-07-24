@@ -37,6 +37,7 @@ import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformDefinition;
+import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
 
@@ -236,6 +237,80 @@ public class AuthorProfileService {
 
 	public List<AuthorNameHistoryEntity> findNameHistory(Integer authorProfileId) {
 		return authorNameHistoryDao.findByAuthorProfileIdOrderByLastSeen(authorProfileId);
+	}
+
+	@Transactional
+	public AuthorProfileRefreshResult applyExternalDouyinProfile(Integer authorProfileId, JSONObject profileUser) {
+		if (authorProfileId == null) {
+			throw new WorkMetadataValidationException("作者档案 ID 不能为空");
+		}
+		AuthorProfileEntity profile = authorProfileDao.findById(authorProfileId)
+				.orElseThrow(() -> new WorkMetadataValidationException("作者档案不存在: " + authorProfileId));
+		if (!AuthorIdentityUtil.isDouyinPlatform(profile.getPlatform())
+				&& !"douyin".equalsIgnoreCase(trimToNull(profile.getPlatformkey()))) {
+			throw new WorkMetadataValidationException("仅支持刷新抖音作者档案");
+		}
+		String targetUid = AuthorIdentityUtil.canonicalAuthorUid("douyin", profile.getAuthoruid(),
+				profile.getAuthoruid());
+		if (!AuthorIdentityUtil.isDouyinSecUid(targetUid)) {
+			throw new WorkMetadataValidationException("作者缺少有效的抖音 sec_uid，请先执行作者修复");
+		}
+		String responseUid = profileUser == null ? null
+				: AuthorIdentityUtil.canonicalAuthorUid("douyin", profileUser.getString("sec_uid"),
+						profileUser.getString("sec_uid"));
+		if (!targetUid.equals(responseUid)) {
+			throw new WorkMetadataValidationException(responseUid == null
+					? "外部 profile 响应缺少有效 sec_uid"
+					: "外部 profile 返回了其他作者，已拒绝更新");
+		}
+
+		String oldDisplayName = trimToNull(profile.getDisplayname());
+		String oldUsername = trimToNull(profile.getUsername());
+		String oldAvatar = trimToNull(profile.getAvatar());
+		String oldSignature = trimToNull(profile.getSignature());
+		String oldHomepage = trimToNull(profile.getHomepage());
+		String displayName = firstNotBlank(profileUser.getString("nickname"), oldDisplayName);
+		String username = firstNotBlank(profileUser.getString("unique_id"), oldUsername);
+		String avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), oldAvatar);
+		String signature = firstNotBlank(profileUser.getString("signature"), oldSignature);
+		String homepage = AuthorIdentityUtil.douyinHomepage(targetUid);
+		int authorFieldsUpdated = changedFieldCount(oldDisplayName, displayName, oldUsername, username,
+				oldAvatar, avatar, oldSignature, signature, oldHomepage, homepage);
+
+		profile.setPlatform("抖音");
+		profile.setPlatformkey("douyin");
+		profile.setAuthoruid(targetUid);
+		profile.setDisplayname(displayName);
+		profile.setUsername(username);
+		profile.setAvatar(avatar);
+		profile.setSignature(signature);
+		profile.setHomepage(homepage);
+		profile.setUpdatetime(new Date());
+		AuthorProfileEntity saved = authorProfileDao.save(profile);
+		if (saved.getId() != null && hasText(displayName)) {
+			upsertNameHistory(saved.getId(), displayName.trim(), saved.getUpdatetime());
+		}
+		List<String> platforms = List.of("抖音", "douyin");
+		int videosUpdated = videoDataDao.updateDouyinAuthorMetadata(targetUid, trimToNull(displayName),
+				trimToNull(username), trimToNull(avatar), homepage, platforms);
+		int graphicsUpdated = graphicContentDao.updateDouyinAuthorMetadata(targetUid, trimToNull(displayName),
+				trimToNull(username), trimToNull(avatar), homepage, platforms);
+		return new AuthorProfileRefreshResult(saved.getId(), targetUid, displayName, username, authorFieldsUpdated,
+				videosUpdated, graphicsUpdated);
+	}
+
+	private int changedFieldCount(String... values) {
+		int changed = 0;
+		for (int i = 0; i + 1 < values.length; i += 2) {
+			if (!Objects.equals(values[i], values[i + 1])) {
+				changed++;
+			}
+		}
+		return changed;
+	}
+
+	public record AuthorProfileRefreshResult(Integer authorProfileId, String authorUid, String displayName,
+			String username, int authorFieldsUpdated, int videosUpdated, int graphicsUpdated) {
 	}
 
 	public AjaxEntity findProfileSummary(String platform, String authoruid, String authorusername, String author) {
@@ -655,7 +730,7 @@ public class AuthorProfileService {
 		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
 		boolean localResolved = localAuthor != null && canonicalUid != null;
 		JSONObject profileAuthor = needsProfileEnrichment(video, canonicalUid)
-				? resolveProfileAuthorCached(profileCache, canonicalUid) : null;
+				? resolveDouyinProfileAuthorCached(profileCache, canonicalUid, video.getAuthorusername()) : null;
 		applyVideoAuthorFromAuthor(video, profileAuthor);
 		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
 		if (canonicalUid == null) {
@@ -695,7 +770,7 @@ public class AuthorProfileService {
 		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
 		boolean localResolved = localAuthor != null && canonicalUid != null;
 		JSONObject profileAuthor = needsProfileEnrichment(graphic, canonicalUid)
-				? resolveProfileAuthorCached(profileCache, canonicalUid) : null;
+				? resolveDouyinProfileAuthorCached(profileCache, canonicalUid, graphic.getAuthorusername()) : null;
 		applyGraphicAuthorFromAuthor(graphic, profileAuthor);
 		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
 		if (canonicalUid == null) {
@@ -850,19 +925,27 @@ public class AuthorProfileService {
 		}
 	}
 
-	private JSONObject resolveProfileAuthorCached(Map<String, JSONObject> cache, String canonicalUid) {
-		if (!AuthorIdentityUtil.isDouyinSecUid(canonicalUid)) {
+	public JSONObject resolveDouyinProfileAuthorCached(Map<String, JSONObject> cache, String canonicalUid,
+			String uniqueId) {
+		String safeUid = AuthorIdentityUtil.isDouyinSecUid(canonicalUid) ? canonicalUid.trim() : null;
+		String safeUsername = trimToNull(uniqueId);
+		if (safeUid == null && safeUsername == null) {
 			return null;
 		}
+		String key = safeUid == null ? "username:" + safeUsername : "uid:" + safeUid;
 		if (cache == null) {
-			return resolveProfileAuthor(canonicalUid);
+			return safeUid == null ? extractProfileUser(DouUtil.fetchUserProfileByUniqueId(safeUsername))
+					: resolveProfileAuthor(safeUid);
 		}
-		String key = "uid:" + canonicalUid;
 		if (cache.containsKey(key)) {
 			return cache.get(key);
 		}
-		JSONObject resolved = resolveProfileAuthor(canonicalUid);
+		JSONObject resolved = safeUid == null ? extractProfileUser(DouUtil.fetchUserProfileByUniqueId(safeUsername))
+				: resolveProfileAuthor(safeUid);
 		cache.put(key, resolved);
+		if (resolved != null && AuthorIdentityUtil.isDouyinSecUid(resolved.getString("sec_uid"))) {
+			cache.put("uid:" + resolved.getString("sec_uid").trim(), resolved);
+		}
 		return resolved;
 	}
 
@@ -984,7 +1067,7 @@ public class AuthorProfileService {
 		return firstNotBlank(profileSignature, hybridSignature);
 	}
 
-	private JSONObject extractProfileUser(JSONObject profile) {
+	JSONObject extractProfileUser(JSONObject profile) {
 		if (profile == null) return null;
 		JSONObject user = profile.getJSONObject("user");
 		if (isProfileUser(user)) return user;

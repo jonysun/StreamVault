@@ -21,7 +21,7 @@
 </head>
 <body>
 <div class="lyear-layout-web"><div class="lyear-layout-container"><div th:insert="~{admin/include/common :: headermenu}"></div>
-<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索名称/用户名/UID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button><button id="repairDouyinMetadataBtn" class="btn btn-info btn-sm"><i class="mdi mdi-auto-fix"></i> 修复抖音元数据</button><button id="previewDouyinAuthorsBtn" class="btn btn-default btn-sm"><i class="mdi mdi-database-search"></i> 检查作者数据</button><button id="rebuildDouyinBtn" class="btn btn-warning btn-sm" disabled><i class="mdi mdi-account-convert"></i> 执行作者修复</button><button id="cleanupHistoryBtn" class="btn btn-danger btn-sm"><i class="mdi mdi-delete-sweep"></i> 清理重复处理历史</button></div></div><div class="card-body"><div id="authorRepairStatus" class="alert alert-info repair-status"></div><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>头像</th><th>当前显示名</th><th>用户名</th><th>UID</th><th>主页</th><th>更新时间</th><th>历史名</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
+<main class="lyear-layout-content"><div class="container-fluid"><div class="row"><div class="col-lg-12"><div class="card"><div class="card-header bg-light"><div class="toolbar"><input id="keyword" class="form-control" placeholder="搜索名称/用户名/UID"><input id="platform" class="form-control" placeholder="平台"><button id="searchBtn" class="btn btn-primary btn-sm"><i class="mdi mdi-magnify"></i> 搜索</button><button id="resetBtn" class="btn btn-default btn-sm"><i class="mdi mdi-refresh"></i> 重置</button><button id="repairDouyinMetadataBtn" class="btn btn-info btn-sm"><i class="mdi mdi-auto-fix"></i> 修复抖音元数据</button><button id="previewDouyinAuthorsBtn" class="btn btn-default btn-sm"><i class="mdi mdi-database-search"></i> 检查作者数据</button><button id="rebuildDouyinBtn" class="btn btn-warning btn-sm" disabled><i class="mdi mdi-account-convert"></i> 执行作者修复</button><button id="cleanupHistoryBtn" class="btn btn-danger btn-sm"><i class="mdi mdi-delete-sweep"></i> 清理重复处理历史</button></div></div><div class="card-body"><div id="authorRepairStatus" class="alert alert-info repair-status"></div><div class="table-responsive"><table class="table table-bordered"><thead><tr><th>ID</th><th>平台</th><th>头像</th><th>当前显示名</th><th>用户名</th><th>UID</th><th>主页</th><th>更新时间</th><th>历史名</th><th>操作</th></tr></thead><tbody id="tableData"></tbody></table></div><ul id="pager" class="pagination"></ul></div></div></div></div></div></main></div></div>
 <script type="text/javascript" src="../static/js/jquery.min.js"></script>
 <script type="text/javascript" src="../static/js/bootstrap.min.js"></script>
 <script type="text/javascript" src="../static/js/laypage.js"></script>
@@ -32,25 +32,31 @@
 		var authorRepairPreview = null;
 		function findList(page){
 			var option = { pageNo: page, pageSize: 15, keyword: $('#keyword').val(), platform: $('#platform').val() };
-			$('#tableData').html('<tr><td colspan="9" class="text-center text-muted">加载中...</td></tr>');
+			$('#tableData').html('<tr><td colspan="10" class="text-center text-muted">加载中...</td></tr>');
 			$.post('/admin/api/findAuthorProfileList', option, function(res){
 				if(res.resCode !== '000001'){ layer.msg(res.message || '加载失败'); return; }
 				var record = res.record || {}; var list = record.content || []; var html='';
 				for(var i=0;i<list.length;i++){
-				var item = list[i];
-				html += '<tr>';
-				html += '<td>'+ (item.id||'') +'</td>';
-				html += '<td>'+ (item.platform||'') +'</td>';
-				html += '<td>'+ (item.avatar ? '<img src="'+item.avatar+'" class="avatar">' : '--') +'</td>';
-				html += '<td class="text-ellipsis" title="'+ (item.displayname||'--') +'">'+ (item.displayname||'--') +'</td>';
-				html += '<td class="mono">'+ (item.username||'--') +'</td>';
-				html += '<td class="mono">'+ (item.authoruid||'--') +'</td>';
-				html += '<td>'+ (item.homepage ? '<a href="'+item.homepage+'" target="_blank">主页</a>' : '--') +'</td>';
-				html += '<td>'+ (item.updatetime || '') +'</td>';
+					var item = list[i];
+					var platformValue = (item.platformkey || item.platform || '').toString().toLowerCase();
+					var authorUid = (item.authoruid || '').toString().trim();
+					var canRefresh = (platformValue === 'douyin' || platformValue.indexOf('抖音') >= 0)
+						&& authorUid.indexOf('MS4') === 0;
+					html += '<tr>';
+					html += '<td>'+ (item.id||'') +'</td>';
+					html += '<td>'+ (item.platform||'') +'</td>';
+					html += '<td>'+ (item.avatar ? '<img src="'+item.avatar+'" class="avatar">' : '--') +'</td>';
+					html += '<td class="text-ellipsis" title="'+ (item.displayname||'--') +'">'+ (item.displayname||'--') +'</td>';
+					html += '<td class="mono">'+ (item.username||'--') +'</td>';
+					html += '<td class="mono">'+ (item.authoruid||'--') +'</td>';
+					html += '<td>'+ (item.homepage ? '<a href="'+item.homepage+'" target="_blank">主页</a>' : '--') +'</td>';
+					html += '<td>'+ (item.updatetime || '') +'</td>';
 					html += '<td><button class="btn btn-outline-info btn-sm historyBtn" data-id="'+item.id+'">查看</button></td>';
+					html += '<td><button class="btn btn-outline-primary btn-sm refreshProfileBtn" data-id="'+item.id+'"'
+						+ (canRefresh ? '' : ' disabled title="作者 UID 待修复"') +'><i class="mdi mdi-sync"></i> 刷新</button></td>';
 					html += '</tr>';
 				}
-				$('#tableData').html(html || '<tr><td colspan="9" class="text-center text-muted">暂无作者档案数据</td></tr>');
+				$('#tableData').html(html || '<tr><td colspan="10" class="text-center text-muted">暂无作者档案数据</td></tr>');
 			$('.historyBtn').click(function(){
 				var id = $(this).data('id');
 				$.get('/admin/api/findAuthorNameHistory', { authorProfileId:id }, function(r){
@@ -62,6 +68,28 @@
 					}
 					if(arr.length === 0){ text += '<div class="text-muted">暂无历史名称</div>'; }
 					text += '</div>'; layer.open({type:1,title:'历史名称',area:['420px','320px'],content:text});
+				});
+			});
+			$('.refreshProfileBtn').click(function(){
+				var button = $(this);
+				if (button.prop('disabled')) return;
+				var originalHtml = button.html();
+				button.prop('disabled', true).html('<i class="mdi mdi-loading mdi-spin"></i> 刷新中');
+				$.post('/admin/api/refreshDouyinAuthorProfile', { authorProfileId: button.data('id') }, function(r){
+					if(r.resCode !== '000001'){
+						button.prop('disabled', false).html(originalHtml);
+						layer.msg(r.message || '作者资料刷新失败');
+						return;
+					}
+					var result = r.record || {};
+					layer.alert('作者资料刷新完成<br>作者字段：'+(result.authorFieldsUpdated||0)
+						+'<br>视频作品：'+(result.videosUpdated||0)+'<br>图文作品：'+(result.graphicsUpdated||0),
+						{title:'刷新完成'});
+					findList(currentPage);
+				}).fail(function(xhr){
+					button.prop('disabled', false).html(originalHtml);
+					var message = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : '作者资料刷新请求失败';
+					layer.msg(message);
 				});
 			});
 			var pages = record.totalPages || (record.page && record.page.totalPages) || 1;

@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -45,6 +46,20 @@ public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, I
 			+ "g.authoruid is null or g.authoruid not like 'MS4%' or g.secuid is null or g.secuid not like 'MS4%' "
 			+ "or g.authorusername is null or trim(g.authorusername) = '' or g.authoravatar is null or trim(g.authoravatar) = '')")
 	long countDouyinAuthorRepairCandidates(@Param("platforms") List<String> platforms);
+
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("update GraphicContentEntity g set g.authoruid = :authorUid, g.secuid = :authorUid, "
+			+ "g.author = coalesce(:displayName, g.author), "
+			+ "g.authorusername = coalesce(:username, g.authorusername), "
+			+ "g.uniqueid = coalesce(:username, g.uniqueid), "
+			+ "g.authoravatar = coalesce(:avatar, g.authoravatar), "
+			+ "g.authorhomepage = coalesce(:homepage, g.authorhomepage) "
+			+ "where (g.platformkey = 'douyin' or g.platform in :platforms) "
+			+ "and (g.authoruid = :authorUid or g.secuid = :authorUid)")
+	int updateDouyinAuthorMetadata(@Param("authorUid") String authorUid,
+			@Param("displayName") String displayName, @Param("username") String username,
+			@Param("avatar") String avatar, @Param("homepage") String homepage,
+			@Param("platforms") List<String> platforms);
 
 	/**
 	 * 按平台分组统计图文内容数量

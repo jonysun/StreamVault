@@ -37,6 +37,25 @@ class AdminTemplateScriptSanityTest {
 		}
 	}
 
+	@Test
+	void graphicVideoPreviewsContainAutoplayLifecycle() throws IOException {
+		String index = template("index.html");
+		String graphic = template("graphicContent.html");
+
+		assertThat(index).contains("playActiveGraphicVideo(itemEl, video, true)",
+				"autoplay preload=\"auto\"");
+		assertThat(graphic).contains("playActivePreviewVideo(true)", "pauseActivePreviewVideo(true)",
+				"id=\"previewVideo\" controls playsinline");
+	}
+
+	@Test
+	void authorListContainsManualProfileRefreshAction() throws IOException {
+		String authorList = template("authorList.html");
+
+		assertThat(authorList).contains("refreshProfileBtn", "/admin/api/refreshDouyinAuthorProfile",
+				"authorFieldsUpdated", "videosUpdated", "graphicsUpdated");
+	}
+
 	private String template(String name) throws IOException {
 		try (var input = getClass().getResourceAsStream("/templates/admin/" + name)) {
 			if (input == null) throw new IOException(name + " template not found");

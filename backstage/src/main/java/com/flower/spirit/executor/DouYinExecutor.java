@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 import jakarta.annotation.PostConstruct;
@@ -175,13 +176,16 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname);
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, originaladdress, null);
 			graphicContentEntity.setAuthor(authorSnapshot.nickname);
 			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
 			graphicContentEntity.setSecuid(authorSnapshot.secUid);
 			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
 			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
 			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
+			graphicContentEntity.setAuthorhomepage(AuthorIdentityUtil.douyinHomepage(authorSnapshot.authorUid));
+			graphicContentEntity.setPlatformkey("douyin");
+			graphicContentEntity.setContenttype("graphic");
 			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
 			JSONObject hybridData = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(post)));
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
@@ -210,6 +214,11 @@ public class DouYinExecutor {
 	
 	
 	public static void ImageTextExecutor(String post,String type,String patch) throws IOException {
+		ImageTextExecutor(post, type, patch, null);
+	}
+
+	public static void ImageTextExecutor(String post, String type, String patch,
+			Map<String, JSONObject> profileCache) throws IOException {
 		logger.info("[DouyinImageText] start alt postId={} type={} patch={}", post, type, patch);
 		String taskout = Global.apppath + "lot" +System.getProperty("file.separator") + "imageText_"+post + ".json";
 		GraphicContentEntity graphicContentEntity = new GraphicContentEntity();
@@ -296,13 +305,16 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname);
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, type, profileCache);
 			graphicContentEntity.setAuthor(authorSnapshot.nickname);
 			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
 			graphicContentEntity.setSecuid(authorSnapshot.secUid);
 			graphicContentEntity.setAuthorusername(authorSnapshot.uniqueId);
 			graphicContentEntity.setUniqueid(authorSnapshot.uniqueId);
 			graphicContentEntity.setAuthoravatar(authorSnapshot.avatar);
+			graphicContentEntity.setAuthorhomepage(AuthorIdentityUtil.douyinHomepage(authorSnapshot.authorUid));
+			graphicContentEntity.setPlatformkey("douyin");
+			graphicContentEntity.setContenttype("graphic");
 			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
 			JSONObject hybridData = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(post)));
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
@@ -357,7 +369,8 @@ public class DouYinExecutor {
 		return file.exists() && file.isFile() && file.length() > 0;
 	}
 
-	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, String fallbackName) {
+	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, String fallbackName, String taskAddress,
+			Map<String, JSONObject> profileCache) {
 		JSONObject author = awemeDetail == null ? null : awemeDetail.getJSONObject("author");
 		AuthorSnapshot snapshot = new AuthorSnapshot();
 		snapshot.nickname = author == null ? fallbackName : firstNotBlank(author.getString("nickname"), fallbackName);
@@ -366,9 +379,19 @@ public class DouYinExecutor {
 		snapshot.uid = author == null ? null : author.getString("uid");
 		snapshot.avatar = DouUtil.extractAvatar(author);
 		snapshot.signature = author == null ? null : author.getString("signature");
-		JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(snapshot.secUid));
-		if (profileUser == null) {
-			profileUser = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(snapshot.uniqueId));
+		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid, extractTaskUid(taskAddress));
+		JSONObject profileUser = null;
+		if (needsProfileEnrichment(snapshot)) {
+			if (staticAuthorProfileService == null) {
+				JSONObject rawProfile = DouUtil.fetchUserProfile(snapshot.authorUid);
+				if (rawProfile == null) {
+					rawProfile = DouUtil.fetchUserProfileByUniqueId(snapshot.uniqueId);
+				}
+				profileUser = extractProfileUser(rawProfile);
+			} else {
+				profileUser = staticAuthorProfileService.resolveDouyinProfileAuthorCached(profileCache,
+						snapshot.authorUid, snapshot.uniqueId);
+			}
 		}
 		if (profileUser != null) {
 			snapshot.nickname = firstNotBlank(profileUser.getString("nickname"), snapshot.nickname);
@@ -378,9 +401,18 @@ public class DouYinExecutor {
 			snapshot.avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), snapshot.avatar);
 			snapshot.signature = firstNotBlank(profileUser.getString("signature"), snapshot.signature);
 		}
-		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid, snapshot.uid);
+		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid,
+				firstNotBlank(snapshot.authorUid, extractTaskUid(taskAddress)));
 		snapshot.secUid = snapshot.authorUid;
 		return snapshot;
+	}
+
+	private static boolean needsProfileEnrichment(AuthorSnapshot snapshot) {
+		return snapshot != null && (snapshot.authorUid != null || snapshot.uniqueId != null)
+				&& (snapshot.uniqueId == null || snapshot.uniqueId.trim().isEmpty()
+						|| snapshot.nickname == null || snapshot.nickname.trim().isEmpty()
+						|| snapshot.avatar == null || snapshot.avatar.trim().isEmpty()
+						|| snapshot.signature == null || snapshot.signature.trim().isEmpty());
 	}
 
 	private static JSONObject extractProfileUser(JSONObject profile) {
