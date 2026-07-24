@@ -77,7 +77,7 @@ function loadModules() {
     window.window = window;
     const context = vm.createContext({ window, document, setTimeout, clearTimeout, console });
     const base = path.resolve(__dirname, '../../main/resources/static/js/admin-feed');
-    ['feed-store.js', 'feed-player-pool.js', 'feed-profile.js', 'feed-controller.js'].forEach((file) => {
+    ['feed-store.js', 'feed-player-pool.js', 'feed-profile.js', 'feed-controller.js', 'feed-management.js'].forEach((file) => {
         vm.runInContext(fs.readFileSync(path.join(base, file), 'utf8'), context, { filename: file });
     });
     return window;
@@ -206,6 +206,22 @@ function testFeedOriginalUrlNormalization() {
     }), 'https://www.douyin.com/video/7622696915705286079');
 }
 
+function testManagementUtilities(window) {
+    const management = window.AdminFeed.Management;
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(management.changedOverrides(
+        { title: 'old', description: 'same', favorite: '0' },
+        { title: 'new', description: 'same', favorite: '' },
+        ['title', 'description', 'favorite']
+    ))), { title: 'new', favorite: null });
+    assert.deepStrictEqual(
+        management.removeByMediaKey([{ mediaKey: 'video:1' }, { mediaKey: 'graphic:2' }], 'video:1')
+            .map((item) => item.mediaKey),
+        ['graphic:2']
+    );
+    assert.strictEqual(management.indexAfterRemoval(3, 2), 1);
+    assert.strictEqual(management.indexAfterRemoval(0, 0), -1);
+}
+
 function testFeedAuthorActionRendering() {
     const html = fs.readFileSync(
         path.resolve(__dirname, '../../main/resources/templates/admin/index.html'),
@@ -257,10 +273,29 @@ function testTemplateHasUniqueTopLevelFunctions() {
     assert.deepStrictEqual(duplicates, [], 'duplicate top-level functions: ' + duplicates.join(', '));
 }
 
+function testTemplateInlineScriptsParseAndExposeManagementActions() {
+    const html = fs.readFileSync(
+        path.resolve(__dirname, '../../main/resources/templates/admin/index.html'),
+        'utf8'
+    );
+    const scripts = Array.from(html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi))
+        .map((match) => match[1])
+        .filter((source) => source.trim());
+    scripts.forEach((source, index) => {
+        new vm.Script(source, { filename: 'admin-index-inline-' + index + '.js' });
+    });
+    assert.match(html, /id="feedEditBtn"/);
+    assert.match(html, /id="feedDeleteBtn"/);
+    assert.match(html, /id="feedAuthorDeleteProfileBtn"/);
+    assert.doesNotMatch(html, /id="feedMuteBtn"/);
+}
+
 const window = loadModules();
 testPlayerReuse(window);
 testIncrementalProfileActivation(window);
+testManagementUtilities(window);
 testFeedOriginalUrlNormalization();
 testFeedAuthorActionRendering();
 testTemplateHasUniqueTopLevelFunctions();
+testTemplateInlineScriptsParseAndExposeManagementActions();
 console.log('admin-feed module tests passed');

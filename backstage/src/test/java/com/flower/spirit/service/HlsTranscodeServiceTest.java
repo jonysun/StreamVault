@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -108,6 +109,41 @@ class HlsTranscodeServiceTest {
 		Map<String, Object> stats = (Map<String, Object>) service.stats().getRecord();
 		assertEquals(0, stats.get("runningCount"));
 		assertTrue(String.valueOf(stats.get("lastError")).contains("simulated failure"));
+		service.shutdown();
+	}
+
+	@Test
+	void deletionReservationRemovesQueuedWorkAndBlocksRequeueUntilReleased() {
+		HlsTranscodeService service = new HlsTranscodeService();
+		prepareVideos(service, 17);
+
+		assertTrue(service.enqueueVideo(17));
+		assertEquals(1, service.queueSize());
+		assertTrue(service.beginVideoDeletion(17));
+		assertEquals(0, service.queueSize());
+		assertFalse(service.enqueueVideo(17));
+
+		service.endVideoDeletion(17);
+		assertTrue(service.enqueueVideo(17));
+		service.shutdown();
+	}
+
+	@Test
+	void runningWorkCannotBeReservedForDeletion() throws Exception {
+		CountDownLatch started = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		BlockingHlsService service = new BlockingHlsService(started, release,
+				new AtomicInteger(), new AtomicInteger());
+		prepareVideos(service, 18);
+		Global.hlsConcurrency = 1;
+
+		service.enqueueByIds("18");
+		service.processQueueTick(true);
+		assertTrue(started.await(2, TimeUnit.SECONDS));
+		assertFalse(service.beginVideoDeletion(18));
+
+		release.countDown();
+		waitForIdle(service);
 		service.shutdown();
 	}
 

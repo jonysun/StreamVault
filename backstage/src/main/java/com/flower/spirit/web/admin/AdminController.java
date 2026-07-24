@@ -18,6 +18,8 @@ import com.flower.spirit.common.RequestEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dto.UpdateWorkMetadataRequest;
 import com.flower.spirit.dto.WorkOperationRequest;
+import com.flower.spirit.dto.AdminAuthorDeletionRequest;
+import com.flower.spirit.dto.AdminDeleteWorkRequest;
 import com.flower.spirit.entity.BiliConfigEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.BlockedWorkEntity;
@@ -37,6 +39,7 @@ import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CollectDataDetailService;
 import com.flower.spirit.service.CollectDataService;
 import com.flower.spirit.service.AnalysisService;
+import com.flower.spirit.service.AdminMediaManagementService;
 import com.flower.spirit.service.AuthorProfileService;
 import com.flower.spirit.service.BlockedWorkService;
 import com.flower.spirit.service.ConfigService;
@@ -150,6 +153,9 @@ public class AdminController {
 
 	@Autowired
 	private WorkRedownloadService workRedownloadService;
+
+	@Autowired
+	private AdminMediaManagementService adminMediaManagementService;
 	
 	/**  
 	
@@ -288,7 +294,15 @@ public class AdminController {
 	 */
 	@GetMapping(value = "/deleteVideoData")
 	public AjaxEntity deleteVideoData(VideoDataEntity downloaderEntity,HttpServletRequest request) {
-		return videoDataService.deleteVideoData(downloaderEntity);
+		AdminDeleteWorkRequest deleteRequest = new AdminDeleteWorkRequest();
+		deleteRequest.setWorkType("video");
+		deleteRequest.setId(downloaderEntity.getId());
+		deleteRequest.setBlockWork(!"0".equals(downloaderEntity.getBlockwork()));
+		try {
+			return new AjaxEntity(Global.ajax_success, "操作成功", adminMediaManagementService.deleteWork(deleteRequest));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
 	}
 	
 	/**
@@ -319,6 +333,73 @@ public class AdminController {
 		try {
 			return new AjaxEntity(Global.ajax_success, "Metadata updated",
 					workMetadataEditService.update(updateRequest, user.getUsername()));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
+	@GetMapping(value = "/workMetadata")
+	public AjaxEntity workMetadata(String workType, Integer id, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Metadata loaded",
+					adminMediaManagementService.findWorkMetadata(workType, id));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
+	@PostMapping(value = "/deleteWork")
+	public AjaxEntity deleteWork(@RequestBody AdminDeleteWorkRequest deleteRequest, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Work deleted",
+					adminMediaManagementService.deleteWork(deleteRequest));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
+	@PostMapping(value = "/previewDeleteAuthor")
+	public AjaxEntity previewDeleteAuthor(@RequestBody AdminAuthorDeletionRequest deletionRequest,
+			HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Author deletion preview",
+					adminMediaManagementService.previewAuthorDeletion(deletionRequest));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
+	@PostMapping(value = "/deleteAuthor")
+	public AjaxEntity deleteAuthor(@RequestBody AdminAuthorDeletionRequest deletionRequest,
+			HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Author deletion started",
+					adminMediaManagementService.startAuthorDeletion(deletionRequest));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
+	@GetMapping(value = "/authorDeletionStatus")
+	public AjaxEntity authorDeletionStatus(String jobId, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "Author deletion status",
+					adminMediaManagementService.authorDeletionStatus(jobId));
 		} catch (WorkMetadataValidationException e) {
 			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
 		}
@@ -734,7 +815,19 @@ public class AdminController {
 
 	@GetMapping(value = "/deleteGraphicContent")
 	public AjaxEntity deleteGraphicContent(String id, String blockwork, HttpServletRequest request) {
-		return graphicContentService.deleteGraphicContent(id, blockwork);
+		AdminDeleteWorkRequest deleteRequest = new AdminDeleteWorkRequest();
+		deleteRequest.setWorkType("graphic");
+		try {
+			deleteRequest.setId(Integer.valueOf(id));
+		} catch (RuntimeException e) {
+			return new AjaxEntity(Global.ajax_uri_error, "positive work id is required", null);
+		}
+		deleteRequest.setBlockWork(!"0".equals(blockwork));
+		try {
+			return new AjaxEntity(Global.ajax_success, "操作成功", adminMediaManagementService.deleteWork(deleteRequest));
+		} catch (WorkMetadataValidationException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
 	}
 
 	@PostMapping(value = "/redownloadGraphicContent")

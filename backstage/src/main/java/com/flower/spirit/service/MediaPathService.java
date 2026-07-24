@@ -48,6 +48,26 @@ public class MediaPathService {
 		return local.startsWith(localRoot) ? local : null;
 	}
 
+	public Path requireOwnedLocalPath(String storedPath) {
+		if (!hasText(storedPath)) {
+			throw new WorkMetadataValidationException("media path is empty");
+		}
+		Path publicLocal = toLocalPath(storedPath);
+		Path candidate = publicLocal != null ? publicLocal : Path.of(storedPath.trim());
+		if (!candidate.isAbsolute()) {
+			candidate = localRoot.resolve(candidate);
+		}
+		Path normalized = candidate.toAbsolutePath().normalize();
+		if (normalized.equals(localRoot) || !normalized.startsWith(localRoot)) {
+			throw new WorkMetadataValidationException("media path is outside configured storage root");
+		}
+		return normalized;
+	}
+
+	Path localRoot() {
+		return localRoot;
+	}
+
 	private static String normalizePublicRoot(String value) {
 		String normalized = hasText(value) ? value.trim().replace('\\', '/') : "/cos";
 		if (normalized.endsWith("/**")) normalized = normalized.substring(0, normalized.length() - 3);

@@ -92,6 +92,14 @@
             background: rgba(0, 0, 0, 0.62);
         }
 
+        #feedDeleteBtn {
+            background: rgba(190, 24, 49, 0.82);
+        }
+
+        #feedDeleteBtn:hover {
+            background: rgba(220, 38, 64, 0.94);
+        }
+
         .feed-control-btn:disabled {
             opacity: 0.38;
             cursor: not-allowed;
@@ -412,7 +420,7 @@
         .feed-author-action-rail {
             position: absolute;
             right: 16px;
-            bottom: 470px;
+            bottom: 540px;
             z-index: 6;
             display: flex;
             flex-direction: column;
@@ -654,7 +662,7 @@
         }
 
         .feed-author-profile-follow {
-            margin-top: 16px;
+            margin-top: 0;
             width: 100%;
             height: 36px;
             border: 0;
@@ -663,6 +671,162 @@
             color: #fff;
             font-size: 15px;
             font-weight: 600;
+        }
+
+        .feed-author-profile-command-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .feed-author-profile-delete {
+            height: 36px;
+            border: 1px solid rgba(255, 80, 105, 0.65);
+            border-radius: 4px;
+            background: rgba(127, 29, 48, 0.4);
+            color: #ffcad4;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .feed-author-deletion-progress {
+            margin-top: 12px;
+            color: #fff;
+            font-size: 12px;
+        }
+
+        .feed-author-deletion-track {
+            height: 4px;
+            margin-top: 6px;
+            overflow: hidden;
+            background: rgba(255,255,255,.12);
+        }
+
+        .feed-author-deletion-bar {
+            width: 0;
+            height: 100%;
+            background: #ff365f;
+            transition: width .2s ease;
+        }
+
+        .feed-management-modal {
+            position: absolute;
+            inset: 0;
+            z-index: 30;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.72);
+        }
+
+        .feed-management-modal.open {
+            display: flex;
+        }
+
+        .feed-management-dialog {
+            width: min(720px, 100%);
+            max-height: min(760px, calc(100vh - 48px));
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,.15);
+            border-radius: 6px;
+            background: #151821;
+            color: #fff;
+            box-shadow: 0 18px 60px rgba(0,0,0,.5);
+        }
+
+        .feed-management-header,
+        .feed-management-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255,255,255,.1);
+        }
+
+        .feed-management-footer {
+            justify-content: flex-end;
+            border-top: 1px solid rgba(255,255,255,.1);
+            border-bottom: 0;
+        }
+
+        .feed-management-close {
+            width: 32px;
+            height: 32px;
+            border: 0;
+            background: transparent;
+            color: #fff;
+            font-size: 20px;
+        }
+
+        .feed-management-body {
+            max-height: calc(min(760px, 100vh - 48px) - 126px);
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .feed-management-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .feed-management-field.wide {
+            grid-column: 1 / -1;
+        }
+
+        .feed-management-field label {
+            display: block;
+            margin-bottom: 5px;
+            color: rgba(255,255,255,.72);
+            font-size: 12px;
+        }
+
+        .feed-management-field input,
+        .feed-management-field textarea,
+        .feed-management-field select {
+            width: 100%;
+            min-height: 36px;
+            border: 1px solid rgba(255,255,255,.16);
+            border-radius: 4px;
+            background: #0f1118;
+            color: #fff;
+            padding: 8px 10px;
+        }
+
+        .feed-management-field textarea {
+            min-height: 84px;
+            resize: vertical;
+        }
+
+        .feed-management-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            color: rgba(255,255,255,.82);
+            font-size: 12px;
+        }
+
+        .feed-management-check input {
+            width: 16px;
+            height: 16px;
+            margin: 0;
+        }
+
+        .feed-management-btn {
+            min-width: 80px;
+            height: 34px;
+            border: 0;
+            border-radius: 4px;
+            background: rgba(255,255,255,.12);
+            color: #fff;
+        }
+
+        .feed-management-btn.primary {
+            background: #ff2f5f;
         }
 
         .feed-author-profile-tabs {
@@ -1403,7 +1567,19 @@
 
             .feed-author-action-rail {
                 right: 10px;
-                bottom: 410px;
+                bottom: 470px;
+            }
+
+            .feed-management-modal {
+                padding: 8px;
+            }
+
+            .feed-management-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .feed-management-field.wide {
+                grid-column: auto;
             }
 
             .feed-playlist-drawer {
@@ -1498,8 +1674,11 @@
                                     <button type="button" class="feed-control-btn" id="feedOriginBtn" title="当前作品没有原链" disabled>
                                         <i class="mdi mdi-link-variant"></i><span>原链</span>
                                     </button>
-                                    <button type="button" class="feed-control-btn" id="feedMuteBtn" title="静音">
-                                        <i class="mdi mdi-volume-off"></i><span>静音</span>
+                                    <button type="button" class="feed-control-btn" id="feedEditBtn" title="编辑当前作品" disabled>
+                                        <i class="mdi mdi-pencil"></i><span>编辑</span>
+                                    </button>
+                                    <button type="button" class="feed-control-btn" id="feedDeleteBtn" title="删除当前作品" disabled>
+                                        <i class="mdi mdi-delete-outline"></i><span>删除</span>
                                     </button>
                                     <button type="button" class="feed-control-btn" id="feedAutoNextBtn" title="播放模式">
                                         <i class="mdi mdi-skip-next-circle"></i><span>自动下一条</span>
@@ -1531,6 +1710,30 @@
                                         <div class="feed-author-profile-body" id="feedAuthorProfileBody"></div>
                                     </div>
                                 </div>
+                                <div class="feed-management-modal" id="feedEditModal" aria-hidden="true">
+                                    <div class="feed-management-dialog" role="dialog" aria-modal="true" aria-labelledby="feedEditModalTitle">
+                                        <div class="feed-management-header"><strong id="feedEditModalTitle">编辑作品信息</strong><button type="button" class="feed-management-close" id="feedEditClose" aria-label="关闭"><i class="mdi mdi-close"></i></button></div>
+                                        <div class="feed-management-body">
+                                            <div class="feed-management-grid">
+                                                <div class="feed-management-field wide"><label for="feedEditTitle">标题</label><input id="feedEditTitle" type="text"></div>
+                                                <div class="feed-management-field wide"><label for="feedEditDescription">摘要</label><textarea id="feedEditDescription"></textarea></div>
+                                                <div class="feed-management-field"><label for="feedEditAuthorName">作者名</label><input id="feedEditAuthorName" type="text"></div>
+                                                <div class="feed-management-field"><label for="feedEditAuthorUsername">用户名</label><input id="feedEditAuthorUsername" type="text"></div>
+                                                <div class="feed-management-field wide"><label for="feedEditAuthorSignature">个签</label><textarea id="feedEditAuthorSignature"></textarea></div>
+                                                <div class="feed-management-field wide"><label for="feedEditAuthorAvatar">头像 URL</label><input id="feedEditAuthorAvatar" type="url"></div>
+                                                <div class="feed-management-field wide"><label for="feedEditAuthorHomepage">作者主页</label><input id="feedEditAuthorHomepage" type="url"></div>
+                                                <div class="feed-management-field"><label for="feedEditPublishTime">发布时间</label><input id="feedEditPublishTime" type="text"></div>
+                                                <div class="feed-management-field"><label for="feedEditTags">标签</label><input id="feedEditTags" type="text"></div>
+                                                <div class="feed-management-field wide"><label for="feedEditSourceUrl">作品原链</label><input id="feedEditSourceUrl" type="url"></div>
+                                                <div class="feed-management-field wide" id="feedEditCoverField"><label for="feedEditCoverUrl">封面 URL</label><input id="feedEditCoverUrl" type="url"></div>
+                                                <div class="feed-management-field"><label for="feedEditPrivacy">可见性</label><select id="feedEditPrivacy"><option value="">默认</option><option value="0">公开</option><option value="1">隐私</option></select></div>
+                                                <div class="feed-management-field"><label for="feedEditFavorite">收藏</label><select id="feedEditFavorite"><option value="">默认</option><option value="0">未收藏</option><option value="1">已收藏</option></select></div>
+                                            </div>
+                                            <label class="feed-management-check"><input type="checkbox" id="feedEditSyncAuthor" checked>同步更新作者档案</label>
+                                        </div>
+                                        <div class="feed-management-footer"><button type="button" class="feed-management-btn" id="feedEditCancel">取消</button><button type="button" class="feed-management-btn primary" id="feedEditSave">保存</button></div>
+                                    </div>
+                                </div>
                                 <div class="loading" id="loading" style="display: none;">
                                     <i class="mdi mdi-loading mdi-spin"></i> 加载中...
                                 </div>
@@ -1553,6 +1756,7 @@
 <script src="../static/js/admin-feed/feed-player-pool.js"></script>
 <script src="../static/js/admin-feed/feed-profile.js"></script>
 <script src="../static/js/admin-feed/feed-controller.js"></script>
+<script src="../static/js/admin-feed/feed-management.js"></script>
 <script>
     var mediaHomeMode = 'grid';
     var feedObserver = null;
@@ -1620,6 +1824,9 @@
     var feedProfileLoader = null;
     var feedController = null;
     var feedAuthorProfileSearch = '';
+    var feedAuthorProfileSummary = null;
+    var feedEditingMetadata = null;
+    var feedAuthorDeletionTimer = null;
 
     function nowMs() {
         return (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : Date.now();
@@ -3506,17 +3713,20 @@
             }
         });
 
-        $('#feedMuteBtn').on('click', function() {
-            feedMuted = !feedMuted;
-            persistFeedMuted();
-            $('#videoFeed .feed-video').each(function() {
-                this.muted = feedMuted;
-            });
-            $('#videoFeed .feed-graphic-slide video').each(function() {
-                this.muted = feedMuted;
-            });
-            updateFeedButtons();
-            renderAllFeedControls();
+        $('#feedEditBtn').on('click', function() {
+            openFeedEditModal();
+        });
+
+        $('#feedDeleteBtn').on('click', function() {
+            confirmDeleteCurrentFeedWork();
+        });
+
+        $('#feedEditClose, #feedEditCancel').on('click', closeFeedEditModal);
+        $('#feedEditSave').on('click', saveFeedMetadata);
+        $('#feedEditModal').on('click', function(e) {
+            if (e.target === this) {
+                closeFeedEditModal();
+            }
         });
 
         $('#feedAutoNextBtn').on('click', function() {
@@ -3917,6 +4127,232 @@
             $('#loading').hide();
         });
     }
+    function adminJsonPost(url, payload) {
+        return $.ajax({
+            url: url,
+            type: 'POST',
+            contentType: 'application/json; charset=UTF-8',
+            data: JSON.stringify(payload || {})
+        });
+    }
+
+    function currentFeedItem() {
+        return feedCurrentAbsIndex >= 0 ? (feedAllItems[feedCurrentAbsIndex] || null) : null;
+    }
+
+    function feedWorkType(item) {
+        return item && item.type === 'graphic' ? 'graphic' : 'video';
+    }
+
+    function feedApiError(res, fallback) {
+        return (res && res.message) || fallback || '操作失败';
+    }
+
+    function closeFeedEditModal() {
+        $('#feedEditModal').removeClass('open').attr('aria-hidden', 'true');
+        feedEditingMetadata = null;
+    }
+
+    function setFeedEditValue(id, value) {
+        $('#' + id).val(value == null ? '' : String(value));
+    }
+
+    function openFeedEditModal() {
+        var item = currentFeedItem();
+        if (!item || !item.id) {
+            layer.msg('当前作品不可编辑');
+            return;
+        }
+        $('#feedEditBtn').prop('disabled', true);
+        $.get('/admin/api/workMetadata', { workType: feedWorkType(item), id: item.id }, function(res) {
+            if (!res || res.resCode !== '000001') {
+                layer.msg(feedApiError(res, '读取作品信息失败'));
+                return;
+            }
+            feedEditingMetadata = $.extend({}, res.record || {});
+            setFeedEditValue('feedEditTitle', feedEditingMetadata.title);
+            setFeedEditValue('feedEditDescription', feedEditingMetadata.description);
+            setFeedEditValue('feedEditAuthorName', feedEditingMetadata.authorName);
+            setFeedEditValue('feedEditAuthorUsername', feedEditingMetadata.authorUsername);
+            setFeedEditValue('feedEditAuthorSignature', feedEditingMetadata.authorSignature);
+            setFeedEditValue('feedEditAuthorAvatar', feedEditingMetadata.authorAvatar);
+            setFeedEditValue('feedEditAuthorHomepage', feedEditingMetadata.authorHomepage);
+            setFeedEditValue('feedEditPublishTime', feedEditingMetadata.publishTime);
+            setFeedEditValue('feedEditTags', feedEditingMetadata.tags);
+            setFeedEditValue('feedEditSourceUrl', feedEditingMetadata.sourceUrl);
+            setFeedEditValue('feedEditCoverUrl', feedEditingMetadata.coverUrl);
+            setFeedEditValue('feedEditPrivacy', feedEditingMetadata.privacy);
+            setFeedEditValue('feedEditFavorite', feedEditingMetadata.favorite);
+            $('#feedEditCoverField').toggle(feedEditingMetadata.workType === 'video');
+            $('#feedEditSyncAuthor').prop('checked', true).prop('disabled', !feedEditingMetadata.authoruid);
+            $('#feedEditModal').addClass('open').attr('aria-hidden', 'false');
+            $('#feedEditTitle').trigger('focus');
+        }).fail(function(xhr) {
+            layer.msg((xhr.responseJSON && xhr.responseJSON.message) || '读取作品信息失败');
+        }).always(function() {
+            updateFeedButtons();
+        });
+    }
+
+    function readFeedEditValues() {
+        return {
+            title: $('#feedEditTitle').val(),
+            description: $('#feedEditDescription').val(),
+            authorName: $('#feedEditAuthorName').val(),
+            authorUsername: $('#feedEditAuthorUsername').val(),
+            authorSignature: $('#feedEditAuthorSignature').val(),
+            authorAvatar: $('#feedEditAuthorAvatar').val(),
+            authorHomepage: $('#feedEditAuthorHomepage').val(),
+            publishTime: $('#feedEditPublishTime').val(),
+            tags: $('#feedEditTags').val(),
+            sourceUrl: $('#feedEditSourceUrl').val(),
+            coverUrl: $('#feedEditCoverUrl').val(),
+            privacy: $('#feedEditPrivacy').val(),
+            favorite: $('#feedEditFavorite').val()
+        };
+    }
+
+    function saveFeedMetadata() {
+        if (!feedEditingMetadata) {
+            return;
+        }
+        var keys = ['title', 'description', 'authorName', 'authorUsername', 'authorSignature',
+            'authorAvatar', 'authorHomepage', 'publishTime', 'tags', 'sourceUrl', 'privacy', 'favorite'];
+        if (feedEditingMetadata.workType === 'video') {
+            keys.push('coverUrl');
+        }
+        var values = readFeedEditValues();
+        var overrides = window.AdminFeed.Management.changedOverrides(feedEditingMetadata, values, keys);
+        if (!Object.keys(overrides).length) {
+            closeFeedEditModal();
+            layer.msg('没有修改');
+            return;
+        }
+        var payload = {
+            workType: feedEditingMetadata.workType,
+            id: feedEditingMetadata.id,
+            overrides: overrides,
+            syncAuthorProfile: $('#feedEditSyncAuthor').is(':checked')
+        };
+        $('#feedEditSave').prop('disabled', true);
+        adminJsonPost('/admin/api/updateWorkMetadata', payload).done(function(res) {
+            if (!res || res.resCode !== '000001') {
+                layer.msg(feedApiError(res, '保存失败'));
+                return;
+            }
+            var currentItem = currentFeedItem();
+            applyFeedMetadataOverrides(currentItem, overrides);
+            if (payload.syncAuthorProfile) {
+                applyFeedAuthorProfileOverrides(currentItem, overrides);
+            }
+            closeFeedEditModal();
+            renderFeedWindow({ forcePlay: true });
+            layer.msg('已保存');
+        }).fail(function(xhr) {
+            layer.msg((xhr.responseJSON && xhr.responseJSON.message) || '保存失败');
+        }).always(function() {
+            $('#feedEditSave').prop('disabled', false);
+        });
+    }
+
+    function applyFeedMetadataOverrides(item, overrides) {
+        if (!item) {
+            return;
+        }
+        Object.keys(overrides || {}).forEach(function(key) {
+            var value = overrides[key];
+            if (key === 'title') { item.title = value; item.videoname = value; }
+            else if (key === 'description') { item.desc = value; item.videodesc = value; item.content = value; }
+            else if (key === 'authorName') { item.author = value; item.videoauthor = value; item.displayAuthor = value; }
+            else if (key === 'authorUsername') { item.authorusername = value; item.uniqueid = value; }
+            else if (key === 'authorSignature') { item.signature = value; }
+            else if (key === 'authorAvatar') { item.authoravatar = value; item.authorAvatar = value; }
+            else if (key === 'authorHomepage') { item.authorhomepage = value; }
+            else if (key === 'publishTime') { item.publishTime = value; item.publishtime = value; }
+            else if (key === 'sourceUrl') { item.sourceurl = value; item.sourceUrl = value; }
+            else if (key === 'coverUrl') { item.cover = value; item.videocover = value; }
+            else if (key === 'tags') { item.tags = value; item.videotag = value; }
+            else if (key === 'privacy') { item.privacy = value; item.videoprivacy = value; }
+            else if (key === 'favorite') { item.favorite = value; }
+        });
+    }
+
+    function applyFeedAuthorProfileOverrides(item, overrides) {
+        if (!item || !feedAuthorProfileSummary || !$('#feedAuthorProfileDrawer').hasClass('open')) {
+            return;
+        }
+        var itemUid = canonicalFeedAuthorUid(item.platform || item.videoplatform,
+            item.profileAuthorUid, item.secuid, item.authoruid);
+        var summaryUid = canonicalFeedAuthorUid(feedAuthorProfileSummary.platform,
+            feedAuthorProfileSummary.authoruid);
+        if (!itemUid || itemUid !== summaryUid) {
+            return;
+        }
+        var profileKeys = {
+            authorName: 'displayname',
+            authorUsername: 'username',
+            authorSignature: 'signature',
+            authorAvatar: 'avatar',
+            authorHomepage: 'homepage'
+        };
+        Object.keys(profileKeys).forEach(function(key) {
+            if (Object.prototype.hasOwnProperty.call(overrides || {}, key)) {
+                feedAuthorProfileSummary[profileKeys[key]] = overrides[key];
+            }
+        });
+        renderFeedAuthorProfileHeader(feedAuthorProfileSummary, item);
+    }
+
+    function confirmDeleteCurrentFeedWork() {
+        var item = currentFeedItem();
+        if (!item || !item.id) {
+            layer.msg('当前作品不可删除');
+            return;
+        }
+        var title = item.title || item.videoname || ('作品 #' + item.id);
+        var author = item.displayAuthor || item.author || item.videoauthor || '未知作者';
+        var typeLabel = feedWorkType(item) === 'graphic' ? '图文' : '视频';
+        var content = '<div style="line-height:1.75;">类型：' + typeLabel
+            + '<br>作品：' + escapeHtml(String(title))
+            + '<br>作者：' + escapeHtml(String(author))
+            + '<br><span style="color:#ff9aad;font-size:12px;">本地媒体和数据库记录将被删除，并加入作品屏蔽列表。</span></div>';
+        layer.confirm(content, { title: '删除作品', btn: ['删除', '取消'] }, function(index) {
+            layer.close(index);
+            $('#feedDeleteBtn').prop('disabled', true);
+            adminJsonPost('/admin/api/deleteWork', {
+                workType: feedWorkType(item),
+                id: item.id,
+                blockWork: true
+            }).done(function(res) {
+                if (!res || res.resCode !== '000001') {
+                    layer.msg(feedApiError(res, '删除失败'));
+                    return;
+                }
+                removeFeedWorkByMediaKey((res.record && res.record.mediaKey) || getFeedItemKey(item));
+                layer.msg('已删除');
+            }).fail(function(xhr) {
+                layer.msg((xhr.responseJSON && xhr.responseJSON.message) || '删除失败');
+            }).always(function() {
+                updateFeedButtons();
+            });
+        });
+    }
+
+    function removeFeedWorkByMediaKey(mediaKey) {
+        var previousIndex = feedCurrentAbsIndex;
+        if (feedPlayerPoolManager) {
+            feedPlayerPoolManager.stageAll();
+        }
+        feedAllItems = window.AdminFeed.Management.removeByMediaKey(feedAllItems, mediaKey, getFeedItemKey);
+        feedAuthorProfileWorks = window.AdminFeed.Management.removeByMediaKey(feedAuthorProfileWorks, mediaKey, getFeedItemKey);
+        feedRandomPool = window.AdminFeed.Management.removeByMediaKey(feedRandomPool, mediaKey, getFeedItemKey);
+        delete feedControlState[mediaKey];
+        feedCurrentAbsIndex = window.AdminFeed.Management.indexAfterRemoval(previousIndex, feedAllItems.length);
+        feedRenderedCenterIndex = -1;
+        renderFeedWindow({ forcePlay: true });
+        refreshFeedAuthorProfileWorks(false, '');
+    }
+
     function renderFeedAuthorProfileHeader(summary, fallback) {
         fallback = fallback || {};
         var name = summary.displayname || fallback.author || 'Unknown';
@@ -3926,6 +4362,14 @@
         var avatar = summary.avatar || fallback.authoravatar || '';
         var homepage = sanitizeAuthorHomepage(platform, uid, summary.homepage || '');
         var signature = summary.signature || fallback.signature || '';
+        feedAuthorProfileSummary = $.extend({}, fallback, summary, {
+            platform: platform,
+            authoruid: uid,
+            username: username,
+            displayname: name,
+            homepage: homepage,
+            signature: signature
+        });
         var heroImage = avatar ? 'url("' + cssUrlEscape(avatar) + '")' : 'none';
         var avatarHtml = avatar ? '<img src="' + escapeHtml(avatar) + '" alt="' + escapeHtml(name) + '">' : escapeHtml(authorInitial(name));
         var html = '<div class="feed-author-profile-hero" style="--author-hero-image:' + heroImage + ';">';
@@ -3962,7 +4406,10 @@
         html += '<div class="feed-author-profile-action"><i class="mdi mdi-account-group"></i><div><strong>作者档案</strong><span>' + (uid ? escapeHtml(uid) : '本地资料') + '</span></div></div>';
         html += '<div class="feed-author-profile-action"><i class="mdi mdi-link-variant"></i><div><strong>主页</strong><span>' + (homepage ? '打开原站' : '暂无链接') + '</span></div></div>';
         html += '</div>';
-        html += homepage ? '<button type="button" class="feed-author-profile-follow" onclick="window.open(\'' + escapeJsString(homepage) + '\', \'_blank\', \'noopener\')">主页</button>' : '<button type="button" class="feed-author-profile-follow" disabled>主页</button>';
+        html += '<div class="feed-author-profile-command-row">';
+        html += homepage ? '<button type="button" class="feed-author-profile-follow" id="feedAuthorHomepageBtn" data-url="' + escapeHtml(homepage) + '">主页</button>' : '<button type="button" class="feed-author-profile-follow" disabled>主页</button>';
+        html += '<button type="button" class="feed-author-profile-delete" id="feedAuthorDeleteProfileBtn"' + (uid ? '' : ' disabled') + '>删除作者</button>';
+        html += '</div><div class="feed-author-deletion-progress" id="feedAuthorDeletionProgress" style="display:none;"></div>';
         $('#feedAuthorProfileHeader').html(html);
         $('#feedAuthorProfileBack').off('click').on('click', function() {
             closeFeedAuthorProfileDrawer();
@@ -3978,6 +4425,124 @@
             feedAuthorProfileSearch = this.value || '';
             refreshFeedAuthorProfileWorks(feedProfileLoader ? feedProfileLoader.snapshot().loading : false, '');
         });
+        $('#feedAuthorHomepageBtn').off('click').on('click', function() {
+            var url = safeExternalUrl(this.getAttribute('data-url') || '');
+            if (url) {
+                window.open(url, '_blank', 'noopener');
+            }
+        });
+        $('#feedAuthorDeleteProfileBtn').off('click').on('click', previewAndDeleteFeedAuthor);
+    }
+
+    function previewAndDeleteFeedAuthor() {
+        var summary = feedAuthorProfileSummary || {};
+        if (!summary.platform || !summary.authoruid) {
+            layer.msg('作者 UID 不完整，无法删除');
+            return;
+        }
+        var button = $('#feedAuthorDeleteProfileBtn').prop('disabled', true);
+        var payload = { platform: summary.platform, authoruid: summary.authoruid };
+        adminJsonPost('/admin/api/previewDeleteAuthor', payload).done(function(res) {
+            if (!res || res.resCode !== '000001') {
+                layer.msg(feedApiError(res, '无法读取删除范围'));
+                button.prop('disabled', false);
+                return;
+            }
+            var preview = res.record || {};
+            var taskCount = Array.isArray(preview.directTasks) ? preview.directTasks.length : 0;
+            var content = '<div style="line-height:1.8;">视频：' + Number(preview.videoCount || 0)
+                + '<br>图文：' + Number(preview.graphicCount || 0)
+                + '<br>停用作者任务：' + taskCount
+                + '<br><span style="color:#ff8ba0;">作者档案和历史名称也会删除。</span></div>';
+            layer.confirm(content, { title: '删除作者', btn: ['确认删除', '取消'] }, function(index) {
+                layer.close(index);
+                payload.confirmationToken = preview.confirmationToken;
+                startFeedAuthorDeletion(payload);
+            }, function() {
+                button.prop('disabled', false);
+            });
+        }).fail(function(xhr) {
+            button.prop('disabled', false);
+            layer.msg((xhr.responseJSON && xhr.responseJSON.message) || '无法读取删除范围');
+        });
+    }
+
+    function startFeedAuthorDeletion(payload) {
+        adminJsonPost('/admin/api/deleteAuthor', payload).done(function(res) {
+            if (!res || res.resCode !== '000001' || !res.record || !res.record.jobId) {
+                $('#feedAuthorDeleteProfileBtn').prop('disabled', false);
+                layer.msg(feedApiError(res, '启动删除失败'));
+                return;
+            }
+            pauseOtherFeedVideos(null);
+            renderFeedAuthorDeletionProgress({ message: '等待执行', state: 'queued' });
+            pollFeedAuthorDeletion(res.record.jobId, payload.platform, payload.authoruid);
+        }).fail(function(xhr) {
+            $('#feedAuthorDeleteProfileBtn').prop('disabled', false);
+            layer.msg((xhr.responseJSON && xhr.responseJSON.message) || '启动删除失败');
+        });
+    }
+
+    function pollFeedAuthorDeletion(jobId, platform, authorUid) {
+        if (feedAuthorDeletionTimer) {
+            clearTimeout(feedAuthorDeletionTimer);
+        }
+        $.get('/admin/api/authorDeletionStatus', { jobId: jobId }, function(res) {
+            if (!res || res.resCode !== '000001') {
+                layer.msg(feedApiError(res, '读取删除进度失败'));
+                $('#feedAuthorDeleteProfileBtn').prop('disabled', false);
+                return;
+            }
+            var status = res.record || {};
+            renderFeedAuthorDeletionProgress(status);
+            if (status.state === 'queued' || status.state === 'running') {
+                feedAuthorDeletionTimer = setTimeout(function() {
+                    pollFeedAuthorDeletion(jobId, platform, authorUid);
+                }, 800);
+                return;
+            }
+            feedAuthorDeletionTimer = null;
+            if (status.state === 'completed') {
+                layer.msg('作者及作品已删除');
+                finishFeedAuthorDeletion(platform, authorUid);
+            } else {
+                $('#feedAuthorDeleteProfileBtn').prop('disabled', false);
+                layer.msg(status.message || '部分内容删除失败，可重试');
+            }
+        }).fail(function() {
+            feedAuthorDeletionTimer = setTimeout(function() {
+                pollFeedAuthorDeletion(jobId, platform, authorUid);
+            }, 1600);
+        });
+    }
+
+    function renderFeedAuthorDeletionProgress(status) {
+        var total = Number(status.totalVideos || 0) + Number(status.totalGraphics || 0) + Number(status.totalTasks || 0);
+        var done = Number(status.deletedVideos || 0) + Number(status.deletedGraphics || 0) + Number(status.disabledTasks || 0);
+        var percent = total > 0 ? Math.min(100, Math.round(done * 100 / total)) : (status.state === 'completed' ? 100 : 0);
+        var html = '<div>' + escapeHtml(status.message || '处理中') + ' · ' + done + '/' + total + '</div>';
+        html += '<div class="feed-author-deletion-track"><div class="feed-author-deletion-bar" style="width:' + percent + '%"></div></div>';
+        $('#feedAuthorDeletionProgress').html(html).show();
+    }
+
+    function finishFeedAuthorDeletion(platform, authorUid) {
+        function keep(item) {
+            var uid = canonicalFeedAuthorUid(item.platform || item.videoplatform,
+                item.profileAuthorUid, item.secuid, item.authoruid);
+            var key = (item.platformkey || '').toString().toLowerCase();
+            var samePlatform = key ? key === (isDouyinFeedPlatform(platform) ? 'douyin' : String(platform).toLowerCase())
+                : String(item.platform || item.videoplatform || '').toLowerCase() === String(platform).toLowerCase();
+            return !(samePlatform && uid === authorUid);
+        }
+        feedAllItems = (feedAllItems || []).filter(keep);
+        feedRandomPool = (feedRandomPool || []).filter(keep);
+        feedAuthorProfileWorks = [];
+        feedAuthorProfileSummary = null;
+        feedAuthor = '';
+        feedAuthorUid = '';
+        clearFeedAuthorContext();
+        closeFeedAuthorProfileDrawer();
+        reloadFeed();
     }
 
     function appendUniqueAuthorFeedItems(list) {
@@ -4626,8 +5191,9 @@
             .attr('data-url', originUrl)
             .attr('title', originUrl ? '打开原作品' : '当前作品没有原链')
             .prop('disabled', !originUrl);
-        $('#feedMuteBtn i').attr('class', feedMuted ? 'mdi mdi-volume-off' : 'mdi mdi-volume-high');
-        $('#feedMuteBtn span').text(feedMuted ? '静音' : '有声');
+        var manageable = !!(currentItem && Number(currentItem.id) > 0);
+        $('#feedEditBtn').prop('disabled', !manageable);
+        $('#feedDeleteBtn').prop('disabled', !manageable);
         var autoNext = feedPlaybackMode === 'auto_next';
         $('#feedAutoNextBtn i').attr('class', autoNext ? 'mdi mdi-skip-next-circle' : 'mdi mdi-repeat-once');
         $('#feedAutoNextBtn span').text(autoNext ? '自动下一条' : '单个循环');

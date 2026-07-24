@@ -49,6 +49,7 @@ public class HlsTranscodeService {
 	private final Deque<Integer> queue = new ArrayDeque<>();
 	private final Set<Integer> dedupe = new HashSet<>();
 	private final Set<Integer> runningVideoIds = new LinkedHashSet<>();
+	private final Set<Integer> deletingVideoIds = new HashSet<>();
 	private final ExecutorService transcodeExecutor = Executors.newCachedThreadPool(new HlsThreadFactory());
 
 	private volatile long lastRunAt = 0L;
@@ -243,6 +244,41 @@ public class HlsTranscodeService {
 		}
 	}
 
+	public boolean isRunning(Integer id) {
+		synchronized (stateLock) {
+			return id != null && runningVideoIds.contains(id);
+		}
+	}
+
+	public boolean cancelQueued(Integer id) {
+		synchronized (stateLock) {
+			if (id == null || runningVideoIds.contains(id)) {
+				return false;
+			}
+			boolean removed = queue.remove(id);
+			dedupe.remove(id);
+			return removed;
+		}
+	}
+
+	public boolean beginVideoDeletion(Integer id) {
+		synchronized (stateLock) {
+			if (id == null || runningVideoIds.contains(id) || deletingVideoIds.contains(id)) {
+				return false;
+			}
+			queue.remove(id);
+			dedupe.remove(id);
+			deletingVideoIds.add(id);
+			return true;
+		}
+	}
+
+	public void endVideoDeletion(Integer id) {
+		synchronized (stateLock) {
+			deletingVideoIds.remove(id);
+		}
+	}
+
 	public AjaxEntity stats() {
 		int queued;
 		Set<Integer> runningIds;
@@ -293,7 +329,8 @@ public class HlsTranscodeService {
 
 	private boolean enqueue(Integer id, boolean forceRebuild) {
 		synchronized (stateLock) {
-			if (id == null || shuttingDown || dedupe.contains(id) || runningVideoIds.contains(id)) {
+			if (id == null || shuttingDown || dedupe.contains(id) || runningVideoIds.contains(id)
+					|| deletingVideoIds.contains(id)) {
 				return false;
 			}
 			if (queue.size() >= MAX_QUEUE_SIZE) {
