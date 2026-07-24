@@ -809,7 +809,7 @@
 			<div class="modal-body">
 				<div class="preview-counter" id="previewCounter" style="display:none;">1 / 1</div>
 				<img id="previewImage" src="" alt="图片预览" style="display: none;">
-				<video id="previewVideo" controls style="display: none;">
+				<video id="previewVideo" controls playsinline webkit-playsinline autoplay preload="auto" style="display: none;">
 					<source src="" type="video/mp4">
 					您的浏览器不支持视频播放
 				</video>
@@ -2004,11 +2004,13 @@ function showMediaPreview(mediaSrc, isVideo, fileName, mediaList, mediaIndex) {
 		$('#previewVideo').show();
 		$('#previewVideo source').attr('src', mediaSrc);
 		$('#previewVideo')[0].load(); // 重新加载视频
+		playActivePreviewVideo(true);
 		
 		// 视频不支持缩放，隐藏缩放按钮
 		$('#zoomOutBtn, #zoomInBtn, #resetZoomBtn').hide();
 	} else {
 		// 显示图片，隐藏视频
+		pauseActivePreviewVideo(true);
 		$('#previewVideo').hide();
 		$('#previewImage').show();
 		$('#previewImage').attr('src', mediaSrc);
@@ -2020,6 +2022,53 @@ function showMediaPreview(mediaSrc, isVideo, fileName, mediaList, mediaIndex) {
 	
 	// 显示模态框，设置高z-index确保在layer弹窗之上
 	$('#imagePreviewModal').css('z-index', 19891015).modal('show');
+}
+
+function playActivePreviewVideo(allowMutedFallback) {
+	var video = $('#previewVideo')[0];
+	if (!video || !$('#previewVideo').is(':visible')) return;
+	var requestToken = (video._previewPlayToken || 0) + 1;
+	video._previewPlayToken = requestToken;
+	video.autoplay = true;
+	video.playsInline = true;
+	function isCurrentRequest() {
+		return video._previewPlayToken === requestToken && $('#previewVideo').is(':visible');
+	}
+	function handleFailure(error) {
+		if (!isCurrentRequest()) return;
+		if (allowMutedFallback && !video.muted && error && error.name === 'NotAllowedError') {
+			video.muted = true;
+			playActivePreviewVideo(false);
+			return;
+		}
+		if (!video._previewCanPlayRetry && video.readyState < 3) {
+			video._previewCanPlayRetry = true;
+			video.addEventListener('canplay', function(){
+				video._previewCanPlayRetry = false;
+				playActivePreviewVideo(false);
+			}, { once:true });
+		} else if (error) {
+			console.warn('[preview] video autoplay failed', error.name || error.message || error);
+		}
+	}
+	var promise;
+	try {
+		promise = video.play();
+	} catch (error) {
+		handleFailure(error);
+		return;
+	}
+	if (promise && typeof promise.catch === 'function') promise.catch(handleFailure);
+}
+
+function pauseActivePreviewVideo(resetPosition) {
+	var video = $('#previewVideo')[0];
+	if (!video) return;
+	video._previewPlayToken = (video._previewPlayToken || 0) + 1;
+	try { video.pause(); } catch (e) {}
+	if (resetPosition) {
+		try { video.currentTime = 0; } catch (e) {}
+	}
 }
 
 function rebuildMediaListFromModal() {
@@ -2201,14 +2250,19 @@ $(document).ready(function() {
 	
 	// 模态框关闭时重置状态
 	$('#imagePreviewModal').on('hidden.bs.modal', function() {
+		pauseActivePreviewVideo(true);
 		exitFullscreen();
 		currentZoom = 1;
 		applyZoom();
 		$('#previewImage').attr('src', '');
 		$('#previewVideo source').attr('src', '');
+		$('#previewVideo')[0].load();
 		$('#previewCounter').hide().text('');
 		currentMediaList = [];
 		currentMediaIndex = 0;
+	});
+	$('#imagePreviewModal').on('shown.bs.modal', function() {
+		playActivePreviewVideo(true);
 	});
 });
 

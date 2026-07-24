@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import com.flower.spirit.entity.VideoDataEntity;
@@ -38,6 +39,20 @@ public interface VideoDataDao
 			+ "v.authoruid is null or v.authoruid not like 'MS4%' or v.secuid is null or v.secuid not like 'MS4%' "
 			+ "or v.authorusername is null or trim(v.authorusername) = '' or v.authoravatar is null or trim(v.authoravatar) = '')")
 	long countDouyinAuthorRepairCandidates(@Param("platforms") List<String> platforms);
+
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("update VideoDataEntity v set v.authoruid = :authorUid, v.secuid = :authorUid, "
+			+ "v.videoauthor = coalesce(:displayName, v.videoauthor), "
+			+ "v.authorusername = coalesce(:username, v.authorusername), "
+			+ "v.uniqueid = coalesce(:username, v.uniqueid), "
+			+ "v.authoravatar = coalesce(:avatar, v.authoravatar), "
+			+ "v.authorhomepage = coalesce(:homepage, v.authorhomepage) "
+			+ "where (v.platformkey = 'douyin' or v.videoplatform in :platforms) "
+			+ "and (v.authoruid = :authorUid or v.secuid = :authorUid)")
+	int updateDouyinAuthorMetadata(@Param("authorUid") String authorUid,
+			@Param("displayName") String displayName, @Param("username") String username,
+			@Param("avatar") String avatar, @Param("homepage") String homepage,
+			@Param("platforms") List<String> platforms);
 
 	List<VideoDataEntity> findByOriginaladdress(String originaladdress);
 

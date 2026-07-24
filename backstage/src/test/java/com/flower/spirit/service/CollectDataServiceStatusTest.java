@@ -188,6 +188,44 @@ class CollectDataServiceStatusTest {
 		assertThat(stats.imageCount()).isEqualTo(1);
 	}
 
+	@Test
+	void resolveDouyinAuthorUsesHybridSecUidWhenListOnlyContainsNumericUid() {
+		JSONObject listItem = JSONObject.parseObject("{\"uid\":\"100718677983\",\"nickname\":\"一个富贵\"}");
+		JSONObject hybrid = JSONObject.parseObject("{\"data\":{\"author\":{"
+				+ "\"sec_uid\":\"MS4wLjABAAAAhybrid\",\"uid\":\"100718677983\","
+				+ "\"unique_id\":\"fuguifuguifugui\",\"nickname\":\"一个富贵\","
+				+ "\"avatar_thumb\":\"https://img.example/avatar.jpg\"}}}");
+
+		CollectDataService.DouyinAuthorSnapshot snapshot = CollectDataService.resolveDouyinAuthorSnapshot(
+				listItem, hybrid, null, "postMS4wLjABAAAAtask");
+
+		assertThat(snapshot.canonicalUid()).isEqualTo("MS4wLjABAAAAhybrid");
+		assertThat(snapshot.uniqueId()).isEqualTo("fuguifuguifugui");
+		assertThat(snapshot.numericUid()).isEqualTo("100718677983");
+		assertThat(snapshot.avatar()).isEqualTo("https://img.example/avatar.jpg");
+	}
+
+	@Test
+	void resolveDouyinAuthorFallsBackToCanonicalTaskSource() {
+		JSONObject listItem = JSONObject.parseObject("{\"uid\":\"100718677983\",\"nickname\":\"作者\"}");
+
+		CollectDataService.DouyinAuthorSnapshot snapshot = CollectDataService.resolveDouyinAuthorSnapshot(
+				listItem, null, null, "postMS4wLjABAAAAtask");
+
+		assertThat(snapshot.canonicalUid()).isEqualTo("MS4wLjABAAAAtask");
+		assertThat(snapshot.needsProfileEnrichment()).isTrue();
+	}
+
+	@Test
+	void resolveDouyinAuthorNeverPromotesNumericTaskSource() {
+		JSONObject listItem = JSONObject.parseObject("{\"uid\":\"100718677983\",\"nickname\":\"作者\"}");
+
+		CollectDataService.DouyinAuthorSnapshot snapshot = CollectDataService.resolveDouyinAuthorSnapshot(
+				listItem, null, null, "post100718677983");
+
+		assertThat(snapshot.canonicalUid()).isNull();
+	}
+
 	private static JSONObject douyinItem(String awemeId, String createTime) {
 		JSONObject item = new JSONObject();
 		item.put("aweme_id", awemeId);

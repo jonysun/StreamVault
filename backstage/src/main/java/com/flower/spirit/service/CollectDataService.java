@@ -493,6 +493,7 @@ public class CollectDataService {
 		logger.info("任务开始" + entity.getOriginaladdress());
 		JSONArray allDYData = this.getDYData(entity, monitor, runId);
 		FetchRunContext fetchContext = lastFetchRunContext.get();
+		Map<String, JSONObject> authorReconcileProfileCache = new HashMap<>();
 		if (allDYData != null) {
 			allDYData = sortDouyinItemsByPublishTime(allDYData);
 			entity.setLastfetchcount(allDYData.size());
@@ -500,7 +501,7 @@ public class CollectDataService {
 			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData, fetchContext));
 			collectdDataDao.save(entity);
 			logFetchSnapshotItems(entity, fetchContext, allDYData, "sorted");
-			prefillDouyinAuthorProfile(allDYData, fetchContext, runId);
+			prefillDouyinAuthorProfile(allDYData, fetchContext, runId, authorReconcileProfileCache);
 		}
 		logger.info("[CollectTask] getDYData result runId={} id={} isNull={} size={}", runId, entity.getId(),
 				allDYData == null, allDYData == null ? 0 : allDYData.size());
@@ -521,7 +522,6 @@ public class CollectDataService {
 			entity.setTaskstatus("已开始处理");
 			collectdDataDao.save(entity);
 			JSONArray planItems = new JSONArray();
-			Map<String, JSONObject> authorReconcileProfileCache = new HashMap<>();
 			for (int i = 0; i < allDYData.size(); i++) {
 				if (successThisRun >= targetSuccess) {
 					logger.info("[CollectTask] 已达到本轮目标成功数，停止本轮处理 targetSuccess={} successThisRun={}", targetSuccess, successThisRun);
@@ -608,7 +608,8 @@ public class CollectDataService {
 					}
 					// 不支持
 					try {
-						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(), (String) null);
+						DouYinExecutor.ImageTextExecutor(awemeId, entity.getOriginaladdress(), (String) null,
+								authorReconcileProfileCache);
 						CollectDataDetailEntity collectDataDetailEntity = existingDetail == null ? new CollectDataDetailEntity() : existingDetail;
 						collectDataDetailEntity.setDataid(entity.getId());
 						collectDataDetailEntity.setVideoid(awemeId);
@@ -787,41 +788,37 @@ public class CollectDataService {
 					videoDataEntity.setJsonData(rawJsonData);
 					videoDataEntity.setVideoinfo(rawJsonData);
 					videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
-					JSONObject author = aweme_detail.getJSONObject("author");
-					String sourceUid = aweme_detail.getString("sec_uid");
-					String uniqueId = aweme_detail.getString("unique_id");
-					String authorUid = aweme_detail.getString("uid");
-					String avatar = aweme_detail.getString("avatar_thumb");
-					String signature = null;
-					if (author != null) {
-						if (sourceUid == null || sourceUid.trim().isEmpty()) sourceUid = author.getString("sec_uid");
-						if (uniqueId == null || uniqueId.trim().isEmpty()) uniqueId = author.getString("unique_id");
-						if (authorUid == null || authorUid.trim().isEmpty()) authorUid = author.getString("uid");
-						if (avatar == null || avatar.trim().isEmpty()) avatar = author.getString("avatar_thumb");
-						signature = author.getString("signature");
+					String taskSourceId = fetchContext == null
+							? extractCanonicalTaskSourceId(entity.getOriginaladdress()) : fetchContext.sourceId();
+					DouyinAuthorSnapshot authorSnapshot = resolveDouyinAuthorSnapshot(aweme_detail, hybridData, null,
+							taskSourceId);
+					JSONObject profileUser = authorSnapshot.needsProfileEnrichment()
+							? authorProfileService.resolveDouyinProfileAuthorCached(authorReconcileProfileCache,
+									authorSnapshot.canonicalUid(), authorSnapshot.uniqueId())
+							: null;
+					authorSnapshot = resolveDouyinAuthorSnapshot(aweme_detail, hybridData, profileUser, taskSourceId);
+					String authorUidForSave = authorSnapshot.canonicalUid();
+					String uniqueId = authorSnapshot.uniqueId();
+					String authorUid = authorSnapshot.numericUid();
+					String avatar = authorSnapshot.avatar();
+					String signature = authorSnapshot.signature();
+					dyNickname = firstNotBlank(authorSnapshot.nickname(), dyNickname);
+					if (authorUidForSave == null) {
+						logger.warn("[CollectTask] author unresolved runId={} taskId={} awemeId={} listSecUidPresent={} hybridSecUidPresent={} taskSourceId={}",
+								runId, entity.getId(), awemeId, hasText(authorSecUid(observedDouyinAuthor(aweme_detail))),
+								hasText(authorSecUid(extractHybridAuthor(hybridData))), taskSourceId);
+					} else {
+						authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, dyNickname, avatar,
+								AuthorIdentityUtil.douyinHomepage(authorUidForSave), signature);
 					}
-					JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(sourceUid));
-					if (profileUser == null) {
-						profileUser = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
-					}
-					if (profileUser != null) {
-						sourceUid = firstNotBlank(profileUser.getString("sec_uid"), sourceUid);
-						uniqueId = firstNotBlank(profileUser.getString("unique_id"), uniqueId);
-						authorUid = firstNotBlank(profileUser.getString("uid"), authorUid);
-						dyNickname = firstNotBlank(profileUser.getString("nickname"), dyNickname);
-						avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), avatar);
-						signature = firstNotBlank(profileUser.getString("signature"), signature);
-					}
-					String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(sourceUid, authorUid);
-					authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, dyNickname,
-							avatar,
-							AuthorIdentityUtil.douyinHomepage(authorUidForSave),
-							signature);
 					videoDataEntity.setAuthoruid(authorUidForSave);
 					videoDataEntity.setSecuid(authorUidForSave);
 					videoDataEntity.setAuthorusername(uniqueId);
 					videoDataEntity.setUniqueid(uniqueId);
 					videoDataEntity.setAuthoravatar(avatar);
+					videoDataEntity.setAuthorhomepage(AuthorIdentityUtil.douyinHomepage(authorUidForSave));
+					videoDataEntity.setPlatformkey("douyin");
+					videoDataEntity.setContenttype("video");
 					videoDataEntity.setSourceurl(sourceUrl);
 					if (Global.getGeneratenfo) {
 						String uid = authorUid;
@@ -2123,7 +2120,7 @@ public class CollectDataService {
 		lastCollectTaskFinishedAt = System.currentTimeMillis();
 	}
 
-	private JSONObject observedDouyinAuthor(JSONObject awemeDetail) {
+	private static JSONObject observedDouyinAuthor(JSONObject awemeDetail) {
 		if (awemeDetail == null) {
 			return null;
 		}
@@ -2131,11 +2128,85 @@ public class CollectDataService {
 		return author == null ? awemeDetail : author;
 	}
 
-	private String firstNotBlank(String first, String second) {
+	static DouyinAuthorSnapshot resolveDouyinAuthorSnapshot(JSONObject awemeDetail, JSONObject hybridData,
+			JSONObject profileUser, String taskSourceId) {
+		JSONObject listAuthor = observedDouyinAuthor(awemeDetail);
+		JSONObject hybridAuthor = extractHybridAuthor(hybridData);
+		String canonicalUid = firstCanonicalDouyinUid(
+				authorSecUid(listAuthor), authorSecUid(hybridAuthor), extractCanonicalTaskSourceId(taskSourceId),
+				authorSecUid(profileUser));
+		String uniqueId = firstNotBlank(value(profileUser, "unique_id"),
+				firstNotBlank(value(hybridAuthor, "unique_id"), value(listAuthor, "unique_id")));
+		String numericUid = firstNotBlank(value(profileUser, "uid"),
+				firstNotBlank(value(hybridAuthor, "uid"), value(listAuthor, "uid")));
+		String nickname = firstNotBlank(value(profileUser, "nickname"),
+				firstNotBlank(value(hybridAuthor, "nickname"), value(listAuthor, "nickname")));
+		String avatar = firstNotBlank(DouUtil.extractAvatar(profileUser),
+				firstNotBlank(DouUtil.extractAvatar(hybridAuthor),
+						firstNotBlank(DouUtil.extractAvatar(listAuthor), value(listAuthor, "avatar_thumb"))));
+		String signature = firstNotBlank(value(profileUser, "signature"),
+				firstNotBlank(value(hybridAuthor, "signature"), value(listAuthor, "signature")));
+		return new DouyinAuthorSnapshot(canonicalUid, uniqueId, numericUid, nickname, avatar, signature);
+	}
+
+	private static JSONObject extractHybridAuthor(JSONObject hybridData) {
+		if (hybridData == null) {
+			return null;
+		}
+		JSONObject detail = DouUtil.findAwemeDetail(hybridData);
+		JSONObject author = detail == null ? null : detail.getJSONObject("author");
+		if (author != null) {
+			return author;
+		}
+		JSONObject data = hybridData.getJSONObject("data");
+		return data == null ? null : data.getJSONObject("author");
+	}
+
+	private static String authorSecUid(JSONObject author) {
+		return value(author, "sec_uid");
+	}
+
+	private static String firstCanonicalDouyinUid(String... candidates) {
+		if (candidates == null) {
+			return null;
+		}
+		for (String candidate : candidates) {
+			if (AuthorIdentityUtil.isDouyinSecUid(candidate)) {
+				return candidate.trim();
+			}
+		}
+		return null;
+	}
+
+	private static String extractCanonicalTaskSourceId(String source) {
+		if (!hasText(source)) {
+			return null;
+		}
+		String value = source.trim().replaceFirst("^(post|like|recommend)", "");
+		return AuthorIdentityUtil.isDouyinSecUid(value) ? value : null;
+	}
+
+	private static String value(JSONObject object, String key) {
+		return object == null ? null : object.getString(key);
+	}
+
+	private static boolean hasText(String value) {
+		return value != null && !value.trim().isEmpty();
+	}
+
+	private static String firstNotBlank(String first, String second) {
 		if (first != null && !first.trim().isEmpty()) {
 			return first;
 		}
 		return second;
+	}
+
+	static record DouyinAuthorSnapshot(String canonicalUid, String uniqueId, String numericUid, String nickname,
+			String avatar, String signature) {
+		boolean needsProfileEnrichment() {
+			return (hasText(canonicalUid) || hasText(uniqueId))
+					&& (!hasText(uniqueId) || !hasText(nickname) || !hasText(avatar) || !hasText(signature));
+		}
 	}
 
 	private JSONObject extractProfileUser(JSONObject profile) {
@@ -2195,7 +2266,8 @@ public class CollectDataService {
 		return result;
 	}
 
-	private void prefillDouyinAuthorProfile(JSONArray allDYData, FetchRunContext context, String runId) {
+	private void prefillDouyinAuthorProfile(JSONArray allDYData, FetchRunContext context, String runId,
+			Map<String, JSONObject> profileCache) {
 		if (allDYData == null || allDYData.isEmpty() || authorProfileService == null) {
 			return;
 		}
@@ -2203,37 +2275,22 @@ public class CollectDataService {
 		if (awemeDetail == null) {
 			return;
 		}
-		JSONObject author = awemeDetail.getJSONObject("author");
-		String sourceUid = firstNotBlank(author == null ? null : author.getString("sec_uid"), awemeDetail.getString("sec_uid"));
-		String uniqueId = firstNotBlank(author == null ? null : author.getString("unique_id"), awemeDetail.getString("unique_id"));
-		String authorUid = firstNotBlank(author == null ? null : author.getString("uid"), awemeDetail.getString("uid"));
-		String nickname = firstNotBlank(author == null ? null : author.getString("nickname"), awemeDetail.getString("nickname"));
-		String avatar = firstNotBlank(DouUtil.extractAvatar(author), awemeDetail.getString("avatar_thumb"));
-		String signature = author == null ? null : author.getString("signature");
 		String taskSourceId = context == null ? null : context.sourceId();
-		sourceUid = firstNotBlank(sourceUid, taskSourceId);
-		JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(sourceUid));
-		if (profileUser == null) {
-			profileUser = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
-		}
-		if (profileUser != null) {
-			sourceUid = firstNotBlank(profileUser.getString("sec_uid"), sourceUid);
-			uniqueId = firstNotBlank(profileUser.getString("unique_id"), uniqueId);
-			authorUid = firstNotBlank(profileUser.getString("uid"), authorUid);
-			nickname = firstNotBlank(profileUser.getString("nickname"), nickname);
-			avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), avatar);
-			signature = firstNotBlank(profileUser.getString("signature"), signature);
-		}
-		String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(sourceUid, firstNotBlank(authorUid, taskSourceId));
+		DouyinAuthorSnapshot snapshot = resolveDouyinAuthorSnapshot(awemeDetail, null, null, taskSourceId);
+		JSONObject profileUser = snapshot.needsProfileEnrichment()
+				? authorProfileService.resolveDouyinProfileAuthorCached(profileCache, snapshot.canonicalUid(), snapshot.uniqueId())
+				: null;
+		snapshot = resolveDouyinAuthorSnapshot(awemeDetail, null, profileUser, taskSourceId);
+		String authorUidForSave = snapshot.canonicalUid();
 		if (authorUidForSave == null) {
 			logger.info("[CollectTask] author prefill skipped runId={} reason=no-author-uid uniqueId={} nickname={}",
-					runId, uniqueId, nickname);
+					runId, snapshot.uniqueId(), snapshot.nickname());
 			return;
 		}
-		authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, avatar,
-				AuthorIdentityUtil.douyinHomepage(authorUidForSave), signature);
+		authorProfileService.upsertAuthor("抖音", authorUidForSave, snapshot.uniqueId(), snapshot.nickname(), snapshot.avatar(),
+				AuthorIdentityUtil.douyinHomepage(authorUidForSave), snapshot.signature());
 		logger.info("[CollectTask] author prefill runId={} authorUid={} uniqueId={} nickname={}",
-				runId, authorUidForSave, uniqueId, nickname);
+				runId, authorUidForSave, snapshot.uniqueId(), snapshot.nickname());
 	}
 
 	static SnapshotMediaStats parseSnapshotMediaStats(String snapshot) {

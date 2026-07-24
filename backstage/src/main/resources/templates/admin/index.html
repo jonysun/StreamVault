@@ -2232,7 +2232,8 @@
         var type = safeSlide.type === 'video' ? 'video' : 'image';
         var url = escapeHtml(safeSlide.url || fallbackUrl || '/static/images/noimage.jpg');
         if (type === 'video') {
-            return '<video class="feed-graphic-media" src="' + url + '" playsinline webkit-playsinline preload="metadata"></video>';
+            return '<video class="feed-graphic-media" src="' + url + '" playsinline webkit-playsinline autoplay preload="auto"'
+                + (feedMuted ? ' muted' : '') + '></video>';
         }
         return '<img class="feed-graphic-media" src="' + url + '" alt="">';
     }
@@ -2506,15 +2507,71 @@
                 goNextGraphicSlide(itemEl, true);
             };
             video.addEventListener('ended', video._graphicEndedHandler);
-            var p = video.play();
-            if (p && typeof p.catch === 'function') {
-                p.catch(function() {});
-            }
+            playActiveGraphicVideo(itemEl, video, true);
             return;
         }
         itemEl._graphicSlideTimer = setTimeout(function() {
             goNextGraphicSlide(itemEl, true);
         }, 4000);
+    }
+
+    function playActiveGraphicVideo(itemEl, video, allowMutedFallback) {
+        if (!itemEl || !video || itemEl.getAttribute('data-graphic-running') !== '1') {
+            return;
+        }
+        var requestToken = (video._graphicPlayToken || 0) + 1;
+        video._graphicPlayToken = requestToken;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = feedMuted;
+
+        function isCurrentRequest() {
+            return video._graphicPlayToken === requestToken
+                && video.isConnected
+                && itemEl.getAttribute('data-graphic-running') === '1';
+        }
+
+        function attempt() {
+            if (!isCurrentRequest()) {
+                return;
+            }
+            var playPromise;
+            try {
+                playPromise = video.play();
+            } catch (error) {
+                handleFailure(error);
+                return;
+            }
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch(handleFailure);
+            }
+        }
+
+        function handleFailure(error) {
+            if (!isCurrentRequest()) {
+                return;
+            }
+            if (allowMutedFallback && !video.muted && error && error.name === 'NotAllowedError') {
+                feedMuted = true;
+                video.muted = true;
+                persistFeedMuted();
+                updateFeedButtons();
+                renderAllFeedControls();
+                playActiveGraphicVideo(itemEl, video, false);
+                return;
+            }
+            if (!video._graphicCanPlayRetry && video.readyState < 3) {
+                video._graphicCanPlayRetry = true;
+                video.addEventListener('canplay', function() {
+                    video._graphicCanPlayRetry = false;
+                    playActiveGraphicVideo(itemEl, video, false);
+                }, { once: true });
+            } else if (error) {
+                console.warn('[AdminIndex] graphic video autoplay failed', error.name || error.message || error);
+            }
+        }
+
+        attempt();
     }
 
     function goNextGraphicSlide(itemEl, allowAutoNext) {
