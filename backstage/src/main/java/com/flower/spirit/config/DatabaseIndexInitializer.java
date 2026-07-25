@@ -57,6 +57,11 @@ public class DatabaseIndexInitializer {
 				"CREATE INDEX IF NOT EXISTS idx_collect_detail_dataid_mediatype_status ON biz_collect_data_detail(dataid, mediatype, status)",
 				"CREATE INDEX IF NOT EXISTS idx_author_profile_platform_authoruid ON biz_author_profile(platform, authoruid)",
 				"CREATE INDEX IF NOT EXISTS idx_author_profile_platformkey_authoruid ON biz_author_profile(platformkey, authoruid)",
+				"CREATE UNIQUE INDEX IF NOT EXISTS uq_author_enrichment_active "
+						+ "ON biz_author_enrichment_job(platform_key, author_uid) "
+						+ "WHERE state IN ('QUEUED', 'RUNNING', 'RETRY_WAIT')",
+				"CREATE INDEX IF NOT EXISTS idx_author_enrichment_due "
+						+ "ON biz_author_enrichment_job(state, next_attempt_at, priority, id)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platform_videoid ON biz_graphic_content(platform, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platformkey_videoid ON biz_graphic_content(platformkey, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author_identity ON biz_graphic_content(platformkey, authoruid, secuid)",

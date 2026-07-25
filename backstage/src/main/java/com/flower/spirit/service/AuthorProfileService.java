@@ -71,6 +71,9 @@ public class AuthorProfileService {
 	@Autowired
 	private AuthorWriteTransaction authorWriteTransaction;
 
+	@Autowired
+	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
+
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName,
 			String avatar, String homepage) {
 		upsertAuthor(platform, authoruid, username, displayName, avatar, homepage, null);
@@ -78,19 +81,20 @@ public class AuthorProfileService {
 
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar,
 			String homepage, String signature) {
-		executeAuthorWrite(() -> upsertAuthorInCurrentTransaction(platform, authoruid, username, displayName,
-				avatar, homepage, signature));
+		AuthorObservation observation = executeAuthorWrite(() -> upsertAuthorInCurrentTransaction(platform, authoruid,
+				username, displayName, avatar, homepage, signature));
+		authorEnrichmentQueueService.enqueueAfterCommitIfIncomplete(observation);
 	}
 
-	private void upsertAuthorInCurrentTransaction(String platform, String authoruid, String username,
+	private AuthorObservation upsertAuthorInCurrentTransaction(String platform, String authoruid, String username,
 			String displayName, String avatar, String homepage, String signature) {
 		if (platform == null || platform.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
-			return;
+			return null;
 		}
 		String safePlatform = platform.trim();
 		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
 		if (safeUid == null) {
-			return;
+			return null;
 		}
 		String platformKey = PlatformCatalog.findByAlias(safePlatform)
 				.map(PlatformDefinition::getKey)
@@ -126,6 +130,7 @@ public class AuthorProfileService {
 		if (saved.getId() != null && displayName != null && !displayName.trim().isEmpty()) {
 			upsertNameHistory(saved.getId(), displayName.trim(), now);
 		}
+		return authorObservation(saved);
 	}
 
 	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
@@ -135,14 +140,15 @@ public class AuthorProfileService {
 
 	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage, String signature) {
-		executeAuthorWrite(() -> upsertCanonicalAuthorInCurrentTransaction(platformKey, legacyPlatform, authoruid,
-				username, displayName, avatar, homepage, signature));
+		AuthorObservation observation = executeAuthorWrite(() -> upsertCanonicalAuthorInCurrentTransaction(platformKey,
+				legacyPlatform, authoruid, username, displayName, avatar, homepage, signature));
+		authorEnrichmentQueueService.enqueueAfterCommitIfIncomplete(observation);
 	}
 
-	private void upsertCanonicalAuthorInCurrentTransaction(String platformKey, String legacyPlatform, String authoruid,
-			String username, String displayName, String avatar, String homepage, String signature) {
+	private AuthorObservation upsertCanonicalAuthorInCurrentTransaction(String platformKey, String legacyPlatform,
+			String authoruid, String username, String displayName, String avatar, String homepage, String signature) {
 		if (platformKey == null || platformKey.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
-			return;
+			return null;
 		}
 		Optional<PlatformDefinition> definition = PlatformCatalog.findByAlias(platformKey);
 		if (definition.isEmpty()) {
@@ -155,7 +161,7 @@ public class AuthorProfileService {
 						? platformKey.trim() : legacyPlatform.trim());
 		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
 		if (safeUid == null) {
-			return;
+			return null;
 		}
 		Optional<AuthorProfileEntity> existing = firstProfile(
 				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(canonicalKey, safeUid));
@@ -198,18 +204,21 @@ public class AuthorProfileService {
 		if (saved.getId() != null && displayName != null && !displayName.trim().isEmpty()) {
 			upsertNameHistory(saved.getId(), displayName.trim(), now);
 		}
+		return authorObservation(saved);
 	}
 
-	private void executeAuthorWrite(Runnable authorWrite) {
+	private <T> T executeAuthorWrite(java.util.function.Supplier<T> authorWrite) {
 		// A nested SQLite writer would contend with its own outer write transaction.
 		if (TransactionSynchronizationManager.isActualTransactionActive()) {
-			authorWrite.run();
-			return;
+			return authorWrite.get();
 		}
-		sqliteWriteRetrier.execute(() -> authorWriteTransaction.execute(() -> {
-			authorWrite.run();
-			return null;
-		}));
+		return sqliteWriteRetrier.execute(() -> authorWriteTransaction.execute(authorWrite));
+	}
+
+	private AuthorObservation authorObservation(AuthorProfileEntity profile) {
+		return profile == null ? null : new AuthorObservation(profile.getPlatformkey(), profile.getAuthoruid(),
+				profile.getUsername(), profile.getDisplayname(), profile.getAvatar(), profile.getSignature(),
+				profile.getHomepage());
 	}
 
 	private void upsertNameHistory(Integer authorProfileId, String displayName, Date now) {
@@ -795,6 +804,11 @@ public class AuthorProfileService {
 
 	public WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, JSONObject observedAuthor,
 			Map<String, JSONObject> profileCache) {
+		return reconcileDouyinVideo(video, observedAuthor, profileCache, false);
+	}
+
+	private WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, JSONObject observedAuthor,
+			Map<String, JSONObject> profileCache, boolean allowExternalProfile) {
 		if (video == null || !isDouyinPlatform(video.getVideoplatform())) {
 			return WorkAuthorReconcileResult.skipped();
 		}
@@ -805,7 +819,7 @@ public class AuthorProfileService {
 
 		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
 		boolean localResolved = localAuthor != null && canonicalUid != null;
-		JSONObject profileAuthor = needsProfileEnrichment(video, canonicalUid)
+		JSONObject profileAuthor = allowExternalProfile && needsProfileEnrichment(video, canonicalUid)
 				? resolveDouyinProfileAuthorCached(profileCache, canonicalUid, video.getAuthorusername()) : null;
 		applyVideoAuthorFromAuthor(video, profileAuthor);
 		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
@@ -830,11 +844,16 @@ public class AuthorProfileService {
 	}
 
 	public WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, Map<String, JSONObject> profileCache) {
-		return reconcileDouyinVideo(video, null, profileCache);
+		return reconcileDouyinVideo(video, null, profileCache, true);
 	}
 
 	public WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic, JSONObject observedAuthor,
 			Map<String, JSONObject> profileCache) {
+		return reconcileDouyinGraphic(graphic, observedAuthor, profileCache, false);
+	}
+
+	private WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic, JSONObject observedAuthor,
+			Map<String, JSONObject> profileCache, boolean allowExternalProfile) {
 		if (graphic == null || !isDouyinPlatform(graphic.getPlatform())) {
 			return WorkAuthorReconcileResult.skipped();
 		}
@@ -845,7 +864,7 @@ public class AuthorProfileService {
 
 		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
 		boolean localResolved = localAuthor != null && canonicalUid != null;
-		JSONObject profileAuthor = needsProfileEnrichment(graphic, canonicalUid)
+		JSONObject profileAuthor = allowExternalProfile && needsProfileEnrichment(graphic, canonicalUid)
 				? resolveDouyinProfileAuthorCached(profileCache, canonicalUid, graphic.getAuthorusername()) : null;
 		applyGraphicAuthorFromAuthor(graphic, profileAuthor);
 		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
@@ -871,7 +890,7 @@ public class AuthorProfileService {
 
 	public WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic,
 			Map<String, JSONObject> profileCache) {
-		return reconcileDouyinGraphic(graphic, null, profileCache);
+		return reconcileDouyinGraphic(graphic, null, profileCache, true);
 	}
 
 	private void upsertReconciledDouyinAuthor(String canonicalUid, String username, String workNickname, String avatar,

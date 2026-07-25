@@ -53,7 +53,7 @@ class AdminTemplateScriptSanityTest {
 		String authorList = template("authorList.html");
 
 		assertThat(authorList).contains("refreshProfileBtn", "/admin/api/refreshDouyinAuthorProfile",
-				"authorFieldsUpdated", "videosUpdated", "graphicsUpdated");
+				"result.jobId", "result.state", "result.promoted");
 	}
 
 	@Test

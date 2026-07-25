@@ -15,6 +15,7 @@ class AuthorIdentityGenerationTest {
 	void authorEntitiesUseDatabaseNativeIdentityGeneration() throws Exception {
 		assertIdentity(AuthorProfileEntity.class);
 		assertIdentity(AuthorNameHistoryEntity.class);
+		assertIdentity(AuthorEnrichmentJobEntity.class);
 	}
 
 	private void assertIdentity(Class<?> entityType) throws Exception {

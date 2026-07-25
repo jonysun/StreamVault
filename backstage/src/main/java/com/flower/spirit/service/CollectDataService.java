@@ -501,7 +501,7 @@ public class CollectDataService {
 			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData, fetchContext));
 			collectdDataDao.save(entity);
 			logFetchSnapshotItems(entity, fetchContext, allDYData, "sorted");
-			prefillDouyinAuthorProfile(allDYData, fetchContext, runId, authorReconcileProfileCache);
+			prefillDouyinAuthorProfile(allDYData, fetchContext, runId);
 		}
 		logger.info("[CollectTask] getDYData result runId={} id={} isNull={} size={}", runId, entity.getId(),
 				allDYData == null, allDYData == null ? 0 : allDYData.size());
@@ -792,11 +792,6 @@ public class CollectDataService {
 							? extractCanonicalTaskSourceId(entity.getOriginaladdress()) : fetchContext.sourceId();
 					DouyinAuthorSnapshot authorSnapshot = resolveDouyinAuthorSnapshot(aweme_detail, hybridData, null,
 							taskSourceId);
-					JSONObject profileUser = authorSnapshot.needsProfileEnrichment()
-							? authorProfileService.resolveDouyinProfileAuthorCached(authorReconcileProfileCache,
-									authorSnapshot.canonicalUid(), authorSnapshot.uniqueId())
-							: null;
-					authorSnapshot = resolveDouyinAuthorSnapshot(aweme_detail, hybridData, profileUser, taskSourceId);
 					String authorUidForSave = authorSnapshot.canonicalUid();
 					String uniqueId = authorSnapshot.uniqueId();
 					String authorUid = authorSnapshot.numericUid();
@@ -2266,8 +2261,7 @@ public class CollectDataService {
 		return result;
 	}
 
-	private void prefillDouyinAuthorProfile(JSONArray allDYData, FetchRunContext context, String runId,
-			Map<String, JSONObject> profileCache) {
+	private void prefillDouyinAuthorProfile(JSONArray allDYData, FetchRunContext context, String runId) {
 		if (allDYData == null || allDYData.isEmpty() || authorProfileService == null) {
 			return;
 		}
@@ -2277,10 +2271,6 @@ public class CollectDataService {
 		}
 		String taskSourceId = context == null ? null : context.sourceId();
 		DouyinAuthorSnapshot snapshot = resolveDouyinAuthorSnapshot(awemeDetail, null, null, taskSourceId);
-		JSONObject profileUser = snapshot.needsProfileEnrichment()
-				? authorProfileService.resolveDouyinProfileAuthorCached(profileCache, snapshot.canonicalUid(), snapshot.uniqueId())
-				: null;
-		snapshot = resolveDouyinAuthorSnapshot(awemeDetail, null, profileUser, taskSourceId);
 		String authorUidForSave = snapshot.canonicalUid();
 		if (authorUidForSave == null) {
 			logger.info("[CollectTask] author prefill skipped runId={} reason=no-author-uid uniqueId={} nickname={}",

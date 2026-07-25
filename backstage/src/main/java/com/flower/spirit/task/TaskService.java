@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 
 import com.flower.spirit.config.Global;
 import com.flower.spirit.service.BiliConfigService;
+import com.flower.spirit.service.AuthorEnrichmentWorker;
+import com.flower.spirit.service.AuthorEnrichmentQueueService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.FfmpegQueueService;
 import com.flower.spirit.service.HlsTranscodeService;
@@ -30,6 +32,12 @@ public class TaskService {
 
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
+
+	@Autowired
+	private AuthorEnrichmentWorker authorEnrichmentWorker;
+
+	@Autowired
+	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
 	
 	
 	@Scheduled(fixedDelay = 1000*5)
@@ -54,6 +62,29 @@ public class TaskService {
 			return;
 		}
 		hlsTranscodeService.processQueueTick(false);
+	}
+
+	@Scheduled(fixedDelayString = "${streamvault.author-enrichment.poll-delay-ms:15000}")
+	public void authorEnrichmentTick() {
+		if (Global.isCollectPaused()) {
+			return;
+		}
+		authorEnrichmentWorker.processOne();
+	}
+
+	@Scheduled(cron = "${streamvault.author-enrichment.reconcile-cron:0 30 3 * * ?}")
+	public void reconcileMissingAuthorEnrichmentJobs() {
+		if (Global.isCollectPaused()) {
+			return;
+		}
+		try {
+			int queued = authorEnrichmentQueueService.reconcileMissingWorkAuthors(200);
+			if (queued > 0) {
+				logger.info("[AuthorEnrichment] reconciliation queued missing authors count={}", queued);
+			}
+		} catch (RuntimeException error) {
+			logger.error("[AuthorEnrichment] reconciliation scan failed", error);
+		}
 	}
 	
 	@Scheduled(cron = "0 0 9 * * ?")

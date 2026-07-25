@@ -760,7 +760,7 @@ public class AdminController {
 			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
 		}
 		try {
-			return new AjaxEntity(Global.ajax_success, "作者资料刷新完成",
+			return new AjaxEntity(Global.ajax_success, "作者资料刷新任务已入队",
 					douyinAuthorProfileRefreshService.refresh(authorProfileId));
 		} catch (WorkMetadataValidationException e) {
 			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);

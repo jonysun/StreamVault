@@ -67,6 +67,9 @@ class AuthorProfileServiceTest {
 	@Mock
 	private AuthorWriteTransaction authorWriteTransaction;
 
+	@Mock
+	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
+
 	@InjectMocks
 	private AuthorProfileService service;
 
@@ -142,6 +145,11 @@ class AuthorProfileServiceTest {
 		assertThat(historyCaptor.getValue().getDisplayname()).isEqualTo("new name");
 		assertThat(historyCaptor.getValue().getFirstseentime()).isNotNull();
 		assertThat(historyCaptor.getValue().getLastseentime()).isNotNull();
+		ArgumentCaptor<AuthorObservation> observationCaptor = ArgumentCaptor.forClass(AuthorObservation.class);
+		verify(authorEnrichmentQueueService).enqueueAfterCommitIfIncomplete(observationCaptor.capture());
+		assertThat(observationCaptor.getValue().platformKey()).isEqualTo("douyin");
+		assertThat(observationCaptor.getValue().authorUid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(observationCaptor.getValue().signature()).isEqualTo("profile bio");
 	}
 
 	@Test

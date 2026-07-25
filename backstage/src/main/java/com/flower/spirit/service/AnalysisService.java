@@ -896,25 +896,6 @@ public class AnalysisService {
 		String secUid = map.get("sec_uid");
 		String uniqueId = map.get("unique_id");
 		String uid = map.get("uid");
-		JSONObject profile = DouUtil.fetchUserProfile(secUid);
-		if (profile == null) {
-			profile = DouUtil.fetchUserProfileByUniqueId(uniqueId);
-		}
-		JSONObject profileAuthor = DouUtil.findAwemeDetail(profile);
-		if (profileAuthor == null && profile != null) {
-			profileAuthor = profile.getJSONObject("user");
-			if (profileAuthor == null && profile.getJSONObject("data") != null) {
-				JSONObject data = profile.getJSONObject("data");
-				profileAuthor = data.getJSONObject("user") != null ? data.getJSONObject("user") : data;
-			}
-		}
-		if (profileAuthor != null) {
-			secUid = firstNotBlank(profileAuthor.getString("sec_uid"), secUid);
-			uniqueId = firstNotBlank(profileAuthor.getString("unique_id"), uniqueId);
-			nickname = firstNotBlank(profileAuthor.getString("nickname"), nickname);
-			uid = firstNotBlank(profileAuthor.getString("uid"), uid);
-			map.put("avatar_thumb", firstNotBlank(DouUtil.extractAvatar(profileAuthor), map.get("avatar_thumb")));
-		}
 		String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(secUid, uid);
 		videoDataEntity.setVideoinfo(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
 		videoDataEntity.setJsonData(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));

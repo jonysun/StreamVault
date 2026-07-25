@@ -74,7 +74,7 @@
 				var button = $(this);
 				if (button.prop('disabled')) return;
 				var originalHtml = button.html();
-				button.prop('disabled', true).html('<i class="mdi mdi-loading mdi-spin"></i> 刷新中');
+				button.prop('disabled', true).html('<i class="mdi mdi-loading mdi-spin"></i> 入队中');
 				$.post('/admin/api/refreshDouyinAuthorProfile', { authorProfileId: button.data('id') }, function(r){
 					if(r.resCode !== '000001'){
 						button.prop('disabled', false).html(originalHtml);
@@ -82,9 +82,9 @@
 						return;
 					}
 					var result = r.record || {};
-					layer.alert('作者资料刷新完成<br>作者字段：'+(result.authorFieldsUpdated||0)
-						+'<br>视频作品：'+(result.videosUpdated||0)+'<br>图文作品：'+(result.graphicsUpdated||0),
-						{title:'刷新完成'});
+					layer.alert('作者资料刷新任务已入队<br>任务 ID：'+(result.jobId||'--')
+						+'<br>状态：'+(result.state||'QUEUED')+(result.promoted ? '<br>已提升为最高优先级' : ''),
+						{title:'已入队'});
 					findList(currentPage);
 				}).fail(function(xhr){
 					button.prop('disabled', false).html(originalHtml);

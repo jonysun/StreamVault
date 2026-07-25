@@ -20,7 +20,8 @@ public class SqliteSchemaPreflight {
 	private static final Logger logger = LoggerFactory.getLogger(SqliteSchemaPreflight.class);
 	private static final List<String> IDENTITY_TABLES = List.of(
 			"biz_author_profile",
-			"biz_author_name_history");
+			"biz_author_name_history",
+			"biz_author_enrichment_job");
 
 	private final JdbcTemplate jdbcTemplate;
 
