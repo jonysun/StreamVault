@@ -5,7 +5,6 @@ import java.time.Instant;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.entity.CollectDataEntity;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
@@ -16,14 +15,16 @@ public class CollectEnqueueService {
 	private final CollectdDataDao collectdDataDao;
 	private final CollectQueueTransaction transaction;
 	private final SqliteWriteRetrier sqliteWriteRetrier;
+	private final RuntimeControlService runtimeControlService;
 	private final int maxAttempts;
 
 	public CollectEnqueueService(CollectdDataDao collectdDataDao, CollectQueueTransaction transaction,
-			SqliteWriteRetrier sqliteWriteRetrier,
+			SqliteWriteRetrier sqliteWriteRetrier, RuntimeControlService runtimeControlService,
 			@Value("${streamvault.collect-queue.max-attempts:3}") int maxAttempts) {
 		this.collectdDataDao = collectdDataDao;
 		this.transaction = transaction;
 		this.sqliteWriteRetrier = sqliteWriteRetrier;
+		this.runtimeControlService = runtimeControlService;
 		this.maxAttempts = Math.max(1, maxAttempts);
 	}
 
@@ -43,9 +44,10 @@ public class CollectEnqueueService {
 			return sqliteWriteRetrier.execute(() -> transaction.recordSkipped(taskId, triggerType,
 					requestedLimit(task), "收藏任务已停用", Instant.now()));
 		}
-		if (Global.isCollectPaused()) {
+		PauseDecision pause = runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH);
+		if (!pause.allowed()) {
 			return sqliteWriteRetrier.execute(() -> transaction.recordSkipped(taskId, triggerType,
-					requestedLimit(task), "收藏/爬取任务全局暂停", Instant.now()));
+					requestedLimit(task), "收藏/爬取任务已暂停: " + pause.controlKey(), Instant.now()));
 		}
 		return sqliteWriteRetrier.execute(() -> transaction.enqueue(taskId, triggerType, requestedLimit(task),
 				availableAt, priority, maxAttempts));

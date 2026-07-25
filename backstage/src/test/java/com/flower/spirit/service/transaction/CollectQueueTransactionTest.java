@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import javax.sql.DataSource;
@@ -25,6 +26,7 @@ import com.flower.spirit.service.CollectJobClaim;
 import com.flower.spirit.service.CollectRunFetchedItem;
 import com.flower.spirit.service.CollectRunState;
 import com.flower.spirit.service.CollectTriggerType;
+import com.flower.spirit.service.RuntimeJobQueryService;
 
 class CollectQueueTransactionTest {
 
@@ -50,6 +52,8 @@ class CollectQueueTransactionTest {
 					.isEqualTo("9");
 
 			CollectJobClaim claim = transaction.claimNext("test-worker", now.plusSeconds(2));
+			Map<String, Object> dashboard = new RuntimeJobQueryService(jdbc).dashboard(20);
+			assertThat((List<?>) dashboard.get("running")).hasSize(1);
 			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
 					now.plusSeconds(3));
 			transaction.storeFetchedItems(claim.runId(), List.of(
@@ -150,7 +154,7 @@ class CollectQueueTransactionTest {
 	}
 
 	private void createSchema(JdbcTemplate jdbc) {
-		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskstatus TEXT, count TEXT, "
+		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, taskstatus TEXT, count TEXT, "
 				+ "carriedout TEXT, endtime TEXT)");
 		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY AUTOINCREMENT, collect_task_id INTEGER NOT NULL, "
 				+ "trigger_type TEXT NOT NULL, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "

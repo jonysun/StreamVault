@@ -106,6 +106,9 @@ public class CollectDataService {
 	@Autowired
 	private CollectRunService collectRunService;
 
+	@Autowired
+	private RuntimeControlService runtimeControlService;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -544,6 +547,7 @@ public class CollectDataService {
 			}
 			JSONArray planItems = new JSONArray();
 			for (int i = 0; i < allDYData.size(); i++) {
+				assertCollectExecutionAllowed();
 				if (successThisRun >= targetSuccess) {
 					logger.info("[CollectTask] 已达到本轮目标成功数，停止本轮处理 targetSuccess={} successThisRun={}", targetSuccess, successThisRun);
 					break;
@@ -1131,6 +1135,17 @@ public class CollectDataService {
 		while (root.getCause() != null && root.getCause() != root) root = root.getCause();
 		return root.getMessage() == null || root.getMessage().isBlank()
 				? root.getClass().getSimpleName() : root.getMessage();
+	}
+
+	private void assertCollectExecutionAllowed() {
+		PauseDecision collect = runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH);
+		if (!collect.allowed()) {
+			throw new CollectExecutionPausedException(collect.controlKey(), collect.reason());
+		}
+		PauseDecision download = runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD);
+		if (!download.allowed()) {
+			throw new CollectExecutionPausedException(download.controlKey(), download.reason());
+		}
 	}
 
 	private JSONObject buildRunSummaryPlanItem(String runId, FetchRunContext context, int fetchedCount,
@@ -2064,6 +2079,7 @@ public class CollectDataService {
 				.orElseThrow(() -> new IllegalArgumentException("收藏任务不存在: " + taskId));
 		activePersistentRunId.set(runId);
 		try {
+			assertCollectExecutionAllowed();
 			if ("抖音".equals(task.getPlatform())) {
 				String cookie = platformCookieService.currentDouyinCookie("collect_worker");
 				if (cookie == null || cookie.isBlank()) {

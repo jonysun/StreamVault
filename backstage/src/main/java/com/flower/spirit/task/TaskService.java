@@ -7,7 +7,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import com.flower.spirit.config.Global;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.AuthorEnrichmentWorker;
 import com.flower.spirit.service.AuthorEnrichmentQueueService;
@@ -15,6 +14,8 @@ import com.flower.spirit.service.CollectJobWorker;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.FfmpegQueueService;
 import com.flower.spirit.service.HlsTranscodeService;
+import com.flower.spirit.service.RuntimeControlService;
+import com.flower.spirit.service.TaskCategory;
 
 @Configuration
 @Component
@@ -42,11 +43,14 @@ public class TaskService {
 
 	@Autowired
 	private CollectJobWorker collectJobWorker;
+
+	@Autowired
+	private RuntimeControlService runtimeControlService;
 	
 	
 	@Scheduled(fixedDelay = 1000*5)
 	public void taskCheckStatus() {
-		if (Global.isDownloadPaused()) {
+		if (!runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
 			return;
 		}
 		ffmpegQueueService.taskCheckStatus();
@@ -54,7 +58,7 @@ public class TaskService {
 	
 	@Scheduled(fixedDelay = 1000*5)
 	public void taskMergeTasks() {
-		if (Global.isDownloadPaused()) {
+		if (!runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
 			return;
 		}
 		ffmpegQueueService.taskMergeTasks();
@@ -62,7 +66,7 @@ public class TaskService {
 
 	@Scheduled(fixedDelay = 1000*8)
 	public void hlsQueueTick() {
-		if (Global.isHlsPaused()) {
+		if (!runtimeControlService.mayRun(TaskCategory.HLS_TRANSCODE).allowed()) {
 			return;
 		}
 		hlsTranscodeService.processQueueTick(false);
@@ -70,7 +74,7 @@ public class TaskService {
 
 	@Scheduled(fixedDelayString = "${streamvault.author-enrichment.poll-delay-ms:15000}")
 	public void authorEnrichmentTick() {
-		if (Global.isCollectPaused()) {
+		if (!runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
 			return;
 		}
 		authorEnrichmentWorker.processOne();
@@ -78,7 +82,8 @@ public class TaskService {
 
 	@Scheduled(fixedDelayString = "${streamvault.collect-queue.poll-delay-ms:5000}")
 	public void collectQueueTick() {
-		if (Global.isCollectPaused()) {
+		if (!runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()
+				|| !runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
 			return;
 		}
 		collectJobWorker.wakeUp();
@@ -86,7 +91,7 @@ public class TaskService {
 
 	@Scheduled(cron = "${streamvault.author-enrichment.reconcile-cron:0 30 3 * * ?}")
 	public void reconcileMissingAuthorEnrichmentJobs() {
-		if (Global.isCollectPaused()) {
+		if (!runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
 			return;
 		}
 		try {
@@ -102,7 +107,7 @@ public class TaskService {
 	@Scheduled(cron = "0 0 9 * * ?")
 	public void isNeedRefreshAndUpdate() {
 		try {
-			if (!Global.isCollectPaused()) {
+			if (runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
 				biliConfigService.isNeedRefreshAndUpdate();
 			}
 		} catch (Exception e) {

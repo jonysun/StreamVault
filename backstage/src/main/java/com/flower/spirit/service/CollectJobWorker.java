@@ -107,6 +107,10 @@ public class CollectJobWorker {
 			recordFailure(claim, expected, expected == CollectRunState.FETCHING ? CollectRunState.FETCH_FAILED
 					: CollectRunState.DB_FAILED, error.getErrorCode(),
 					rootMessage(error), error, retryDelaySeconds(error));
+		} catch (CollectExecutionPausedException error) {
+			CollectRunState expected = currentExpectedState(claim.runId(), CollectRunState.PROCESSING);
+			recordFailure(claim, expected, CollectRunState.INTERRUPTED, "PAUSED_DURING_EXECUTION",
+					rootMessage(error), error, 30);
 		} catch (DataAccessException error) {
 			recordFailure(claim, currentExpectedState(claim.runId(), CollectRunState.PROCESSING), CollectRunState.DB_FAILED, "DB_WRITE_FAILED",
 					rootMessage(error), error, 60);

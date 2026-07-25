@@ -58,6 +58,9 @@ import com.flower.spirit.service.GraphicContentService;
 import com.flower.spirit.service.HlsTranscodeService;
 import com.flower.spirit.service.MediaFeedService;
 import com.flower.spirit.service.ProcessHistoryService;
+import com.flower.spirit.service.RuntimeControlService;
+import com.flower.spirit.service.RuntimeControlSnapshot;
+import com.flower.spirit.service.RuntimeJobQueryService;
 import com.flower.spirit.service.SystemService;
 import com.flower.spirit.service.TikTokConfigService;
 import com.flower.spirit.service.UserService;
@@ -111,6 +114,12 @@ public class AdminController {
 
 	@Autowired
 	private CollectEnqueueService collectEnqueueService;
+
+	@Autowired
+	private RuntimeControlService runtimeControlService;
+
+	@Autowired
+	private RuntimeJobQueryService runtimeJobQueryService;
 	
 	
 	@Autowired
@@ -615,14 +624,16 @@ public class AdminController {
 	 * @return
 	 */
 	private Map<String, Object> buildBackgroundTaskControlStatus() {
+		RuntimeControlSnapshot snapshot = runtimeControlService.snapshot();
 		Map<String, Object> control = new HashMap<>();
-		control.put("allPaused", Global.backgroundTaskPauseAll);
-		control.put("downloadPaused", Global.backgroundTaskPauseDownload);
-		control.put("collectPaused", Global.backgroundTaskPauseCollect);
-		control.put("hlsPaused", Global.backgroundTaskPauseHls);
-		control.put("effectiveDownloadPaused", Global.isDownloadPaused());
-		control.put("effectiveCollectPaused", Global.isCollectPaused());
-		control.put("effectiveHlsPaused", Global.isHlsPaused());
+		control.put("allPaused", snapshot.allPaused());
+		control.put("downloadPaused", snapshot.downloadPaused());
+		control.put("collectPaused", snapshot.collectPaused());
+		control.put("hlsPaused", snapshot.hlsPaused());
+		control.put("effectiveDownloadPaused", snapshot.effectiveDownloadPaused());
+		control.put("effectiveCollectPaused", snapshot.effectiveCollectPaused());
+		control.put("effectiveHlsPaused", snapshot.effectiveHlsPaused());
+		control.put("values", snapshot.values());
 		return control;
 	}
 
@@ -676,6 +687,7 @@ public class AdminController {
 			result.put("control", buildBackgroundTaskControlStatus());
 			result.put("analysis", analysisService.getThreadPoolStatus());
 			result.put("collect", collectDataService.getCollectThreadPoolStatus());
+			result.put("jobs", runtimeJobQueryService.dashboard(50));
 			AjaxEntity hls = hlsTranscodeService.stats();
 			result.put("hls", hls == null ? null : hls.getRecord());
 			return new AjaxEntity(Global.ajax_success, "获取后台任务状态成功", result);
@@ -685,29 +697,70 @@ public class AdminController {
 	}
 
 	@PostMapping(value = "/setBackgroundTaskPause")
-	public AjaxEntity setBackgroundTaskPause(String scope, String paused) {
+	public AjaxEntity setBackgroundTaskPause(String scope, String paused, String reason,
+			HttpServletRequest request) {
 		boolean value = "1".equals(paused) || "true".equalsIgnoreCase(String.valueOf(paused)) || "Y".equalsIgnoreCase(String.valueOf(paused));
-		String normalized = scope == null ? "" : scope.trim().toLowerCase();
-		switch (normalized) {
-		case "all":
-			Global.backgroundTaskPauseAll = value;
-			Global.backgroundTaskPauseDownload = value;
-			Global.backgroundTaskPauseCollect = value;
-			Global.backgroundTaskPauseHls = value;
-			break;
-		case "download":
-			Global.backgroundTaskPauseDownload = value;
-			break;
-		case "collect":
-			Global.backgroundTaskPauseCollect = value;
-			break;
-		case "hls":
-			Global.backgroundTaskPauseHls = value;
-			break;
-		default:
-			return new AjaxEntity(Global.ajax_uri_error, "未知任务范围: " + scope, null);
+		try {
+			runtimeControlService.set(scope, value, runtimeActor(request), reason);
+			return getBackgroundTaskStatus();
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
 		}
-		return getBackgroundTaskStatus();
+	}
+
+	@GetMapping("/runtime-controls")
+	public AjaxEntity runtimeControls() {
+		return new AjaxEntity(Global.ajax_success, "获取运行控制成功", runtimeControlService.snapshot());
+	}
+
+	@PostMapping("/runtime-controls/pause-all")
+	public AjaxEntity pauseAllRuntimeTasks(@RequestBody(required = false) Map<String, Object> body,
+			HttpServletRequest request) {
+		return updateRuntimeControl("all", true, body, request);
+	}
+
+	@PostMapping("/runtime-controls/resume-all")
+	public AjaxEntity resumeAllRuntimeTasks(@RequestBody(required = false) Map<String, Object> body,
+			HttpServletRequest request) {
+		return updateRuntimeControl("all", false, body, request);
+	}
+
+	@PostMapping("/runtime-controls/{category}/pause")
+	public AjaxEntity pauseRuntimeCategory(@PathVariable String category,
+			@RequestBody(required = false) Map<String, Object> body, HttpServletRequest request) {
+		return updateRuntimeControl(category, true, body, request);
+	}
+
+	@PostMapping("/runtime-controls/{category}/resume")
+	public AjaxEntity resumeRuntimeCategory(@PathVariable String category,
+			@RequestBody(required = false) Map<String, Object> body, HttpServletRequest request) {
+		return updateRuntimeControl(category, false, body, request);
+	}
+
+	@GetMapping("/runtime-jobs")
+	public AjaxEntity runtimeJobs(@RequestParam(defaultValue = "RUNNING,QUEUED,RETRY_WAIT") String state,
+			@RequestParam(defaultValue = "100") int limit) {
+		return new AjaxEntity(Global.ajax_success, "获取运行任务成功", runtimeJobQueryService.findJobs(state, limit));
+	}
+
+	private AjaxEntity updateRuntimeControl(String scope, boolean paused, Map<String, Object> body,
+			HttpServletRequest request) {
+		try {
+			String reason = body == null || body.get("reason") == null ? null : String.valueOf(body.get("reason"));
+			return new AjaxEntity(Global.ajax_success, paused ? "已暂停" : "已恢复",
+					runtimeControlService.set(scope, paused, runtimeActor(request), reason));
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	private String runtimeActor(HttpServletRequest request) {
+		Object sessionUser = request == null || request.getSession(false) == null ? null
+				: request.getSession(false).getAttribute(Global.user_session_key);
+		if (sessionUser instanceof UserEntity user && user.getUsername() != null && !user.getUsername().isBlank()) {
+			return user.getUsername();
+		}
+		return "admin";
 	}
 
 	@PostMapping(value = "/updateCookie")
