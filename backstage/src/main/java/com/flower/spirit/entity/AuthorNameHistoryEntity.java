@@ -8,7 +8,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.TableGenerator;
 
 @Entity
 @Table(name = "biz_author_name_history")
@@ -17,8 +16,7 @@ public class AuthorNameHistoryEntity implements Serializable {
 	private static final long serialVersionUID = 5301557841756241718L;
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.TABLE, generator = "biz_author_name_history_seq")
-	@TableGenerator(name = "biz_author_name_history_seq", allocationSize = 1, table = "seq_common", pkColumnName = "seq_id", valueColumnName = "seq_count")
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
 
 	private Integer authorprofileid;

@@ -2,6 +2,7 @@ package com.flower.spirit.web.admin;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.flower.spirit.common.AjaxEntity;
@@ -20,6 +22,8 @@ import com.flower.spirit.dto.UpdateWorkMetadataRequest;
 import com.flower.spirit.dto.WorkOperationRequest;
 import com.flower.spirit.dto.AdminAuthorDeletionRequest;
 import com.flower.spirit.dto.AdminDeleteWorkRequest;
+import com.flower.spirit.dto.DatabaseMaintenanceRequest;
+import com.flower.spirit.dto.MediaFeedRequest;
 import com.flower.spirit.entity.BiliConfigEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.BlockedWorkEntity;
@@ -38,6 +42,8 @@ import com.flower.spirit.entity.VideoMixEntity;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CollectDataDetailService;
 import com.flower.spirit.service.CollectDataService;
+import com.flower.spirit.service.CollectEnqueueService;
+import com.flower.spirit.service.CollectRunQueryService;
 import com.flower.spirit.service.AnalysisService;
 import com.flower.spirit.service.AdminMediaManagementService;
 import com.flower.spirit.service.AuthorProfileService;
@@ -49,11 +55,17 @@ import com.flower.spirit.service.DouyinCookieHealthService;
 import com.flower.spirit.service.DouyinAuthorReconciliationService;
 import com.flower.spirit.service.DouyinAuthorProfileRefreshService;
 import com.flower.spirit.service.DouyinWorkMaintenanceService;
+import com.flower.spirit.service.DatabaseAuditService;
+import com.flower.spirit.service.DatabaseMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
 import com.flower.spirit.service.HlsTranscodeService;
 import com.flower.spirit.service.MediaFeedService;
+import com.flower.spirit.service.Mp4FaststartMaintenanceService;
 import com.flower.spirit.service.ProcessHistoryService;
+import com.flower.spirit.service.RuntimeControlService;
+import com.flower.spirit.service.RuntimeControlSnapshot;
+import com.flower.spirit.service.RuntimeJobQueryService;
 import com.flower.spirit.service.SystemService;
 import com.flower.spirit.service.TikTokConfigService;
 import com.flower.spirit.service.UserService;
@@ -101,6 +113,24 @@ public class AdminController {
 	
 	@Autowired
 	private CollectDataService collectDataService;
+
+	@Autowired
+	private CollectRunQueryService collectRunQueryService;
+
+	@Autowired
+	private CollectEnqueueService collectEnqueueService;
+
+	@Autowired
+	private RuntimeControlService runtimeControlService;
+
+	@Autowired
+	private RuntimeJobQueryService runtimeJobQueryService;
+
+	@Autowired
+	private DatabaseAuditService databaseAuditService;
+
+	@Autowired
+	private DatabaseMaintenanceService databaseMaintenanceService;
 	
 	
 	@Autowired
@@ -139,6 +169,9 @@ public class AdminController {
 
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
+
+	@Autowired
+	private Mp4FaststartMaintenanceService mp4FaststartMaintenanceService;
 
 	@Autowired
 	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
@@ -289,6 +322,15 @@ public class AdminController {
 	public AjaxEntity findMediaFeedList(VideoDataEntity videoDataEntity, HttpServletRequest request) {
 		return mediaFeedService.findPage(videoDataEntity);
 	}
+
+	@GetMapping(value = "/media-feed")
+	public AjaxEntity findMediaFeed(MediaFeedRequest request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "媒体列表获取成功", mediaFeedService.findCursorPage(request));
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
 	
 	/**
 	 * 删除视频缓存信息及视频文件
@@ -366,6 +408,24 @@ public class AdminController {
 		} catch (WorkMetadataValidationException e) {
 			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
 		}
+	}
+
+	@GetMapping(value = "/mp4FaststartPreview")
+	public AjaxEntity mp4FaststartPreview(Integer afterId, Integer limit, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return new AjaxEntity(Global.ajax_success, "MP4 faststart preview",
+				mp4FaststartMaintenanceService.preview(afterId, limit));
+	}
+
+	@PostMapping(value = "/mp4FaststartApply")
+	public AjaxEntity mp4FaststartApply(@RequestBody List<Integer> ids, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return new AjaxEntity(Global.ajax_success, "MP4 faststart apply completed",
+				mp4FaststartMaintenanceService.apply(ids));
 	}
 
 	@PostMapping(value = "/previewDeleteAuthor")
@@ -605,15 +665,67 @@ public class AdminController {
 	 * @return
 	 */
 	private Map<String, Object> buildBackgroundTaskControlStatus() {
+		RuntimeControlSnapshot snapshot = runtimeControlService.snapshot();
 		Map<String, Object> control = new HashMap<>();
-		control.put("allPaused", Global.backgroundTaskPauseAll);
-		control.put("downloadPaused", Global.backgroundTaskPauseDownload);
-		control.put("collectPaused", Global.backgroundTaskPauseCollect);
-		control.put("hlsPaused", Global.backgroundTaskPauseHls);
-		control.put("effectiveDownloadPaused", Global.isDownloadPaused());
-		control.put("effectiveCollectPaused", Global.isCollectPaused());
-		control.put("effectiveHlsPaused", Global.isHlsPaused());
+		control.put("allPaused", snapshot.allPaused());
+		control.put("downloadPaused", snapshot.downloadPaused());
+		control.put("collectPaused", snapshot.collectPaused());
+		control.put("hlsPaused", snapshot.hlsPaused());
+		control.put("effectiveDownloadPaused", snapshot.effectiveDownloadPaused());
+		control.put("effectiveCollectPaused", snapshot.effectiveCollectPaused());
+		control.put("effectiveHlsPaused", snapshot.effectiveHlsPaused());
+		control.put("values", snapshot.values());
 		return control;
+	}
+
+	@GetMapping("/collect-tasks/{taskId}/runs")
+	public List<Map<String, Object>> findCollectRuns(@PathVariable Integer taskId,
+			@RequestParam(defaultValue = "20") int limit, @RequestParam(defaultValue = "0") long afterId) {
+		return collectRunQueryService.findRuns(taskId, limit, afterId);
+	}
+
+	@GetMapping("/collect-runs/{runId}")
+	public Map<String, Object> findCollectRun(@PathVariable long runId) {
+		return collectRunQueryService.findRun(runId);
+	}
+
+	@GetMapping("/collect-runs/{runId}/items")
+	public List<Map<String, Object>> findCollectRunItems(@PathVariable long runId,
+			@RequestParam(defaultValue = "all") String decision, @RequestParam(defaultValue = "100") int limit,
+			@RequestParam(defaultValue = "0") long afterId) {
+		return collectRunQueryService.findItems(runId, decision, limit, afterId);
+	}
+
+	@GetMapping("/collect-runs/{runId}/events")
+	public List<Map<String, Object>> findCollectRunEvents(@PathVariable long runId,
+			@RequestParam(defaultValue = "0") int afterSequence, @RequestParam(defaultValue = "200") int limit) {
+		return collectRunQueryService.findEvents(runId, afterSequence, limit);
+	}
+
+	@GetMapping("/collect-tasks/{taskId}/latest-items")
+	public Map<String, Object> findLatestCollectItems(@PathVariable int taskId,
+			@RequestParam(defaultValue = "all") String view, @RequestParam(defaultValue = "500") int limit,
+			@RequestParam(defaultValue = "0") long afterId) {
+		return collectRunQueryService.findLatestItems(taskId, view, limit, afterId);
+	}
+
+	@PostMapping("/collect-runs/{runId}/requeue-preview")
+	public Map<String, Object> previewCollectRunRequeue(@PathVariable long runId) {
+		return collectRunQueryService.requeuePreview(runId, Global.isCollectPaused());
+	}
+
+	@PostMapping("/collect-runs/{runId}/requeue")
+	public AjaxEntity requeueCollectRun(@PathVariable long runId) {
+		Map<String, Object> preview = collectRunQueryService.requeuePreview(runId, Global.isCollectPaused());
+		if (!Boolean.TRUE.equals(preview.get("canRequeue"))) {
+			return new AjaxEntity(Global.ajax_uri_error, "当前运行不可重排队", preview);
+		}
+		try {
+			int taskId = ((Number) preview.get("taskId")).intValue();
+			return new AjaxEntity(Global.ajax_success, "已重新入队", collectEnqueueService.enqueueManual(taskId));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, "重排队失败: " + error.getMessage(), null);
+		}
 	}
 
 	@GetMapping(value = "/getBackgroundTaskStatus")
@@ -623,6 +735,7 @@ public class AdminController {
 			result.put("control", buildBackgroundTaskControlStatus());
 			result.put("analysis", analysisService.getThreadPoolStatus());
 			result.put("collect", collectDataService.getCollectThreadPoolStatus());
+			result.put("jobs", runtimeJobQueryService.dashboard(50));
 			AjaxEntity hls = hlsTranscodeService.stats();
 			result.put("hls", hls == null ? null : hls.getRecord());
 			return new AjaxEntity(Global.ajax_success, "获取后台任务状态成功", result);
@@ -632,29 +745,102 @@ public class AdminController {
 	}
 
 	@PostMapping(value = "/setBackgroundTaskPause")
-	public AjaxEntity setBackgroundTaskPause(String scope, String paused) {
+	public AjaxEntity setBackgroundTaskPause(String scope, String paused, String reason,
+			HttpServletRequest request) {
 		boolean value = "1".equals(paused) || "true".equalsIgnoreCase(String.valueOf(paused)) || "Y".equalsIgnoreCase(String.valueOf(paused));
-		String normalized = scope == null ? "" : scope.trim().toLowerCase();
-		switch (normalized) {
-		case "all":
-			Global.backgroundTaskPauseAll = value;
-			Global.backgroundTaskPauseDownload = value;
-			Global.backgroundTaskPauseCollect = value;
-			Global.backgroundTaskPauseHls = value;
-			break;
-		case "download":
-			Global.backgroundTaskPauseDownload = value;
-			break;
-		case "collect":
-			Global.backgroundTaskPauseCollect = value;
-			break;
-		case "hls":
-			Global.backgroundTaskPauseHls = value;
-			break;
-		default:
-			return new AjaxEntity(Global.ajax_uri_error, "未知任务范围: " + scope, null);
+		try {
+			runtimeControlService.set(scope, value, runtimeActor(request), reason);
+			return getBackgroundTaskStatus();
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
 		}
-		return getBackgroundTaskStatus();
+	}
+
+	@GetMapping("/runtime-controls")
+	public AjaxEntity runtimeControls() {
+		return new AjaxEntity(Global.ajax_success, "获取运行控制成功", runtimeControlService.snapshot());
+	}
+
+	@PostMapping("/runtime-controls/pause-all")
+	public AjaxEntity pauseAllRuntimeTasks(@RequestBody(required = false) Map<String, Object> body,
+			HttpServletRequest request) {
+		return updateRuntimeControl("all", true, body, request);
+	}
+
+	@PostMapping("/runtime-controls/resume-all")
+	public AjaxEntity resumeAllRuntimeTasks(@RequestBody(required = false) Map<String, Object> body,
+			HttpServletRequest request) {
+		return updateRuntimeControl("all", false, body, request);
+	}
+
+	@PostMapping("/runtime-controls/{category}/pause")
+	public AjaxEntity pauseRuntimeCategory(@PathVariable String category,
+			@RequestBody(required = false) Map<String, Object> body, HttpServletRequest request) {
+		return updateRuntimeControl(category, true, body, request);
+	}
+
+	@PostMapping("/runtime-controls/{category}/resume")
+	public AjaxEntity resumeRuntimeCategory(@PathVariable String category,
+			@RequestBody(required = false) Map<String, Object> body, HttpServletRequest request) {
+		return updateRuntimeControl(category, false, body, request);
+	}
+
+	@GetMapping("/runtime-jobs")
+	public AjaxEntity runtimeJobs(@RequestParam(defaultValue = "RUNNING,QUEUED,RETRY_WAIT") String state,
+			@RequestParam(defaultValue = "100") int limit) {
+		return new AjaxEntity(Global.ajax_success, "获取运行任务成功", runtimeJobQueryService.findJobs(state, limit));
+	}
+
+	@GetMapping("/database/audit")
+	public AjaxEntity databaseAudit() {
+		return new AjaxEntity(Global.ajax_success, "数据库审计完成", databaseAuditService.audit());
+	}
+
+	@PostMapping("/database/maintenance/preview")
+	public AjaxEntity previewDatabaseMaintenance(@RequestBody(required = false) DatabaseMaintenanceRequest request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "数据库维护预览完成",
+					databaseMaintenanceService.preview(request == null ? null : request.getOperations()));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@PostMapping("/database/maintenance/apply")
+	public AjaxEntity applyDatabaseMaintenance(@RequestBody DatabaseMaintenanceRequest request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "数据库维护批次执行完成",
+					databaseMaintenanceService.apply(request));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@GetMapping("/database/maintenance/{operationId}")
+	public AjaxEntity databaseMaintenanceStatus(@PathVariable long operationId) {
+		Map<String, Object> status = databaseMaintenanceService.status(operationId);
+		return status.isEmpty() ? new AjaxEntity(Global.ajax_uri_error, "数据库维护任务不存在", null)
+				: new AjaxEntity(Global.ajax_success, "获取数据库维护状态成功", status);
+	}
+
+	private AjaxEntity updateRuntimeControl(String scope, boolean paused, Map<String, Object> body,
+			HttpServletRequest request) {
+		try {
+			String reason = body == null || body.get("reason") == null ? null : String.valueOf(body.get("reason"));
+			return new AjaxEntity(Global.ajax_success, paused ? "已暂停" : "已恢复",
+					runtimeControlService.set(scope, paused, runtimeActor(request), reason));
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	private String runtimeActor(HttpServletRequest request) {
+		Object sessionUser = request == null || request.getSession(false) == null ? null
+				: request.getSession(false).getAttribute(Global.user_session_key);
+		if (sessionUser instanceof UserEntity user && user.getUsername() != null && !user.getUsername().isBlank()) {
+			return user.getUsername();
+		}
+		return "admin";
 	}
 
 	@PostMapping(value = "/updateCookie")
@@ -760,7 +946,7 @@ public class AdminController {
 			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
 		}
 		try {
-			return new AjaxEntity(Global.ajax_success, "作者资料刷新完成",
+			return new AjaxEntity(Global.ajax_success, "作者资料刷新任务已入队",
 					douyinAuthorProfileRefreshService.refresh(authorProfileId));
 		} catch (WorkMetadataValidationException e) {
 			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
@@ -768,14 +954,15 @@ public class AdminController {
 	}
 
 	@GetMapping(value = "/authorProfileSummary")
-	public AjaxEntity authorProfileSummary(String platform, String authoruid, String authorusername, String author) {
-		return authorProfileService.findProfileSummary(platform, authoruid, authorusername, author);
+	public AjaxEntity authorProfileSummary(String platformkey, String platform, String authoruid, String authorusername,
+			String author) {
+		return authorProfileService.findProfileSummary(platformkey, platform, authoruid, authorusername, author);
 	}
 
 	@GetMapping(value = "/authorProfileWorks")
-	public AjaxEntity authorProfileWorks(String platform, String authoruid, String authorusername, String author,
+	public AjaxEntity authorProfileWorks(String platformkey, String platform, String authoruid, String authorusername, String author,
 			String type, Integer pageNo, Integer pageSize) {
-		return authorProfileService.findProfileWorks(platform, authoruid, authorusername, author, type, pageNo, pageSize);
+		return authorProfileService.findProfileWorks(platformkey, platform, authoruid, authorusername, author, type, pageNo, pageSize);
 	}
 
 	@PostMapping(value = "/rebuildDouyinAuthors")

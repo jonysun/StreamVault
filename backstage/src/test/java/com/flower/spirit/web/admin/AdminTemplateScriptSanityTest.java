@@ -42,8 +42,10 @@ class AdminTemplateScriptSanityTest {
 		String index = template("index.html");
 		String graphic = template("graphicContent.html");
 
-		assertThat(index).contains("playActiveGraphicVideo(itemEl, video, true)",
-				"autoplay preload=\"auto\"");
+		assertThat(index).contains("feed-graphic-video-host", "function mountGraphicSlideVideo(itemEl, host)",
+				"setupVideoSource(video, src, true)", "goNextGraphicSlide(itemEl, true)");
+		assertThat(index).contains("feed-playback-controller.js")
+				.doesNotContain("feed-player-pool.js", "new window.AdminFeed.PlayerPool");
 		assertThat(graphic).contains("playActivePreviewVideo(true)", "pauseActivePreviewVideo(true)",
 				"id=\"previewVideo\" controls playsinline");
 	}
@@ -53,7 +55,7 @@ class AdminTemplateScriptSanityTest {
 		String authorList = template("authorList.html");
 
 		assertThat(authorList).contains("refreshProfileBtn", "/admin/api/refreshDouyinAuthorProfile",
-				"authorFieldsUpdated", "videosUpdated", "graphicsUpdated");
+				"result.jobId", "result.state", "result.promoted");
 	}
 
 	@Test
@@ -64,6 +66,25 @@ class AdminTemplateScriptSanityTest {
 				"id=\"feedMoreMenu\"", "id=\"feedEditBtn\"", "id=\"feedAutoNextBtn\"",
 				"id=\"feedDeleteBtn\"", "function setFeedMoreMenuOpen(open)",
 				"function closeFeedMoreMenu()", "click.feedMoreOutside", "keydown.feedMoreEscape");
+	}
+
+	@Test
+	void indexPassesCanonicalPlatformKeyToAuthorProfileApis() throws IOException {
+		String index = template("index.html");
+
+		assertThat(index).contains("data-platformkey=\"", "platformkey: this.getAttribute('data-platformkey')",
+				"/admin/api/authorProfileSummary", "/admin/api/authorProfileWorks");
+	}
+
+	@Test
+	void indexUsesKeysetFeedWithoutBreakingLegacyFallbacks() throws IOException {
+		String index = template("index.html");
+
+		assertThat(index).contains("function shouldUseFeedCursor()", "function buildFeedCursorRequestOption(pageSize)",
+				"$.get('/admin/api/media-feed', option)", "feedNextCursor = record.nextCursor || ''",
+				"feedNextCursor = '';", "keyset media feed is disabled", "feedUseKeyset = false",
+				"feedOrder !== 'random'", "feedAuthorUid && feedAuthorPlatformKey",
+				"data-platformkey=\"");
 	}
 
 	private String template(String name) throws IOException {

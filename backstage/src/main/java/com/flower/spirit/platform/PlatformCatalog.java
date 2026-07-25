@@ -1,6 +1,8 @@
 package com.flower.spirit.platform;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -42,6 +44,41 @@ public final class PlatformCatalog {
 			throw new IllegalArgumentException("unknown platform key: " + key);
 		}
 		return definition;
+	}
+
+	public static String canonicalKey(String explicitKey, String legacyPlatform) {
+		Optional<PlatformDefinition> definition = findByAlias(explicitKey);
+		if (definition.isEmpty()) {
+			definition = findByAlias(legacyPlatform);
+		}
+		if (definition.isPresent()) {
+			return definition.get().getKey();
+		}
+		if (hasText(explicitKey)) {
+			return normalize(explicitKey);
+		}
+		return hasText(legacyPlatform) ? normalize(legacyPlatform) : null;
+	}
+
+	public static List<String> aliases(String platformKey, String legacyPlatform) {
+		LinkedHashSet<String> aliases = new LinkedHashSet<>();
+		Optional<PlatformDefinition> definition = findByAlias(platformKey);
+		if (definition.isEmpty()) {
+			definition = findByAlias(legacyPlatform);
+		}
+		definition.ifPresent(value -> aliases.addAll(value.getAliases()));
+		String resolvedKey = definition.map(PlatformDefinition::getKey).orElse(null);
+		boolean compatibleLegacy = resolvedKey == null
+				|| findByAlias(legacyPlatform)
+						.map(value -> value.getKey().equals(resolvedKey))
+						.orElse(false);
+		if (hasText(legacyPlatform) && compatibleLegacy) {
+			aliases.add(legacyPlatform.trim());
+		}
+		if (aliases.isEmpty() && hasText(platformKey)) {
+			aliases.add(platformKey.trim());
+		}
+		return List.copyOf(aliases);
 	}
 
 	public static PlatformDefinition definitionForExtractor(String extractor) {

@@ -18,7 +18,6 @@ import com.flower.spirit.platform.WorkMediaResource;
 import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.platform.WorkMetadataNormalizer;
 import com.flower.spirit.platform.WorkMetadataValidationException;
-import com.flower.spirit.platform.RawMetadataSanitizer;
 import com.flower.spirit.service.WorkDeduplicationService.ExistingWork;
 
 @Service
@@ -30,16 +29,19 @@ public class WorkPersistenceService {
 	private final GraphicContentDao graphicContentDao;
 	private final AuthorProfileService authorProfileService;
 	private final MediaPathService mediaPathService;
+	private final RawPayloadService rawPayloadService;
 
 	public WorkPersistenceService(WorkMetadataNormalizer normalizer, WorkDeduplicationService deduplicationService,
 			VideoDataDao videoDataDao, GraphicContentDao graphicContentDao,
-			AuthorProfileService authorProfileService, MediaPathService mediaPathService) {
+			AuthorProfileService authorProfileService, MediaPathService mediaPathService,
+			RawPayloadService rawPayloadService) {
 		this.normalizer = normalizer;
 		this.deduplicationService = deduplicationService;
 		this.videoDataDao = videoDataDao;
 		this.graphicContentDao = graphicContentDao;
 		this.authorProfileService = authorProfileService;
 		this.mediaPathService = mediaPathService;
+		this.rawPayloadService = rawPayloadService;
 	}
 
 	@Transactional
@@ -117,7 +119,7 @@ public class WorkPersistenceService {
 		if (hasText(metadata.getPublishTime())) entity.setPublishtime(metadata.getPublishTime());
 		if (hasText(metadata.getSourceUrl())) entity.setSourceurl(metadata.getSourceUrl());
 		if (hasText(metadata.getCoverUrl())) entity.setVideocover(metadata.getCoverUrl());
-		if (metadata.getRawMetadata() != null) entity.setJsonData(RawMetadataSanitizer.sanitize(metadata.getRawMetadata()));
+		if (metadata.getRawMetadata() != null) rawPayloadService.storeVideoRawPayload(entity, metadata.getRawMetadata());
 	}
 
 	private PersistenceResult persistGraphic(WorkMetadata metadata, ExistingWork existing) {
@@ -171,7 +173,7 @@ public class WorkPersistenceService {
 		if (hasText(metadata.getAuthorHomepage())) entity.setAuthorhomepage(metadata.getAuthorHomepage());
 		if (hasText(metadata.getPublishTime())) entity.setPublishtime(metadata.getPublishTime());
 		if (hasText(metadata.getSourceUrl())) entity.setSourceurl(metadata.getSourceUrl());
-		if (metadata.getRawMetadata() != null) entity.setJsonData(RawMetadataSanitizer.sanitize(metadata.getRawMetadata()));
+		if (metadata.getRawMetadata() != null) rawPayloadService.storeGraphicRawPayload(entity, metadata.getRawMetadata());
 	}
 
 	private static boolean hasText(String value) {

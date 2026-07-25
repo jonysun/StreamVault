@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.platform.DownloadResult;
@@ -21,6 +22,9 @@ import com.flower.spirit.platform.adapter.PlatformWorkAdapter;
 
 @Service
 public class MediaDownloadService {
+
+	@Autowired(required = false)
+	private Mp4FaststartService mp4FaststartService;
 
 	public DownloadOutcome download(PlatformWorkAdapter adapter, WorkMetadata metadata, WorkDownloadRequest request) {
 		if (adapter == null || metadata == null || request == null) {
@@ -47,6 +51,9 @@ public class MediaDownloadService {
 				throw new WorkMetadataValidationException(messageOrDefault(result.getMessage(), "download failed"));
 			}
 			adapter.postProcessDownloaded(metadata, staging, result.getMediaResources());
+			if (mp4FaststartService != null) {
+				mp4FaststartService.optimizeNewDownloads(result.getMediaResources(), staging);
+			}
 			List<ResourcePath> verified = verifyResources(result.getMediaResources(), staging);
 			Promotion promotion = promote(staging, target, request.isReplaceExisting());
 			List<WorkMediaResource> promoted = verified.stream()

@@ -27,9 +27,11 @@ import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.common.AjaxEntity;
@@ -42,6 +44,7 @@ import com.flower.spirit.entity.CollectDataDetailEntity;
 import com.flower.spirit.entity.CollectDataEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.dto.CollectTaskListItem;
 import com.flower.spirit.executor.DouYinExecutor;
 import com.flower.spirit.task.QuartzTaskService;
 import com.flower.spirit.utils.Aria2Util;
@@ -64,7 +67,6 @@ public class CollectDataService {
 
 	private static final Pattern PYTHON_EXCEPTION_PATTERN = Pattern.compile("(?m)^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\\s*(.+)$");
 	private static final Pattern PYTHON_FILE_PATTERN = Pattern.compile("File \"([^\"]+)\", line (\\d+), in ([^\\r\\n]+)");
-	private static final int FETCH_SNAPSHOT_MAX_LENGTH = 500000;
 	private static final Pattern SNAPSHOT_HAS_VIDEO_PATTERN = Pattern.compile("\"has_video_play_addr\"\\s*:\\s*(true|false)");
 
 	@Autowired
@@ -100,6 +102,27 @@ public class CollectDataService {
 	@Autowired
 	private DouyinCookieHealthService douyinCookieHealthService;
 
+	@Autowired
+	private CollectEnqueueService collectEnqueueService;
+
+	@Autowired
+	private CollectRunService collectRunService;
+
+	@Autowired
+	private RuntimeControlService runtimeControlService;
+
+	@Autowired
+	private SnapshotCodec snapshotCodec;
+
+	@Autowired
+	private CollectRunQueryService collectRunQueryService;
+
+	@Autowired
+	private RawPayloadService rawPayloadService;
+
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -108,6 +131,7 @@ public class CollectDataService {
 	private volatile long lastCollectTaskFinishedAt = 0L;
 	private final ThreadLocal<F2FailureDiagnosis> lastF2FailureDiagnosis = new ThreadLocal<>();
 	private final ThreadLocal<FetchRunContext> lastFetchRunContext = new ThreadLocal<>();
+	private final ThreadLocal<Long> activePersistentRunId = new ThreadLocal<>();
 
 	/**
 	 * 文件储存真实路径
@@ -133,27 +157,47 @@ public class CollectDataService {
     
 
     public AjaxEntity findPage(CollectDataEntity res) {
-        PageRequest pageRequest = PageRequest.of(res.getPageNo(), res.getPageSize());
-
-        Specification<CollectDataEntity> specification = (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-
-            if (res != null) {
-                if (StringUtil.isString(res.getTaskid())) {
-                    predicates.add(cb.like(root.get("taskid"), "%" + res.getTaskid() + "%"));
-                }
-                if (StringUtil.isString(res.getPlatform())) {
-                    predicates.add(cb.like(root.get("platform"), "%" + res.getPlatform() + "%"));
-                }
-            }
-
-            query.orderBy(cb.desc(root.get("id")));
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-
-        Page<CollectDataEntity> findAll = collectdDataDao.findAll(specification, pageRequest);
-        return new AjaxEntity(Global.ajax_success, "数据获取成功", findAll);
+		int pageNo = res == null ? 0 : Math.max(0, res.getPageNo());
+		int pageSize = res == null ? 25 : Math.min(Math.max(1, res.getPageSize()), 200);
+		String taskId = res == null || !StringUtil.isString(res.getTaskid()) ? null : "%" + res.getTaskid() + "%";
+		String platform = res == null || !StringUtil.isString(res.getPlatform()) ? null : "%" + res.getPlatform() + "%";
+		List<String> filters = new ArrayList<>();
+		List<Object> parameters = new ArrayList<>();
+		if (taskId != null) {
+			filters.add("taskid LIKE ?");
+			parameters.add(taskId);
+		}
+		if (platform != null) {
+			filters.add("platform LIKE ?");
+			parameters.add(platform);
+		}
+		String where = filters.isEmpty() ? "" : " WHERE " + String.join(" AND ", filters);
+		Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_data" + where, Long.class,
+				parameters.toArray());
+		String sql = "SELECT id, taskid, platform, taskname, taskstatus, createtime, endtime, count, carriedout, "
+				+ "originaladdress, monitoring, taskenabled, lastCheckTime, lastid, maxcur, omaxcur, generatenfo, "
+				+ "taskcron, lastfetchtime, lastfetchcount FROM biz_collect_data" + where
+				+ " ORDER BY id DESC LIMIT ? OFFSET ?";
+		List<Object> pageParameters = new ArrayList<>(parameters);
+		pageParameters.add(pageSize);
+		pageParameters.add((long) pageNo * pageSize);
+		List<CollectTaskListItem> items = jdbcTemplate.query(sql, (row, index) -> new CollectTaskListItem(
+				row.getInt("id"), row.getString("taskid"), row.getString("platform"), row.getString("taskname"),
+				row.getString("taskstatus"), row.getString("createtime"), row.getString("endtime"),
+				row.getString("count"), row.getString("carriedout"), row.getString("originaladdress"),
+				row.getString("monitoring"), row.getString("taskenabled"), row.getString("lastCheckTime"),
+				row.getString("lastid"), nullableInteger(row, "maxcur"), nullableInteger(row, "omaxcur"),
+				row.getString("generatenfo"), row.getString("taskcron"), row.getString("lastfetchtime"),
+				nullableInteger(row, "lastfetchcount")), pageParameters.toArray());
+		Page<CollectTaskListItem> page = new PageImpl<>(items, PageRequest.of(pageNo, pageSize),
+				total == null ? 0 : total);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);
     }
+
+	private Integer nullableInteger(java.sql.ResultSet row, String column) throws java.sql.SQLException {
+		int value = row.getInt(column);
+		return row.wasNull() ? null : value;
+	}
 
 
 	public AjaxEntity deleteCollectData(CollectDataEntity collectDataEntity) {
@@ -237,7 +281,8 @@ public class CollectDataService {
 					return new AjaxEntity(Global.ajax_success, "任务创建成功", null);
 
 				} catch (Exception e) {
-					logger.error("异常" + e.getMessage());
+					logger.error("[CollectTask] synchronous execution failed taskId={}", collectDataEntity.getId(), e);
+					throw new IllegalStateException("收藏任务执行失败: " + rootCauseMessage(e), e);
 				}
 
 			} else {
@@ -382,7 +427,8 @@ public class CollectDataService {
 							VideoDataEntity videoDataEntity = new VideoDataEntity(findVideoStreaming.get("cid"),
 									findVideoStreaming.get("title"), findVideoStreaming.get("desc"), "哔哩",
 									codir + "/" + filename + ".jpg", findVideoStreaming.get("video"), videounaddr, bvid);
-							videoDataEntity.setVideoinfo(JSONObject.toJSONString(findVideoStreaming));
+							rawPayloadService.storeVideoRawPayload(videoDataEntity,
+									JSONObject.toJSONString(findVideoStreaming));
 							logger.info(vt + (i + 1) + "下载流程结束");
 
 							JSONObject owner = JSONObject.parseObject(map.get("owner"));
@@ -413,7 +459,7 @@ public class CollectDataService {
 							    JSONObject videoInfoJson = new JSONObject();
 						        videoInfoJson.put("aid", aid);
 						        videoInfoJson.put("duration", duration);
-						        videoDataEntity.setVideoinfo(videoInfoJson.toJSONString());
+						        rawPayloadService.storeVideoRawPayload(videoDataEntity, videoInfoJson.toJSONString());
 							}
 							videoDataEntity.setVideoauthor(upname);
 							videoDataEntity.setAuthoruid(upmid);
@@ -470,8 +516,12 @@ public class CollectDataService {
 	}
 
 	public void createDyData(CollectDataEntity entity, String monitor) throws Exception {
+		createDyData(entity, monitor, null);
+	}
+
+	private void createDyData(CollectDataEntity entity, String monitor, Long persistentRunId) throws Exception {
 		sleepCollectTaskIntervalIfNeeded();
-		String runId = buildCollectRunId(entity);
+		String runId = persistentRunId == null ? buildCollectRunId(entity) : "collect-run-" + persistentRunId;
 		logger.info("[CollectTask] createDyData start runId={} id={} name={} monitor={} originaladdress={}",
 				runId, entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
 		String taskname = entity.getTaskname(); // 任务名称 作为tvshou.nfo元数据
@@ -496,12 +546,15 @@ public class CollectDataService {
 		Map<String, JSONObject> authorReconcileProfileCache = new HashMap<>();
 		if (allDYData != null) {
 			allDYData = sortDouyinItemsByPublishTime(allDYData);
+			if (persistentRunId != null) {
+				collectRunService.storeFetchedItems(persistentRunId, buildPersistentRunItems(allDYData));
+			}
 			entity.setLastfetchcount(allDYData.size());
 			entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
 			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData, fetchContext));
 			collectdDataDao.save(entity);
 			logFetchSnapshotItems(entity, fetchContext, allDYData, "sorted");
-			prefillDouyinAuthorProfile(allDYData, fetchContext, runId, authorReconcileProfileCache);
+			prefillDouyinAuthorProfile(allDYData, fetchContext, runId);
 		}
 		logger.info("[CollectTask] getDYData result runId={} id={} isNull={} size={}", runId, entity.getId(),
 				allDYData == null, allDYData == null ? 0 : allDYData.size());
@@ -514,15 +567,22 @@ public class CollectDataService {
 					diagnosis == null ? "用户作品列表抓取失败" : diagnosis.rootCause(),
 					getLastF2Context(diagnosis));
 			lastF2FailureDiagnosis.remove();
+			if (persistentRunId != null) {
+				throw new CollectFetchException(diagnosis == null ? "FETCH_DY_DATA_FAIL" : diagnosis.errorCode(),
+						diagnosis == null ? "用户作品列表抓取失败" : diagnosis.rootCause());
+			}
 		}
 		// System.out.println(allDYData.size());
 		String risk = "0";
 		if (allDYData != null) {
-			entity.setCount(String.valueOf(allDYData.size()));
-			entity.setTaskstatus("已开始处理");
-			collectdDataDao.save(entity);
+			if (persistentRunId == null) {
+				entity.setCount(String.valueOf(allDYData.size()));
+				entity.setTaskstatus("已开始处理");
+				collectdDataDao.save(entity);
+			}
 			JSONArray planItems = new JSONArray();
 			for (int i = 0; i < allDYData.size(); i++) {
+				assertCollectExecutionAllowed();
 				if (successThisRun >= targetSuccess) {
 					logger.info("[CollectTask] 已达到本轮目标成功数，停止本轮处理 targetSuccess={} successThisRun={}", targetSuccess, successThisRun);
 					break;
@@ -629,8 +689,10 @@ public class CollectDataService {
 						if (existingDetail == null) {
 							String carriedout = entity.getCarriedout() == null ? "1"
 									: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
-							entity.setCarriedout(carriedout);
-							collectdDataDao.save(entity);
+							if (persistentRunId == null) {
+								entity.setCarriedout(carriedout);
+								collectdDataDao.save(entity);
+							}
 						}
 						graphiccount++;
 						successThisRun++;
@@ -785,18 +847,12 @@ public class CollectDataService {
 					VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, "抖音", coverunaddr,
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
-					videoDataEntity.setJsonData(rawJsonData);
-					videoDataEntity.setVideoinfo(rawJsonData);
+					rawPayloadService.storeVideoRawPayload(videoDataEntity, rawJsonData);
 					videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 					String taskSourceId = fetchContext == null
 							? extractCanonicalTaskSourceId(entity.getOriginaladdress()) : fetchContext.sourceId();
 					DouyinAuthorSnapshot authorSnapshot = resolveDouyinAuthorSnapshot(aweme_detail, hybridData, null,
 							taskSourceId);
-					JSONObject profileUser = authorSnapshot.needsProfileEnrichment()
-							? authorProfileService.resolveDouyinProfileAuthorCached(authorReconcileProfileCache,
-									authorSnapshot.canonicalUid(), authorSnapshot.uniqueId())
-							: null;
-					authorSnapshot = resolveDouyinAuthorSnapshot(aweme_detail, hybridData, profileUser, taskSourceId);
 					String authorUidForSave = authorSnapshot.canonicalUid();
 					String uniqueId = authorSnapshot.uniqueId();
 					String authorUid = authorSnapshot.numericUid();
@@ -892,8 +948,10 @@ public class CollectDataService {
 					// 修改主体
 					String carriedout = entity.getCarriedout() == null ? "1"
 							: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
-					entity.setCarriedout(carriedout);
-					collectdDataDao.save(entity);
+					if (persistentRunId == null) {
+						entity.setCarriedout(carriedout);
+						collectdDataDao.save(entity);
+					}
 					videoaddcount++;
 					if (status.startsWith("已完成") || "图文已完成".equals(status)) {
 						successThisRun++;
@@ -913,16 +971,18 @@ public class CollectDataService {
 			}
 			planItems.add(0, buildRunSummaryPlanItem(runId, fetchContext, allDYData.size(), successThisRun,
 					failedThisRun, skippedThisRun, videoaddcount, graphiccount, targetSuccess));
-			entity.setLastplanitems(planItems.toJSONString());
+			entity.setLastplanitems(snapshotCodec().encodePlan(planItems, snapshotContext(runId, fetchContext)));
 			collectdDataDao.save(entity);
 		}
 		int totalCount = videoaddcount + graphiccount;
 		if (totalCount > 0) {
 		    sendNotify.sendMessage(totalCount, entity.getTaskname());
 		}
-		entity.setTaskstatus(resolveDouyinCollectStatus(risk, allDYData == null, successThisRun, failedThisRun, skippedThisRun));
-		entity.setEndtime(DateUtils.formatDateTime(new Date()));
-		collectdDataDao.save(entity);
+		if (persistentRunId == null) {
+			entity.setTaskstatus(resolveDouyinCollectStatus(risk, allDYData == null, successThisRun, failedThisRun, skippedThisRun));
+			entity.setEndtime(DateUtils.formatDateTime(new Date()));
+			collectdDataDao.save(entity);
+		}
 		markCollectTaskFinished();
 		System.gc();
 		logger.info("任务结束" + entity.getOriginaladdress());
@@ -948,86 +1008,36 @@ public class CollectDataService {
 	}
 
 	String buildFetchSnapshot(JSONArray allData, FetchRunContext context) {
-		JSONArray arr = new JSONArray();
+		JSONArray normalized = new JSONArray();
 		for (int i = 0; i < allData.size(); i++) {
 			JSONObject src = allData.getJSONObject(i);
-			String createTime = src.getString("create_time");
-			String publishTime = formatPublishTimeFromEpochSeconds(createTime);
-			JSONObject item = new JSONObject();
-			item.put("index", i + 1);
-			item.put("sortedIndex", i + 1);
-			if (context != null) {
-				item.put("runId", context.runId());
-				item.put("taskId", context.taskId());
-				item.put("taskName", context.taskName());
-				item.put("fetchMode", context.mode());
-				item.put("sourceId", context.sourceId());
-				item.put("maxc", context.maxc());
-				item.put("existingDetailCount", context.existingDetailCount());
-				item.put("successDetailCount", context.successDetailCount());
-				item.put("originaladdress", context.originaladdress());
-			}
-			item.put("aweme_id", src.getString("aweme_id"));
-			item.put("desc", src.getString("desc"));
-			item.put("create_time", createTime);
-			item.put("publish_time", publishTime);
-			item.put("type", src.getString("type"));
-			item.put("nickname", src.getString("nickname"));
-			item.put("uid", src.getString("uid"));
-			item.put("sec_uid", src.getString("sec_uid"));
-			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
-			arr.add(item);
+			if (src == null) continue;
+			JSONObject item = new JSONObject(src);
+			item.put("publish_time", formatPublishTimeFromEpochSeconds(src.getString("create_time")));
+			normalized.add(item);
 		}
-		return limitFetchSnapshot(arr, allData.size(), summarizeSnapshotMediaStats(arr));
+		return snapshotCodec().encodeFetch(normalized, snapshotContext(context == null ? null : context.runId(), context));
 	}
 
-	String limitFetchSnapshot(JSONArray arr, int totalCount, SnapshotMediaStats totalStats) {
-		String text = arr.toJSONString();
-		if (text.length() <= FETCH_SNAPSHOT_MAX_LENGTH) {
-			return text;
-		}
-		JSONArray limited = new JSONArray();
-		for (int i = 0; i < arr.size(); i++) {
-			limited.add(arr.getJSONObject(i));
-			if (limited.toJSONString().length() > FETCH_SNAPSHOT_MAX_LENGTH) {
-				limited.remove(limited.size() - 1);
-				break;
-			}
-		}
-		JSONObject marker = new JSONObject();
-		marker.put("snapshot_truncated", true);
-		marker.put("total_count", totalCount);
-		marker.put("video_total", totalStats == null ? 0 : totalStats.videoCount());
-		marker.put("image_total", totalStats == null ? 0 : totalStats.imageCount());
-		marker.put("included_count", limited.size());
-		marker.put("omitted_count", Math.max(0, totalCount - limited.size()));
-		limited.add(marker);
-		while (limited.toJSONString().length() > FETCH_SNAPSHOT_MAX_LENGTH && limited.size() > 1) {
-			limited.remove(limited.size() - 2);
-			marker.put("included_count", limited.size() - 1);
-			marker.put("omitted_count", Math.max(0, totalCount - (limited.size() - 1)));
-		}
-		return limited.toJSONString();
+	private SnapshotCodec snapshotCodec() {
+		return snapshotCodec == null
+				? new SnapshotCodec(SnapshotCodec.DEFAULT_MAX_BYTES, SnapshotCodec.DEFAULT_FORMAT_VERSION)
+				: snapshotCodec;
 	}
 
-	private SnapshotMediaStats summarizeSnapshotMediaStats(JSONArray arr) {
-		int videoCount = 0;
-		int imageCount = 0;
-		if (arr == null) {
-			return new SnapshotMediaStats(0, 0);
-		}
-		for (int i = 0; i < arr.size(); i++) {
-			JSONObject obj = arr.getJSONObject(i);
-			if (obj == null || obj.getBooleanValue("snapshot_truncated")) {
-				continue;
-			}
-			if (obj.getBooleanValue("has_video_play_addr")) {
-				videoCount++;
-			} else {
-				imageCount++;
-			}
-		}
-		return new SnapshotMediaStats(videoCount, imageCount);
+	private Map<String, Object> snapshotContext(String runId, FetchRunContext context) {
+		Map<String, Object> result = new HashMap<>();
+		if (runId != null) result.put("runId", runId);
+		if (context == null) return result;
+		result.put("taskId", context.taskId());
+		result.put("taskName", context.taskName());
+		result.put("fetchMode", context.mode());
+		result.put("sourceId", context.sourceId());
+		result.put("maxc", context.maxc());
+		result.put("existingDetailCount", context.existingDetailCount());
+		result.put("successDetailCount", context.successDetailCount());
+		result.put("originaladdress", context.originaladdress());
+		return result;
 	}
 
 	private String buildCollectRunId(CollectDataEntity entity) {
@@ -1065,10 +1075,70 @@ public class CollectDataService {
 		String logText = processLog == null ? "" : processLog.toString();
 		planItem.put("processlog", logText.length() > 12000 ? logText.substring(0, 12000) + "...(truncated)" : logText);
 		planItems.add(planItem);
+		Long persistentRunId = activePersistentRunId.get();
+		if (persistentRunId != null && planItem.getString("aweme_id") != null) {
+			collectRunService.updateItem(persistentRunId, planItem.getString("aweme_id"),
+					normalizeRunDecision(planItem.getString("decision")), runItemState(planItem.getString("decision"),
+							planItem.getString("status"), errorCode), errorCode, errorMsg);
+		}
 		logger.info("[CollectTask] plan item runId={} awemeId={} index={} mediaType={} decision={} status={} reason={} errorCode={} log={}",
 				planItem.getString("runId"), planItem.getString("aweme_id"), planItem.get("index"),
 				planItem.getString("mediatype"), planItem.getString("decision"), planItem.getString("status"),
 				trimForLog(planItem.getString("reason"), 160), errorCode, trimForLog(logText, 500));
+	}
+
+	private List<CollectRunFetchedItem> buildPersistentRunItems(JSONArray items) {
+		List<CollectRunFetchedItem> result = new ArrayList<>();
+		for (int i = 0; i < items.size(); i++) {
+			JSONObject item = items.getJSONObject(i);
+			String workId = item.getString("aweme_id");
+			if (workId == null || workId.isBlank()) continue;
+			JSONArray playAddress = item.getJSONArray("video_play_addr");
+			String mediaType = playAddress == null || playAddress.isEmpty() ? "image" : "video";
+			result.add(new CollectRunFetchedItem(i + 1, "douyin", workId,
+					firstNotBlank(item.getString("sec_uid"), item.getString("author_uid")),
+					item.getString("nickname"), item.getString("desc"),
+					firstNotBlank(item.getString("publish_time"), item.getString("create_time")), mediaType));
+		}
+		return result;
+	}
+
+	private String runItemState(String decision, String status, String errorCode) {
+		String combined = (valueOrEmpty(decision) + " " + valueOrEmpty(status)).toLowerCase();
+		if (errorCode != null || combined.contains("fail") || combined.contains("失败")) return "FAILED";
+		if (combined.contains("skip") || combined.contains("exist") || combined.contains("已存在")) return "SKIPPED";
+		return "COMPLETED";
+	}
+
+	static String normalizeRunDecision(String decision) {
+		String value = valueOrEmpty(decision).toLowerCase();
+		if (value.contains("retry") || value.contains("repair") || value.contains("missing")) return "RETRY";
+		if (value.contains("fail")) return "FAILED";
+		if (value.contains("skip") || value.contains("exist") || value.contains("blocked")) return "SKIP";
+		if (value.contains("download") || value.contains("success") || value.contains("local-hit")) return "NEW";
+		return "UNKNOWN";
+	}
+
+	private static String valueOrEmpty(String value) {
+		return value == null ? "" : value;
+	}
+
+	private String rootCauseMessage(Throwable error) {
+		Throwable root = error;
+		while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+		return root.getMessage() == null || root.getMessage().isBlank()
+				? root.getClass().getSimpleName() : root.getMessage();
+	}
+
+	private void assertCollectExecutionAllowed() {
+		PauseDecision collect = runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH);
+		if (!collect.allowed()) {
+			throw new CollectExecutionPausedException(collect.controlKey(), collect.reason());
+		}
+		PauseDecision download = runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD);
+		if (!download.allowed()) {
+			throw new CollectExecutionPausedException(download.controlKey(), download.reason());
+		}
 	}
 
 	private JSONObject buildRunSummaryPlanItem(String runId, FetchRunContext context, int fetchedCount,
@@ -1565,10 +1635,13 @@ public class CollectDataService {
 			planItem.put("processlog", processLog.toString());
 		}
 		planItems.add(planItem);
-		entity.setTaskstatus("执行失败(抓取异常)");
-		entity.setEndtime(DateUtils.formatDateTime(new Date()));
-		entity.setCount("0");
-		entity.setLastplanitems(planItems.toJSONString());
+		if (activePersistentRunId.get() == null) {
+			entity.setTaskstatus("执行失败(抓取异常)");
+			entity.setEndtime(DateUtils.formatDateTime(new Date()));
+			entity.setCount("0");
+		}
+		entity.setLastplanitems(snapshotCodec().encodePlan(planItems,
+				snapshotContext(fetchContext == null ? null : fetchContext.runId(), fetchContext)));
 		entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
 		collectdDataDao.save(entity);
 	}
@@ -1991,6 +2064,46 @@ public class CollectDataService {
 		return collectdDataDao.findById(taskId);
 	}
 
+	public boolean isCollectTaskEnabled(Integer taskId) {
+		return collectdDataDao.findById(taskId).map(task -> !"N".equalsIgnoreCase(task.getTaskenabled())).orElse(false);
+	}
+
+	public void executeQueuedCollectTask(Integer taskId, long runId) {
+		CollectDataEntity task = collectdDataDao.findById(taskId)
+				.orElseThrow(() -> new IllegalArgumentException("收藏任务不存在: " + taskId));
+		activePersistentRunId.set(runId);
+		try {
+			assertCollectExecutionAllowed();
+			if ("抖音".equals(task.getPlatform())) {
+				String cookie = platformCookieService.currentDouyinCookie("collect_worker");
+				if (cookie == null || cookie.isBlank()) {
+					throw new CollectFetchException("COOKIE_MISSING", "抖音 Cookie 为空，无法抓取作品列表");
+				}
+				String address = task.getOriginaladdress();
+				if (address == null || !(address.startsWith("post") || address.startsWith("like")
+						|| address.startsWith("fav-") || address.startsWith("recommend"))) {
+					throw new CollectFetchException("INVALID_SOURCE", "收藏任务地址格式不受支持");
+				}
+				createDyData(task, "Y", runId);
+				return;
+			}
+			collectRunService.storeFetchedItems(runId, List.of());
+			AjaxEntity result = submitCollectData(task, "Y");
+			if (result == null || !Global.ajax_success.equals(result.getResCode())) {
+				throw new CollectFetchException("COLLECT_EXECUTION_FAILED",
+						result == null ? "收藏任务未返回执行结果" : result.getMessage());
+			}
+		} catch (CollectFetchException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new IllegalStateException("收藏任务执行异常: " + rootCauseMessage(e), e);
+		} finally {
+			activePersistentRunId.remove();
+			lastF2FailureDiagnosis.remove();
+			lastFetchRunContext.remove();
+		}
+	}
+
 
 	public AjaxEntity execCollectData(CollectDataEntity collectDataEntity){
 		if (collectDataEntity == null || collectDataEntity.getId() == null) {
@@ -2000,28 +2113,15 @@ public class CollectDataService {
 		if (current.isPresent() && "N".equalsIgnoreCase(current.get().getTaskenabled())) {
 			return new AjaxEntity(Global.ajax_uri_error, "任务已暂停，请先开始任务", null);
 		}
-		//先判断 任务存不存在
-		boolean taskExists = quartzTaskService.isTaskExists(collectDataEntity.getId());
-		if(taskExists) {
-			//判断是否在运行
-			boolean taskRunning = quartzTaskService.isTaskRunning(collectDataEntity.getId());
-			if(!taskRunning) {
-				quartzTaskService.triggerTask(collectDataEntity.getId());
-			}else {
-				return new AjaxEntity(Global.ajax_success, "当前任务已在运行,请勿重复提交", null);
-			}
-			
-		}else {
-			//不存在 需要先查询 然后注册  在触发
-			Optional<CollectDataEntity> byId = collectdDataDao.findById(collectDataEntity.getId());
-			if(byId.isPresent()) {
-				CollectDataEntity db = byId.get();
-				quartzTaskService.scheduleTask(db);
-				sleepCollectTaskIntervalIfNeeded();
-				quartzTaskService.triggerTask(db.getId());
-			}
+		try {
+			CollectEnqueueResult result = collectEnqueueService.enqueueManual(collectDataEntity.getId());
+			String message = result.skippedPaused() ? "任务当前已暂停，本次已记录为跳过"
+					: result.inserted() ? "任务已进入持久队列" : "当前任务已在队列或运行中，请勿重复提交";
+			return new AjaxEntity(Global.ajax_success, message, result);
+		} catch (RuntimeException error) {
+			logger.error("[CollectManualEnqueue] failed taskId={}", collectDataEntity.getId(), error);
+			return new AjaxEntity(Global.ajax_uri_error, "任务入队失败: " + rootCauseMessage(error), null);
 		}
-		return new AjaxEntity(Global.ajax_success, "任务启动成功", null);
 	}
 
 	public AjaxEntity pauseCollectData(Integer id) {
@@ -2237,26 +2337,11 @@ public class CollectDataService {
 			row.put("taskName", task.getTaskname());
 			row.put("enabled", task.getTaskenabled());
 			row.put("monitoring", task.getMonitoring());
-			int totalVideo = 0;
-			int totalImage = 0;
-			try {
-				if (task.getLastfetchsnapshot() != null && !task.getLastfetchsnapshot().trim().isEmpty()) {
-					SnapshotMediaStats stats = parseSnapshotMediaStats(task.getLastfetchsnapshot());
-					totalVideo = stats.videoCount();
-					totalImage = stats.imageCount();
-				}
-			} catch (Exception e) {
-				SnapshotMediaStats fallbackStats = scanSnapshotMediaStats(task.getLastfetchsnapshot());
-				totalVideo = fallbackStats.videoCount();
-				totalImage = fallbackStats.imageCount();
-				String snapshot = task.getLastfetchsnapshot();
-				logger.warn("[AuthorStats] parse snapshot failed taskId={} length={} truncated={} fallbackVideo={} fallbackImage={} error={} preview={}",
-						task.getId(), snapshot == null ? 0 : snapshot.length(),
-						isSnapshotTruncated(snapshot), totalVideo, totalImage,
-						e.getClass().getSimpleName() + ": " + e.getMessage(), previewText(snapshot, 200));
-			}
 			long doneVideo = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "video", successStatuses);
 			long doneImage = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "image", successStatuses);
+			Map<String, Long> latestTotals = collectRunQueryService.latestMediaTotals(task.getId());
+			long totalVideo = Math.max(doneVideo, latestTotals.getOrDefault("video", 0L));
+			long totalImage = Math.max(doneImage, latestTotals.getOrDefault("graphic", 0L));
 			row.put("videoDone", doneVideo);
 			row.put("videoTotal", totalVideo);
 			row.put("imageDone", doneImage);
@@ -2266,8 +2351,7 @@ public class CollectDataService {
 		return result;
 	}
 
-	private void prefillDouyinAuthorProfile(JSONArray allDYData, FetchRunContext context, String runId,
-			Map<String, JSONObject> profileCache) {
+	private void prefillDouyinAuthorProfile(JSONArray allDYData, FetchRunContext context, String runId) {
 		if (allDYData == null || allDYData.isEmpty() || authorProfileService == null) {
 			return;
 		}
@@ -2277,10 +2361,6 @@ public class CollectDataService {
 		}
 		String taskSourceId = context == null ? null : context.sourceId();
 		DouyinAuthorSnapshot snapshot = resolveDouyinAuthorSnapshot(awemeDetail, null, null, taskSourceId);
-		JSONObject profileUser = snapshot.needsProfileEnrichment()
-				? authorProfileService.resolveDouyinProfileAuthorCached(profileCache, snapshot.canonicalUid(), snapshot.uniqueId())
-				: null;
-		snapshot = resolveDouyinAuthorSnapshot(awemeDetail, null, profileUser, taskSourceId);
 		String authorUidForSave = snapshot.canonicalUid();
 		if (authorUidForSave == null) {
 			logger.info("[CollectTask] author prefill skipped runId={} reason=no-author-uid uniqueId={} nickname={}",
@@ -2294,30 +2374,15 @@ public class CollectDataService {
 	}
 
 	static SnapshotMediaStats parseSnapshotMediaStats(String snapshot) {
-		JSONArray arr = JSONArray.parseArray(snapshot);
-		int videoCount = 0;
-		int imageCount = 0;
-		for (int i = 0; i < arr.size(); i++) {
-			JSONObject obj = arr.getJSONObject(i);
-			if (obj.getBooleanValue("snapshot_truncated")) {
-				Integer videoTotal = obj.getInteger("video_total");
-				Integer imageTotal = obj.getInteger("image_total");
-				if (videoTotal != null && imageTotal != null) {
-					return new SnapshotMediaStats(Math.max(0, videoTotal), Math.max(0, imageTotal));
-				}
-				continue;
-			}
-			if (obj.getBooleanValue("has_video_play_addr")) {
-				videoCount++;
-			} else {
-				imageCount++;
-			}
-		}
-		return new SnapshotMediaStats(videoCount, imageCount);
+		SnapshotReadResult result = new SnapshotCodec(SnapshotCodec.DEFAULT_MAX_BYTES,
+				SnapshotCodec.DEFAULT_FORMAT_VERSION).read(snapshot);
+		if (!result.available()) throw new IllegalArgumentException(result.warningMessage());
+		return new SnapshotMediaStats(result.videoTotal(), result.graphicTotal());
 	}
 
 	static boolean isSnapshotTruncated(String snapshot) {
-		return snapshot != null && (snapshot.contains("...(truncated)") || snapshot.contains("\"snapshot_truncated\":true"));
+		return snapshot != null && (snapshot.contains("...(truncated)")
+				|| snapshot.contains("\"snapshot_truncated\":true") || snapshot.contains("\"truncated\":true"));
 	}
 
 	static SnapshotMediaStats scanSnapshotMediaStats(String snapshot) {

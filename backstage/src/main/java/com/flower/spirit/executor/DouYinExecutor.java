@@ -176,7 +176,7 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, originaladdress, null);
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, originaladdress);
 			graphicContentEntity.setAuthor(authorSnapshot.nickname);
 			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
 			graphicContentEntity.setSecuid(authorSnapshot.secUid);
@@ -305,7 +305,7 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, type, profileCache);
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, type);
 			graphicContentEntity.setAuthor(authorSnapshot.nickname);
 			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
 			graphicContentEntity.setSecuid(authorSnapshot.secUid);
@@ -369,8 +369,7 @@ public class DouYinExecutor {
 		return file.exists() && file.isFile() && file.length() > 0;
 	}
 
-	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, String fallbackName, String taskAddress,
-			Map<String, JSONObject> profileCache) {
+	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, String fallbackName, String taskAddress) {
 		JSONObject author = awemeDetail == null ? null : awemeDetail.getJSONObject("author");
 		AuthorSnapshot snapshot = new AuthorSnapshot();
 		snapshot.nickname = author == null ? fallbackName : firstNotBlank(author.getString("nickname"), fallbackName);
@@ -380,52 +379,10 @@ public class DouYinExecutor {
 		snapshot.avatar = DouUtil.extractAvatar(author);
 		snapshot.signature = author == null ? null : author.getString("signature");
 		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid, extractTaskUid(taskAddress));
-		JSONObject profileUser = null;
-		if (needsProfileEnrichment(snapshot)) {
-			if (staticAuthorProfileService == null) {
-				JSONObject rawProfile = DouUtil.fetchUserProfile(snapshot.authorUid);
-				if (rawProfile == null) {
-					rawProfile = DouUtil.fetchUserProfileByUniqueId(snapshot.uniqueId);
-				}
-				profileUser = extractProfileUser(rawProfile);
-			} else {
-				profileUser = staticAuthorProfileService.resolveDouyinProfileAuthorCached(profileCache,
-						snapshot.authorUid, snapshot.uniqueId);
-			}
-		}
-		if (profileUser != null) {
-			snapshot.nickname = firstNotBlank(profileUser.getString("nickname"), snapshot.nickname);
-			snapshot.secUid = firstNotBlank(profileUser.getString("sec_uid"), snapshot.secUid);
-			snapshot.uniqueId = firstNotBlank(profileUser.getString("unique_id"), snapshot.uniqueId);
-			snapshot.uid = firstNotBlank(profileUser.getString("uid"), snapshot.uid);
-			snapshot.avatar = firstNotBlank(DouUtil.extractAvatar(profileUser), snapshot.avatar);
-			snapshot.signature = firstNotBlank(profileUser.getString("signature"), snapshot.signature);
-		}
 		snapshot.authorUid = AuthorProfileService.preferDouyinAuthorUid(snapshot.secUid,
 				firstNotBlank(snapshot.authorUid, extractTaskUid(taskAddress)));
 		snapshot.secUid = snapshot.authorUid;
 		return snapshot;
-	}
-
-	private static boolean needsProfileEnrichment(AuthorSnapshot snapshot) {
-		return snapshot != null && (snapshot.authorUid != null || snapshot.uniqueId != null)
-				&& (snapshot.uniqueId == null || snapshot.uniqueId.trim().isEmpty()
-						|| snapshot.nickname == null || snapshot.nickname.trim().isEmpty()
-						|| snapshot.avatar == null || snapshot.avatar.trim().isEmpty()
-						|| snapshot.signature == null || snapshot.signature.trim().isEmpty());
-	}
-
-	private static JSONObject extractProfileUser(JSONObject profile) {
-		if (profile == null) return null;
-		JSONObject user = profile.getJSONObject("user");
-		if (user != null) return user;
-		JSONObject data = profile.getJSONObject("data");
-		if (data != null) {
-			JSONObject dataUser = data.getJSONObject("user");
-			if (dataUser != null) return dataUser;
-			return data;
-		}
-		return profile;
 	}
 
 	private static String firstNotBlank(String first, String second) {

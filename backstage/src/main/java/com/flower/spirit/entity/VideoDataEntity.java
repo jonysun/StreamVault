@@ -221,14 +221,11 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	}
 
 	public String getVideoinfo() {
-		return isString(videoinfo) ? videoinfo : jsonData;
+		return videoinfo;
 	}
 
 	public void setVideoinfo(String videoinfo) {
 		this.videoinfo = videoinfo;
-		if (!isString(this.jsonData)) {
-			this.jsonData = videoinfo;
-		}
 	}
 
 	public String getPublishtime() {
@@ -359,10 +356,6 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 		this.jsonData = jsonData;
 	}
 
-	private boolean isString(String value) {
-		return value != null && !value.trim().isEmpty();
-	}
-	
 	/**
 	 * 排除的平台（用于查询时排除特定平台的视频，不持久化到数据库）
 	 */

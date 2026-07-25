@@ -158,7 +158,7 @@ public class Global {
 
 	public static boolean hlsPrivacyEnabled = true;
 
-	public static int hlsSegmentSeconds = 4;
+	public static int hlsSegmentSeconds = 2;
 
 	public static volatile boolean backgroundTaskPauseAll = false;
 

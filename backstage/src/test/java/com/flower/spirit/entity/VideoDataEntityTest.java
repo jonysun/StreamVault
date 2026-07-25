@@ -21,21 +21,21 @@ class VideoDataEntityTest {
 	}
 
 	@Test
-	void setVideoinfoBackfillsCanonicalJsonData() {
+	void legacyVideoinfoDoesNotBackfillCanonicalJsonData() {
 		VideoDataEntity video = new VideoDataEntity();
 
 		video.setVideoinfo("{\"aid\":\"1\"}");
 
-		assertThat(video.getJsonData()).isEqualTo("{\"aid\":\"1\"}");
+		assertThat(video.getJsonData()).isNull();
 		assertThat(video.getVideoinfo()).isEqualTo("{\"aid\":\"1\"}");
 	}
 
 	@Test
-	void getVideoinfoFallsBackToJsonData() {
+	void legacyVideoinfoDoesNotMirrorCanonicalJsonData() {
 		VideoDataEntity video = new VideoDataEntity();
 
 		video.setJsonData("{\"aid\":\"2\"}");
 
-		assertThat(video.getVideoinfo()).isEqualTo("{\"aid\":\"2\"}");
+		assertThat(video.getVideoinfo()).isNull();
 	}
 }

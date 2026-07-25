@@ -50,6 +50,9 @@ public class DouyinWorkMaintenanceService {
 	@Autowired
 	private PlatformCookieService platformCookieService;
 
+	@Autowired
+	private RawPayloadService rawPayloadService;
+
 	public AjaxEntity redownloadVideo(Integer id) {
 		if (id == null) {
 			return new AjaxEntity(Global.ajax_uri_error, "视频ID不能为空", null);
@@ -141,13 +144,18 @@ public class DouyinWorkMaintenanceService {
 				}
 				JSONObject hybrid = null;
 				if (isBlank(video.getJsonData())) {
-					hybrid = fetchHybridWithFallbacks(oldSource, originalAddress, sourceUrl);
-					if (hybrid != null) {
-						String json = hybrid.toJSONString();
-						video.setJsonData(json);
-						video.setVideoinfo(json);
+					String legacyPayload = rawPayload().loadVideoRawPayload(video);
+					if (!isBlank(legacyPayload)) {
+						rawPayload().storeVideoRawPayload(video, legacyPayload);
 						jsonUpdated++;
 						changed = true;
+					} else {
+						hybrid = fetchHybridWithFallbacks(oldSource, originalAddress, sourceUrl);
+						if (hybrid != null) {
+							rawPayload().storeVideoRawPayload(video, hybrid.toJSONString());
+							jsonUpdated++;
+							changed = true;
+						}
 					}
 				}
 				if (hybrid != null) {
@@ -281,8 +289,7 @@ public class DouyinWorkMaintenanceService {
 		target.setOriginaladdress(source);
 		target.setVideoprivacy(oldPrivacy);
 		target.setVideotag(oldTag);
-		target.setVideoinfo(jsonData);
-		target.setJsonData(jsonData);
+		rawPayload().storeVideoRawPayload(target, jsonData);
 		target.setPublishtime(DateUtils.normalizePublishTime(createTime));
 		target.setSourceurl(DouyinSourceUrlUtil.video(awemeId));
 		target.setVideoauthor(nickname);
@@ -382,6 +389,10 @@ public class DouyinWorkMaintenanceService {
 		changed = setIfBlankVideoAuthor(video, author.getString("sec_uid"), author.getString("unique_id"),
 				author.getString("nickname"), DouUtil.extractAvatar(author)) || changed;
 		return changed;
+	}
+
+	private RawPayloadService rawPayload() {
+		return rawPayloadService == null ? new RawPayloadService() : rawPayloadService;
 	}
 
 	private boolean applyGraphicAuthorFromHybrid(GraphicContentEntity item, JSONObject hybrid) {

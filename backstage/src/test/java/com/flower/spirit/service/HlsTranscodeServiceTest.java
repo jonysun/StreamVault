@@ -2,11 +2,15 @@ package com.flower.spirit.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -16,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flower.spirit.config.Global;
@@ -23,6 +28,9 @@ import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.VideoDataEntity;
 
 class HlsTranscodeServiceTest {
+
+	@TempDir
+	Path tempDir;
 
 	private boolean previousEnabled;
 	private int previousConcurrency;
@@ -145,6 +153,65 @@ class HlsTranscodeServiceTest {
 		release.countDown();
 		waitForIdle(service);
 		service.shutdown();
+	}
+
+	@Test
+	void publishesCompletedHlsDirectoryOnlyAfterValidation() throws Exception {
+		Path input = Files.writeString(tempDir.resolve("source.mp4"), "video");
+		HlsTranscodeService service = new HlsTranscodeService() {
+			@Override
+			protected int executeTranscodeCommand(List<String> command) throws java.io.IOException {
+				assertFalse(Files.exists(tempDir.resolve("hls")));
+				Path playlist = Path.of(command.get(command.size() - 1));
+				String pattern = command.get(command.indexOf("-hls_segment_filename") + 1);
+				Files.writeString(Path.of(pattern.replace("%05d", "00000")), "segment");
+				Files.writeString(playlist, "#EXTM3U\n#EXTINF:2.0,\nseg_00000.ts\n");
+				return 0;
+			}
+		};
+		prepareVideo(service, 31, input);
+
+		service.transcodeOne(31);
+
+		assertTrue(Files.isRegularFile(tempDir.resolve("hls/index.m3u8")));
+		assertTrue(Files.isRegularFile(tempDir.resolve("hls/seg_00000.ts")));
+		assertTrue(stagingDirectories().isEmpty());
+		service.shutdown();
+	}
+
+	@Test
+	void failedTranscodeKeepsExistingDirectoryAndRemovesStaging() throws Exception {
+		Path input = Files.writeString(tempDir.resolve("source-fail.mp4"), "video");
+		Files.createDirectories(tempDir.resolve("hls"));
+		Files.writeString(tempDir.resolve("hls/old.marker"), "old");
+		HlsTranscodeService service = new HlsTranscodeService() {
+			@Override
+			protected int executeTranscodeCommand(List<String> command) {
+				return 7;
+			}
+		};
+		prepareVideo(service, 32, input);
+
+		assertThrows(IllegalStateException.class, () -> service.transcodeOne(32));
+
+		assertTrue(Files.isRegularFile(tempDir.resolve("hls/old.marker")));
+		assertTrue(stagingDirectories().isEmpty());
+		service.shutdown();
+	}
+
+	private void prepareVideo(HlsTranscodeService service, int id, Path input) {
+		VideoDataDao dao = mock(VideoDataDao.class);
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(id);
+		video.setVideoaddr(input.toString());
+		when(dao.findById(id)).thenReturn(Optional.of(video));
+		ReflectionTestUtils.setField(service, "videoDataDao", dao);
+	}
+
+	private List<Path> stagingDirectories() throws Exception {
+		try (var paths = Files.list(tempDir)) {
+			return paths.filter(path -> path.getFileName().toString().startsWith(".hls-staging-")).toList();
+		}
 	}
 
 	private void prepareVideos(HlsTranscodeService service, int... ids) {

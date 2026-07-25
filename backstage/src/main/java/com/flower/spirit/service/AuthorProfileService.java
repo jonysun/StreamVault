@@ -19,6 +19,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -38,10 +39,13 @@ import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformDefinition;
 import com.flower.spirit.platform.WorkMetadataValidationException;
+import com.flower.spirit.service.transaction.AuthorWriteTransaction;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
 
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Path;
 
 @Service
 public class AuthorProfileService {
@@ -61,22 +65,39 @@ public class AuthorProfileService {
 	@Autowired
 	private GraphicContentDao graphicContentDao;
 
-	@Transactional
+	@Autowired
+	private SqliteWriteRetrier sqliteWriteRetrier;
+
+	@Autowired
+	private AuthorWriteTransaction authorWriteTransaction;
+
+	@Autowired
+	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
+
+	@Autowired
+	private RawPayloadService rawPayloadService;
+
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName,
 			String avatar, String homepage) {
 		upsertAuthor(platform, authoruid, username, displayName, avatar, homepage, null);
 	}
 
-	@Transactional
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar,
 			String homepage, String signature) {
+		AuthorObservation observation = executeAuthorWrite(() -> upsertAuthorInCurrentTransaction(platform, authoruid,
+				username, displayName, avatar, homepage, signature));
+		authorEnrichmentQueueService.enqueueAfterCommitIfIncomplete(observation);
+	}
+
+	private AuthorObservation upsertAuthorInCurrentTransaction(String platform, String authoruid, String username,
+			String displayName, String avatar, String homepage, String signature) {
 		if (platform == null || platform.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
-			return;
+			return null;
 		}
 		String safePlatform = platform.trim();
 		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
 		if (safeUid == null) {
-			return;
+			return null;
 		}
 		String platformKey = PlatformCatalog.findByAlias(safePlatform)
 				.map(PlatformDefinition::getKey)
@@ -112,19 +133,25 @@ public class AuthorProfileService {
 		if (saved.getId() != null && displayName != null && !displayName.trim().isEmpty()) {
 			upsertNameHistory(saved.getId(), displayName.trim(), now);
 		}
+		return authorObservation(saved);
 	}
 
-	@Transactional
 	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage) {
 		upsertCanonicalAuthor(platformKey, legacyPlatform, authoruid, username, displayName, avatar, homepage, null);
 	}
 
-	@Transactional
 	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage, String signature) {
+		AuthorObservation observation = executeAuthorWrite(() -> upsertCanonicalAuthorInCurrentTransaction(platformKey,
+				legacyPlatform, authoruid, username, displayName, avatar, homepage, signature));
+		authorEnrichmentQueueService.enqueueAfterCommitIfIncomplete(observation);
+	}
+
+	private AuthorObservation upsertCanonicalAuthorInCurrentTransaction(String platformKey, String legacyPlatform,
+			String authoruid, String username, String displayName, String avatar, String homepage, String signature) {
 		if (platformKey == null || platformKey.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
-			return;
+			return null;
 		}
 		Optional<PlatformDefinition> definition = PlatformCatalog.findByAlias(platformKey);
 		if (definition.isEmpty()) {
@@ -137,7 +164,7 @@ public class AuthorProfileService {
 						? platformKey.trim() : legacyPlatform.trim());
 		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
 		if (safeUid == null) {
-			return;
+			return null;
 		}
 		Optional<AuthorProfileEntity> existing = firstProfile(
 				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(canonicalKey, safeUid));
@@ -180,6 +207,21 @@ public class AuthorProfileService {
 		if (saved.getId() != null && displayName != null && !displayName.trim().isEmpty()) {
 			upsertNameHistory(saved.getId(), displayName.trim(), now);
 		}
+		return authorObservation(saved);
+	}
+
+	private <T> T executeAuthorWrite(java.util.function.Supplier<T> authorWrite) {
+		// A nested SQLite writer would contend with its own outer write transaction.
+		if (TransactionSynchronizationManager.isActualTransactionActive()) {
+			return authorWrite.get();
+		}
+		return sqliteWriteRetrier.execute(() -> authorWriteTransaction.execute(authorWrite));
+	}
+
+	private AuthorObservation authorObservation(AuthorProfileEntity profile) {
+		return profile == null ? null : new AuthorObservation(profile.getPlatformkey(), profile.getAuthoruid(),
+				profile.getUsername(), profile.getDisplayname(), profile.getAvatar(), profile.getSignature(),
+				profile.getHomepage());
 	}
 
 	private void upsertNameHistory(Integer authorProfileId, String displayName, Date now) {
@@ -314,19 +356,28 @@ public class AuthorProfileService {
 	}
 
 	public AjaxEntity findProfileSummary(String platform, String authoruid, String authorusername, String author) {
+		return findProfileSummary(null, platform, authoruid, authorusername, author);
+	}
+
+	public AjaxEntity findProfileSummary(String platformKey, String platform, String authoruid, String authorusername,
+			String author) {
 		String safePlatform = trimToNull(platform);
-		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
+		String safePlatformKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, safePlatform);
+		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatformKey, authoruid, authoruid);
 		String safeUsername = AuthorIdentityUtil.canonicalUsername(authorusername, null);
-		AuthorProfileEntity profile = findBestProfile(safePlatform, safeUid, safeUsername, author);
+		AuthorProfileEntity profile = findBestProfile(safePlatformKey, safePlatform, safeUid, safeUsername, author);
 		List<String> nameAliases = authorNameAliases(profile, author);
-		Specification<VideoDataEntity> videoSpec = buildVideoAuthorSpec(safePlatform, safeUid, safeUsername, author, nameAliases);
-		Specification<GraphicContentEntity> graphicSpec = buildGraphicAuthorSpec(safePlatform, safeUid, safeUsername, author, nameAliases);
+		Specification<VideoDataEntity> videoSpec = buildVideoAuthorSpec(safePlatformKey, safePlatform, safeUid,
+				safeUsername, author, nameAliases);
+		Specification<GraphicContentEntity> graphicSpec = buildGraphicAuthorSpec(safePlatformKey, safePlatform, safeUid,
+				safeUsername, author, nameAliases);
 		long videoCount = videoDataDao.count(videoSpec);
 		long graphicCount = graphicContentDao.count(graphicSpec);
 		AdminAuthorProfileSummary summary = new AdminAuthorProfileSummary();
 		if (profile != null) {
 			summary.setId(profile.getId());
 			summary.setPlatform(profile.getPlatform());
+			summary.setPlatformkey(profile.getPlatformkey());
 			summary.setAuthoruid(profile.getAuthoruid());
 			summary.setUsername(profile.getUsername());
 			summary.setDisplayname(profile.getDisplayname());
@@ -336,11 +387,12 @@ public class AuthorProfileService {
 			summary.setUpdatetime(profile.getUpdatetime());
 		}
 		summary.setPlatform(firstNotBlank(summary.getPlatform(), safePlatform));
-		String summaryUid = AuthorIdentityUtil.canonicalAuthorUid(summary.getPlatform(), summary.getAuthoruid(), safeUid);
+		summary.setPlatformkey(firstNotBlank(summary.getPlatformkey(), safePlatformKey));
+		String summaryUid = AuthorIdentityUtil.canonicalAuthorUid(summary.getPlatformkey(), summary.getAuthoruid(), safeUid);
 		summary.setAuthoruid(summaryUid);
 		summary.setUsername(AuthorIdentityUtil.canonicalUsername(summary.getUsername(), safeUsername));
 		summary.setDisplayname(firstNotBlank(summary.getDisplayname(), author));
-		summary.setHomepage(AuthorIdentityUtil.sanitizeHomepage(summary.getPlatform(), summaryUid, summary.getHomepage()));
+		summary.setHomepage(AuthorIdentityUtil.sanitizeHomepage(summary.getPlatformkey(), summaryUid, summary.getHomepage()));
 		summary.setVideoCount(videoCount);
 		summary.setGraphicCount(graphicCount);
 		summary.setTotalCount(videoCount + graphicCount);
@@ -349,18 +401,25 @@ public class AuthorProfileService {
 
 	public AjaxEntity findProfileWorks(String platform, String authoruid, String authorusername, String author,
 			String type, Integer pageNo, Integer pageSize) {
+		return findProfileWorks(null, platform, authoruid, authorusername, author, type, pageNo, pageSize);
+	}
+
+	public AjaxEntity findProfileWorks(String platformKey, String platform, String authoruid, String authorusername,
+			String author, String type, Integer pageNo, Integer pageSize) {
 		String safePlatform = trimToNull(platform);
-		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
+		String safePlatformKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, safePlatform);
+		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatformKey, authoruid, authoruid);
 		String safeUsername = AuthorIdentityUtil.canonicalUsername(authorusername, null);
 		int actualPageNo = pageNo == null ? 0 : Math.max(0, pageNo.intValue());
 		int actualPageSize = pageSize == null ? 24 : Math.max(1, Math.min(100, pageSize.intValue()));
 		int fetchSize = Math.max(actualPageSize, (actualPageNo + 1) * actualPageSize);
 		List<AdminMediaFeedItem> items = new ArrayList<>();
 		long totalElements = 0;
-		AuthorProfileEntity profile = findBestProfile(safePlatform, safeUid, safeUsername, author);
+		AuthorProfileEntity profile = findBestProfile(safePlatformKey, safePlatform, safeUid, safeUsername, author);
 		List<String> nameAliases = authorNameAliases(profile, author);
 		if (!"graphic".equalsIgnoreCase(type)) {
-			Page<VideoDataEntity> videos = videoDataDao.findAll(buildVideoAuthorSpec(safePlatform, safeUid, safeUsername, author, nameAliases),
+			Page<VideoDataEntity> videos = videoDataDao.findAll(buildVideoAuthorSpec(safePlatformKey, safePlatform, safeUid,
+					safeUsername, author, nameAliases),
 					PageRequest.of(0, fetchSize, mediaSort()));
 			totalElements += videos.getTotalElements();
 			for (VideoDataEntity video : videos.getContent()) {
@@ -368,7 +427,8 @@ public class AuthorProfileService {
 			}
 		}
 		if (!"video".equalsIgnoreCase(type)) {
-			Page<GraphicContentEntity> graphics = graphicContentDao.findAll(buildGraphicAuthorSpec(safePlatform, safeUid, safeUsername, author, nameAliases),
+			Page<GraphicContentEntity> graphics = graphicContentDao.findAll(buildGraphicAuthorSpec(safePlatformKey, safePlatform,
+					safeUid, safeUsername, author, nameAliases),
 					PageRequest.of(0, fetchSize, mediaSort()));
 			totalElements += graphics.getTotalElements();
 			for (GraphicContentEntity graphic : graphics.getContent()) {
@@ -399,6 +459,7 @@ public class AuthorProfileService {
 		item.setId(video.getId());
 		item.setMediaKey("video:" + video.getId());
 		item.setVideoid(video.getVideoid());
+		item.setPlatformkey(video.getPlatformkey());
 		item.setPlatform(video.getVideoplatform());
 		item.setAuthor(video.getVideoauthor());
 		item.setAuthoruid(video.getAuthoruid());
@@ -432,6 +493,7 @@ public class AuthorProfileService {
 		item.setId(graphic.getId());
 		item.setMediaKey("graphic:" + graphic.getId());
 		item.setVideoid(graphic.getVideoid());
+		item.setPlatformkey(graphic.getPlatformkey());
 		item.setPlatform(graphic.getPlatform());
 		item.setAuthor(graphic.getAuthor());
 		item.setAuthoruid(graphic.getAuthoruid());
@@ -477,7 +539,9 @@ public class AuthorProfileService {
 		if (item == null) {
 			return;
 		}
-		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(item.getPlatform(), item.getAuthoruid(), item.getSecuid());
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(
+				AuthorIdentityUtil.canonicalPlatformKey(item.getPlatformkey(), item.getPlatform()),
+				item.getAuthoruid(), item.getSecuid());
 		String canonicalUsername = AuthorIdentityUtil.canonicalUsername(item.getAuthorusername(), item.getUniqueid());
 		item.setAuthoruid(canonicalUid);
 		item.setSecuid(canonicalUid);
@@ -487,9 +551,8 @@ public class AuthorProfileService {
 			return;
 		}
 		String platform = item.getPlatform().trim();
-		String platformKey = PlatformCatalog.findByAlias(platform)
-				.map(PlatformDefinition::getKey)
-				.orElseGet(() -> platform.toLowerCase(Locale.ROOT));
+		String platformKey = AuthorIdentityUtil.canonicalPlatformKey(item.getPlatformkey(), platform);
+		item.setPlatformkey(platformKey);
 		findPreferredProfile(platformKey, platform, canonicalUid)
 				.map(AuthorProfileEntity::getDisplayname)
 				.filter(name -> name != null && !name.trim().isEmpty())
@@ -535,30 +598,31 @@ public class AuthorProfileService {
 		return url.substring(0, end);
 	}
 
-	private AuthorProfileEntity findBestProfile(String platform, String authoruid, String authorusername, String author) {
+	private AuthorProfileEntity findBestProfile(String platformKey, String platform, String authoruid,
+			String authorusername, String author) {
 		String safePlatform = trimToNull(platform);
-		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatform, authoruid, authoruid);
+		String safePlatformKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, safePlatform);
+		String safeUid = AuthorIdentityUtil.canonicalAuthorUid(safePlatformKey, authoruid, authoruid);
 		String safeUsername = AuthorIdentityUtil.canonicalUsername(authorusername, null);
 		String safeAuthor = trimToNull(author);
-		if (AuthorIdentityUtil.isDouyinPlatform(safePlatform) && safeUid == null) {
+		if (AuthorIdentityUtil.isDouyinPlatform(safePlatformKey) && safeUid == null) {
 			return null;
 		}
 		if (safeUid == null && safeUsername == null && safeAuthor == null) {
 			return null;
 		}
-		if (safePlatform != null && safeUid != null) {
-			String platformKey = PlatformCatalog.findByAlias(safePlatform)
-					.map(PlatformDefinition::getKey)
-					.orElseGet(() -> safePlatform.toLowerCase(Locale.ROOT));
-			Optional<AuthorProfileEntity> byUid = findPreferredProfile(platformKey, safePlatform, safeUid);
+		if (safePlatformKey != null && safeUid != null) {
+			Optional<AuthorProfileEntity> byUid = findPreferredProfile(safePlatformKey, safePlatform, safeUid);
 			if (byUid.isPresent()) {
 				return byUid.get();
 			}
 		}
 		List<AuthorProfileEntity> candidates = authorProfileDao.findAll((root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
-			if (safePlatform != null) {
-				predicates.add(cb.equal(root.get("platform"), safePlatform));
+			Predicate platformPredicate = buildCanonicalPlatformPredicate(cb, root.get("platformkey"),
+					root.get("platform"), safePlatformKey, safePlatform);
+			if (platformPredicate != null) {
+				predicates.add(platformPredicate);
 			}
 			List<Predicate> identity = new ArrayList<>();
 			if (safeUid != null) {
@@ -608,18 +672,21 @@ public class AuthorProfileService {
 		}
 	}
 
-	private Specification<VideoDataEntity> buildVideoAuthorSpec(String platform, String authoruid, String authorusername, String author,
-			List<String> nameAliases) {
+	private Specification<VideoDataEntity> buildVideoAuthorSpec(String platformKey, String platform, String authoruid,
+			String authorusername, String author, List<String> nameAliases) {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
-			if (trimToNull(platform) != null) {
-				predicates.add(cb.equal(root.get("videoplatform"), platform.trim()));
+			String canonicalPlatformKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, platform);
+			Predicate platformPredicate = buildCanonicalPlatformPredicate(cb, root.get("platformkey"),
+					root.get("videoplatform"), canonicalPlatformKey, platform);
+			if (platformPredicate != null) {
+				predicates.add(platformPredicate);
 			}
 			List<Predicate> identity = new ArrayList<>();
-			String safeUid = AuthorIdentityUtil.canonicalAuthorUid(platform, authoruid, authoruid);
+			String safeUid = AuthorIdentityUtil.canonicalAuthorUid(canonicalPlatformKey, authoruid, authoruid);
 			String safeUsername = AuthorIdentityUtil.canonicalUsername(authorusername, null);
 			String safeAuthor = trimToNull(author);
-			boolean douyin = AuthorIdentityUtil.isDouyinPlatform(platform);
+			boolean douyin = AuthorIdentityUtil.isDouyinPlatform(canonicalPlatformKey);
 			if (safeUid != null) {
 				identity.add(cb.equal(root.get("authoruid"), safeUid));
 				identity.add(cb.equal(root.get("secuid"), safeUid));
@@ -646,18 +713,21 @@ public class AuthorProfileService {
 		};
 	}
 
-	private Specification<GraphicContentEntity> buildGraphicAuthorSpec(String platform, String authoruid, String authorusername, String author,
-			List<String> nameAliases) {
+	private Specification<GraphicContentEntity> buildGraphicAuthorSpec(String platformKey, String platform, String authoruid,
+			String authorusername, String author, List<String> nameAliases) {
 		return (root, query, cb) -> {
 			List<Predicate> predicates = new ArrayList<>();
-			if (trimToNull(platform) != null) {
-				predicates.add(cb.equal(root.get("platform"), platform.trim()));
+			String canonicalPlatformKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, platform);
+			Predicate platformPredicate = buildCanonicalPlatformPredicate(cb, root.get("platformkey"),
+					root.get("platform"), canonicalPlatformKey, platform);
+			if (platformPredicate != null) {
+				predicates.add(platformPredicate);
 			}
 			List<Predicate> identity = new ArrayList<>();
-			String safeUid = AuthorIdentityUtil.canonicalAuthorUid(platform, authoruid, authoruid);
+			String safeUid = AuthorIdentityUtil.canonicalAuthorUid(canonicalPlatformKey, authoruid, authoruid);
 			String safeUsername = AuthorIdentityUtil.canonicalUsername(authorusername, null);
 			String safeAuthor = trimToNull(author);
-			boolean douyin = AuthorIdentityUtil.isDouyinPlatform(platform);
+			boolean douyin = AuthorIdentityUtil.isDouyinPlatform(canonicalPlatformKey);
 			if (safeUid != null) {
 				identity.add(cb.equal(root.get("authoruid"), safeUid));
 				identity.add(cb.equal(root.get("secuid"), safeUid));
@@ -682,6 +752,24 @@ public class AuthorProfileService {
 			predicates.add(identity.isEmpty() ? cb.disjunction() : cb.or(identity.toArray(new Predicate[0])));
 			return cb.and(predicates.toArray(new Predicate[0]));
 		};
+	}
+
+	private Predicate buildCanonicalPlatformPredicate(CriteriaBuilder cb, Path<String> platformKeyPath,
+			Path<String> legacyPlatformPath, String platformKey, String legacyPlatform) {
+		String canonicalKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, legacyPlatform);
+		if (canonicalKey == null) {
+			return null;
+		}
+		Predicate canonical = cb.equal(cb.lower(platformKeyPath), canonicalKey);
+		Predicate blankPlatformKey = cb.or(
+				cb.isNull(platformKeyPath),
+				cb.equal(cb.trim(platformKeyPath), ""));
+		List<String> aliases = PlatformCatalog.aliases(canonicalKey, legacyPlatform).stream()
+				.map(value -> value.toLowerCase(Locale.ROOT))
+				.distinct()
+				.toList();
+		Predicate legacyAlias = aliases.isEmpty() ? cb.disjunction() : cb.lower(legacyPlatformPath).in(aliases);
+		return cb.or(canonical, cb.and(blankPlatformKey, legacyAlias));
 	}
 
 	private Sort mediaSort() {
@@ -719,17 +807,22 @@ public class AuthorProfileService {
 
 	public WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, JSONObject observedAuthor,
 			Map<String, JSONObject> profileCache) {
+		return reconcileDouyinVideo(video, observedAuthor, profileCache, false);
+	}
+
+	private WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, JSONObject observedAuthor,
+			Map<String, JSONObject> profileCache, boolean allowExternalProfile) {
 		if (video == null || !isDouyinPlatform(video.getVideoplatform())) {
 			return WorkAuthorReconcileResult.skipped();
 		}
 		String before = videoIdentityFingerprint(video);
 		String legacyUid = trimToNull(video.getAuthoruid());
-		JSONObject localAuthor = observedAuthor == null ? findStoredAuthor(video.getJsonData()) : observedAuthor;
+		JSONObject localAuthor = observedAuthor == null ? findStoredAuthor(rawPayload().loadVideoRawPayload(video)) : observedAuthor;
 		applyVideoAuthorFromAuthor(video, localAuthor);
 
 		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
 		boolean localResolved = localAuthor != null && canonicalUid != null;
-		JSONObject profileAuthor = needsProfileEnrichment(video, canonicalUid)
+		JSONObject profileAuthor = allowExternalProfile && needsProfileEnrichment(video, canonicalUid)
 				? resolveDouyinProfileAuthorCached(profileCache, canonicalUid, video.getAuthorusername()) : null;
 		applyVideoAuthorFromAuthor(video, profileAuthor);
 		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
@@ -754,11 +847,20 @@ public class AuthorProfileService {
 	}
 
 	public WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, Map<String, JSONObject> profileCache) {
-		return reconcileDouyinVideo(video, null, profileCache);
+		return reconcileDouyinVideo(video, null, profileCache, true);
+	}
+
+	private RawPayloadService rawPayload() {
+		return rawPayloadService == null ? new RawPayloadService() : rawPayloadService;
 	}
 
 	public WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic, JSONObject observedAuthor,
 			Map<String, JSONObject> profileCache) {
+		return reconcileDouyinGraphic(graphic, observedAuthor, profileCache, false);
+	}
+
+	private WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic, JSONObject observedAuthor,
+			Map<String, JSONObject> profileCache, boolean allowExternalProfile) {
 		if (graphic == null || !isDouyinPlatform(graphic.getPlatform())) {
 			return WorkAuthorReconcileResult.skipped();
 		}
@@ -769,7 +871,7 @@ public class AuthorProfileService {
 
 		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
 		boolean localResolved = localAuthor != null && canonicalUid != null;
-		JSONObject profileAuthor = needsProfileEnrichment(graphic, canonicalUid)
+		JSONObject profileAuthor = allowExternalProfile && needsProfileEnrichment(graphic, canonicalUid)
 				? resolveDouyinProfileAuthorCached(profileCache, canonicalUid, graphic.getAuthorusername()) : null;
 		applyGraphicAuthorFromAuthor(graphic, profileAuthor);
 		canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(graphic.getPlatform(), graphic.getAuthoruid(), graphic.getSecuid());
@@ -795,7 +897,7 @@ public class AuthorProfileService {
 
 	public WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic,
 			Map<String, JSONObject> profileCache) {
-		return reconcileDouyinGraphic(graphic, null, profileCache);
+		return reconcileDouyinGraphic(graphic, null, profileCache, true);
 	}
 
 	private void upsertReconciledDouyinAuthor(String canonicalUid, String username, String workNickname, String avatar,
@@ -1110,12 +1212,20 @@ public class AuthorProfileService {
 	}
 
 	private Optional<AuthorProfileEntity> findPreferredProfile(String platformKey, String platform, String authorUid) {
+		String canonicalKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, platform);
 		Optional<AuthorProfileEntity> byKey = firstProfile(
-				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(platformKey, authorUid));
+				authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(canonicalKey, authorUid));
 		if (byKey.isPresent()) {
 			return byKey;
 		}
-		return firstProfile(authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc(platform, authorUid));
+		for (String alias : PlatformCatalog.aliases(canonicalKey, platform)) {
+			Optional<AuthorProfileEntity> legacy = firstProfile(
+					authorProfileDao.findAllByPlatformAndAuthoruidOrderByUpdatetimeDescIdDesc(alias, authorUid));
+			if (legacy.isPresent()) {
+				return legacy;
+			}
+		}
+		return Optional.empty();
 	}
 
 	private Optional<AuthorProfileEntity> firstProfile(List<AuthorProfileEntity> profiles) {

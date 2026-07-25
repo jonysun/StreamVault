@@ -1843,7 +1843,7 @@
 <script src="../static/js/layer/layer.js" type="text/javascript"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
 <script src="../static/js/admin-feed/feed-store.js"></script>
-<script src="../static/js/admin-feed/feed-player-pool.js"></script>
+<script src="../static/js/admin-feed/feed-playback-controller.js"></script>
 <script src="../static/js/admin-feed/feed-profile.js"></script>
 <script src="../static/js/admin-feed/feed-controller.js"></script>
 <script src="../static/js/admin-feed/feed-management.js"></script>
@@ -1854,6 +1854,9 @@
     var feedMediaType = 'mixed';
     var feedAuthor = '';
     var feedAuthorUid = '';
+    var feedAuthorPlatformKey = '';
+    var feedNextCursor = '';
+    var feedUseKeyset = true;
     var feedMuted = true;
     var feedSourceMode = 'prefer_hls';
     var feedAuthorSet = {};
@@ -2210,26 +2213,39 @@
         isLoading = true;
         $('#loading').show();
         
-		var option = mediaHomeMode === 'feed'
-			? buildFeedRequestOption(page, feedPageSize)
-			: { pageNo: page + 1, pageSize: 25, sortField: 'publishtime', sortOrder: 'desc' };
-        option.lite = '1';
+		var useCursorFeed = shouldUseFeedCursor();
+		var option = useCursorFeed
+			? buildFeedCursorRequestOption(feedPageSize)
+			: (mediaHomeMode === 'feed'
+				? buildFeedRequestOption(page, feedPageSize)
+				: { pageNo: page + 1, pageSize: 25, sortField: 'publishtime', sortOrder: 'desc' });
+        if (!useCursorFeed) {
+            option.lite = '1';
+        }
         var listRequestStart = nowMs();
         
-        $.post(getFeedListEndpoint(), option, function(data, status) {
+        var listRequest = useCursorFeed
+            ? $.get('/admin/api/media-feed', option)
+            : $.post(getFeedListEndpoint(), option);
+        listRequest.done(function(data, status) {
             if(data.resCode === "000001") {
-                var list = data.record.content;
+                var record = data.record || {};
+                var list = useCursorFeed ? (record.items || []) : (record.content || []);
                 console.log('[AdminIndexPerf] list response', {
                     elapsedMs: Math.round(nowMs() - listRequestStart),
                     page: page,
                     mode: mediaHomeMode,
                     count: list.length,
-                    last: data.record.last,
+                    cursorMode: useCursorFeed,
+                    hasMore: useCursorFeed ? !!record.hasMore : !record.last,
                     status: status
                 });
                 
                 // 检查是否还有更多数据
-                hasMore = list.length > 0 && !data.record.last;
+                if (useCursorFeed) {
+                    feedNextCursor = record.nextCursor || '';
+                }
+                hasMore = list.length > 0 && (useCursorFeed ? !!record.hasMore : !record.last);
                 
                 if(list.length > 0) {
                     if (mediaHomeMode === 'feed') {
@@ -2289,8 +2305,14 @@
                         }
                     });
                 }
+            } else if (useCursorFeed && String(data.message || '').indexOf('keyset media feed is disabled') >= 0) {
+                feedUseKeyset = false;
+                isLoading = false;
+                $('#loading').hide();
+                findList(page);
+                return;
             }
-            
+
             isLoading = false;
             $('#loading').hide();
         }).fail(function(xhr, status, error) {
@@ -2322,8 +2344,8 @@
         var type = safeSlide.type === 'video' ? 'video' : 'image';
         var url = escapeHtml(safeSlide.url || fallbackUrl || '/static/images/noimage.jpg');
         if (type === 'video') {
-            return '<video class="feed-graphic-media" src="' + url + '" playsinline webkit-playsinline autoplay preload="auto"'
-                + (feedMuted ? ' muted' : '') + '></video>';
+            return '<div class="feed-video-host feed-graphic-video-host" data-src="' + url
+                + '" data-fallback="' + url + '" data-playurl="' + url + '" data-mp4="' + url + '"></div>';
         }
         return '<img class="feed-graphic-media" src="' + url + '" alt="">';
     }
@@ -2350,14 +2372,14 @@
         }
     }
 
-    function buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, authorUid) {
+    function buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, authorUid, platformKey) {
         var safeTitle = isPrivate ? '******' : escapeHtml(String(titleValue || 'Untitled'));
         var safePlatform = isPrivate ? '****' : escapeHtml(String(platformValue || 'Unknown'));
         var safeAuthor = isPrivate ? '****' : escapeHtml(String(authorValue || 'Unknown'));
         var timeText = escapeHtml(formatTime(timeValue));
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(authorUid || '') + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(authorUid || '') + '" data-platformkey="' + escapeHtml(platformKey || '') + '">' + safeAuthor + '</span>';
         }
         var html = '<div class="feed-overlay">';
         html += '<div class="feed-title">' + safeTitle + '</div>';
@@ -2371,10 +2393,11 @@
             return '';
         }
         item = item || {};
-        var authorUid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+		var identityPlatform = item.platformkey || item.platform || item.videoplatform;
+		var authorUid = canonicalFeedAuthorUid(identityPlatform, item.profileAuthorUid, item.secuid, item.authoruid);
         var authorUsername = item.authorusername || item.uniqueid || '';
         var rawAuthor = authorValue || item.author || item.videoauthor || '';
-        var pendingDouyinAuthor = isDouyinFeedPlatform(item.platform || item.videoplatform) && !authorUid;
+		var pendingDouyinAuthor = isDouyinFeedPlatform(identityPlatform) && !authorUid;
         if (!rawAuthor && !authorUid && !authorUsername && !item.authoravatar && !item.authorAvatar) {
             return '';
         }
@@ -2386,7 +2409,8 @@
         var html = '<div class="feed-author-action-rail">';
         if (rawAuthor || authorUid || authorUsername || avatar) {
             html += '<button type="button" class="feed-author-avatar-btn" title="' + (pendingDouyinAuthor ? '作者 UID 待修复' : '作者主页') + '"'
-				+ (pendingDouyinAuthor ? ' disabled' : '')
+                + (pendingDouyinAuthor ? ' disabled' : '')
+				+ ' data-platformkey="' + escapeHtml(item.platformkey || '') + '"'
                 + ' data-platform="' + escapeHtml(item.platform || item.videoplatform || '') + '"'
                 + ' data-author="' + escapeHtml(authorName || '') + '"'
                 + ' data-authoruid="' + escapeHtml(authorUid) + '"'
@@ -2407,15 +2431,16 @@
     function buildFeedOriginalUrl(item) {
         item = item || {};
         var platform = item.platform || item.videoplatform || '';
+		var identityPlatform = item.platformkey || platform;
         var fallback = safeExternalUrl(item.sourceurl || item.sourceUrl || item.originaladdress || item.originalAddress || '');
-        if (!isDouyinFeedPlatform(platform)) {
+		if (!isDouyinFeedPlatform(identityPlatform)) {
             return fallback;
         }
         var workId = (item.videoid || '').toString().trim();
         var isGraphic = item.type === 'graphic'
             || (!item.type && Array.isArray(item.slides) && item.slides.length > 0);
         if (isGraphic) {
-            var authorUid = canonicalFeedAuthorUid(platform, item.profileAuthorUid, item.secuid, item.authoruid);
+			var authorUid = canonicalFeedAuthorUid(identityPlatform, item.profileAuthorUid, item.secuid, item.authoruid);
             return authorUid && workId
                 ? 'https://www.douyin.com/user/' + encodeURIComponent(authorUid) + '?modal_id=' + encodeURIComponent(workId)
                 : '';
@@ -2486,7 +2511,8 @@
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
-        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, item.authoruid || '');
+        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue,
+            item.authoruid || '', item.platformkey || '');
         html += buildFeedAuthorActionHtml(item, isPrivate, authorValue);
         html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '"></div>';
         html += '<div class="feed-bottom-hover-zone"></div>';
@@ -2500,7 +2526,8 @@
         var titleValue = item.title || item.videoname || 'Untitled';
         var platformValue = item.platform || item.videoplatform || 'Unknown';
         var authorValue = item.displayAuthor || item.author || item.videoauthor || 'Unknown';
-        item.authoruid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+		item.authoruid = canonicalFeedAuthorUid(item.platformkey || item.platform || item.videoplatform,
+			item.profileAuthorUid, item.secuid, item.authoruid);
         item.secuid = item.authoruid;
         item.profileAuthorUid = item.authoruid;
         var timeValue = item.publishTime || item.publishtime || item.createTime || item.createtime;
@@ -2527,7 +2554,7 @@
         html += '<div class="feed-title">' + safeTitle + '</div>';
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.authoruid || '') + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.authoruid || '') + '" data-platformkey="' + escapeHtml(item.platformkey || '') + '">' + safeAuthor + '</span>';
         }
         html += '<div class="feed-meta">' + safePlatform + ' | ' + timeText + authorChip + '</div>';
         html += '</div>';
@@ -2553,6 +2580,9 @@
         if (!stage) {
             return;
         }
+        if (feedActiveVideo && stage.contains(feedActiveVideo) && feedPlayerPoolManager) {
+            feedPlayerPoolManager.stageAll();
+        }
         stage.querySelectorAll('video').forEach(function(video) {
             try { video.pause(); } catch (e) {}
         });
@@ -2560,6 +2590,10 @@
         stage.setAttribute('data-slide-index', String(nextIndex));
         stage.setAttribute('data-slide-type', slides[nextIndex] ? slides[nextIndex].type : 'image');
         stage.innerHTML = buildGraphicSlideMediaHtml(slides[nextIndex], host.getAttribute('data-cover') || '/static/images/noimage.jpg');
+        if ((!slides[nextIndex] || slides[nextIndex].type !== 'video') && feedVideoPool[0]
+            && feedVideoPool[0].parentNode && feedVideoPool[0].parentNode.id === 'feedPlayerStaging') {
+            detachPoolVideo(feedVideoPool[0]);
+        }
         Array.prototype.slice.call(host.querySelectorAll('.feed-graphic-progress span')).forEach(function(dot, i) {
             dot.classList.toggle('active', i === nextIndex);
         });
@@ -2587,17 +2621,9 @@
             index = 0;
         }
         var slide = host.querySelector('.feed-graphic-slide');
-        var video = slide ? slide.querySelector('video') : null;
-        if (video) {
-            video.muted = feedMuted;
-            if (video._graphicEndedHandler) {
-                video.removeEventListener('ended', video._graphicEndedHandler);
-            }
-            video._graphicEndedHandler = function() {
-                goNextGraphicSlide(itemEl, true);
-            };
-            video.addEventListener('ended', video._graphicEndedHandler);
-            playActiveGraphicVideo(itemEl, video, true);
+        var videoHost = slide ? slide.querySelector('.feed-graphic-video-host') : null;
+        if (videoHost) {
+            mountGraphicSlideVideo(itemEl, videoHost);
             return;
         }
         itemEl._graphicSlideTimer = setTimeout(function() {
@@ -2605,63 +2631,28 @@
         }, 4000);
     }
 
-    function playActiveGraphicVideo(itemEl, video, allowMutedFallback) {
-        if (!itemEl || !video || itemEl.getAttribute('data-graphic-running') !== '1') {
+    function mountGraphicSlideVideo(itemEl, host) {
+        if (!itemEl || !host || itemEl.getAttribute('data-graphic-running') !== '1') {
             return;
         }
-        var requestToken = (video._graphicPlayToken || 0) + 1;
-        video._graphicPlayToken = requestToken;
-        video.autoplay = true;
-        video.playsInline = true;
+        ensureFeedVideoPool();
+        var video = feedVideoPool[0];
+        if (video.parentNode !== host) {
+            if (video.parentNode) {
+                video.parentNode.removeChild(video);
+            }
+            host.appendChild(video);
+        }
+        var itemIndex = Number(itemEl.getAttribute('data-abs-index') || '-1');
+        var slideIndex = Number((host.parentNode && host.parentNode.getAttribute('data-slide-index')) || '0');
+        var src = host.getAttribute('data-src') || '';
+        video._poolRole = 'current';
+        video.setAttribute('data-playback-kind', 'graphic');
+        video.setAttribute('data-feed-index', String(itemIndex));
+        video.setAttribute('data-media-key', 'graphic:' + itemIndex + ':slide:' + slideIndex);
+        video.setAttribute('data-fallback', src);
         video.muted = feedMuted;
-
-        function isCurrentRequest() {
-            return video._graphicPlayToken === requestToken
-                && video.isConnected
-                && itemEl.getAttribute('data-graphic-running') === '1';
-        }
-
-        function attempt() {
-            if (!isCurrentRequest()) {
-                return;
-            }
-            var playPromise;
-            try {
-                playPromise = video.play();
-            } catch (error) {
-                handleFailure(error);
-                return;
-            }
-            if (playPromise && typeof playPromise.catch === 'function') {
-                playPromise.catch(handleFailure);
-            }
-        }
-
-        function handleFailure(error) {
-            if (!isCurrentRequest()) {
-                return;
-            }
-            if (allowMutedFallback && !video.muted && error && error.name === 'NotAllowedError') {
-                feedMuted = true;
-                video.muted = true;
-                persistFeedMuted();
-                updateFeedButtons();
-                renderAllFeedControls();
-                playActiveGraphicVideo(itemEl, video, false);
-                return;
-            }
-            if (!video._graphicCanPlayRetry && video.readyState < 3) {
-                video._graphicCanPlayRetry = true;
-                video.addEventListener('canplay', function() {
-                    video._graphicCanPlayRetry = false;
-                    playActiveGraphicVideo(itemEl, video, false);
-                }, { once: true });
-            } else if (error) {
-                console.warn('[AdminIndex] graphic video autoplay failed', error.name || error.message || error);
-            }
-        }
-
-        attempt();
+        setupVideoSource(video, src, true);
     }
 
     function goNextGraphicSlide(itemEl, allowAutoNext) {
@@ -2725,9 +2716,9 @@
         }
         itemEl.setAttribute('data-graphic-running', '0');
         clearGraphicSlideshowTimer(itemEl);
-        itemEl.querySelectorAll('.feed-graphic-slide video').forEach(function(video) {
-            try { video.pause(); } catch (e) {}
-        });
+        if (feedActiveVideo && itemEl.contains(feedActiveVideo) && feedPlayerPoolManager) {
+            feedPlayerPoolManager.stageAll();
+        }
     }
 
     function bindGraphicSlideshowControls() {
@@ -3125,6 +3116,12 @@
             return;
         }
 
+        var sourceToken = (videoEl._sourceRequestToken || 0) + 1;
+        videoEl._sourceRequestToken = sourceToken;
+        function isCurrentSource() {
+            return videoEl._sourceRequestToken === sourceToken;
+        }
+
         if (feedPlayerPoolManager) {
             feedPlayerPoolManager.markLoading(videoEl);
         }
@@ -3156,7 +3153,7 @@
         }
 
         function fallbackToMp4(reason) {
-            if (!fallback || fallback === src) {
+            if (!isCurrentSource() || !fallback || fallback === src) {
                 return;
             }
             feedMetrics.fallbackToMp4++;
@@ -3215,6 +3212,9 @@
             bindStallGuard(videoEl);
 
             hls.on(window.Hls.Events.MANIFEST_PARSED, function() {
+                if (!isCurrentSource()) {
+                    return;
+                }
                 markVideoPerf(videoEl, 'manifest-parsed');
                 if (autoPlayWhenReady) {
                     playWithSync(videoEl);
@@ -3222,6 +3222,9 @@
             });
 
             videoEl._frameWatchTimer = setTimeout(function() {
+                if (!isCurrentSource()) {
+                    return;
+                }
                 var noFrame = !(videoEl.videoWidth > 0 && videoEl.videoHeight > 0);
                 var stuck = videoEl.currentTime > 0.8 && noFrame;
                 if (stuck) {
@@ -3230,6 +3233,10 @@
             }, 4500);
 
             videoEl.addEventListener('loadeddata', function onLoadedData() {
+                if (!isCurrentSource()) {
+                    videoEl.removeEventListener('loadeddata', onLoadedData);
+                    return;
+                }
                 if (videoEl._frameWatchTimer) {
                     clearTimeout(videoEl._frameWatchTimer);
                     videoEl._frameWatchTimer = null;
@@ -3237,6 +3244,9 @@
                 videoEl.removeEventListener('loadeddata', onLoadedData);
             });
             hls.on(window.Hls.Events.ERROR, function(event, data) {
+                if (!isCurrentSource()) {
+                    return;
+                }
                 if (data && data.fatal) {
                     markVideoPerf(videoEl, 'hls-fatal', { type: data.type, details: data.details });
                     console.warn('[HLS] fatal error', data.type, data.details);
@@ -3502,14 +3512,24 @@
         }
         ensureFeedVideoPool();
         feedPlayerPoolManager.mountWindow(items, activeIndex, direction);
+        (items || []).forEach(function(item) {
+            var itemIndex = Number(item.getAttribute('data-abs-index') || '-1');
+            if (Math.abs(itemIndex - activeIndex) !== 1) {
+                return;
+            }
+            var host = item.querySelector('.feed-video-host');
+            if (host) {
+                var source = resolveFeedSource(host, host.getAttribute('data-src') || '');
+                prefetchStreamSource(source.src);
+            }
+        });
     }
 
     function ensureFeedVideoPool() {
         if (!feedPlayerPoolManager) {
-            feedPlayerPoolManager = new window.AdminFeed.PlayerPool({
-                maxPlayers: 4,
+            feedPlayerPoolManager = new window.AdminFeed.FeedPlaybackController({
                 mount: mountPoolVideo,
-                release: scheduleReleasePoolVideo
+                release: detachPoolVideo
             });
         }
         feedVideoPool = feedPlayerPoolManager.ensure();
@@ -3549,6 +3569,8 @@
         video._adminFeedReady = false;
         video._framePrimedFor = '';
         video._framePrimeToken = (video._framePrimeToken || 0) + 1;
+        video._sourceRequestToken = (video._sourceRequestToken || 0) + 1;
+        video._playRequestToken = (video._playRequestToken || 0) + 1;
         try { video.load(); } catch (e) {}
     }
 
@@ -3573,6 +3595,7 @@
         var src = host.getAttribute('data-src') || '';
         var fallback = host.getAttribute('data-fallback') || '';
         video.setAttribute('data-fallback', fallback);
+        video.setAttribute('data-playback-kind', 'feed');
         video.setAttribute('data-feed-index', String(itemIndex));
         video.setAttribute('data-media-key', host.getAttribute('data-media-key') || '');
         video._framePrimeToken = (video._framePrimeToken || 0) + 1;
@@ -3581,88 +3604,6 @@
         }
         setupVideoSource(video, src, autoplayNow);
         video.muted = feedMuted;
-        if (!autoplayNow) {
-            prefetchStreamSource(src);
-            warmPoolVideo(video, src);
-            primeVideoFrame(video);
-        }
-    }
-
-    function primeVideoFrame(video) {
-        if (!video || video._poolRole === 'current') {
-            return;
-        }
-        if (video._framePrimedFor === (video.getAttribute('data-bound-src') || '')) {
-            return;
-        }
-        var primeRole = video._poolRole || '';
-        var primeSrc = video.getAttribute('data-bound-src') || '';
-        var primeKey = video.getAttribute('data-media-key') || '';
-        var primeIndex = video.getAttribute('data-feed-index') || '';
-        var primeToken = (video._framePrimeToken || 0) + 1;
-        video._framePrimeToken = primeToken;
-        var once = function() {
-            video.removeEventListener('loadeddata', once);
-            video.removeEventListener('canplay', once);
-            if (video._framePrimeToken !== primeToken) {
-                return;
-            }
-            if (video._poolRole === 'current' || (video._poolRole || '') !== primeRole) {
-                return;
-            }
-            if ((video.getAttribute('data-bound-src') || '') !== primeSrc ||
-                (video.getAttribute('data-media-key') || '') !== primeKey ||
-                (video.getAttribute('data-feed-index') || '') !== primeIndex) {
-                return;
-            }
-            try {
-                video.pause();
-                video.currentTime = 0;
-                video._framePrimedFor = video.getAttribute('data-bound-src') || '';
-            } catch (e) {}
-        };
-        video.addEventListener('loadeddata', once);
-        video.addEventListener('canplay', once);
-        var p = video.play();
-        if (p && typeof p.catch === 'function') {
-            p.catch(function() {});
-        }
-    }
-
-    function warmPoolVideo(video, src) {
-        if (!video || !src) {
-            return;
-        }
-        var role = video._poolRole || '';
-        if (role !== 'next' && role !== 'next2') {
-            return;
-        }
-        if (!/\.m3u8(\?|$)/i.test(src)) {
-            if (role === 'next') {
-                try { video.load(); } catch (e) {}
-            }
-            return;
-        }
-        if (role === 'next' && video._hlsIns && typeof video._hlsIns.startLoad === 'function') {
-            try { video._hlsIns.startLoad(-1); } catch (e) {}
-            setTimeout(function() {
-                if (video._poolRole === 'next' && video._hlsIns && typeof video._hlsIns.startLoad === 'function') {
-                    try { video._hlsIns.startLoad(-1); } catch (e) {}
-                }
-            }, 260);
-        }
-    }
-
-    function scheduleReleasePoolVideo(video, delayMs) {
-        if (!video) {
-            return;
-        }
-        if (video._releaseTimer) {
-            clearTimeout(video._releaseTimer);
-        }
-        video._releaseTimer = setTimeout(function() {
-            detachPoolVideo(video);
-        }, delayMs);
     }
 
     function prefetchStreamSource(src) {
@@ -3711,26 +3652,6 @@
         }).finally(function() {
             delete feedPrewarmPending[src];
         });
-    }
-
-    function releaseFarFeedPlayers(items, activeIndex, direction) {
-        var keepMin = direction === 'up' ? activeIndex - 2 : activeIndex - 1;
-        var keepMax = direction === 'up' ? activeIndex + 1 : activeIndex + 2;
-        for (var i = 0; i < feedVideoPool.length; i++) {
-            var video = feedVideoPool[i];
-            if (!video || !video.parentNode) {
-                continue;
-            }
-            var ownerIndex = Number(video.getAttribute('data-feed-index') || '-1');
-            if (ownerIndex >= 0 && ownerIndex >= keepMin && ownerIndex <= keepMax) {
-                continue;
-            }
-            if (ownerIndex === keepMin - 1 || ownerIndex === keepMax + 1) {
-                scheduleReleasePoolVideo(video, 1200);
-                continue;
-            }
-            detachPoolVideo(video);
-        }
     }
 
     function updateFeedSourceBadge(videoEl, type) {
@@ -3924,6 +3845,7 @@
             e.preventDefault();
             e.stopPropagation();
             openFeedAuthorProfile({
+				platformkey: this.getAttribute('data-platformkey') || '',
                 platform: this.getAttribute('data-platform') || '',
                 author: this.getAttribute('data-author') || '',
                 authoruid: this.getAttribute('data-authoruid') || '',
@@ -3969,6 +3891,7 @@
             clearFeedAuthorContext();
             feedAuthor = ($(this).data('author') || '').toString().trim();
             feedAuthorUid = ($(this).data('authoruid') || '').toString().trim();
+            feedAuthorPlatformKey = ($(this).data('platformkey') || '').toString().trim();
             $('#feedAuthorDrawer').removeClass('open');
             updateFeedButtons();
             reloadFeed();
@@ -3982,6 +3905,7 @@
             }
             feedAuthor = author;
             feedAuthorUid = ($(this).data('authoruid') || '').toString().trim();
+            feedAuthorPlatformKey = ($(this).data('platformkey') || '').toString().trim();
             updateFeedButtons();
             reloadFeed();
         });
@@ -4190,6 +4114,7 @@
 
     function resetFeedRenderState() {
         page = 0;
+        feedNextCursor = '';
         hasMore = true;
         isLoading = false;
         document.querySelectorAll('#videoFeed .feed-item').forEach(function(item) {
@@ -4237,11 +4162,6 @@
                     appendFeedAuthorOptions(items);
                     updateFeedButtons();
                     switchFeedTo(targetIndex, { animate: false, forcePlay: true });
-                    requestAnimationFrame(function() {
-                        setTimeout(function() {
-                            playFeedItemByAbsIndex(targetIndex, 0);
-                        }, 40);
-                    });
                 }
             });
         }
@@ -4464,9 +4384,9 @@
         if (!item || !feedAuthorProfileSummary || !$('#feedAuthorProfileDrawer').hasClass('open')) {
             return;
         }
-        var itemUid = canonicalFeedAuthorUid(item.platform || item.videoplatform,
+		var itemUid = canonicalFeedAuthorUid(item.platformkey || item.platform || item.videoplatform,
             item.profileAuthorUid, item.secuid, item.authoruid);
-        var summaryUid = canonicalFeedAuthorUid(feedAuthorProfileSummary.platform,
+		var summaryUid = canonicalFeedAuthorUid(feedAuthorProfileSummary.platformkey || feedAuthorProfileSummary.platform,
             feedAuthorProfileSummary.authoruid);
         if (!itemUid || itemUid !== summaryUid) {
             return;
@@ -4540,13 +4460,16 @@
         fallback = fallback || {};
         var name = summary.displayname || fallback.author || 'Unknown';
         var platform = summary.platform || fallback.platform || '';
+		var platformkey = summary.platformkey || fallback.platformkey || '';
+		var identityPlatform = platformkey || platform;
         var username = summary.username || fallback.authorusername || fallback.uniqueid || '';
-        var uid = canonicalFeedAuthorUid(platform, summary.authoruid, fallback.authoruid, fallback.secuid);
+		var uid = canonicalFeedAuthorUid(identityPlatform, summary.authoruid, fallback.authoruid, fallback.secuid);
         var avatar = summary.avatar || fallback.authoravatar || '';
-        var homepage = sanitizeAuthorHomepage(platform, uid, summary.homepage || '');
+		var homepage = sanitizeAuthorHomepage(identityPlatform, uid, summary.homepage || '');
         var signature = summary.signature || fallback.signature || '';
         feedAuthorProfileSummary = $.extend({}, fallback, summary, {
             platform: platform,
+			platformkey: platformkey,
             authoruid: uid,
             username: username,
             displayname: name,
@@ -4710,7 +4633,7 @@
 
     function finishFeedAuthorDeletion(platform, authorUid) {
         function keep(item) {
-            var uid = canonicalFeedAuthorUid(item.platform || item.videoplatform,
+			var uid = canonicalFeedAuthorUid(item.platformkey || item.platform || item.videoplatform,
                 item.profileAuthorUid, item.secuid, item.authoruid);
             var key = (item.platformkey || '').toString().toLowerCase();
             var samePlatform = key ? key === (isDouyinFeedPlatform(platform) ? 'douyin' : String(platform).toLowerCase())
@@ -4723,6 +4646,7 @@
         feedAuthorProfileSummary = null;
         feedAuthor = '';
         feedAuthorUid = '';
+        feedAuthorPlatformKey = '';
         clearFeedAuthorContext();
         closeFeedAuthorProfileDrawer();
         reloadFeed();
@@ -5037,6 +4961,10 @@
             if (feedCurrentAbsIndex >= 0 && currentIndex !== feedCurrentAbsIndex) {
                 return;
             }
+            if (videoEl.getAttribute('data-playback-kind') === 'graphic') {
+                goNextGraphicSlide(itemEl, true);
+                return;
+            }
             onFeedItemEnded(itemEl);
         });
     }
@@ -5201,6 +5129,29 @@
         reloadFeed();
     }
 
+    function shouldUseFeedCursor() {
+        return mediaHomeMode === 'feed'
+            && feedOrder !== 'random'
+            && feedUseKeyset
+            && ((!feedAuthor && !feedAuthorUid) || (feedAuthorUid && feedAuthorPlatformKey));
+    }
+
+    function buildFeedCursorRequestOption(pageSize) {
+        var option = {
+            type: feedMediaType,
+            order: feedOrder === 'asc' ? 'asc' : 'desc',
+            limit: pageSize || 20
+        };
+        if (feedNextCursor) {
+            option.cursor = feedNextCursor;
+        }
+        if (feedAuthorUid && feedAuthorPlatformKey) {
+            option.authorUid = feedAuthorUid.trim();
+            option.platformKey = feedAuthorPlatformKey.trim();
+        }
+        return option;
+    }
+
     function buildFeedRequestOption(pageNo, pageSize) {
         var option = {
             pageNo: pageNo + 1,
@@ -5232,11 +5183,6 @@
     function playFeedItemByAbsIndex(absIndex, retryCount) {
         var item = document.querySelector('#videoFeed .feed-item[data-abs-index="' + absIndex + '"]');
         if (!item) {
-            if ((retryCount || 0) < 20) {
-                setTimeout(function() {
-                    playFeedItemByAbsIndex(absIndex, (retryCount || 0) + 1);
-                }, 160);
-            }
             return;
         }
         if (item.getAttribute('data-feed-type') === 'graphic') {
@@ -5245,12 +5191,12 @@
         }
         var video = item.querySelector('.feed-video');
         if (!video || Number(video.getAttribute('data-feed-index') || '-1') !== absIndex) {
-            if ((retryCount || 0) < 20) {
-                setTimeout(function() {
-                    playFeedItemByAbsIndex(absIndex, (retryCount || 0) + 1);
-                }, 160);
+            prewarmFeedIndexWindow(Array.prototype.slice.call(document.querySelectorAll('#videoFeed .feed-item')),
+                absIndex, feedScrollDirection);
+            video = item.querySelector('.feed-video');
+            if (!video) {
+                return;
             }
-            return;
         }
         playWithSync(video);
     }
@@ -5265,13 +5211,17 @@
         }).sort(function(left, right) {
             return String((left && left.label) || '').localeCompare(String((right && right.label) || ''));
         });
-        var html = '<button type="button" class="feed-author-item' + (!feedAuthor && !feedAuthorUid ? ' active' : '') + '" data-author="" data-authoruid="">全部作者</button>';
+        var html = '<button type="button" class="feed-author-item' + (!feedAuthor && !feedAuthorUid ? ' active' : '') + '" data-author="" data-authoruid="" data-platformkey="">全部作者</button>';
         for (var i = 0; i < authors.length; i++) {
             var option = authors[i] || {};
             var label = option.label || '';
             var uid = option.authoruid || '';
-            var activeCls = (feedAuthorUid && uid === feedAuthorUid) || (!feedAuthorUid && feedAuthor === label) ? ' active' : '';
-            html += '<button type="button" class="feed-author-item' + activeCls + '" data-author="' + escapeHtml(label) + '" data-authoruid="' + escapeHtml(uid) + '">' + escapeHtml(label) + '</button>';
+            var platformKey = option.platformkey || '';
+            var activeCls = (feedAuthorUid && uid === feedAuthorUid && platformKey === feedAuthorPlatformKey)
+                || (!feedAuthorUid && feedAuthor === label) ? ' active' : '';
+            html += '<button type="button" class="feed-author-item' + activeCls + '" data-author="' + escapeHtml(label)
+                + '" data-authoruid="' + escapeHtml(uid) + '" data-platformkey="' + escapeHtml(platformKey) + '">'
+                + escapeHtml(label) + '</button>';
         }
         wrap.html(html);
     }
@@ -5337,15 +5287,18 @@
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
             var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
-            var uid = canonicalFeedAuthorUid(list[i].platform || list[i].videoplatform,
+			var identityPlatform = list[i].platformkey || list[i].platform || list[i].videoplatform;
+			var uid = canonicalFeedAuthorUid(identityPlatform,
                     list[i].profileAuthorUid, list[i].secuid, list[i].authoruid);
-            var key = uid ? ('uid:' + uid) : ('name:' + author);
-            if (!author || (isDouyinFeedPlatform(list[i].platform || list[i].videoplatform) && !uid) || feedAuthorSet[key]) {
+			var platformKey = (list[i].platformkey || '').toString().trim();
+            var key = uid ? ('uid:' + platformKey + ':' + uid) : ('name:' + author);
+			if (!author || (isDouyinFeedPlatform(identityPlatform) && !uid) || feedAuthorSet[key]) {
                 continue;
             }
             feedAuthorSet[key] = {
                 label: author,
-                authoruid: uid
+                authoruid: uid,
+                platformkey: platformKey
             };
         }
     }

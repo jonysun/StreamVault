@@ -826,8 +826,9 @@
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-success startTask" href="#!" title="开始任务" data-toggle="tooltip">执行一次</a>'
 									+'<a data-row="'+encodeURIComponent(JSON.stringify(list[i]))+'" class="btn btn-xs btn-primary editCollect" href="#!" title="编辑任务" data-toggle="tooltip">编辑</a>'
 									+(enabled ? '<a data-id="'+list[i].id+'" class="btn btn-xs btn-warning pauseTask" href="#!" title="暂停任务" data-toggle="tooltip">暂停</a>' : '<a data-id="'+list[i].id+'" class="btn btn-xs btn-info resumeTask" href="#!" title="开始任务" data-toggle="tooltip">开始</a>')
-									+'<a data-json="'+encodeURIComponent(list[i].lastfetchsnapshot || '')+'" class="btn btn-xs btn-default viewSnapshot" href="#!" title="最近拉取全量" data-toggle="tooltip">全量列表</a>'
-									+'<a data-json="'+encodeURIComponent(list[i].lastplanitems || '')+'" class="btn btn-xs btn-default viewPlan" href="#!" title="本轮计划下载" data-toggle="tooltip">计划列表</a>'
+									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewSnapshot" href="#!" title="最近拉取全量" data-toggle="tooltip">全量列表</a>'
+					+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewPlan" href="#!" title="本轮计划下载" data-toggle="tooltip">计划列表</a>'
+					+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-info viewRuns" href="#!" title="查看持久运行记录" data-toggle="tooltip">运行记录</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewProcesses" href="#!" title="查看进程" data-toggle="tooltip">查看进程</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default deleteProcesses" href="#!" title="删除" data-toggle="tooltip">删除</a>'
 									+(list[i].platform === '哔哩' && !list[i].originaladdress.startsWith('bili-fav-') && !list[i].originaladdress.startsWith('bili-arc-')  && !list[i].originaladdress.startsWith('bili-seaarc-') ? 
@@ -845,6 +846,7 @@
 					resumeTask();
 					viewSnapshot();
 					viewPlan();
+					viewRuns();
 						laypage({
 							cont: 'pager',
 							pages: record.page.totalPages,
@@ -862,23 +864,84 @@
 
 	function viewSnapshot(){
 		$('.viewSnapshot').click(function(){
-			var content = decodeURIComponent($(this).attr('data-json') || '');
-			if(!content){
-				layer.msg('暂无最近一次全量拉取数据');
-				return;
-			}
-			showJsonTableDialog('最近一次全量拉取列表', content, 'snapshot');
+			showLatestRunItems($(this).data('id'), 'all');
 		});
 	}
 
 	function viewPlan(){
 		$('.viewPlan').click(function(){
-			var content = decodeURIComponent($(this).attr('data-json') || '');
-			if(!content){
-				layer.msg('暂无最近一次计划下载数据');
-				return;
+			showLatestRunItems($(this).data('id'), 'plan');
+		});
+	}
+
+	function showLatestRunItems(taskId, view){
+		$.get('/admin/api/collect-tasks/'+taskId+'/latest-items', {view:view, limit:500}, function(record){
+			record = record || {};
+			if(record.warningMessage){
+				layer.msg(record.warningMessage);
 			}
-			showJsonTableDialog('最近一次计划下载列表', content, 'plan');
+			var rows = record.items || [];
+			var title = view === 'plan' ? '最近一次计划下载列表' : '最近一次全量拉取列表';
+			var content = view === 'plan' ? renderPlanTable(rows) : renderSnapshotTable(rows);
+			layer.open({type:1,title:title,area:['96%','86%'],content:content});
+		});
+	}
+
+	function viewRuns(){
+		$('.viewRuns').click(function(){
+			var taskId = $(this).data('id');
+			$.get('/admin/api/collect-tasks/'+taskId+'/runs', {limit: 50}, function(rows){
+				if(!$.isArray(rows) || !rows.length){
+					layer.msg('暂无持久运行记录');
+					return;
+				}
+				var columns = [
+					{title:'运行ID', render:function(row){ return codeCell(row.runId); }},
+					{title:'触发', render:function(row){ return cell(row.triggerType); }},
+					{title:'状态', render:function(row){ return badgeCell(row.stateLabel || row.state); }},
+					{title:'抓取', render:function(row){ return cell(row.fetchedCount); }},
+					{title:'计划/新增/跳过/失败', render:function(row){ return cell([row.plannedCount,row.insertedCount,row.skippedExistingCount,row.failedItemCount].join(' / ')); }},
+					{title:'排队时间', render:function(row){ return smallCell(row.queuedAt); }},
+					{title:'错误', render:function(row){ return smallCell([row.errorCode,row.errorMessage].filter(Boolean).join('\n')); }},
+					{title:'操作', render:function(row){ return '<button class="btn btn-xs btn-primary inspectRun" data-run-id="'+escapeHtml(row.runId)+'">明细</button>'; }}
+				];
+				var content = renderTableDialog('任务 '+taskId+' 的持久运行记录', columns, rows);
+				layer.open({type:1,title:'收藏运行记录',area:['96%','86%'],content:content});
+				$('.inspectRun').click(function(){ showRunItems($(this).data('run-id')); });
+			});
+		});
+	}
+
+	function showRunItems(runId){
+		$.when(
+			$.get('/admin/api/collect-runs/'+runId+'/items', {decision:'all', limit:500}),
+			$.get('/admin/api/collect-runs/'+runId+'/events', {limit:500})
+		).done(function(itemsResponse, eventsResponse){
+			var rows = itemsResponse[0] || [];
+			var events = eventsResponse[0] || [];
+			var columns = [
+				{title:'序号', render:function(row){ return cell(row.ordinal); }},
+				{title:'作品ID', render:function(row){ return codeCell(row.workId); }},
+				{title:'媒体', render:function(row){ return cell(row.mediaType); }},
+				{title:'作者', render:function(row){ return cell(row.nicknameSnapshot || row.authorUid); }},
+				{title:'标题/摘要', render:function(row){ return longCell(row.titleSnapshot, 260); }},
+				{title:'发布时间', render:function(row){ return cell(row.publishTime); }},
+				{title:'决策', render:function(row){ return badgeCell(row.decision); }},
+				{title:'处理状态', render:function(row){ return cell(row.processState); }},
+				{title:'错误', render:function(row){ return smallCell([row.errorCode,row.errorMessage].filter(Boolean).join('\n')); }}
+			];
+			var eventColumns = [
+				{title:'序号', render:function(row){ return cell(row.sequence); }},
+				{title:'时间', render:function(row){ return smallCell(row.createdAt); }},
+				{title:'级别', render:function(row){ return badgeCell(row.level); }},
+				{title:'阶段', render:function(row){ return cell(row.stage); }},
+				{title:'事件', render:function(row){ return codeCell(row.eventCode); }},
+				{title:'作品ID', render:function(row){ return codeCell(row.workId); }},
+				{title:'消息', render:function(row){ return longCell(row.message, 500); }}
+			];
+			var content = renderTableDialog('runId: '+runId+' · 作品明细', columns, rows)
+				+ renderTableDialog('runId: '+runId+' · 过程事件', eventColumns, events);
+			layer.open({type:1,title:'运行作品明细',area:['96%','86%'],content:content});
 		});
 	}
 
@@ -907,15 +970,15 @@
 
 	function renderSnapshotTable(rows){
 		var first = rows[0] || {};
-		var meta = 'runId: '+textnone(first.runId)+' | mode: '+textnone(first.fetchMode)+' | source: '+textnone(first.sourceId)+' | maxc: '+textnone(first.maxc)+' | count: '+rows.length;
+		var meta = 'count: '+rows.length;
 		var columns = [
-			{title:'序号', render:function(row, i){ return cell(row.index || row.sortedIndex || (i + 1)); }},
-			{title:'发布时间', render:function(row){ return cell(row.publish_time || row.create_time); }},
-			{title:'媒体', render:function(row){ return cell(row.has_video_play_addr ? '视频' : '图文'); }},
-			{title:'作者', render:function(row){ return cell(row.nickname || row.uid || row.sec_uid); }},
-			{title:'作品ID', render:function(row){ return codeCell(row.aweme_id); }},
-			{title:'标题/摘要', render:function(row){ return longCell(row.desc, 320); }},
-			{title:'抓取参数', render:function(row){ return smallCell('mode='+textnone(row.fetchMode)+'\nsource='+textnone(row.sourceId)+'\nmaxc='+textnone(row.maxc)); }}
+			{title:'序号', render:function(row, i){ return cell(row.ordinal || row.index || row.sortedIndex || (i + 1)); }},
+			{title:'发布时间', render:function(row){ return cell(row.publishTime || row.publish_time || row.create_time); }},
+			{title:'媒体', render:function(row){ return cell(row.mediaType || (row.has_video_play_addr ? 'video' : 'graphic')); }},
+			{title:'作者', render:function(row){ return cell(row.nicknameSnapshot || row.nickname || row.authorUid || row.uid || row.sec_uid); }},
+			{title:'作品ID', render:function(row){ return codeCell(row.workId || row.aweme_id); }},
+			{title:'标题/摘要', render:function(row){ return longCell(row.titleSnapshot || row.title || row.desc, 320); }},
+			{title:'决策', render:function(row){ return badgeCell(row.decision); }}
 		];
 		return renderTableDialog(meta, columns, rows);
 	}
@@ -926,14 +989,14 @@
 			? 'runId: '+textnone(summary.runId)+' | mode: '+textnone(summary.fetchMode)+' | source: '+textnone(summary.sourceId)+' | fetched: '+textnone(summary.fetchedCount)+' | success: '+textnone(summary.successThisRun)+' | failed: '+textnone(summary.failedThisRun)+' | skipped: '+textnone(summary.skippedThisRun)
 			: 'items: '+rows.length;
 		var columns = [
-			{title:'序号', render:function(row, i){ return cell(row.stage === 'run-summary' ? '汇总' : (row.index || i)); }},
-			{title:'媒体', render:function(row){ return cell(row.mediatype || row.stage || ''); }},
+			{title:'序号', render:function(row, i){ return cell(row.ordinal || row.index || (i + 1)); }},
+			{title:'媒体', render:function(row){ return cell(row.mediaType || row.mediatype || row.stage || ''); }},
 			{title:'决策', render:function(row){ return badgeCell(row.decision); }},
 			{title:'原因', render:function(row){ return longCell(planReason(row), 260); }},
-			{title:'状态', render:function(row){ return cell(row.status); }},
-			{title:'错误', render:function(row){ return smallCell([row.errorcode, row.errormsg].filter(Boolean).join('\n')); }},
-			{title:'作品ID', render:function(row){ return codeCell(row.aweme_id); }},
-			{title:'标题/摘要', render:function(row){ return longCell(row.desc, 260); }},
+			{title:'状态', render:function(row){ return cell(row.processState || row.status); }},
+			{title:'错误', render:function(row){ return smallCell([row.errorCode || row.errorcode, row.errorMessage || row.errormsg].filter(Boolean).join('\n')); }},
+			{title:'作品ID', render:function(row){ return codeCell(row.workId || row.aweme_id); }},
+			{title:'标题/摘要', render:function(row){ return longCell(row.titleSnapshot || row.title || row.desc, 260); }},
 			{title:'过程日志', render:function(row){ return logCell(combinedProcessLog(row)); }}
 		];
 		return renderTableDialog(meta, columns, rows);

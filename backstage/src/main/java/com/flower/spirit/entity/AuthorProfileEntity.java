@@ -11,7 +11,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
 
 @Entity
@@ -21,8 +20,7 @@ public class AuthorProfileEntity extends DataEntity<AuthorProfileEntity> impleme
 	private static final long serialVersionUID = 8794577706279088910L;
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.TABLE, generator = "biz_author_profile_seq")
-	@TableGenerator(name = "biz_author_profile_seq", allocationSize = 1, table = "seq_common", pkColumnName = "seq_id", valueColumnName = "seq_count")
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
 
 	private String platform;
