@@ -19,6 +19,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -38,6 +39,7 @@ import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformDefinition;
 import com.flower.spirit.platform.WorkMetadataValidationException;
+import com.flower.spirit.service.transaction.AuthorWriteTransaction;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
 
@@ -63,15 +65,25 @@ public class AuthorProfileService {
 	@Autowired
 	private GraphicContentDao graphicContentDao;
 
-	@Transactional
+	@Autowired
+	private SqliteWriteRetrier sqliteWriteRetrier;
+
+	@Autowired
+	private AuthorWriteTransaction authorWriteTransaction;
+
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName,
 			String avatar, String homepage) {
 		upsertAuthor(platform, authoruid, username, displayName, avatar, homepage, null);
 	}
 
-	@Transactional
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName, String avatar,
 			String homepage, String signature) {
+		executeAuthorWrite(() -> upsertAuthorInCurrentTransaction(platform, authoruid, username, displayName,
+				avatar, homepage, signature));
+	}
+
+	private void upsertAuthorInCurrentTransaction(String platform, String authoruid, String username,
+			String displayName, String avatar, String homepage, String signature) {
 		if (platform == null || platform.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
 			return;
 		}
@@ -116,15 +128,19 @@ public class AuthorProfileService {
 		}
 	}
 
-	@Transactional
 	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage) {
 		upsertCanonicalAuthor(platformKey, legacyPlatform, authoruid, username, displayName, avatar, homepage, null);
 	}
 
-	@Transactional
 	public synchronized void upsertCanonicalAuthor(String platformKey, String legacyPlatform, String authoruid, String username,
 			String displayName, String avatar, String homepage, String signature) {
+		executeAuthorWrite(() -> upsertCanonicalAuthorInCurrentTransaction(platformKey, legacyPlatform, authoruid,
+				username, displayName, avatar, homepage, signature));
+	}
+
+	private void upsertCanonicalAuthorInCurrentTransaction(String platformKey, String legacyPlatform, String authoruid,
+			String username, String displayName, String avatar, String homepage, String signature) {
 		if (platformKey == null || platformKey.trim().isEmpty() || authoruid == null || authoruid.trim().isEmpty()) {
 			return;
 		}
@@ -182,6 +198,18 @@ public class AuthorProfileService {
 		if (saved.getId() != null && displayName != null && !displayName.trim().isEmpty()) {
 			upsertNameHistory(saved.getId(), displayName.trim(), now);
 		}
+	}
+
+	private void executeAuthorWrite(Runnable authorWrite) {
+		// A nested SQLite writer would contend with its own outer write transaction.
+		if (TransactionSynchronizationManager.isActualTransactionActive()) {
+			authorWrite.run();
+			return;
+		}
+		sqliteWriteRetrier.execute(() -> authorWriteTransaction.execute(() -> {
+			authorWrite.run();
+			return null;
+		}));
 	}
 
 	private void upsertNameHistory(Integer authorProfileId, String displayName, Date now) {

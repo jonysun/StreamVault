@@ -15,7 +15,9 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -35,6 +37,7 @@ import com.flower.spirit.dto.AdminAuthorProfileSummary;
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.service.transaction.AuthorWriteTransaction;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
@@ -58,19 +61,40 @@ class AuthorProfileServiceTest {
 	@Mock
 	private GraphicContentDao graphicContentDao;
 
+	@Mock
+	private SqliteWriteRetrier sqliteWriteRetrier;
+
+	@Mock
+	private AuthorWriteTransaction authorWriteTransaction;
+
 	@InjectMocks
 	private AuthorProfileService service;
 
+	@BeforeEach
+	void executeAuthorWrites() {
+		org.mockito.Mockito.lenient().when(sqliteWriteRetrier.execute(any())).thenAnswer(invocation ->
+				((Supplier<?>) invocation.getArgument(0)).get());
+		org.mockito.Mockito.lenient().when(authorWriteTransaction.execute(any())).thenAnswer(invocation ->
+				((Supplier<?>) invocation.getArgument(0)).get());
+	}
+
 	@Test
-	void everyPublicAuthorUpsertEntryPointIsTransactionalAndSynchronized() {
+	void everyPublicAuthorUpsertEntryPointIsSynchronizedAndUsesExternalTransactionBoundary() {
 		assertThat(List.of(AuthorProfileService.class.getDeclaredMethods()).stream()
 				.filter(method -> method.getName().equals("upsertAuthor")
 						|| method.getName().equals("upsertCanonicalAuthor")))
 				.isNotEmpty()
 				.allSatisfy(method -> {
-					assertThat(method.isAnnotationPresent(Transactional.class)).isTrue();
+					assertThat(method.isAnnotationPresent(Transactional.class)).isFalse();
 					assertThat(Modifier.isSynchronized(method.getModifiers())).isTrue();
 				});
+		assertThat(AuthorWriteTransaction.class.getDeclaredMethods()).anySatisfy(method -> {
+			assertThat(method.getName()).isEqualTo("execute");
+			Transactional transactional = method.getAnnotation(Transactional.class);
+			assertThat(transactional).isNotNull();
+			assertThat(transactional.propagation())
+					.isEqualTo(org.springframework.transaction.annotation.Propagation.REQUIRES_NEW);
+		});
 	}
 
 	@Test
