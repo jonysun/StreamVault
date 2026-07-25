@@ -768,14 +768,15 @@ public class AdminController {
 	}
 
 	@GetMapping(value = "/authorProfileSummary")
-	public AjaxEntity authorProfileSummary(String platform, String authoruid, String authorusername, String author) {
-		return authorProfileService.findProfileSummary(platform, authoruid, authorusername, author);
+	public AjaxEntity authorProfileSummary(String platformkey, String platform, String authoruid, String authorusername,
+			String author) {
+		return authorProfileService.findProfileSummary(platformkey, platform, authoruid, authorusername, author);
 	}
 
 	@GetMapping(value = "/authorProfileWorks")
-	public AjaxEntity authorProfileWorks(String platform, String authoruid, String authorusername, String author,
+	public AjaxEntity authorProfileWorks(String platformkey, String platform, String authoruid, String authorusername, String author,
 			String type, Integer pageNo, Integer pageSize) {
-		return authorProfileService.findProfileWorks(platform, authoruid, authorusername, author, type, pageNo, pageSize);
+		return authorProfileService.findProfileWorks(platformkey, platform, authoruid, authorusername, author, type, pageNo, pageSize);
 	}
 
 	@PostMapping(value = "/rebuildDouyinAuthors")

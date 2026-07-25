@@ -16,7 +16,7 @@ class DatabaseIndexInitializerTest {
 	void defaultIndexStatementsAreIdempotentCreateIndexStatements() {
 		List<String> statements = DatabaseIndexInitializer.defaultIndexSqlStatements();
 
-		assertThat(statements).hasSize(18);
+		assertThat(statements).hasSize(20);
 		assertThat(statements)
 				.allMatch(sql -> sql.startsWith("CREATE INDEX IF NOT EXISTS "))
 				.anyMatch(sql -> sql.contains("idx_biz_video_publishtime_id"))
@@ -28,7 +28,9 @@ class DatabaseIndexInitializerTest {
 				.anyMatch(sql -> sql.contains("idx_graphic_content_createtime_id"))
 				.anyMatch(sql -> sql.contains("idx_graphic_content_author"))
 				.anyMatch(sql -> sql.contains("idx_biz_video_platformkey_videoid"))
+				.anyMatch(sql -> sql.contains("idx_biz_video_author_identity"))
 				.anyMatch(sql -> sql.contains("idx_graphic_content_platformkey_videoid"))
+				.anyMatch(sql -> sql.contains("idx_graphic_content_author_identity"))
 				.anyMatch(sql -> sql.contains("idx_author_profile_platformkey_authoruid"));
 	}
 

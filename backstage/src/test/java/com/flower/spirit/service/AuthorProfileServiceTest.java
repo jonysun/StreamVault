@@ -3,12 +3,14 @@ package com.flower.spirit.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -33,6 +35,13 @@ import com.flower.spirit.dto.AdminAuthorProfileSummary;
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Path;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 
 @ExtendWith(MockitoExtension.class)
 class AuthorProfileServiceTest {
@@ -236,6 +245,36 @@ class AuthorProfileServiceTest {
 	}
 
 	@Test
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	void profileSummaryUsesCanonicalPlatformForVideoAndGraphicQueries() {
+		String uid = "MS4wLjABAAAAstable";
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setPlatform("抖音");
+		profile.setPlatformkey("douyin");
+		profile.setAuthoruid(uid);
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", uid))
+				.thenReturn(List.of(profile));
+		when(videoDataDao.count(any(Specification.class))).thenReturn(1050L);
+		when(graphicContentDao.count(any(Specification.class))).thenReturn(8L);
+
+		AdminAuthorProfileSummary summary = (AdminAuthorProfileSummary) service
+				.findProfileSummary("douyin", "抖音", uid, null, null)
+				.getRecord();
+
+		assertThat(summary.getPlatformkey()).isEqualTo("douyin");
+		assertThat(summary.getVideoCount()).isEqualTo(1050);
+		assertThat(summary.getGraphicCount()).isEqualTo(8);
+		assertThat(summary.getTotalCount()).isEqualTo(1058);
+
+		ArgumentCaptor<Specification> videoSpec = ArgumentCaptor.forClass(Specification.class);
+		ArgumentCaptor<Specification> graphicSpec = ArgumentCaptor.forClass(Specification.class);
+		verify(videoDataDao).count(videoSpec.capture());
+		verify(graphicContentDao).count(graphicSpec.capture());
+		assertCanonicalDouyinPlatformPredicate(videoSpec.getValue(), "videoplatform", uid);
+		assertCanonicalDouyinPlatformPredicate(graphicSpec.getValue(), "platform", uid);
+	}
+
+	@Test
 	void reconcileVideoUsesStoredJsonWithoutUpstreamLookup() {
 		VideoDataEntity video = new VideoDataEntity();
 		video.setId(31);
@@ -355,6 +394,51 @@ class AuthorProfileServiceTest {
 		verify(authorProfileDao, never()).save(any(AuthorProfileEntity.class));
 		verify(videoDataDao, never()).updateDouyinAuthorMetadata(any(), any(), any(), any(), any(), any());
 		verify(graphicContentDao, never()).updateDouyinAuthorMetadata(any(), any(), any(), any(), any(), any());
+	}
+
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	private void assertCanonicalDouyinPlatformPredicate(Specification specification, String legacyField, String uid) {
+		Root root = mock(Root.class);
+		CriteriaQuery query = mock(CriteriaQuery.class);
+		CriteriaBuilder cb = mock(CriteriaBuilder.class);
+		Path<String> platformKey = mock(Path.class);
+		Path<String> legacyPlatform = mock(Path.class);
+		Path<String> authorUid = mock(Path.class);
+		Path<String> secUid = mock(Path.class);
+		Expression<String> lowerPlatformKey = mock(Expression.class);
+		Expression<String> lowerLegacyPlatform = mock(Expression.class);
+		Expression<String> trimmedPlatformKey = mock(Expression.class);
+		Predicate canonicalPlatform = mock(Predicate.class);
+		Predicate nullPlatformKey = mock(Predicate.class);
+		Predicate emptyPlatformKey = mock(Predicate.class);
+		Predicate blankPlatformKey = mock(Predicate.class);
+		Predicate legacyAlias = mock(Predicate.class);
+		Predicate legacyFallback = mock(Predicate.class);
+		Predicate canonicalOrLegacy = mock(Predicate.class);
+
+		when(root.get("platformkey")).thenReturn(platformKey);
+		when(root.get(legacyField)).thenReturn(legacyPlatform);
+		when(root.get("authoruid")).thenReturn(authorUid);
+		when(root.get("secuid")).thenReturn(secUid);
+		when(cb.lower(platformKey)).thenReturn(lowerPlatformKey);
+		when(cb.lower(legacyPlatform)).thenReturn(lowerLegacyPlatform);
+		when(cb.equal(lowerPlatformKey, "douyin")).thenReturn(canonicalPlatform);
+		when(cb.isNull(platformKey)).thenReturn(nullPlatformKey);
+		when(cb.trim(platformKey)).thenReturn(trimmedPlatformKey);
+		when(cb.equal(trimmedPlatformKey, "")).thenReturn(emptyPlatformKey);
+		when(cb.or(nullPlatformKey, emptyPlatformKey)).thenReturn(blankPlatformKey);
+		when(lowerLegacyPlatform.in(any(Collection.class))).thenReturn(legacyAlias);
+		when(cb.and(blankPlatformKey, legacyAlias)).thenReturn(legacyFallback);
+		when(cb.or(canonicalPlatform, legacyFallback)).thenReturn(canonicalOrLegacy);
+
+		specification.toPredicate(root, query, cb);
+
+		ArgumentCaptor<Collection> aliases = ArgumentCaptor.forClass(Collection.class);
+		verify(lowerLegacyPlatform).in(aliases.capture());
+		assertThat(aliases.getValue()).contains("douyin", "抖音");
+		verify(cb).or(canonicalPlatform, legacyFallback);
+		verify(cb).equal(authorUid, uid);
+		verify(cb).equal(secUid, uid);
 	}
 
 	private JSONObject invokeExtractProfileUser(AuthorProfileService service, JSONObject payload) throws Exception {

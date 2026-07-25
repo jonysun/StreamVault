@@ -2371,10 +2371,11 @@
             return '';
         }
         item = item || {};
-        var authorUid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+		var identityPlatform = item.platformkey || item.platform || item.videoplatform;
+		var authorUid = canonicalFeedAuthorUid(identityPlatform, item.profileAuthorUid, item.secuid, item.authoruid);
         var authorUsername = item.authorusername || item.uniqueid || '';
         var rawAuthor = authorValue || item.author || item.videoauthor || '';
-        var pendingDouyinAuthor = isDouyinFeedPlatform(item.platform || item.videoplatform) && !authorUid;
+		var pendingDouyinAuthor = isDouyinFeedPlatform(identityPlatform) && !authorUid;
         if (!rawAuthor && !authorUid && !authorUsername && !item.authoravatar && !item.authorAvatar) {
             return '';
         }
@@ -2386,7 +2387,8 @@
         var html = '<div class="feed-author-action-rail">';
         if (rawAuthor || authorUid || authorUsername || avatar) {
             html += '<button type="button" class="feed-author-avatar-btn" title="' + (pendingDouyinAuthor ? '作者 UID 待修复' : '作者主页') + '"'
-				+ (pendingDouyinAuthor ? ' disabled' : '')
+                + (pendingDouyinAuthor ? ' disabled' : '')
+				+ ' data-platformkey="' + escapeHtml(item.platformkey || '') + '"'
                 + ' data-platform="' + escapeHtml(item.platform || item.videoplatform || '') + '"'
                 + ' data-author="' + escapeHtml(authorName || '') + '"'
                 + ' data-authoruid="' + escapeHtml(authorUid) + '"'
@@ -2407,15 +2409,16 @@
     function buildFeedOriginalUrl(item) {
         item = item || {};
         var platform = item.platform || item.videoplatform || '';
+		var identityPlatform = item.platformkey || platform;
         var fallback = safeExternalUrl(item.sourceurl || item.sourceUrl || item.originaladdress || item.originalAddress || '');
-        if (!isDouyinFeedPlatform(platform)) {
+		if (!isDouyinFeedPlatform(identityPlatform)) {
             return fallback;
         }
         var workId = (item.videoid || '').toString().trim();
         var isGraphic = item.type === 'graphic'
             || (!item.type && Array.isArray(item.slides) && item.slides.length > 0);
         if (isGraphic) {
-            var authorUid = canonicalFeedAuthorUid(platform, item.profileAuthorUid, item.secuid, item.authoruid);
+			var authorUid = canonicalFeedAuthorUid(identityPlatform, item.profileAuthorUid, item.secuid, item.authoruid);
             return authorUid && workId
                 ? 'https://www.douyin.com/user/' + encodeURIComponent(authorUid) + '?modal_id=' + encodeURIComponent(workId)
                 : '';
@@ -2500,7 +2503,8 @@
         var titleValue = item.title || item.videoname || 'Untitled';
         var platformValue = item.platform || item.videoplatform || 'Unknown';
         var authorValue = item.displayAuthor || item.author || item.videoauthor || 'Unknown';
-        item.authoruid = canonicalFeedAuthorUid(item.platform || item.videoplatform, item.profileAuthorUid, item.secuid, item.authoruid);
+		item.authoruid = canonicalFeedAuthorUid(item.platformkey || item.platform || item.videoplatform,
+			item.profileAuthorUid, item.secuid, item.authoruid);
         item.secuid = item.authoruid;
         item.profileAuthorUid = item.authoruid;
         var timeValue = item.publishTime || item.publishtime || item.createTime || item.createtime;
@@ -3924,6 +3928,7 @@
             e.preventDefault();
             e.stopPropagation();
             openFeedAuthorProfile({
+				platformkey: this.getAttribute('data-platformkey') || '',
                 platform: this.getAttribute('data-platform') || '',
                 author: this.getAttribute('data-author') || '',
                 authoruid: this.getAttribute('data-authoruid') || '',
@@ -4464,9 +4469,9 @@
         if (!item || !feedAuthorProfileSummary || !$('#feedAuthorProfileDrawer').hasClass('open')) {
             return;
         }
-        var itemUid = canonicalFeedAuthorUid(item.platform || item.videoplatform,
+		var itemUid = canonicalFeedAuthorUid(item.platformkey || item.platform || item.videoplatform,
             item.profileAuthorUid, item.secuid, item.authoruid);
-        var summaryUid = canonicalFeedAuthorUid(feedAuthorProfileSummary.platform,
+		var summaryUid = canonicalFeedAuthorUid(feedAuthorProfileSummary.platformkey || feedAuthorProfileSummary.platform,
             feedAuthorProfileSummary.authoruid);
         if (!itemUid || itemUid !== summaryUid) {
             return;
@@ -4540,13 +4545,16 @@
         fallback = fallback || {};
         var name = summary.displayname || fallback.author || 'Unknown';
         var platform = summary.platform || fallback.platform || '';
+		var platformkey = summary.platformkey || fallback.platformkey || '';
+		var identityPlatform = platformkey || platform;
         var username = summary.username || fallback.authorusername || fallback.uniqueid || '';
-        var uid = canonicalFeedAuthorUid(platform, summary.authoruid, fallback.authoruid, fallback.secuid);
+		var uid = canonicalFeedAuthorUid(identityPlatform, summary.authoruid, fallback.authoruid, fallback.secuid);
         var avatar = summary.avatar || fallback.authoravatar || '';
-        var homepage = sanitizeAuthorHomepage(platform, uid, summary.homepage || '');
+		var homepage = sanitizeAuthorHomepage(identityPlatform, uid, summary.homepage || '');
         var signature = summary.signature || fallback.signature || '';
         feedAuthorProfileSummary = $.extend({}, fallback, summary, {
             platform: platform,
+			platformkey: platformkey,
             authoruid: uid,
             username: username,
             displayname: name,
@@ -4710,7 +4718,7 @@
 
     function finishFeedAuthorDeletion(platform, authorUid) {
         function keep(item) {
-            var uid = canonicalFeedAuthorUid(item.platform || item.videoplatform,
+			var uid = canonicalFeedAuthorUid(item.platformkey || item.platform || item.videoplatform,
                 item.profileAuthorUid, item.secuid, item.authoruid);
             var key = (item.platformkey || '').toString().toLowerCase();
             var samePlatform = key ? key === (isDouyinFeedPlatform(platform) ? 'douyin' : String(platform).toLowerCase())
@@ -5337,10 +5345,11 @@
     function appendFeedAuthorOptions(list) {
         for (var i = 0; i < list.length; i++) {
             var author = (list[i].displayAuthor || list[i].author || list[i].videoauthor || '').trim();
-            var uid = canonicalFeedAuthorUid(list[i].platform || list[i].videoplatform,
+			var identityPlatform = list[i].platformkey || list[i].platform || list[i].videoplatform;
+			var uid = canonicalFeedAuthorUid(identityPlatform,
                     list[i].profileAuthorUid, list[i].secuid, list[i].authoruid);
             var key = uid ? ('uid:' + uid) : ('name:' + author);
-            if (!author || (isDouyinFeedPlatform(list[i].platform || list[i].videoplatform) && !uid) || feedAuthorSet[key]) {
+			if (!author || (isDouyinFeedPlatform(identityPlatform) && !uid) || feedAuthorSet[key]) {
                 continue;
             }
             feedAuthorSet[key] = {

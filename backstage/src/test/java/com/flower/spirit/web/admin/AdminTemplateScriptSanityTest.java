@@ -66,6 +66,14 @@ class AdminTemplateScriptSanityTest {
 				"function closeFeedMoreMenu()", "click.feedMoreOutside", "keydown.feedMoreEscape");
 	}
 
+	@Test
+	void indexPassesCanonicalPlatformKeyToAuthorProfileApis() throws IOException {
+		String index = template("index.html");
+
+		assertThat(index).contains("data-platformkey=\"", "platformkey: this.getAttribute('data-platformkey')",
+				"/admin/api/authorProfileSummary", "/admin/api/authorProfileWorks");
+	}
+
 	private String template(String name) throws IOException {
 		try (var input = getClass().getResourceAsStream("/templates/admin/" + name)) {
 			if (input == null) throw new IOException(name + " template not found");

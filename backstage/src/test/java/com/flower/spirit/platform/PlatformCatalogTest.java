@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,16 @@ class PlatformCatalogTest {
 		assertThat(PlatformCatalog.requireByKey("youtube").getDisplayName()).isEqualTo("YouTube");
 		assertThat(PlatformCatalog.requireByKey("xiaohongshu").getDisplayName()).isEqualTo("小红书");
 		assertThat(PlatformCatalog.requireByKey("twitter").getDisplayName()).isEqualTo("Twitter");
+	}
+
+	@Test
+	void resolvesCanonicalKeyAndAllLegacyAliases() {
+		assertThat(PlatformCatalog.canonicalKey("DOUYIN", "wrong-display")).isEqualTo("douyin");
+		assertThat(PlatformCatalog.canonicalKey(null, "抖音")).isEqualTo("douyin");
+
+		List<String> aliases = PlatformCatalog.aliases("douyin", "抖音");
+		assertThat(aliases).contains("douyin", "抖音");
+		assertThat(PlatformCatalog.aliases("douyin", "wrong-display")).doesNotContain("wrong-display");
 	}
 
 	@Test

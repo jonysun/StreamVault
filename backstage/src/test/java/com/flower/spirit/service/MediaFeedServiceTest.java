@@ -168,6 +168,25 @@ class MediaFeedServiceTest {
 	}
 
 	@Test
+	void feedBatchEnrichmentUsesCanonicalPlatformKeyWhenDisplayPlatformIsMissing() {
+		AdminMediaFeedItem item = new AdminMediaFeedItem();
+		item.setPlatformkey("DOUYIN");
+		item.setSecuid("MS4wLjABAAAAstable");
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setPlatform("抖音");
+		profile.setPlatformkey("douyin");
+		profile.setAuthoruid("MS4wLjABAAAAstable");
+		profile.setAvatar("https://img.example/current.jpg");
+		when(authorProfileDao.findByAuthoruidIn(any())).thenReturn(List.of(profile));
+
+		service.enrichDisplayAuthorsForTest(List.of(item));
+
+		assertThat(item.getPlatformkey()).isEqualTo("douyin");
+		assertThat(item.getAuthoruid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(item.getAuthoravatar()).isEqualTo("https://img.example/current.jpg");
+	}
+
+	@Test
 	void findPageMergesVideosAndGraphicsByPublishTime() {
 		VideoDataEntity request = new VideoDataEntity();
 		request.setPageNo(1);

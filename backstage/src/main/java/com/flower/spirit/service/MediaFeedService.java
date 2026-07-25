@@ -510,10 +510,8 @@ public class MediaFeedService {
 	}
 
 	private String authorProfileKey(String platformKey, String platform, String authorUid) {
-		String canonicalKey = platformKey == null ? null : platformKey.trim().toLowerCase(Locale.ROOT);
-		if (canonicalKey == null || canonicalKey.isEmpty()) {
-			canonicalKey = PlatformCatalog.findByAlias(platform).map(definition -> definition.getKey()).orElse("");
-		}
+		String canonicalKey = AuthorIdentityUtil.canonicalPlatformKey(platformKey, platform);
+		canonicalKey = canonicalKey == null ? "" : canonicalKey;
 		return canonicalKey + "\u0001" + authorUid;
 	}
 
@@ -542,8 +540,11 @@ public class MediaFeedService {
 		if (item == null) {
 			return;
 		}
-		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(item.getPlatform(), item.getAuthoruid(), item.getSecuid());
+		String canonicalPlatformKey = AuthorIdentityUtil.canonicalPlatformKey(item.getPlatformkey(), item.getPlatform());
+		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(canonicalPlatformKey,
+				item.getAuthoruid(), item.getSecuid());
 		String canonicalUsername = AuthorIdentityUtil.canonicalUsername(item.getAuthorusername(), item.getUniqueid());
+		item.setPlatformkey(canonicalPlatformKey);
 		item.setAuthoruid(canonicalUid);
 		item.setSecuid(canonicalUid);
 		item.setAuthorusername(canonicalUsername);

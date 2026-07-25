@@ -1,13 +1,18 @@
 package com.flower.spirit.utils;
 
+import com.flower.spirit.platform.PlatformCatalog;
+
 public final class AuthorIdentityUtil {
 
 	private AuthorIdentityUtil() {
 	}
 
 	public static boolean isDouyinPlatform(String platform) {
-		String value = trimToNull(platform);
-		return "抖音".equals(value) || "douyin".equalsIgnoreCase(value);
+		return "douyin".equals(canonicalPlatformKey(platform, platform));
+	}
+
+	public static String canonicalPlatformKey(String platformKey, String legacyPlatform) {
+		return PlatformCatalog.canonicalKey(platformKey, legacyPlatform);
 	}
 
 	public static boolean isDouyinSecUid(String value) {
@@ -25,6 +30,13 @@ public final class AuthorIdentityUtil {
 			return isDouyinSecUid(normalizedAuthorUid) ? normalizedAuthorUid : null;
 		}
 		return firstNotBlank(authoruid, secuid);
+	}
+
+	public static AuthorKey authorKey(String platformKey, String legacyPlatform, String authoruid, String secuid) {
+		String canonicalPlatformKey = canonicalPlatformKey(platformKey, legacyPlatform);
+		String canonicalUid = canonicalAuthorUid(canonicalPlatformKey, authoruid, secuid);
+		return canonicalPlatformKey == null || canonicalUid == null
+				? null : new AuthorKey(canonicalPlatformKey, canonicalUid);
 	}
 
 	public static String canonicalUsername(String authorusername, String uniqueid) {
@@ -54,5 +66,8 @@ public final class AuthorIdentityUtil {
 			return null;
 		}
 		return value.trim();
+	}
+
+	public record AuthorKey(String platformKey, String authorUid) {
 	}
 }

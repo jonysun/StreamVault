@@ -33,4 +33,14 @@ class AuthorIdentityUtilTest {
 		assertThat(AuthorIdentityUtil.sanitizeHomepage("抖音", "84583932458",
 				"https://www.douyin.com/user/84583932458")).isNull();
 	}
+
+	@Test
+	void authorKeyUsesPlatformKeyAndSecUidInsteadOfDisplayMetadata() {
+		AuthorIdentityUtil.AuthorKey key = AuthorIdentityUtil.authorKey(
+				"DOUYIN", "unexpected-display", "84583932458", "MS4wLjABAAAAstable");
+
+		assertThat(key.platformKey()).isEqualTo("douyin");
+		assertThat(key.authorUid()).isEqualTo("MS4wLjABAAAAstable");
+		assertThat(AuthorIdentityUtil.authorKey("douyin", "抖音", "84583932458", null)).isNull();
+	}
 }

@@ -6,6 +6,7 @@ public class AdminAuthorProfileSummary {
 
 	private Integer id;
 	private String platform;
+	private String platformkey;
 	private String authoruid;
 	private String username;
 	private String displayname;
@@ -31,6 +32,14 @@ public class AdminAuthorProfileSummary {
 
 	public void setPlatform(String platform) {
 		this.platform = platform;
+	}
+
+	public String getPlatformkey() {
+		return platformkey;
+	}
+
+	public void setPlatformkey(String platformkey) {
+		this.platformkey = platformkey;
 	}
 
 	public String getAuthoruid() {
