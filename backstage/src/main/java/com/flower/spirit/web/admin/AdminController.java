@@ -2,6 +2,7 @@ package com.flower.spirit.web.admin;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.flower.spirit.common.AjaxEntity;
@@ -38,6 +40,8 @@ import com.flower.spirit.entity.VideoMixEntity;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CollectDataDetailService;
 import com.flower.spirit.service.CollectDataService;
+import com.flower.spirit.service.CollectEnqueueService;
+import com.flower.spirit.service.CollectRunQueryService;
 import com.flower.spirit.service.AnalysisService;
 import com.flower.spirit.service.AdminMediaManagementService;
 import com.flower.spirit.service.AuthorProfileService;
@@ -101,6 +105,12 @@ public class AdminController {
 	
 	@Autowired
 	private CollectDataService collectDataService;
+
+	@Autowired
+	private CollectRunQueryService collectRunQueryService;
+
+	@Autowired
+	private CollectEnqueueService collectEnqueueService;
 	
 	
 	@Autowired
@@ -614,6 +624,49 @@ public class AdminController {
 		control.put("effectiveCollectPaused", Global.isCollectPaused());
 		control.put("effectiveHlsPaused", Global.isHlsPaused());
 		return control;
+	}
+
+	@GetMapping("/collect-tasks/{taskId}/runs")
+	public List<Map<String, Object>> findCollectRuns(@PathVariable Integer taskId,
+			@RequestParam(defaultValue = "20") int limit, @RequestParam(defaultValue = "0") long afterId) {
+		return collectRunQueryService.findRuns(taskId, limit, afterId);
+	}
+
+	@GetMapping("/collect-runs/{runId}")
+	public Map<String, Object> findCollectRun(@PathVariable long runId) {
+		return collectRunQueryService.findRun(runId);
+	}
+
+	@GetMapping("/collect-runs/{runId}/items")
+	public List<Map<String, Object>> findCollectRunItems(@PathVariable long runId,
+			@RequestParam(defaultValue = "all") String decision, @RequestParam(defaultValue = "100") int limit,
+			@RequestParam(defaultValue = "0") long afterId) {
+		return collectRunQueryService.findItems(runId, decision, limit, afterId);
+	}
+
+	@GetMapping("/collect-runs/{runId}/events")
+	public List<Map<String, Object>> findCollectRunEvents(@PathVariable long runId,
+			@RequestParam(defaultValue = "0") int afterSequence, @RequestParam(defaultValue = "200") int limit) {
+		return collectRunQueryService.findEvents(runId, afterSequence, limit);
+	}
+
+	@PostMapping("/collect-runs/{runId}/requeue-preview")
+	public Map<String, Object> previewCollectRunRequeue(@PathVariable long runId) {
+		return collectRunQueryService.requeuePreview(runId, Global.isCollectPaused());
+	}
+
+	@PostMapping("/collect-runs/{runId}/requeue")
+	public AjaxEntity requeueCollectRun(@PathVariable long runId) {
+		Map<String, Object> preview = collectRunQueryService.requeuePreview(runId, Global.isCollectPaused());
+		if (!Boolean.TRUE.equals(preview.get("canRequeue"))) {
+			return new AjaxEntity(Global.ajax_uri_error, "当前运行不可重排队", preview);
+		}
+		try {
+			int taskId = ((Number) preview.get("taskId")).intValue();
+			return new AjaxEntity(Global.ajax_success, "已重新入队", collectEnqueueService.enqueueManual(taskId));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, "重排队失败: " + error.getMessage(), null);
+		}
 	}
 
 	@GetMapping(value = "/getBackgroundTaskStatus")

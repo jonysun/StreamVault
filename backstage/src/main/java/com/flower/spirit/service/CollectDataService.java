@@ -100,6 +100,12 @@ public class CollectDataService {
 	@Autowired
 	private DouyinCookieHealthService douyinCookieHealthService;
 
+	@Autowired
+	private CollectEnqueueService collectEnqueueService;
+
+	@Autowired
+	private CollectRunService collectRunService;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -108,6 +114,7 @@ public class CollectDataService {
 	private volatile long lastCollectTaskFinishedAt = 0L;
 	private final ThreadLocal<F2FailureDiagnosis> lastF2FailureDiagnosis = new ThreadLocal<>();
 	private final ThreadLocal<FetchRunContext> lastFetchRunContext = new ThreadLocal<>();
+	private final ThreadLocal<Long> activePersistentRunId = new ThreadLocal<>();
 
 	/**
 	 * 文件储存真实路径
@@ -237,7 +244,8 @@ public class CollectDataService {
 					return new AjaxEntity(Global.ajax_success, "任务创建成功", null);
 
 				} catch (Exception e) {
-					logger.error("异常" + e.getMessage());
+					logger.error("[CollectTask] synchronous execution failed taskId={}", collectDataEntity.getId(), e);
+					throw new IllegalStateException("收藏任务执行失败: " + rootCauseMessage(e), e);
 				}
 
 			} else {
@@ -470,8 +478,12 @@ public class CollectDataService {
 	}
 
 	public void createDyData(CollectDataEntity entity, String monitor) throws Exception {
+		createDyData(entity, monitor, null);
+	}
+
+	private void createDyData(CollectDataEntity entity, String monitor, Long persistentRunId) throws Exception {
 		sleepCollectTaskIntervalIfNeeded();
-		String runId = buildCollectRunId(entity);
+		String runId = persistentRunId == null ? buildCollectRunId(entity) : "collect-run-" + persistentRunId;
 		logger.info("[CollectTask] createDyData start runId={} id={} name={} monitor={} originaladdress={}",
 				runId, entity.getId(), entity.getTaskname(), monitor, entity.getOriginaladdress());
 		String taskname = entity.getTaskname(); // 任务名称 作为tvshou.nfo元数据
@@ -496,6 +508,9 @@ public class CollectDataService {
 		Map<String, JSONObject> authorReconcileProfileCache = new HashMap<>();
 		if (allDYData != null) {
 			allDYData = sortDouyinItemsByPublishTime(allDYData);
+			if (persistentRunId != null) {
+				collectRunService.storeFetchedItems(persistentRunId, buildPersistentRunItems(allDYData));
+			}
 			entity.setLastfetchcount(allDYData.size());
 			entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
 			entity.setLastfetchsnapshot(buildFetchSnapshot(allDYData, fetchContext));
@@ -514,13 +529,19 @@ public class CollectDataService {
 					diagnosis == null ? "用户作品列表抓取失败" : diagnosis.rootCause(),
 					getLastF2Context(diagnosis));
 			lastF2FailureDiagnosis.remove();
+			if (persistentRunId != null) {
+				throw new CollectFetchException(diagnosis == null ? "FETCH_DY_DATA_FAIL" : diagnosis.errorCode(),
+						diagnosis == null ? "用户作品列表抓取失败" : diagnosis.rootCause());
+			}
 		}
 		// System.out.println(allDYData.size());
 		String risk = "0";
 		if (allDYData != null) {
-			entity.setCount(String.valueOf(allDYData.size()));
-			entity.setTaskstatus("已开始处理");
-			collectdDataDao.save(entity);
+			if (persistentRunId == null) {
+				entity.setCount(String.valueOf(allDYData.size()));
+				entity.setTaskstatus("已开始处理");
+				collectdDataDao.save(entity);
+			}
 			JSONArray planItems = new JSONArray();
 			for (int i = 0; i < allDYData.size(); i++) {
 				if (successThisRun >= targetSuccess) {
@@ -629,8 +650,10 @@ public class CollectDataService {
 						if (existingDetail == null) {
 							String carriedout = entity.getCarriedout() == null ? "1"
 									: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
-							entity.setCarriedout(carriedout);
-							collectdDataDao.save(entity);
+							if (persistentRunId == null) {
+								entity.setCarriedout(carriedout);
+								collectdDataDao.save(entity);
+							}
 						}
 						graphiccount++;
 						successThisRun++;
@@ -887,8 +910,10 @@ public class CollectDataService {
 					// 修改主体
 					String carriedout = entity.getCarriedout() == null ? "1"
 							: String.valueOf(Integer.parseInt(entity.getCarriedout()) + 1);
-					entity.setCarriedout(carriedout);
-					collectdDataDao.save(entity);
+					if (persistentRunId == null) {
+						entity.setCarriedout(carriedout);
+						collectdDataDao.save(entity);
+					}
 					videoaddcount++;
 					if (status.startsWith("已完成") || "图文已完成".equals(status)) {
 						successThisRun++;
@@ -915,9 +940,11 @@ public class CollectDataService {
 		if (totalCount > 0) {
 		    sendNotify.sendMessage(totalCount, entity.getTaskname());
 		}
-		entity.setTaskstatus(resolveDouyinCollectStatus(risk, allDYData == null, successThisRun, failedThisRun, skippedThisRun));
-		entity.setEndtime(DateUtils.formatDateTime(new Date()));
-		collectdDataDao.save(entity);
+		if (persistentRunId == null) {
+			entity.setTaskstatus(resolveDouyinCollectStatus(risk, allDYData == null, successThisRun, failedThisRun, skippedThisRun));
+			entity.setEndtime(DateUtils.formatDateTime(new Date()));
+			collectdDataDao.save(entity);
+		}
 		markCollectTaskFinished();
 		System.gc();
 		logger.info("任务结束" + entity.getOriginaladdress());
@@ -1060,10 +1087,50 @@ public class CollectDataService {
 		String logText = processLog == null ? "" : processLog.toString();
 		planItem.put("processlog", logText.length() > 12000 ? logText.substring(0, 12000) + "...(truncated)" : logText);
 		planItems.add(planItem);
+		Long persistentRunId = activePersistentRunId.get();
+		if (persistentRunId != null && planItem.getString("aweme_id") != null) {
+			collectRunService.updateItem(persistentRunId, planItem.getString("aweme_id"),
+					planItem.getString("decision"), runItemState(planItem.getString("decision"),
+							planItem.getString("status"), errorCode), errorCode, errorMsg);
+		}
 		logger.info("[CollectTask] plan item runId={} awemeId={} index={} mediaType={} decision={} status={} reason={} errorCode={} log={}",
 				planItem.getString("runId"), planItem.getString("aweme_id"), planItem.get("index"),
 				planItem.getString("mediatype"), planItem.getString("decision"), planItem.getString("status"),
 				trimForLog(planItem.getString("reason"), 160), errorCode, trimForLog(logText, 500));
+	}
+
+	private List<CollectRunFetchedItem> buildPersistentRunItems(JSONArray items) {
+		List<CollectRunFetchedItem> result = new ArrayList<>();
+		for (int i = 0; i < items.size(); i++) {
+			JSONObject item = items.getJSONObject(i);
+			String workId = item.getString("aweme_id");
+			if (workId == null || workId.isBlank()) continue;
+			JSONArray playAddress = item.getJSONArray("video_play_addr");
+			String mediaType = playAddress == null || playAddress.isEmpty() ? "image" : "video";
+			result.add(new CollectRunFetchedItem(i + 1, "douyin", workId,
+					firstNotBlank(item.getString("sec_uid"), item.getString("author_uid")),
+					item.getString("nickname"), item.getString("desc"),
+					firstNotBlank(item.getString("publish_time"), item.getString("create_time")), mediaType));
+		}
+		return result;
+	}
+
+	private String runItemState(String decision, String status, String errorCode) {
+		String combined = (valueOrEmpty(decision) + " " + valueOrEmpty(status)).toLowerCase();
+		if (errorCode != null || combined.contains("fail") || combined.contains("失败")) return "FAILED";
+		if (combined.contains("skip") || combined.contains("exist") || combined.contains("已存在")) return "SKIPPED";
+		return "COMPLETED";
+	}
+
+	private String valueOrEmpty(String value) {
+		return value == null ? "" : value;
+	}
+
+	private String rootCauseMessage(Throwable error) {
+		Throwable root = error;
+		while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+		return root.getMessage() == null || root.getMessage().isBlank()
+				? root.getClass().getSimpleName() : root.getMessage();
 	}
 
 	private JSONObject buildRunSummaryPlanItem(String runId, FetchRunContext context, int fetchedCount,
@@ -1560,9 +1627,11 @@ public class CollectDataService {
 			planItem.put("processlog", processLog.toString());
 		}
 		planItems.add(planItem);
-		entity.setTaskstatus("执行失败(抓取异常)");
-		entity.setEndtime(DateUtils.formatDateTime(new Date()));
-		entity.setCount("0");
+		if (activePersistentRunId.get() == null) {
+			entity.setTaskstatus("执行失败(抓取异常)");
+			entity.setEndtime(DateUtils.formatDateTime(new Date()));
+			entity.setCount("0");
+		}
 		entity.setLastplanitems(planItems.toJSONString());
 		entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
 		collectdDataDao.save(entity);
@@ -1986,6 +2055,45 @@ public class CollectDataService {
 		return collectdDataDao.findById(taskId);
 	}
 
+	public boolean isCollectTaskEnabled(Integer taskId) {
+		return collectdDataDao.findById(taskId).map(task -> !"N".equalsIgnoreCase(task.getTaskenabled())).orElse(false);
+	}
+
+	public void executeQueuedCollectTask(Integer taskId, long runId) {
+		CollectDataEntity task = collectdDataDao.findById(taskId)
+				.orElseThrow(() -> new IllegalArgumentException("收藏任务不存在: " + taskId));
+		activePersistentRunId.set(runId);
+		try {
+			if ("抖音".equals(task.getPlatform())) {
+				String cookie = platformCookieService.currentDouyinCookie("collect_worker");
+				if (cookie == null || cookie.isBlank()) {
+					throw new CollectFetchException("COOKIE_MISSING", "抖音 Cookie 为空，无法抓取作品列表");
+				}
+				String address = task.getOriginaladdress();
+				if (address == null || !(address.startsWith("post") || address.startsWith("like")
+						|| address.startsWith("fav-") || address.startsWith("recommend"))) {
+					throw new CollectFetchException("INVALID_SOURCE", "收藏任务地址格式不受支持");
+				}
+				createDyData(task, "Y", runId);
+				return;
+			}
+			collectRunService.storeFetchedItems(runId, List.of());
+			AjaxEntity result = submitCollectData(task, "Y");
+			if (result == null || !Global.ajax_success.equals(result.getResCode())) {
+				throw new CollectFetchException("COLLECT_EXECUTION_FAILED",
+						result == null ? "收藏任务未返回执行结果" : result.getMessage());
+			}
+		} catch (CollectFetchException e) {
+			throw e;
+		} catch (Exception e) {
+			throw new IllegalStateException("收藏任务执行异常: " + rootCauseMessage(e), e);
+		} finally {
+			activePersistentRunId.remove();
+			lastF2FailureDiagnosis.remove();
+			lastFetchRunContext.remove();
+		}
+	}
+
 
 	public AjaxEntity execCollectData(CollectDataEntity collectDataEntity){
 		if (collectDataEntity == null || collectDataEntity.getId() == null) {
@@ -1995,28 +2103,15 @@ public class CollectDataService {
 		if (current.isPresent() && "N".equalsIgnoreCase(current.get().getTaskenabled())) {
 			return new AjaxEntity(Global.ajax_uri_error, "任务已暂停，请先开始任务", null);
 		}
-		//先判断 任务存不存在
-		boolean taskExists = quartzTaskService.isTaskExists(collectDataEntity.getId());
-		if(taskExists) {
-			//判断是否在运行
-			boolean taskRunning = quartzTaskService.isTaskRunning(collectDataEntity.getId());
-			if(!taskRunning) {
-				quartzTaskService.triggerTask(collectDataEntity.getId());
-			}else {
-				return new AjaxEntity(Global.ajax_success, "当前任务已在运行,请勿重复提交", null);
-			}
-			
-		}else {
-			//不存在 需要先查询 然后注册  在触发
-			Optional<CollectDataEntity> byId = collectdDataDao.findById(collectDataEntity.getId());
-			if(byId.isPresent()) {
-				CollectDataEntity db = byId.get();
-				quartzTaskService.scheduleTask(db);
-				sleepCollectTaskIntervalIfNeeded();
-				quartzTaskService.triggerTask(db.getId());
-			}
+		try {
+			CollectEnqueueResult result = collectEnqueueService.enqueueManual(collectDataEntity.getId());
+			String message = result.skippedPaused() ? "任务当前已暂停，本次已记录为跳过"
+					: result.inserted() ? "任务已进入持久队列" : "当前任务已在队列或运行中，请勿重复提交";
+			return new AjaxEntity(Global.ajax_success, message, result);
+		} catch (RuntimeException error) {
+			logger.error("[CollectManualEnqueue] failed taskId={}", collectDataEntity.getId(), error);
+			return new AjaxEntity(Global.ajax_uri_error, "任务入队失败: " + rootCauseMessage(error), null);
 		}
-		return new AjaxEntity(Global.ajax_success, "任务启动成功", null);
 	}
 
 	public AjaxEntity pauseCollectData(Integer id) {

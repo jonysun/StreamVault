@@ -12,9 +12,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import com.flower.spirit.config.Global;
+import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.entity.CollectDataEntity;
-import com.flower.spirit.service.CollectDataService;
+import com.flower.spirit.service.CollectEnqueueResult;
+import com.flower.spirit.service.CollectEnqueueService;
 
 /**
  * 收藏夹监控任务Job
@@ -26,7 +27,10 @@ public class CollectDataJob implements Job {
     private static final Logger logger = LoggerFactory.getLogger(CollectDataJob.class);
     
     @Autowired
-    private CollectDataService collectDataService;
+	private CollectEnqueueService collectEnqueueService;
+
+	@Autowired
+	private CollectdDataDao collectdDataDao;
     
     @Autowired
     private QuartzTaskService quartzTaskService;
@@ -42,24 +46,20 @@ public class CollectDataJob implements Job {
         String taskName = dataMap.getString("taskName");
 
         try {
-            if (Global.isCollectPaused()) {
-                logger.info("收藏任务已暂停，跳过执行：{}", taskName);
-                return;
-            }
-            logger.info("开始执行收藏夹任务：{}", taskName);
-            
-            // 获取任务详情
-            Optional<CollectDataEntity> taskOpt = collectDataService.findById(taskId);
-            if (!taskOpt.isPresent()) {
-            	logger.warn("任务不存在：{}", taskName);
-                return;
-            }
-            CollectDataEntity collectDataEntity = taskOpt.get();
-            collectDataService.submitCollectData(collectDataEntity, "Y");
-            if (!"Y".equals(collectDataEntity.getMonitoring())) {
-                quartzTaskService.removeTaskSchedule(taskId);
-            }
-            logger.info("收藏夹任务执行完成：{}", taskName);
+			logger.info("收藏任务到期，准备入队：{}", taskName);
+			Optional<CollectDataEntity> taskOpt = collectdDataDao.findById(taskId);
+			if (!taskOpt.isPresent()) {
+				logger.warn("任务不存在：{}", taskName);
+				return;
+			}
+			CollectDataEntity collectDataEntity = taskOpt.get();
+			CollectEnqueueResult result = collectEnqueueService.enqueueScheduled(taskId,
+					context.getFireTime() == null ? null : context.getFireTime().toInstant());
+			if (!"Y".equals(collectDataEntity.getMonitoring())) {
+				quartzTaskService.removeTaskSchedule(taskId);
+			}
+			logger.info("收藏任务入队完成 taskId={} taskName={} runId={} jobId={} state={} inserted={}", taskId,
+					taskName, result.runId(), result.jobId(), result.state(), result.inserted());
             
         } catch (Exception e) {
             logger.error("收藏夹任务执行失败：{}", taskName, e);

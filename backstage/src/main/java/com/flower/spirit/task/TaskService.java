@@ -11,6 +11,7 @@ import com.flower.spirit.config.Global;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.AuthorEnrichmentWorker;
 import com.flower.spirit.service.AuthorEnrichmentQueueService;
+import com.flower.spirit.service.CollectJobWorker;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.FfmpegQueueService;
 import com.flower.spirit.service.HlsTranscodeService;
@@ -38,6 +39,9 @@ public class TaskService {
 
 	@Autowired
 	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
+
+	@Autowired
+	private CollectJobWorker collectJobWorker;
 	
 	
 	@Scheduled(fixedDelay = 1000*5)
@@ -70,6 +74,14 @@ public class TaskService {
 			return;
 		}
 		authorEnrichmentWorker.processOne();
+	}
+
+	@Scheduled(fixedDelayString = "${streamvault.collect-queue.poll-delay-ms:5000}")
+	public void collectQueueTick() {
+		if (Global.isCollectPaused()) {
+			return;
+		}
+		collectJobWorker.wakeUp();
 	}
 
 	@Scheduled(cron = "${streamvault.author-enrichment.reconcile-cron:0 30 3 * * ?}")

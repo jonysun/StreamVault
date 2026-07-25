@@ -827,7 +827,8 @@
 									+'<a data-row="'+encodeURIComponent(JSON.stringify(list[i]))+'" class="btn btn-xs btn-primary editCollect" href="#!" title="编辑任务" data-toggle="tooltip">编辑</a>'
 									+(enabled ? '<a data-id="'+list[i].id+'" class="btn btn-xs btn-warning pauseTask" href="#!" title="暂停任务" data-toggle="tooltip">暂停</a>' : '<a data-id="'+list[i].id+'" class="btn btn-xs btn-info resumeTask" href="#!" title="开始任务" data-toggle="tooltip">开始</a>')
 									+'<a data-json="'+encodeURIComponent(list[i].lastfetchsnapshot || '')+'" class="btn btn-xs btn-default viewSnapshot" href="#!" title="最近拉取全量" data-toggle="tooltip">全量列表</a>'
-									+'<a data-json="'+encodeURIComponent(list[i].lastplanitems || '')+'" class="btn btn-xs btn-default viewPlan" href="#!" title="本轮计划下载" data-toggle="tooltip">计划列表</a>'
+					+'<a data-json="'+encodeURIComponent(list[i].lastplanitems || '')+'" class="btn btn-xs btn-default viewPlan" href="#!" title="本轮计划下载" data-toggle="tooltip">计划列表</a>'
+					+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-info viewRuns" href="#!" title="查看持久运行记录" data-toggle="tooltip">运行记录</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewProcesses" href="#!" title="查看进程" data-toggle="tooltip">查看进程</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default deleteProcesses" href="#!" title="删除" data-toggle="tooltip">删除</a>'
 									+(list[i].platform === '哔哩' && !list[i].originaladdress.startsWith('bili-fav-') && !list[i].originaladdress.startsWith('bili-arc-')  && !list[i].originaladdress.startsWith('bili-seaarc-') ? 
@@ -845,6 +846,7 @@
 					resumeTask();
 					viewSnapshot();
 					viewPlan();
+					viewRuns();
 						laypage({
 							cont: 'pager',
 							pages: record.page.totalPages,
@@ -879,6 +881,49 @@
 				return;
 			}
 			showJsonTableDialog('最近一次计划下载列表', content, 'plan');
+		});
+	}
+
+	function viewRuns(){
+		$('.viewRuns').click(function(){
+			var taskId = $(this).data('id');
+			$.get('/admin/api/collect-tasks/'+taskId+'/runs', {limit: 50}, function(rows){
+				if(!$.isArray(rows) || !rows.length){
+					layer.msg('暂无持久运行记录');
+					return;
+				}
+				var columns = [
+					{title:'运行ID', render:function(row){ return codeCell(row.runId); }},
+					{title:'触发', render:function(row){ return cell(row.triggerType); }},
+					{title:'状态', render:function(row){ return badgeCell(row.stateLabel || row.state); }},
+					{title:'抓取', render:function(row){ return cell(row.fetchedCount); }},
+					{title:'计划/新增/跳过/失败', render:function(row){ return cell([row.plannedCount,row.insertedCount,row.skippedExistingCount,row.failedItemCount].join(' / ')); }},
+					{title:'排队时间', render:function(row){ return smallCell(row.queuedAt); }},
+					{title:'错误', render:function(row){ return smallCell([row.errorCode,row.errorMessage].filter(Boolean).join('\n')); }},
+					{title:'操作', render:function(row){ return '<button class="btn btn-xs btn-primary inspectRun" data-run-id="'+escapeHtml(row.runId)+'">明细</button>'; }}
+				];
+				var content = renderTableDialog('任务 '+taskId+' 的持久运行记录', columns, rows);
+				layer.open({type:1,title:'收藏运行记录',area:['96%','86%'],content:content});
+				$('.inspectRun').click(function(){ showRunItems($(this).data('run-id')); });
+			});
+		});
+	}
+
+	function showRunItems(runId){
+		$.get('/admin/api/collect-runs/'+runId+'/items', {decision:'all', limit:500}, function(rows){
+			var columns = [
+				{title:'序号', render:function(row){ return cell(row.ordinal); }},
+				{title:'作品ID', render:function(row){ return codeCell(row.workId); }},
+				{title:'媒体', render:function(row){ return cell(row.mediaType); }},
+				{title:'作者', render:function(row){ return cell(row.nicknameSnapshot || row.authorUid); }},
+				{title:'标题/摘要', render:function(row){ return longCell(row.titleSnapshot, 260); }},
+				{title:'发布时间', render:function(row){ return cell(row.publishTime); }},
+				{title:'决策', render:function(row){ return badgeCell(row.decision); }},
+				{title:'处理状态', render:function(row){ return cell(row.processState); }},
+				{title:'错误', render:function(row){ return smallCell([row.errorCode,row.errorMessage].filter(Boolean).join('\n')); }}
+			];
+			var content = renderTableDialog('runId: '+runId, columns, rows || []);
+			layer.open({type:1,title:'运行作品明细',area:['96%','86%'],content:content});
 		});
 	}
 

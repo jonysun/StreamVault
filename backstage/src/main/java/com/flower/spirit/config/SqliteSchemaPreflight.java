@@ -21,7 +21,11 @@ public class SqliteSchemaPreflight {
 	private static final List<String> IDENTITY_TABLES = List.of(
 			"biz_author_profile",
 			"biz_author_name_history",
-			"biz_author_enrichment_job");
+			"biz_author_enrichment_job",
+			"biz_collect_run",
+			"biz_collect_run_item",
+			"biz_collect_run_event",
+			"biz_job_queue");
 
 	private final JdbcTemplate jdbcTemplate;
 

@@ -62,6 +62,26 @@ public class DatabaseIndexInitializer {
 						+ "WHERE state IN ('QUEUED', 'RUNNING', 'RETRY_WAIT')",
 				"CREATE INDEX IF NOT EXISTS idx_author_enrichment_due "
 						+ "ON biz_author_enrichment_job(state, next_attempt_at, priority, id)",
+				"CREATE UNIQUE INDEX IF NOT EXISTS uq_collect_run_active_task "
+						+ "ON biz_collect_run(collect_task_id) "
+						+ "WHERE state IN ('QUEUED', 'FETCHING', 'PROCESSING')",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_task_created "
+						+ "ON biz_collect_run(collect_task_id, created_at DESC, id DESC)",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_state_heartbeat "
+						+ "ON biz_collect_run(state, heartbeat_at)",
+				"CREATE UNIQUE INDEX IF NOT EXISTS uq_collect_run_item_work "
+						+ "ON biz_collect_run_item(run_id, platform_key, work_id)",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_run_ordinal "
+						+ "ON biz_collect_run_item(run_id, ordinal)",
+				"CREATE UNIQUE INDEX IF NOT EXISTS uq_collect_run_event_sequence "
+						+ "ON biz_collect_run_event(run_id, sequence)",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_event_run_sequence "
+						+ "ON biz_collect_run_event(run_id, sequence)",
+				"CREATE UNIQUE INDEX IF NOT EXISTS uq_job_queue_active_dedupe "
+						+ "ON biz_job_queue(job_type, dedupe_key) "
+						+ "WHERE state IN ('QUEUED', 'RUNNING', 'RETRY_WAIT')",
+				"CREATE INDEX IF NOT EXISTS idx_job_queue_claim "
+						+ "ON biz_job_queue(state, available_at, priority, id)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platform_videoid ON biz_graphic_content(platform, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platformkey_videoid ON biz_graphic_content(platformkey, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author_identity ON biz_graphic_content(platformkey, authoruid, secuid)",
