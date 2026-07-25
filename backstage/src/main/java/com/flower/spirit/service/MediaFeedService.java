@@ -9,14 +9,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Date;
+import java.util.HexFormat;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -26,9 +31,14 @@ import com.alibaba.fastjson.JSON;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.AuthorProfileDao;
+import com.flower.spirit.dao.MediaFeedQueryDao;
 import com.flower.spirit.dto.AdminMediaFeedItem;
 import com.flower.spirit.dto.AdminMediaSlide;
 import com.flower.spirit.dto.AdminVideoListItem;
+import com.flower.spirit.dto.FeedCursor;
+import com.flower.spirit.dto.MediaFeedCursorPage;
+import com.flower.spirit.dto.MediaFeedRequest;
+import com.flower.spirit.dto.MediaFeedRow;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
@@ -54,6 +64,146 @@ public class MediaFeedService {
 
 	@Autowired
 	private AuthorProfileDao authorProfileDao;
+
+	@Autowired
+	private MediaFeedQueryDao mediaFeedQueryDao;
+
+	@Autowired
+	private FeedCursorCodec feedCursorCodec;
+
+	@Autowired
+	private HlsTranscodeService hlsTranscodeService;
+
+	@Value("${streamvault.feed.keyset.enabled:true}")
+	private boolean keysetEnabled;
+
+	public MediaFeedCursorPage findCursorPage(MediaFeedRequest source) {
+		if (!keysetEnabled) throw new IllegalArgumentException("keyset media feed is disabled");
+		MediaFeedRequest request = normalizeCursorRequest(source);
+		String filterHash = cursorFilterHash(request);
+		FeedCursor cursor = feedCursorCodec.decode(request.getCursor());
+		validateCursor(cursor, request, filterHash);
+		int limit = request.getLimit();
+		List<MediaFeedRow> rows = new ArrayList<>(mediaFeedQueryDao.find(request, cursor, limit + 1));
+		boolean hasMore = rows.size() > limit;
+		if (hasMore) rows.remove(rows.size() - 1);
+		Set<Integer> queuedIds = hlsTranscodeService == null ? Set.of() : hlsTranscodeService.queuedIdsSnapshot();
+		Set<Integer> runningIds = hlsTranscodeService == null ? Set.of() : hlsTranscodeService.runningVideoIdsSnapshot();
+		List<AdminMediaFeedItem> items = rows.stream()
+				.map(row -> toCursorFeedItem(row, queuedIds, runningIds))
+				.toList();
+		enrichDisplayAuthors(items);
+		String nextCursor = null;
+		if (hasMore && !rows.isEmpty()) {
+			MediaFeedRow last = rows.get(rows.size() - 1);
+			nextCursor = feedCursorCodec.encode(new FeedCursor(Instant.ofEpochMilli(last.sortTimeMillis()),
+					last.mediaType(), last.internalId(), request.getOrder(), filterHash));
+		}
+		return new MediaFeedCursorPage(items, nextCursor, hasMore);
+	}
+
+	public boolean isKeysetEnabled() {
+		return keysetEnabled;
+	}
+
+	private MediaFeedRequest normalizeCursorRequest(MediaFeedRequest source) {
+		MediaFeedRequest request = new MediaFeedRequest();
+		String type = source == null ? null : source.getType();
+		String order = source == null ? null : source.getOrder();
+		request.setType(normalizeMediaType(type));
+		request.setOrder("asc".equalsIgnoreCase(order) ? "asc" : "desc");
+		request.setLimit(Math.min(Math.max(source == null || source.getLimit() == null ? 20 : source.getLimit(), 1), 100));
+		request.setCursor(source == null ? null : trimToNull(source.getCursor()));
+		String platformKey = source == null ? null : trimToNull(source.getPlatformKey());
+		request.setPlatformKey(platformKey == null ? null : PlatformCatalog.canonicalKey(platformKey, platformKey));
+		request.setAuthorUid(source == null ? null : trimToNull(source.getAuthorUid()));
+		if (request.getAuthorUid() != null && request.getPlatformKey() == null) {
+			throw new IllegalArgumentException("platformKey is required when authorUid is provided");
+		}
+		return request;
+	}
+
+	private void validateCursor(FeedCursor cursor, MediaFeedRequest request, String filterHash) {
+		if (cursor == null) return;
+		if (!request.getOrder().equals(cursor.order()) || !filterHash.equals(cursor.filterHash())) {
+			throw new IllegalArgumentException("feed cursor does not match the current filters");
+		}
+		if (cursor.sortTime() == null || cursor.internalId() <= 0
+				|| !("video".equals(cursor.mediaType()) || "graphic".equals(cursor.mediaType()))) {
+			throw new IllegalArgumentException("feed cursor is incomplete");
+		}
+	}
+
+	private String cursorFilterHash(MediaFeedRequest request) {
+		String value = String.join("|", request.getType(), request.getOrder(),
+				String.valueOf(request.getPlatformKey()), String.valueOf(request.getAuthorUid()));
+		try {
+			return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+					.digest(value.getBytes(StandardCharsets.UTF_8)));
+		} catch (Exception error) {
+			throw new IllegalStateException("SHA-256 unavailable", error);
+		}
+	}
+
+	private AdminMediaFeedItem toCursorFeedItem(MediaFeedRow row, Set<Integer> queuedIds,
+			Set<Integer> runningIds) {
+		AdminMediaFeedItem item = new AdminMediaFeedItem();
+		item.setType(row.mediaType());
+		item.setId(row.internalId());
+		item.setMediaKey(row.mediaKey());
+		item.setVideoid(row.workId());
+		String platformKey = PlatformMetadataCompatibilityService.resolvePlatformKey(row.platformKey(),
+				row.platformDisplayName());
+		item.setPlatformkey(platformKey);
+		item.setPlatform(PlatformMetadataCompatibilityService.resolveDisplayName(platformKey,
+				row.platformDisplayName()));
+		item.setAuthor(row.authorDisplayName());
+		item.setAuthoruid(row.authorUid());
+		item.setSecuid(row.authorUid());
+		item.setAuthorusername(row.authorUsername());
+		item.setUniqueid(row.authorUsername());
+		item.setAuthoravatar(row.authorAvatar());
+		item.setAuthorhomepage(row.authorHomepage());
+		item.setTitle(row.title());
+		item.setDesc(row.summary());
+		item.setPublishTime(row.publishTime() == null ? null : row.publishTime().toString());
+		item.setCreateTime(row.downloadedAt() == null ? null : Date.from(row.downloadedAt()));
+		item.setCover(row.coverUrl());
+		item.setSourceurl(row.sourceUrl());
+		item.setOriginaladdress(row.originalAddress());
+		item.setFavorite(row.favorite());
+		item.setPrivacy(row.privacy());
+		item.setContenttype(row.contentType());
+		item.setFallbackUrl(row.fallbackUrl());
+		item.setSlides(row.slides().stream().map(slide -> new AdminMediaSlide(slide.type(), slide.url())).toList());
+		if ("video".equals(row.mediaType())) applyCursorPlayback(item, row, queuedIds, runningIds);
+		if (!"video".equals(row.mediaType()) && !hasText(item.getContenttype())) {
+			item.setContenttype(item.getSlides().stream().anyMatch(slide -> "video".equals(slide.getType()))
+					? "mixed" : "graphic");
+		}
+		normalizeAuthorIdentity(item);
+		return item;
+	}
+
+	private void applyCursorPlayback(AdminMediaFeedItem item, MediaFeedRow row, Set<Integer> queuedIds,
+			Set<Integer> runningIds) {
+		String playUrl = row.fallbackUrl();
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(row.internalId());
+		video.setVideoaddr(row.localVideoPath());
+		video.setVideounrealaddr(row.fallbackUrl());
+		boolean hasHls = Global.hlsEnable && hlsTranscodeService != null && hlsTranscodeService.hasHls(video);
+		if (hasHls) {
+			String hls = hlsTranscodeService.buildHlsPlayUrl(video);
+			if (hasText(hls)) playUrl = hls;
+		}
+		item.setPlayurl(playUrl);
+		if (!Global.hlsEnable) item.setHlsstatus("关闭");
+		else if (hasHls) item.setHlsstatus("已完成");
+		else if (runningIds.contains(row.internalId())) item.setHlsstatus("转码中");
+		else if (queuedIds.contains(row.internalId())) item.setHlsstatus("排队中");
+		else item.setHlsstatus("未完成");
+	}
 
 	public AjaxEntity findPage(VideoDataEntity query) {
 		VideoDataEntity videoQuery = copyVideoQuery(query);
@@ -549,5 +699,13 @@ public class MediaFeedService {
 		item.setSecuid(canonicalUid);
 		item.setAuthorusername(canonicalUsername);
 		item.setUniqueid(canonicalUsername);
+	}
+
+	private String trimToNull(String value) {
+		return hasText(value) ? value.trim() : null;
+	}
+
+	private boolean hasText(String value) {
+		return value != null && !value.trim().isEmpty();
 	}
 }

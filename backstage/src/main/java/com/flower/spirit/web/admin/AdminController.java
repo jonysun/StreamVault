@@ -23,6 +23,7 @@ import com.flower.spirit.dto.WorkOperationRequest;
 import com.flower.spirit.dto.AdminAuthorDeletionRequest;
 import com.flower.spirit.dto.AdminDeleteWorkRequest;
 import com.flower.spirit.dto.DatabaseMaintenanceRequest;
+import com.flower.spirit.dto.MediaFeedRequest;
 import com.flower.spirit.entity.BiliConfigEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.BlockedWorkEntity;
@@ -316,6 +317,15 @@ public class AdminController {
 	@PostMapping(value = "/findMediaFeedList")
 	public AjaxEntity findMediaFeedList(VideoDataEntity videoDataEntity, HttpServletRequest request) {
 		return mediaFeedService.findPage(videoDataEntity);
+	}
+
+	@GetMapping(value = "/media-feed")
+	public AjaxEntity findMediaFeed(MediaFeedRequest request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "媒体列表获取成功", mediaFeedService.findCursorPage(request));
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
 	}
 	
 	/**

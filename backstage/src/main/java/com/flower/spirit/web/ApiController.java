@@ -22,7 +22,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.dto.MediaFeedRequest;
 import com.flower.spirit.service.AnalysisService;
+import com.flower.spirit.service.MediaFeedService;
 import com.flower.spirit.service.VideoDataService;
 import com.flower.spirit.service.ConfigService;
 import com.flower.spirit.service.ProcessHistoryService;
@@ -50,6 +52,9 @@ public class ApiController {
 
 	@Autowired
 	private ProcessHistoryService processHistoryService;
+
+	@Autowired
+	private MediaFeedService mediaFeedService;
 	
 	
 	/**
@@ -96,6 +101,19 @@ public class ApiController {
 		    return new AjaxEntity(Global.ajax_uri_error, "app token 错误", null);
 		}
 		return videoDataService.findAll(res);
+	}
+
+	@RequestMapping("/media-feed")
+	public AjaxEntity mediaFeed(HttpServletRequest req, MediaFeedRequest request) {
+		String token = req.getParameter("token");
+		if (!(Objects.equals(token, Global.apptoken) || Objects.equals(token, Global.readonlytoken))) {
+			return new AjaxEntity(Global.ajax_uri_error, "app token 错误", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "媒体列表获取成功", mediaFeedService.findCursorPage(request));
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
 	}
 
 	@RequestMapping("/updateVideoFavorite")

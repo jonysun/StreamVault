@@ -74,6 +74,17 @@ class AdminTemplateScriptSanityTest {
 				"/admin/api/authorProfileSummary", "/admin/api/authorProfileWorks");
 	}
 
+	@Test
+	void indexUsesKeysetFeedWithoutBreakingLegacyFallbacks() throws IOException {
+		String index = template("index.html");
+
+		assertThat(index).contains("function shouldUseFeedCursor()", "function buildFeedCursorRequestOption(pageSize)",
+				"$.get('/admin/api/media-feed', option)", "feedNextCursor = record.nextCursor || ''",
+				"feedNextCursor = '';", "keyset media feed is disabled", "feedUseKeyset = false",
+				"feedOrder !== 'random'", "feedAuthorUid && feedAuthorPlatformKey",
+				"data-platformkey=\"");
+	}
+
 	private String template(String name) throws IOException {
 		try (var input = getClass().getResourceAsStream("/templates/admin/" + name)) {
 			if (input == null) throw new IOException(name + " template not found");

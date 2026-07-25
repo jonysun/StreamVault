@@ -51,6 +51,8 @@ public class DatabaseIndexInitializer {
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_platform_videoid ON biz_video(videoplatform, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_platformkey_videoid ON biz_video(platformkey, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_author_identity ON biz_video(platformkey, authoruid, secuid)",
+				"CREATE INDEX IF NOT EXISTS idx_biz_video_author_feed "
+						+ "ON biz_video(platformkey, COALESCE(NULLIF(secuid,''), authoruid), publishtime, id)",
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_favorite_id ON biz_video(favorite, id)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_detail_dataid_videoid ON biz_collect_data_detail(dataid, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_detail_dataid_status ON biz_collect_data_detail(dataid, status)",
@@ -85,6 +87,8 @@ public class DatabaseIndexInitializer {
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platform_videoid ON biz_graphic_content(platform, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platformkey_videoid ON biz_graphic_content(platformkey, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author_identity ON biz_graphic_content(platformkey, authoruid, secuid)",
+				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author_feed "
+						+ "ON biz_graphic_content(platformkey, COALESCE(NULLIF(secuid,''), authoruid), publishtime, id)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_publishtime_id ON biz_graphic_content(publishtime, id)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_createtime_id ON biz_graphic_content(createtime, id)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author ON biz_graphic_content(author)");

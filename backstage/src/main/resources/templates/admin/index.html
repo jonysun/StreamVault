@@ -1854,6 +1854,9 @@
     var feedMediaType = 'mixed';
     var feedAuthor = '';
     var feedAuthorUid = '';
+    var feedAuthorPlatformKey = '';
+    var feedNextCursor = '';
+    var feedUseKeyset = true;
     var feedMuted = true;
     var feedSourceMode = 'prefer_hls';
     var feedAuthorSet = {};
@@ -2210,26 +2213,39 @@
         isLoading = true;
         $('#loading').show();
         
-		var option = mediaHomeMode === 'feed'
-			? buildFeedRequestOption(page, feedPageSize)
-			: { pageNo: page + 1, pageSize: 25, sortField: 'publishtime', sortOrder: 'desc' };
-        option.lite = '1';
+		var useCursorFeed = shouldUseFeedCursor();
+		var option = useCursorFeed
+			? buildFeedCursorRequestOption(feedPageSize)
+			: (mediaHomeMode === 'feed'
+				? buildFeedRequestOption(page, feedPageSize)
+				: { pageNo: page + 1, pageSize: 25, sortField: 'publishtime', sortOrder: 'desc' });
+        if (!useCursorFeed) {
+            option.lite = '1';
+        }
         var listRequestStart = nowMs();
         
-        $.post(getFeedListEndpoint(), option, function(data, status) {
+        var listRequest = useCursorFeed
+            ? $.get('/admin/api/media-feed', option)
+            : $.post(getFeedListEndpoint(), option);
+        listRequest.done(function(data, status) {
             if(data.resCode === "000001") {
-                var list = data.record.content;
+                var record = data.record || {};
+                var list = useCursorFeed ? (record.items || []) : (record.content || []);
                 console.log('[AdminIndexPerf] list response', {
                     elapsedMs: Math.round(nowMs() - listRequestStart),
                     page: page,
                     mode: mediaHomeMode,
                     count: list.length,
-                    last: data.record.last,
+                    cursorMode: useCursorFeed,
+                    hasMore: useCursorFeed ? !!record.hasMore : !record.last,
                     status: status
                 });
                 
                 // 检查是否还有更多数据
-                hasMore = list.length > 0 && !data.record.last;
+                if (useCursorFeed) {
+                    feedNextCursor = record.nextCursor || '';
+                }
+                hasMore = list.length > 0 && (useCursorFeed ? !!record.hasMore : !record.last);
                 
                 if(list.length > 0) {
                     if (mediaHomeMode === 'feed') {
@@ -2289,8 +2305,14 @@
                         }
                     });
                 }
+            } else if (useCursorFeed && String(data.message || '').indexOf('keyset media feed is disabled') >= 0) {
+                feedUseKeyset = false;
+                isLoading = false;
+                $('#loading').hide();
+                findList(page);
+                return;
             }
-            
+
             isLoading = false;
             $('#loading').hide();
         }).fail(function(xhr, status, error) {
@@ -2350,14 +2372,14 @@
         }
     }
 
-    function buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, authorUid) {
+    function buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, authorUid, platformKey) {
         var safeTitle = isPrivate ? '******' : escapeHtml(String(titleValue || 'Untitled'));
         var safePlatform = isPrivate ? '****' : escapeHtml(String(platformValue || 'Unknown'));
         var safeAuthor = isPrivate ? '****' : escapeHtml(String(authorValue || 'Unknown'));
         var timeText = escapeHtml(formatTime(timeValue));
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(authorUid || '') + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(authorUid || '') + '" data-platformkey="' + escapeHtml(platformKey || '') + '">' + safeAuthor + '</span>';
         }
         var html = '<div class="feed-overlay">';
         html += '<div class="feed-title">' + safeTitle + '</div>';
@@ -2489,7 +2511,8 @@
         if (isPrivate) {
             html += '<div class="feed-private-mask"><i class="mdi mdi-lock"></i></div>';
         }
-        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue, item.authoruid || '');
+        html += buildFeedOverlayHtml(isPrivate, titleValue, platformValue, authorValue, timeValue,
+            item.authoruid || '', item.platformkey || '');
         html += buildFeedAuthorActionHtml(item, isPrivate, authorValue);
         html += '<div class="feed-custom-controls" data-feed-key="' + itemKey + '"></div>';
         html += '<div class="feed-bottom-hover-zone"></div>';
@@ -2531,7 +2554,7 @@
         html += '<div class="feed-title">' + safeTitle + '</div>';
         var authorChip = '';
         if (!isPrivate && authorValue && authorValue !== 'Unknown') {
-            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.authoruid || '') + '">' + safeAuthor + '</span>';
+            authorChip = '<span class="feed-author-chip" data-author="' + safeAuthor + '" data-authoruid="' + escapeHtml(item.authoruid || '') + '" data-platformkey="' + escapeHtml(item.platformkey || '') + '">' + safeAuthor + '</span>';
         }
         html += '<div class="feed-meta">' + safePlatform + ' | ' + timeText + authorChip + '</div>';
         html += '</div>';
@@ -3974,6 +3997,7 @@
             clearFeedAuthorContext();
             feedAuthor = ($(this).data('author') || '').toString().trim();
             feedAuthorUid = ($(this).data('authoruid') || '').toString().trim();
+            feedAuthorPlatformKey = ($(this).data('platformkey') || '').toString().trim();
             $('#feedAuthorDrawer').removeClass('open');
             updateFeedButtons();
             reloadFeed();
@@ -3987,6 +4011,7 @@
             }
             feedAuthor = author;
             feedAuthorUid = ($(this).data('authoruid') || '').toString().trim();
+            feedAuthorPlatformKey = ($(this).data('platformkey') || '').toString().trim();
             updateFeedButtons();
             reloadFeed();
         });
@@ -4195,6 +4220,7 @@
 
     function resetFeedRenderState() {
         page = 0;
+        feedNextCursor = '';
         hasMore = true;
         isLoading = false;
         document.querySelectorAll('#videoFeed .feed-item').forEach(function(item) {
@@ -4731,6 +4757,7 @@
         feedAuthorProfileSummary = null;
         feedAuthor = '';
         feedAuthorUid = '';
+        feedAuthorPlatformKey = '';
         clearFeedAuthorContext();
         closeFeedAuthorProfileDrawer();
         reloadFeed();
@@ -5209,6 +5236,29 @@
         reloadFeed();
     }
 
+    function shouldUseFeedCursor() {
+        return mediaHomeMode === 'feed'
+            && feedOrder !== 'random'
+            && feedUseKeyset
+            && ((!feedAuthor && !feedAuthorUid) || (feedAuthorUid && feedAuthorPlatformKey));
+    }
+
+    function buildFeedCursorRequestOption(pageSize) {
+        var option = {
+            type: feedMediaType,
+            order: feedOrder === 'asc' ? 'asc' : 'desc',
+            limit: pageSize || 20
+        };
+        if (feedNextCursor) {
+            option.cursor = feedNextCursor;
+        }
+        if (feedAuthorUid && feedAuthorPlatformKey) {
+            option.authorUid = feedAuthorUid.trim();
+            option.platformKey = feedAuthorPlatformKey.trim();
+        }
+        return option;
+    }
+
     function buildFeedRequestOption(pageNo, pageSize) {
         var option = {
             pageNo: pageNo + 1,
@@ -5273,13 +5323,17 @@
         }).sort(function(left, right) {
             return String((left && left.label) || '').localeCompare(String((right && right.label) || ''));
         });
-        var html = '<button type="button" class="feed-author-item' + (!feedAuthor && !feedAuthorUid ? ' active' : '') + '" data-author="" data-authoruid="">全部作者</button>';
+        var html = '<button type="button" class="feed-author-item' + (!feedAuthor && !feedAuthorUid ? ' active' : '') + '" data-author="" data-authoruid="" data-platformkey="">全部作者</button>';
         for (var i = 0; i < authors.length; i++) {
             var option = authors[i] || {};
             var label = option.label || '';
             var uid = option.authoruid || '';
-            var activeCls = (feedAuthorUid && uid === feedAuthorUid) || (!feedAuthorUid && feedAuthor === label) ? ' active' : '';
-            html += '<button type="button" class="feed-author-item' + activeCls + '" data-author="' + escapeHtml(label) + '" data-authoruid="' + escapeHtml(uid) + '">' + escapeHtml(label) + '</button>';
+            var platformKey = option.platformkey || '';
+            var activeCls = (feedAuthorUid && uid === feedAuthorUid && platformKey === feedAuthorPlatformKey)
+                || (!feedAuthorUid && feedAuthor === label) ? ' active' : '';
+            html += '<button type="button" class="feed-author-item' + activeCls + '" data-author="' + escapeHtml(label)
+                + '" data-authoruid="' + escapeHtml(uid) + '" data-platformkey="' + escapeHtml(platformKey) + '">'
+                + escapeHtml(label) + '</button>';
         }
         wrap.html(html);
     }
@@ -5348,13 +5402,15 @@
 			var identityPlatform = list[i].platformkey || list[i].platform || list[i].videoplatform;
 			var uid = canonicalFeedAuthorUid(identityPlatform,
                     list[i].profileAuthorUid, list[i].secuid, list[i].authoruid);
-            var key = uid ? ('uid:' + uid) : ('name:' + author);
+			var platformKey = (list[i].platformkey || '').toString().trim();
+            var key = uid ? ('uid:' + platformKey + ':' + uid) : ('name:' + author);
 			if (!author || (isDouyinFeedPlatform(identityPlatform) && !uid) || feedAuthorSet[key]) {
                 continue;
             }
             feedAuthorSet[key] = {
                 label: author,
-                authoruid: uid
+                authoruid: uid,
+                platformkey: platformKey
             };
         }
     }

@@ -1647,6 +1647,8 @@ LIMIT :limitPlusOne;
 
 实际 SQL 必须按真实列名调整，并通过 `EXPLAIN QUERY PLAN` 验证使用索引。若 SQLite 对该 union 的计划不稳定，则建立物化轻量表 `biz_media_feed`，由作品提交事务同步 upsert；不能回退到加载实体再内存全排序。
 
+实施校正（2026-07-25）：生产数据库验证显示，`UNION ALL + sort_time` 会分别全表扫描并建立临时排序树。为避免在数据库瘦身阶段新增物化表及其双写一致性成本，近期实现改为分别使用 `idx_biz_video_publishtime_id` 和 `idx_graphic_content_publishtime_id` 读取每类最多 `limit+1` 条轻量 JDBC 投影，再在 Java 中归并最多 `2*(limit+1)` 行。作者 scope 使用 `(platformkey, COALESCE(NULLIF(secuid,''), authoruid), publishtime, id)` 表达式索引。该实现不得加载 JPA 实体或 raw JSON，且必须保留查询计划回归测试；若未来需要跨更多媒体表或组合筛选导致索引计划退化，再进入 `biz_media_feed` 物化方案。
+
 ### 12.3 API
 
 ```http

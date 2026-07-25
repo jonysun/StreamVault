@@ -3,13 +3,17 @@ package com.flower.spirit.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
+import java.time.Instant;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -19,13 +23,19 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.AuthorProfileDao;
+import com.flower.spirit.dao.MediaFeedQueryDao;
 import com.flower.spirit.dto.AdminMediaFeedItem;
 import com.flower.spirit.dto.AdminMediaSlide;
 import com.flower.spirit.dto.AdminVideoListItem;
+import com.flower.spirit.dto.FeedCursor;
+import com.flower.spirit.dto.MediaFeedCursorPage;
+import com.flower.spirit.dto.MediaFeedRequest;
+import com.flower.spirit.dto.MediaFeedRow;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.VideoDataEntity;
@@ -42,8 +52,66 @@ class MediaFeedServiceTest {
 	@Mock
 	private AuthorProfileDao authorProfileDao;
 
+	@Mock
+	private MediaFeedQueryDao mediaFeedQueryDao;
+
+	@Mock
+	private FeedCursorCodec feedCursorCodec;
+
+	@Mock
+	private HlsTranscodeService hlsTranscodeService;
+
 	@InjectMocks
 	private MediaFeedService service;
+
+	@BeforeEach
+	void enableKeysetFeed() {
+		ReflectionTestUtils.setField(service, "keysetEnabled", true);
+	}
+
+	@Test
+	void cursorFeedReturnsLimitAndSignsTheLastIncludedTuple() {
+		MediaFeedRequest request = new MediaFeedRequest();
+		request.setType("mixed");
+		request.setOrder("desc");
+		request.setLimit(2);
+		when(feedCursorCodec.decode(isNull())).thenReturn(null);
+		when(mediaFeedQueryDao.find(any(MediaFeedRequest.class), isNull(), eq(3)))
+				.thenReturn(List.of(row("graphic", 3, 3000), row("video", 2, 2000), row("video", 1, 1000)));
+		when(hlsTranscodeService.queuedIdsSnapshot()).thenReturn(Set.of());
+		when(hlsTranscodeService.runningVideoIdsSnapshot()).thenReturn(Set.of());
+		when(feedCursorCodec.encode(any(FeedCursor.class))).thenReturn("next-token");
+
+		MediaFeedCursorPage page = service.findCursorPage(request);
+
+		assertThat(page.items()).extracting(AdminMediaFeedItem::getMediaKey)
+				.containsExactly("graphic:3", "video:2");
+		assertThat(page.hasMore()).isTrue();
+		assertThat(page.nextCursor()).isEqualTo("next-token");
+	}
+
+	@Test
+	void cursorFromDifferentFilterIsRejectedBeforeQuery() {
+		MediaFeedRequest request = new MediaFeedRequest();
+		request.setType("video");
+		request.setOrder("desc");
+		request.setCursor("signed-token");
+		when(feedCursorCodec.decode("signed-token")).thenReturn(new FeedCursor(Instant.ofEpochMilli(1000),
+				"video", 1, "desc", "sha256:different"));
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.findCursorPage(request))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("filters");
+		verify(mediaFeedQueryDao, never()).find(any(), any(), org.mockito.ArgumentMatchers.anyInt());
+	}
+
+	private MediaFeedRow row(String type, int id, long sortTime) {
+		return new MediaFeedRow(type + ":" + id, type, id, "douyin", "douyin", "work-" + id,
+				"MS4-author", "author-user", "author", null, "title-" + id, "summary-" + id,
+				Instant.ofEpochMilli(sortTime), Instant.ofEpochMilli(sortTime), "/cover.jpg",
+				"video".equals(type) ? "/video.mp4" : null, "https://example.test/work/" + id,
+				null, "0", "0", type, null, List.of(), null, sortTime);
+	}
 
 	@Test
 	void parseGraphicSlidesDetectsImageAndVideoExtensions() {
