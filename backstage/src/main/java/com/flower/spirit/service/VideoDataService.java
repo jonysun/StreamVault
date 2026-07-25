@@ -584,14 +584,38 @@ public class VideoDataService {
 	}
 
 	public ResponseEntity<StreamingResponseBody> playVideo(HttpHeaders headers, String video) throws IOException {
-		if (video != null && !video.isEmpty()) {
-			Optional<VideoDataEntity> findById = videoDataDao.findById(Integer.valueOf(video));
+		Integer videoId;
+		try {
+			videoId = video == null || video.isBlank() ? null : Integer.valueOf(video);
+		} catch (NumberFormatException error) {
+			return ResponseEntity.badRequest().build();
+		}
+		if (videoId != null) {
+			Optional<VideoDataEntity> findById = videoDataDao.findById(videoId);
 			if (findById.isPresent()) {
 				VideoDataEntity videoDataEntity = findById.get();
-				File videoFile = new File(videoDataEntity.getVideoaddr());
+				String videoPath = videoDataEntity.getVideoaddr();
+				if (videoPath == null || videoPath.isBlank()) {
+					return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+				}
+				File videoFile = new File(videoPath);
+				if (!videoFile.isFile() || videoFile.length() <= 0) {
+					return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+				}
 				long fileLength = videoFile.length();
 				String mimeType = Files.probeContentType(videoFile.toPath());
-				List<HttpRange> httpRanges = headers.getRange();
+				if (mimeType == null || mimeType.isBlank()) {
+					mimeType = "video/mp4";
+				}
+				List<HttpRange> httpRanges;
+				try {
+					httpRanges = headers == null ? List.of() : headers.getRange();
+				} catch (IllegalArgumentException error) {
+					HttpHeaders responseHeaders = new HttpHeaders();
+					responseHeaders.set(HttpHeaders.CONTENT_RANGE, "bytes */" + fileLength);
+					return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+							.headers(responseHeaders).build();
+				}
 
 				long start = 0;
 				long end = fileLength - 1;
@@ -599,17 +623,31 @@ public class VideoDataService {
 
 				if (!httpRanges.isEmpty()) {
 					// 只处理第一个 range
-					HttpRange range = httpRanges.get(0);
-					start = range.getRangeStart(fileLength);
-					end = range.getRangeEnd(fileLength);
-					isPartial = true;
+					try {
+						HttpRange range = httpRanges.get(0);
+						start = range.getRangeStart(fileLength);
+						end = range.getRangeEnd(fileLength);
+						if (start >= fileLength || end < start) {
+							throw new IllegalArgumentException("range starts beyond end of file");
+						}
+						isPartial = true;
+					} catch (IllegalArgumentException error) {
+						HttpHeaders responseHeaders = new HttpHeaders();
+						responseHeaders.set(HttpHeaders.CONTENT_RANGE, "bytes */" + fileLength);
+						return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+								.headers(responseHeaders).build();
+					}
 				}
 
 				long rangeLength = end - start + 1;
 				long finalStart = start;
 				long finalEnd = end;
+				long responseStartedAt = System.nanoTime();
+				int responseVideoId = videoId;
 
 				StreamingResponseBody responseBody = outputStream -> {
+					long transferred = 0;
+					long firstByteMillis = -1;
 					try (RandomAccessFile raf = new RandomAccessFile(videoFile, "r")) {
 						raf.seek(finalStart);
 						try (InputStream inputStream = new BufferedInputStream(new FileInputStream(raf.getFD()))) {
@@ -623,9 +661,13 @@ public class VideoDataService {
 								}
 								try {
 									outputStream.write(buffer, 0, bytesRead);
+									if (firstByteMillis < 0) {
+										firstByteMillis = (System.nanoTime() - responseStartedAt) / 1_000_000L;
+									}
+									transferred += bytesRead;
 								} catch (IOException e) {
-									// 客户端断开连接，停止写入，记录日志
-									logger.warn("客户端断开连接，停止视频流传输: {}", e.toString());
+									logger.debug("[MediaRange] client disconnected videoId={} start={} end={} bytes={} error={}",
+											responseVideoId, finalStart, finalEnd, transferred, e.toString());
 									break;
 								}
 								remaining -= bytesRead;
@@ -633,8 +675,16 @@ public class VideoDataService {
 							outputStream.flush(); // 确保数据发送完毕
 						}
 					} catch (IOException e) {
-						// 其他IO异常，记录错误日志
-						logger.error("视频流传输异常", e);
+						logger.error("[MediaRange] transfer failed videoId={} start={} end={}",
+								responseVideoId, finalStart, finalEnd, e);
+					} finally {
+						if (firstByteMillis >= 500) {
+							logger.warn("[MediaRange] slow first byte videoId={} start={} end={} bytes={} firstByteMs={}",
+									responseVideoId, finalStart, finalEnd, transferred, firstByteMillis);
+						} else {
+							logger.debug("[MediaRange] complete videoId={} start={} end={} bytes={} firstByteMs={}",
+									responseVideoId, finalStart, finalEnd, transferred, firstByteMillis);
+						}
 					}
 				};
 

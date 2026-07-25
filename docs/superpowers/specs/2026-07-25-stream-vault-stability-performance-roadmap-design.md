@@ -2699,6 +2699,14 @@ streamvault.raw-payload.single-write.enabled=true
 
 ## 31.8 PR 8：播放器和媒体传输
 
+实施状态（2026-07-26）：
+
+- 已完成 previous/current/next 三槽与单一 `<video>` 实例，mixed Feed、作者 profile 和图文视频 slide 共用同一 source 激活路径。
+- 已完成 source/play token 隔离、相邻作品 Range/HLS 预取、profile 直接定位、图文视频自动播放及末页完成/循环语义。
+- 已完成 MP4 Range 的 `206/404/416` 响应与首字节诊断，HLS staging 校验后原子发布，并将默认 HLS 分片调整为 2 秒。
+- 新下载 MP4 已接入 faststart；历史文件仅通过 `GET /admin/api/mp4FaststartPreview` 预览，并由 `POST /admin/api/mp4FaststartApply` 对最多 50 个明确 ID 执行，不在启动时批量改写。
+- 已通过 Java 非上下文测试、JS 模块测试，以及桌面和 `390x844` 移动 viewport 烟测。生产环境仍需用真实 MP4/HLS 文件观察首字节、首帧和 FFmpeg 失败日志。
+
 1. 在 `index.html` 将 Feed DOM 收敛为 previous/current/next 三槽和一个实际 video 实例。
 2. 提取 `FeedPlaybackController`（可先是独立 JS 模块），统一 mixed/profile/graphic 的 source 激活路径。
 3. 每次 source 切换生成 token，旧 promise/event 先校验 token。

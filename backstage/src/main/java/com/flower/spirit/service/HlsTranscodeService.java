@@ -1,6 +1,12 @@
 package com.flower.spirit.service;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
@@ -12,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -28,7 +35,6 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.VideoDataEntity;
-import com.flower.spirit.utils.CommandUtil;
 
 import jakarta.annotation.PreDestroy;
 
@@ -398,43 +404,111 @@ public class HlsTranscodeService {
 		if (!input.isFile() || input.length() <= 0) {
 			throw new IllegalStateException("video file is missing or empty: " + input.getPath());
 		}
-		File hlsDir = new File(input.getParentFile(), "hls");
-		if (!hlsDir.exists() && !hlsDir.mkdirs()) {
-			throw new IllegalStateException("cannot create HLS directory: " + hlsDir.getPath());
-		}
-		File m3u8 = new File(hlsDir, "index.m3u8");
-		String tsPattern = new File(hlsDir, "seg_%05d.ts").getPath();
-
-		if (m3u8.exists() && !m3u8.delete()) {
-			logger.warn("[HLS] failed to delete old m3u8 id={} path={}", id, m3u8.getPath());
-		}
-		File[] oldSegments = hlsDir.listFiles((dir, name) -> name != null
-				&& (name.endsWith(".ts") || name.endsWith(".m4s") || name.endsWith(".tmp")));
-		if (oldSegments != null) {
-			for (File segment : oldSegments) {
-				if (segment != null && segment.exists() && !segment.delete()) {
-					logger.warn("[HLS] failed to delete old segment id={} path={}", id, segment.getPath());
-				}
+		Path parent = input.getParentFile().toPath();
+		Path finalDirectory = parent.resolve("hls");
+		Path stagingDirectory = parent.resolve(".hls-staging-" + id + "-" + UUID.randomUUID());
+		try {
+			Files.createDirectory(stagingDirectory);
+			Path playlist = stagingDirectory.resolve("index.m3u8");
+			Path segmentPattern = stagingDirectory.resolve("seg_%05d.ts");
+			List<String> command = buildTranscodeCommand(input.toPath(), segmentPattern, playlist);
+			logger.info("[HLS] transcode start id={} mode=compat-encode threads={} staging={}",
+					id, FFMPEG_THREADS, stagingDirectory.getFileName());
+			int exitCode = executeTranscodeCommand(command);
+			if (exitCode != 0) {
+				throw new IllegalStateException("ffmpeg exited with code " + exitCode);
 			}
+			validateHlsOutput(playlist, stagingDirectory);
+			publishHlsDirectory(stagingDirectory, finalDirectory);
+			logger.info("[HLS] transcode success id={} by compat-encode", id);
+			lastSuccessAt = System.currentTimeMillis();
+			lastError = "";
+		} catch (IOException error) {
+			throw new IllegalStateException("cannot publish HLS output: " + error.getMessage(), error);
+		} finally {
+			deleteDirectoryQuietly(stagingDirectory);
 		}
+	}
 
-		String command = "ffmpeg -y -i \"" + input.getPath()
-				+ "\" -map 0:v:0 -map 0:a? -c:v libx264 -profile:v main -level 4.0 "
-				+ "-pix_fmt yuv420p -preset veryfast -crf 23 -threads " + FFMPEG_THREADS
-				+ " -r 30 -vsync cfr -g 60 -keyint_min 60 -sc_threshold 0 "
-				+ "-c:a aac -b:a 128k -af aresample=async=1000:min_hard_comp=0.100:first_pts=0 "
-				+ "-ar 48000 -ac 2 -hls_time " + Math.max(2, Global.hlsSegmentSeconds)
-				+ " -max_muxing_queue_size 2048 -movflags +faststart"
-				+ " -hls_list_size 0 -hls_playlist_type vod -hls_flags " + HLS_FLAGS
-				+ " -hls_segment_filename \"" + tsPattern + "\" \"" + m3u8.getPath() + "\"";
-		logger.info("[HLS] transcode start id={} mode=compat-encode threads={}", id, FFMPEG_THREADS);
-		CommandUtil.command(command);
-		if (!m3u8.isFile() || m3u8.length() <= 0) {
+	private List<String> buildTranscodeCommand(Path input, Path segmentPattern, Path playlist) {
+		return List.of("ffmpeg", "-y", "-i", input.toString(),
+				"-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-profile:v", "main", "-level", "4.0",
+				"-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23", "-threads", String.valueOf(FFMPEG_THREADS),
+				"-r", "30", "-vsync", "cfr", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+				"-c:a", "aac", "-b:a", "128k", "-af", "aresample=async=1000:min_hard_comp=0.100:first_pts=0",
+				"-ar", "48000", "-ac", "2", "-hls_time", String.valueOf(Math.max(2, Global.hlsSegmentSeconds)),
+				"-max_muxing_queue_size", "2048", "-movflags", "+faststart", "-hls_list_size", "0",
+				"-hls_playlist_type", "vod", "-hls_flags", HLS_FLAGS,
+				"-hls_segment_filename", segmentPattern.toString(), playlist.toString());
+	}
+
+	protected int executeTranscodeCommand(List<String> command) throws IOException {
+		Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+		try (var output = process.getInputStream()) {
+			output.transferTo(OutputStream.nullOutputStream());
+		}
+		try {
+			return process.waitFor();
+		} catch (InterruptedException error) {
+			Thread.currentThread().interrupt();
+			throw new IOException("ffmpeg interrupted", error);
+		} finally {
+			process.destroy();
+		}
+	}
+
+	private void validateHlsOutput(Path playlist, Path directory) throws IOException {
+		if (!Files.isRegularFile(playlist) || Files.size(playlist) <= 0) {
 			throw new IllegalStateException("transcode produced no playlist");
 		}
-		logger.info("[HLS] transcode success id={} by compat-encode", id);
-		lastSuccessAt = System.currentTimeMillis();
-		lastError = "";
+		try (var files = Files.list(directory)) {
+			if (files.noneMatch(path -> Files.isRegularFile(path)
+					&& (path.getFileName().toString().endsWith(".ts")
+							|| path.getFileName().toString().endsWith(".m4s")))) {
+				throw new IllegalStateException("transcode produced no media segments");
+			}
+		}
+	}
+
+	private void publishHlsDirectory(Path staging, Path target) throws IOException {
+		Path backup = target.resolveSibling(".hls-backup-" + UUID.randomUUID());
+		boolean hadTarget = Files.exists(target);
+		try {
+			if (hadTarget) {
+				moveDirectory(target, backup);
+			}
+			moveDirectory(staging, target);
+			deleteDirectoryQuietly(backup);
+		} catch (IOException | RuntimeException error) {
+			deleteDirectoryQuietly(target);
+			if (hadTarget && Files.exists(backup)) {
+				moveDirectory(backup, target);
+			}
+			throw error;
+		}
+	}
+
+	private void moveDirectory(Path source, Path target) throws IOException {
+		try {
+			Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+		} catch (AtomicMoveNotSupportedException error) {
+			Files.move(source, target);
+		}
+	}
+
+	private void deleteDirectoryQuietly(Path root) {
+		if (root == null || !Files.exists(root)) {
+			return;
+		}
+		try (var paths = Files.walk(root)) {
+			paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+				try {
+					Files.deleteIfExists(path);
+				} catch (IOException ignored) {
+				}
+			});
+		} catch (IOException ignored) {
+		}
 	}
 
 	private void markFailure(Integer id, String detail, Exception error) {

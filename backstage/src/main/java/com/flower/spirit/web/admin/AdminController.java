@@ -61,6 +61,7 @@ import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
 import com.flower.spirit.service.HlsTranscodeService;
 import com.flower.spirit.service.MediaFeedService;
+import com.flower.spirit.service.Mp4FaststartMaintenanceService;
 import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.service.RuntimeControlService;
 import com.flower.spirit.service.RuntimeControlSnapshot;
@@ -168,6 +169,9 @@ public class AdminController {
 
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
+
+	@Autowired
+	private Mp4FaststartMaintenanceService mp4FaststartMaintenanceService;
 
 	@Autowired
 	private DouyinWorkMaintenanceService douyinWorkMaintenanceService;
@@ -404,6 +408,24 @@ public class AdminController {
 		} catch (WorkMetadataValidationException e) {
 			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
 		}
+	}
+
+	@GetMapping(value = "/mp4FaststartPreview")
+	public AjaxEntity mp4FaststartPreview(Integer afterId, Integer limit, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return new AjaxEntity(Global.ajax_success, "MP4 faststart preview",
+				mp4FaststartMaintenanceService.preview(afterId, limit));
+	}
+
+	@PostMapping(value = "/mp4FaststartApply")
+	public AjaxEntity mp4FaststartApply(@RequestBody List<Integer> ids, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		return new AjaxEntity(Global.ajax_success, "MP4 faststart apply completed",
+				mp4FaststartMaintenanceService.apply(ids));
 	}
 
 	@PostMapping(value = "/previewDeleteAuthor")

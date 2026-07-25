@@ -42,8 +42,10 @@ class AdminTemplateScriptSanityTest {
 		String index = template("index.html");
 		String graphic = template("graphicContent.html");
 
-		assertThat(index).contains("playActiveGraphicVideo(itemEl, video, true)",
-				"autoplay preload=\"auto\"");
+		assertThat(index).contains("feed-graphic-video-host", "function mountGraphicSlideVideo(itemEl, host)",
+				"setupVideoSource(video, src, true)", "goNextGraphicSlide(itemEl, true)");
+		assertThat(index).contains("feed-playback-controller.js")
+				.doesNotContain("feed-player-pool.js", "new window.AdminFeed.PlayerPool");
 		assertThat(graphic).contains("playActivePreviewVideo(true)", "pauseActivePreviewVideo(true)",
 				"id=\"previewVideo\" controls playsinline");
 	}

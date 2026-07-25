@@ -60,6 +60,7 @@ function createItem(index, key) {
     host.setAttribute('data-media-key', key);
     const item = createNode('div', 'feed-item');
     item.setAttribute('data-abs-index', index);
+    item.setAttribute('data-feed-type', 'video');
     item.querySelector = (selector) => selector === '.feed-video-host' ? host : null;
     item.appendChild(host);
     return { item, host };
@@ -77,7 +78,7 @@ function loadModules() {
     window.window = window;
     const context = vm.createContext({ window, document, setTimeout, clearTimeout, console });
     const base = path.resolve(__dirname, '../../main/resources/static/js/admin-feed');
-    ['feed-store.js', 'feed-player-pool.js', 'feed-profile.js', 'feed-controller.js', 'feed-management.js'].forEach((file) => {
+    ['feed-store.js', 'feed-playback-controller.js', 'feed-profile.js', 'feed-controller.js', 'feed-management.js'].forEach((file) => {
         vm.runInContext(fs.readFileSync(path.join(base, file), 'utf8'), context, { filename: file });
     });
     return window;
@@ -85,8 +86,7 @@ function loadModules() {
 
 function testPlayerReuse(window) {
     const mounted = [];
-    const pool = new window.AdminFeed.PlayerPool({
-        maxPlayers: 4,
+    const pool = new window.AdminFeed.FeedPlaybackController({
         mount(video, item, index) {
             const host = item.querySelector('.feed-video-host');
             host.appendChild(video);
@@ -98,19 +98,19 @@ function testPlayerReuse(window) {
     });
     let firstWindow = [createItem(0, 'a'), createItem(1, 'b'), createItem(2, 'c')];
     pool.mountWindow(firstWindow.map((entry) => entry.item), 1, 'down');
-    const preloadedC = pool.players.find((video) => video.getAttribute('data-media-key') === 'c');
-    preloadedC.readyState = 2;
-    preloadedC.dispatch('loadeddata');
-    assert.strictEqual(firstWindow[2].host.classList.contains('feed-video-ready'), true);
+    const onlyPlayer = pool.video;
+    onlyPlayer.readyState = 2;
+    onlyPlayer.dispatch('loadeddata');
+    assert.strictEqual(firstWindow[1].host.classList.contains('feed-video-ready'), true);
+    assert.strictEqual(pool.ensure().length, 1);
 
     pool.stageAll();
     const secondWindow = [createItem(1, 'b'), createItem(2, 'c'), createItem(3, 'd')];
     pool.mountWindow(secondWindow.map((entry) => entry.item), 2, 'down');
-    const currentC = pool.players.find((video) => video.getAttribute('data-media-key') === 'c');
-    assert.strictEqual(currentC, preloadedC, 'the preloaded adjacent player must become current');
+    const currentC = pool.video;
+    assert.strictEqual(currentC, onlyPlayer, 'the current slot must reuse the single player');
     assert.strictEqual(currentC.getAttribute('data-bound-src'), 'source-c');
-    assert.strictEqual(secondWindow[1].host.classList.contains('feed-video-ready'), true);
-    assert.ok(mounted.length >= 6);
+    assert.strictEqual(mounted.length, 2);
 }
 
 function testIncrementalProfileActivation(window) {
