@@ -22,6 +22,7 @@ import com.flower.spirit.dto.UpdateWorkMetadataRequest;
 import com.flower.spirit.dto.WorkOperationRequest;
 import com.flower.spirit.dto.AdminAuthorDeletionRequest;
 import com.flower.spirit.dto.AdminDeleteWorkRequest;
+import com.flower.spirit.dto.DatabaseMaintenanceRequest;
 import com.flower.spirit.entity.BiliConfigEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
 import com.flower.spirit.entity.BlockedWorkEntity;
@@ -53,6 +54,8 @@ import com.flower.spirit.service.DouyinCookieHealthService;
 import com.flower.spirit.service.DouyinAuthorReconciliationService;
 import com.flower.spirit.service.DouyinAuthorProfileRefreshService;
 import com.flower.spirit.service.DouyinWorkMaintenanceService;
+import com.flower.spirit.service.DatabaseAuditService;
+import com.flower.spirit.service.DatabaseMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
 import com.flower.spirit.service.GraphicContentService;
 import com.flower.spirit.service.HlsTranscodeService;
@@ -120,6 +123,12 @@ public class AdminController {
 
 	@Autowired
 	private RuntimeJobQueryService runtimeJobQueryService;
+
+	@Autowired
+	private DatabaseAuditService databaseAuditService;
+
+	@Autowired
+	private DatabaseMaintenanceService databaseMaintenanceService;
 	
 	
 	@Autowired
@@ -661,6 +670,13 @@ public class AdminController {
 		return collectRunQueryService.findEvents(runId, afterSequence, limit);
 	}
 
+	@GetMapping("/collect-tasks/{taskId}/latest-items")
+	public Map<String, Object> findLatestCollectItems(@PathVariable int taskId,
+			@RequestParam(defaultValue = "all") String view, @RequestParam(defaultValue = "500") int limit,
+			@RequestParam(defaultValue = "0") long afterId) {
+		return collectRunQueryService.findLatestItems(taskId, view, limit, afterId);
+	}
+
 	@PostMapping("/collect-runs/{runId}/requeue-preview")
 	public Map<String, Object> previewCollectRunRequeue(@PathVariable long runId) {
 		return collectRunQueryService.requeuePreview(runId, Global.isCollectPaused());
@@ -741,6 +757,38 @@ public class AdminController {
 	public AjaxEntity runtimeJobs(@RequestParam(defaultValue = "RUNNING,QUEUED,RETRY_WAIT") String state,
 			@RequestParam(defaultValue = "100") int limit) {
 		return new AjaxEntity(Global.ajax_success, "获取运行任务成功", runtimeJobQueryService.findJobs(state, limit));
+	}
+
+	@GetMapping("/database/audit")
+	public AjaxEntity databaseAudit() {
+		return new AjaxEntity(Global.ajax_success, "数据库审计完成", databaseAuditService.audit());
+	}
+
+	@PostMapping("/database/maintenance/preview")
+	public AjaxEntity previewDatabaseMaintenance(@RequestBody(required = false) DatabaseMaintenanceRequest request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "数据库维护预览完成",
+					databaseMaintenanceService.preview(request == null ? null : request.getOperations()));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@PostMapping("/database/maintenance/apply")
+	public AjaxEntity applyDatabaseMaintenance(@RequestBody DatabaseMaintenanceRequest request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "数据库维护批次执行完成",
+					databaseMaintenanceService.apply(request));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@GetMapping("/database/maintenance/{operationId}")
+	public AjaxEntity databaseMaintenanceStatus(@PathVariable long operationId) {
+		Map<String, Object> status = databaseMaintenanceService.status(operationId);
+		return status.isEmpty() ? new AjaxEntity(Global.ajax_uri_error, "数据库维护任务不存在", null)
+				: new AjaxEntity(Global.ajax_success, "获取数据库维护状态成功", status);
 	}
 
 	private AjaxEntity updateRuntimeControl(String scope, boolean paused, Map<String, Object> body,

@@ -27,9 +27,11 @@ import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.common.AjaxEntity;
@@ -42,6 +44,7 @@ import com.flower.spirit.entity.CollectDataDetailEntity;
 import com.flower.spirit.entity.CollectDataEntity;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.dto.CollectTaskListItem;
 import com.flower.spirit.executor.DouYinExecutor;
 import com.flower.spirit.task.QuartzTaskService;
 import com.flower.spirit.utils.Aria2Util;
@@ -64,7 +67,6 @@ public class CollectDataService {
 
 	private static final Pattern PYTHON_EXCEPTION_PATTERN = Pattern.compile("(?m)^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\\s*(.+)$");
 	private static final Pattern PYTHON_FILE_PATTERN = Pattern.compile("File \"([^\"]+)\", line (\\d+), in ([^\\r\\n]+)");
-	private static final int FETCH_SNAPSHOT_MAX_LENGTH = 500000;
 	private static final Pattern SNAPSHOT_HAS_VIDEO_PATTERN = Pattern.compile("\"has_video_play_addr\"\\s*:\\s*(true|false)");
 
 	@Autowired
@@ -109,6 +111,18 @@ public class CollectDataService {
 	@Autowired
 	private RuntimeControlService runtimeControlService;
 
+	@Autowired
+	private SnapshotCodec snapshotCodec;
+
+	@Autowired
+	private CollectRunQueryService collectRunQueryService;
+
+	@Autowired
+	private RawPayloadService rawPayloadService;
+
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
+
 	private Logger logger = LoggerFactory.getLogger(CollectDataService.class);
 
 	@Autowired
@@ -143,27 +157,47 @@ public class CollectDataService {
     
 
     public AjaxEntity findPage(CollectDataEntity res) {
-        PageRequest pageRequest = PageRequest.of(res.getPageNo(), res.getPageSize());
-
-        Specification<CollectDataEntity> specification = (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-
-            if (res != null) {
-                if (StringUtil.isString(res.getTaskid())) {
-                    predicates.add(cb.like(root.get("taskid"), "%" + res.getTaskid() + "%"));
-                }
-                if (StringUtil.isString(res.getPlatform())) {
-                    predicates.add(cb.like(root.get("platform"), "%" + res.getPlatform() + "%"));
-                }
-            }
-
-            query.orderBy(cb.desc(root.get("id")));
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-
-        Page<CollectDataEntity> findAll = collectdDataDao.findAll(specification, pageRequest);
-        return new AjaxEntity(Global.ajax_success, "数据获取成功", findAll);
+		int pageNo = res == null ? 0 : Math.max(0, res.getPageNo());
+		int pageSize = res == null ? 25 : Math.min(Math.max(1, res.getPageSize()), 200);
+		String taskId = res == null || !StringUtil.isString(res.getTaskid()) ? null : "%" + res.getTaskid() + "%";
+		String platform = res == null || !StringUtil.isString(res.getPlatform()) ? null : "%" + res.getPlatform() + "%";
+		List<String> filters = new ArrayList<>();
+		List<Object> parameters = new ArrayList<>();
+		if (taskId != null) {
+			filters.add("taskid LIKE ?");
+			parameters.add(taskId);
+		}
+		if (platform != null) {
+			filters.add("platform LIKE ?");
+			parameters.add(platform);
+		}
+		String where = filters.isEmpty() ? "" : " WHERE " + String.join(" AND ", filters);
+		Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_data" + where, Long.class,
+				parameters.toArray());
+		String sql = "SELECT id, taskid, platform, taskname, taskstatus, createtime, endtime, count, carriedout, "
+				+ "originaladdress, monitoring, taskenabled, lastCheckTime, lastid, maxcur, omaxcur, generatenfo, "
+				+ "taskcron, lastfetchtime, lastfetchcount FROM biz_collect_data" + where
+				+ " ORDER BY id DESC LIMIT ? OFFSET ?";
+		List<Object> pageParameters = new ArrayList<>(parameters);
+		pageParameters.add(pageSize);
+		pageParameters.add((long) pageNo * pageSize);
+		List<CollectTaskListItem> items = jdbcTemplate.query(sql, (row, index) -> new CollectTaskListItem(
+				row.getInt("id"), row.getString("taskid"), row.getString("platform"), row.getString("taskname"),
+				row.getString("taskstatus"), row.getString("createtime"), row.getString("endtime"),
+				row.getString("count"), row.getString("carriedout"), row.getString("originaladdress"),
+				row.getString("monitoring"), row.getString("taskenabled"), row.getString("lastCheckTime"),
+				row.getString("lastid"), nullableInteger(row, "maxcur"), nullableInteger(row, "omaxcur"),
+				row.getString("generatenfo"), row.getString("taskcron"), row.getString("lastfetchtime"),
+				nullableInteger(row, "lastfetchcount")), pageParameters.toArray());
+		Page<CollectTaskListItem> page = new PageImpl<>(items, PageRequest.of(pageNo, pageSize),
+				total == null ? 0 : total);
+		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);
     }
+
+	private Integer nullableInteger(java.sql.ResultSet row, String column) throws java.sql.SQLException {
+		int value = row.getInt(column);
+		return row.wasNull() ? null : value;
+	}
 
 
 	public AjaxEntity deleteCollectData(CollectDataEntity collectDataEntity) {
@@ -393,7 +427,8 @@ public class CollectDataService {
 							VideoDataEntity videoDataEntity = new VideoDataEntity(findVideoStreaming.get("cid"),
 									findVideoStreaming.get("title"), findVideoStreaming.get("desc"), "哔哩",
 									codir + "/" + filename + ".jpg", findVideoStreaming.get("video"), videounaddr, bvid);
-							videoDataEntity.setVideoinfo(JSONObject.toJSONString(findVideoStreaming));
+							rawPayloadService.storeVideoRawPayload(videoDataEntity,
+									JSONObject.toJSONString(findVideoStreaming));
 							logger.info(vt + (i + 1) + "下载流程结束");
 
 							JSONObject owner = JSONObject.parseObject(map.get("owner"));
@@ -424,7 +459,7 @@ public class CollectDataService {
 							    JSONObject videoInfoJson = new JSONObject();
 						        videoInfoJson.put("aid", aid);
 						        videoInfoJson.put("duration", duration);
-						        videoDataEntity.setVideoinfo(videoInfoJson.toJSONString());
+						        rawPayloadService.storeVideoRawPayload(videoDataEntity, videoInfoJson.toJSONString());
 							}
 							videoDataEntity.setVideoauthor(upname);
 							videoDataEntity.setAuthoruid(upmid);
@@ -812,8 +847,7 @@ public class CollectDataService {
 					VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, "抖音", coverunaddr,
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
 							videounrealaddr, entity.getOriginaladdress());
-					videoDataEntity.setJsonData(rawJsonData);
-					videoDataEntity.setVideoinfo(rawJsonData);
+					rawPayloadService.storeVideoRawPayload(videoDataEntity, rawJsonData);
 					videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 					String taskSourceId = fetchContext == null
 							? extractCanonicalTaskSourceId(entity.getOriginaladdress()) : fetchContext.sourceId();
@@ -937,7 +971,7 @@ public class CollectDataService {
 			}
 			planItems.add(0, buildRunSummaryPlanItem(runId, fetchContext, allDYData.size(), successThisRun,
 					failedThisRun, skippedThisRun, videoaddcount, graphiccount, targetSuccess));
-			entity.setLastplanitems(planItems.toJSONString());
+			entity.setLastplanitems(snapshotCodec().encodePlan(planItems, snapshotContext(runId, fetchContext)));
 			collectdDataDao.save(entity);
 		}
 		int totalCount = videoaddcount + graphiccount;
@@ -974,86 +1008,36 @@ public class CollectDataService {
 	}
 
 	String buildFetchSnapshot(JSONArray allData, FetchRunContext context) {
-		JSONArray arr = new JSONArray();
+		JSONArray normalized = new JSONArray();
 		for (int i = 0; i < allData.size(); i++) {
 			JSONObject src = allData.getJSONObject(i);
-			String createTime = src.getString("create_time");
-			String publishTime = formatPublishTimeFromEpochSeconds(createTime);
-			JSONObject item = new JSONObject();
-			item.put("index", i + 1);
-			item.put("sortedIndex", i + 1);
-			if (context != null) {
-				item.put("runId", context.runId());
-				item.put("taskId", context.taskId());
-				item.put("taskName", context.taskName());
-				item.put("fetchMode", context.mode());
-				item.put("sourceId", context.sourceId());
-				item.put("maxc", context.maxc());
-				item.put("existingDetailCount", context.existingDetailCount());
-				item.put("successDetailCount", context.successDetailCount());
-				item.put("originaladdress", context.originaladdress());
-			}
-			item.put("aweme_id", src.getString("aweme_id"));
-			item.put("desc", src.getString("desc"));
-			item.put("create_time", createTime);
-			item.put("publish_time", publishTime);
-			item.put("type", src.getString("type"));
-			item.put("nickname", src.getString("nickname"));
-			item.put("uid", src.getString("uid"));
-			item.put("sec_uid", src.getString("sec_uid"));
-			item.put("has_video_play_addr", src.getJSONArray("video_play_addr") != null && !src.getJSONArray("video_play_addr").isEmpty());
-			arr.add(item);
+			if (src == null) continue;
+			JSONObject item = new JSONObject(src);
+			item.put("publish_time", formatPublishTimeFromEpochSeconds(src.getString("create_time")));
+			normalized.add(item);
 		}
-		return limitFetchSnapshot(arr, allData.size(), summarizeSnapshotMediaStats(arr));
+		return snapshotCodec().encodeFetch(normalized, snapshotContext(context == null ? null : context.runId(), context));
 	}
 
-	String limitFetchSnapshot(JSONArray arr, int totalCount, SnapshotMediaStats totalStats) {
-		String text = arr.toJSONString();
-		if (text.length() <= FETCH_SNAPSHOT_MAX_LENGTH) {
-			return text;
-		}
-		JSONArray limited = new JSONArray();
-		for (int i = 0; i < arr.size(); i++) {
-			limited.add(arr.getJSONObject(i));
-			if (limited.toJSONString().length() > FETCH_SNAPSHOT_MAX_LENGTH) {
-				limited.remove(limited.size() - 1);
-				break;
-			}
-		}
-		JSONObject marker = new JSONObject();
-		marker.put("snapshot_truncated", true);
-		marker.put("total_count", totalCount);
-		marker.put("video_total", totalStats == null ? 0 : totalStats.videoCount());
-		marker.put("image_total", totalStats == null ? 0 : totalStats.imageCount());
-		marker.put("included_count", limited.size());
-		marker.put("omitted_count", Math.max(0, totalCount - limited.size()));
-		limited.add(marker);
-		while (limited.toJSONString().length() > FETCH_SNAPSHOT_MAX_LENGTH && limited.size() > 1) {
-			limited.remove(limited.size() - 2);
-			marker.put("included_count", limited.size() - 1);
-			marker.put("omitted_count", Math.max(0, totalCount - (limited.size() - 1)));
-		}
-		return limited.toJSONString();
+	private SnapshotCodec snapshotCodec() {
+		return snapshotCodec == null
+				? new SnapshotCodec(SnapshotCodec.DEFAULT_MAX_BYTES, SnapshotCodec.DEFAULT_FORMAT_VERSION)
+				: snapshotCodec;
 	}
 
-	private SnapshotMediaStats summarizeSnapshotMediaStats(JSONArray arr) {
-		int videoCount = 0;
-		int imageCount = 0;
-		if (arr == null) {
-			return new SnapshotMediaStats(0, 0);
-		}
-		for (int i = 0; i < arr.size(); i++) {
-			JSONObject obj = arr.getJSONObject(i);
-			if (obj == null || obj.getBooleanValue("snapshot_truncated")) {
-				continue;
-			}
-			if (obj.getBooleanValue("has_video_play_addr")) {
-				videoCount++;
-			} else {
-				imageCount++;
-			}
-		}
-		return new SnapshotMediaStats(videoCount, imageCount);
+	private Map<String, Object> snapshotContext(String runId, FetchRunContext context) {
+		Map<String, Object> result = new HashMap<>();
+		if (runId != null) result.put("runId", runId);
+		if (context == null) return result;
+		result.put("taskId", context.taskId());
+		result.put("taskName", context.taskName());
+		result.put("fetchMode", context.mode());
+		result.put("sourceId", context.sourceId());
+		result.put("maxc", context.maxc());
+		result.put("existingDetailCount", context.existingDetailCount());
+		result.put("successDetailCount", context.successDetailCount());
+		result.put("originaladdress", context.originaladdress());
+		return result;
 	}
 
 	private String buildCollectRunId(CollectDataEntity entity) {
@@ -1094,7 +1078,7 @@ public class CollectDataService {
 		Long persistentRunId = activePersistentRunId.get();
 		if (persistentRunId != null && planItem.getString("aweme_id") != null) {
 			collectRunService.updateItem(persistentRunId, planItem.getString("aweme_id"),
-					planItem.getString("decision"), runItemState(planItem.getString("decision"),
+					normalizeRunDecision(planItem.getString("decision")), runItemState(planItem.getString("decision"),
 							planItem.getString("status"), errorCode), errorCode, errorMsg);
 		}
 		logger.info("[CollectTask] plan item runId={} awemeId={} index={} mediaType={} decision={} status={} reason={} errorCode={} log={}",
@@ -1126,7 +1110,16 @@ public class CollectDataService {
 		return "COMPLETED";
 	}
 
-	private String valueOrEmpty(String value) {
+	static String normalizeRunDecision(String decision) {
+		String value = valueOrEmpty(decision).toLowerCase();
+		if (value.contains("retry") || value.contains("repair") || value.contains("missing")) return "RETRY";
+		if (value.contains("fail")) return "FAILED";
+		if (value.contains("skip") || value.contains("exist") || value.contains("blocked")) return "SKIP";
+		if (value.contains("download") || value.contains("success") || value.contains("local-hit")) return "NEW";
+		return "UNKNOWN";
+	}
+
+	private static String valueOrEmpty(String value) {
 		return value == null ? "" : value;
 	}
 
@@ -1647,7 +1640,8 @@ public class CollectDataService {
 			entity.setEndtime(DateUtils.formatDateTime(new Date()));
 			entity.setCount("0");
 		}
-		entity.setLastplanitems(planItems.toJSONString());
+		entity.setLastplanitems(snapshotCodec().encodePlan(planItems,
+				snapshotContext(fetchContext == null ? null : fetchContext.runId(), fetchContext)));
 		entity.setLastfetchtime(DateUtils.formatDateTime(new Date()));
 		collectdDataDao.save(entity);
 	}
@@ -2343,26 +2337,11 @@ public class CollectDataService {
 			row.put("taskName", task.getTaskname());
 			row.put("enabled", task.getTaskenabled());
 			row.put("monitoring", task.getMonitoring());
-			int totalVideo = 0;
-			int totalImage = 0;
-			try {
-				if (task.getLastfetchsnapshot() != null && !task.getLastfetchsnapshot().trim().isEmpty()) {
-					SnapshotMediaStats stats = parseSnapshotMediaStats(task.getLastfetchsnapshot());
-					totalVideo = stats.videoCount();
-					totalImage = stats.imageCount();
-				}
-			} catch (Exception e) {
-				SnapshotMediaStats fallbackStats = scanSnapshotMediaStats(task.getLastfetchsnapshot());
-				totalVideo = fallbackStats.videoCount();
-				totalImage = fallbackStats.imageCount();
-				String snapshot = task.getLastfetchsnapshot();
-				logger.warn("[AuthorStats] parse snapshot failed taskId={} length={} truncated={} fallbackVideo={} fallbackImage={} error={} preview={}",
-						task.getId(), snapshot == null ? 0 : snapshot.length(),
-						isSnapshotTruncated(snapshot), totalVideo, totalImage,
-						e.getClass().getSimpleName() + ": " + e.getMessage(), previewText(snapshot, 200));
-			}
 			long doneVideo = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "video", successStatuses);
 			long doneImage = collectDataDetailDao.countByDataidAndMediatypeAndStatusIn(task.getId(), "image", successStatuses);
+			Map<String, Long> latestTotals = collectRunQueryService.latestMediaTotals(task.getId());
+			long totalVideo = Math.max(doneVideo, latestTotals.getOrDefault("video", 0L));
+			long totalImage = Math.max(doneImage, latestTotals.getOrDefault("graphic", 0L));
 			row.put("videoDone", doneVideo);
 			row.put("videoTotal", totalVideo);
 			row.put("imageDone", doneImage);
@@ -2395,30 +2374,15 @@ public class CollectDataService {
 	}
 
 	static SnapshotMediaStats parseSnapshotMediaStats(String snapshot) {
-		JSONArray arr = JSONArray.parseArray(snapshot);
-		int videoCount = 0;
-		int imageCount = 0;
-		for (int i = 0; i < arr.size(); i++) {
-			JSONObject obj = arr.getJSONObject(i);
-			if (obj.getBooleanValue("snapshot_truncated")) {
-				Integer videoTotal = obj.getInteger("video_total");
-				Integer imageTotal = obj.getInteger("image_total");
-				if (videoTotal != null && imageTotal != null) {
-					return new SnapshotMediaStats(Math.max(0, videoTotal), Math.max(0, imageTotal));
-				}
-				continue;
-			}
-			if (obj.getBooleanValue("has_video_play_addr")) {
-				videoCount++;
-			} else {
-				imageCount++;
-			}
-		}
-		return new SnapshotMediaStats(videoCount, imageCount);
+		SnapshotReadResult result = new SnapshotCodec(SnapshotCodec.DEFAULT_MAX_BYTES,
+				SnapshotCodec.DEFAULT_FORMAT_VERSION).read(snapshot);
+		if (!result.available()) throw new IllegalArgumentException(result.warningMessage());
+		return new SnapshotMediaStats(result.videoTotal(), result.graphicTotal());
 	}
 
 	static boolean isSnapshotTruncated(String snapshot) {
-		return snapshot != null && (snapshot.contains("...(truncated)") || snapshot.contains("\"snapshot_truncated\":true"));
+		return snapshot != null && (snapshot.contains("...(truncated)")
+				|| snapshot.contains("\"snapshot_truncated\":true") || snapshot.contains("\"truncated\":true"));
 	}
 
 	static SnapshotMediaStats scanSnapshotMediaStats(String snapshot) {

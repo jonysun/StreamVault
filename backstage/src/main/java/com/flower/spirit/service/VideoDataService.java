@@ -80,6 +80,9 @@ public class VideoDataService {
 	@Autowired
 	private PlatformMetadataCompatibilityService platformMetadataCompatibilityService;
 
+	@Autowired
+	private RawPayloadService rawPayloadService;
+
 	private Logger logger = LoggerFactory.getLogger(VideoDataService.class);
 
 	public List<VideoDataEntity> findByVideoid(String videoid) {
@@ -714,13 +717,7 @@ public class VideoDataService {
 	}
 
 	private String videoMetadataJson(VideoDataEntity videoDataEntity) {
-		if (videoDataEntity == null) {
-			return null;
-		}
-		if (StringUtil.isString(videoDataEntity.getJsonData())) {
-			return videoDataEntity.getJsonData();
-		}
-		return videoDataEntity.getVideoinfo();
+		return rawPayloadService.loadVideoRawPayload(videoDataEntity);
 	}
 
 	public VideoDataEntity findRandomByVideoplatform(String platform) {

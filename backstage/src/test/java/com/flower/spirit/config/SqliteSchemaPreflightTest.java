@@ -20,6 +20,8 @@ class SqliteSchemaPreflightTest {
 		jdbcTemplate.execute("CREATE TABLE biz_author_profile (id INTEGER NOT NULL PRIMARY KEY, authoruid TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_author_name_history (id INTEGER NOT NULL PRIMARY KEY, displayname TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_author_enrichment_job (id INTEGER NOT NULL PRIMARY KEY, state TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_database_maintenance_operation "
+				+ "(id INTEGER NOT NULL PRIMARY KEY, status TEXT)");
 		jdbcTemplate.execute("CREATE TABLE seq_common (seq_id TEXT PRIMARY KEY, seq_count INTEGER)");
 		jdbcTemplate.update("INSERT INTO seq_common(seq_id, seq_count) VALUES('author', 91)");
 
@@ -31,6 +33,7 @@ class SqliteSchemaPreflightTest {
 		jdbcTemplate.update("INSERT INTO biz_author_name_history(displayname) VALUES('first')");
 		jdbcTemplate.update("INSERT INTO biz_author_name_history(displayname) VALUES('second')");
 		jdbcTemplate.update("INSERT INTO biz_author_enrichment_job(state) VALUES('QUEUED')");
+		jdbcTemplate.update("INSERT INTO biz_database_maintenance_operation(status) VALUES('RUNNING')");
 
 		assertThat(jdbcTemplate.queryForList("SELECT id FROM biz_author_profile ORDER BY id", Integer.class))
 				.containsExactly(1, 2);
@@ -39,6 +42,8 @@ class SqliteSchemaPreflightTest {
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT seq_count FROM seq_common WHERE seq_id = 'author'", Integer.class)).isEqualTo(91);
 		assertThat(jdbcTemplate.queryForObject("SELECT id FROM biz_author_enrichment_job", Integer.class)).isEqualTo(1);
+		assertThat(jdbcTemplate.queryForObject(
+				"SELECT id FROM biz_database_maintenance_operation", Integer.class)).isEqualTo(1);
 	}
 
 	@Test

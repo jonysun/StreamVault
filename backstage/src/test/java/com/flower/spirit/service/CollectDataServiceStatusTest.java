@@ -87,14 +87,15 @@ class CollectDataServiceStatusTest {
 		JSONArray items = new JSONArray();
 		items.add(douyinItem("new-work", "2026-07-05 23-28-46"));
 
-		JSONArray snapshot = JSONArray.parseArray(service.buildFetchSnapshot(items));
+		JSONObject envelope = JSONObject.parseObject(service.buildFetchSnapshot(items));
+		JSONArray snapshot = envelope.getJSONArray("items");
 
 		JSONObject item = snapshot.getJSONObject(0);
-		assertThat(item.getInteger("index")).isEqualTo(1);
-		assertThat(item.getString("aweme_id")).isEqualTo("new-work");
-		assertThat(item.getString("create_time")).isEqualTo("2026-07-05 23-28-46");
-		assertThat(item.getString("publish_time")).isEqualTo("2026-07-05 23:28:46");
-		assertThat(item.getBoolean("has_video_play_addr")).isTrue();
+		assertThat(envelope.getInteger("version")).isEqualTo(2);
+		assertThat(item.getInteger("ordinal")).isEqualTo(1);
+		assertThat(item.getString("workId")).isEqualTo("new-work");
+		assertThat(item.getString("publishTime")).isEqualTo("2026-07-05 23:28:46");
+		assertThat(item.getString("mediaType")).isEqualTo("video");
 	}
 
 	@Test
@@ -105,22 +106,21 @@ class CollectDataServiceStatusTest {
 		CollectDataService.FetchRunContext context = new CollectDataService.FetchRunContext("collect-1-123", 1,
 				"task", "postMS4abc", "Y", "post", "MS4abc", 120, 100, 80, 20, 20, "/tmp/out.json");
 
-		JSONArray snapshot = JSONArray.parseArray(service.buildFetchSnapshot(items, context));
-
-		JSONObject item = snapshot.getJSONObject(0);
-		assertThat(item.getString("runId")).isEqualTo("collect-1-123");
-		assertThat(item.getString("fetchMode")).isEqualTo("post");
-		assertThat(item.getString("sourceId")).isEqualTo("MS4abc");
-		assertThat(item.getInteger("maxc")).isEqualTo(120);
-		assertThat(item.getLong("existingDetailCount")).isEqualTo(100L);
-		assertThat(item.getLong("successDetailCount")).isEqualTo(80L);
+		JSONObject snapshot = JSONObject.parseObject(service.buildFetchSnapshot(items, context));
+		JSONObject savedContext = snapshot.getJSONObject("context");
+		assertThat(savedContext.getString("runId")).isEqualTo("collect-1-123");
+		assertThat(savedContext.getString("fetchMode")).isEqualTo("post");
+		assertThat(savedContext.getString("sourceId")).isEqualTo("MS4abc");
+		assertThat(savedContext.getInteger("maxc")).isEqualTo(120);
+		assertThat(savedContext.getLong("existingDetailCount")).isEqualTo(100L);
+		assertThat(savedContext.getLong("successDetailCount")).isEqualTo(80L);
 	}
 
 	@Test
 	void buildFetchSnapshotTruncatesAsValidJsonAtItemBoundary() {
 		CollectDataService service = new CollectDataService();
 		JSONArray items = new JSONArray();
-		for (int i = 0; i < 200; i++) {
+		for (int i = 0; i < 400; i++) {
 			JSONObject item = douyinItem("work-" + i, "2026-07-05 23-28-46");
 			item.put("desc", "x".repeat(4000));
 			if (i % 4 == 0) {
@@ -130,14 +130,13 @@ class CollectDataServiceStatusTest {
 		}
 
 		String snapshot = service.buildFetchSnapshot(items);
-		JSONArray parsed = JSONArray.parseArray(snapshot);
-		JSONObject marker = parsed.getJSONObject(parsed.size() - 1);
+		JSONObject parsed = JSONObject.parseObject(snapshot);
 
-		assertThat(snapshot.length()).isLessThanOrEqualTo(500000);
-		assertThat(marker.getBooleanValue("snapshot_truncated")).isTrue();
-		assertThat(marker.getInteger("total_count")).isEqualTo(200);
-		assertThat(marker.getInteger("video_total")).isEqualTo(150);
-		assertThat(marker.getInteger("image_total")).isEqualTo(50);
+		assertThat(snapshot.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isLessThanOrEqualTo(1048576);
+		assertThat(parsed.getBooleanValue("truncated")).isTrue();
+		assertThat(parsed.getInteger("totalCount")).isEqualTo(400);
+		assertThat(parsed.getInteger("videoTotal")).isEqualTo(300);
+		assertThat(parsed.getInteger("graphicTotal")).isEqualTo(100);
 	}
 
 	@Test

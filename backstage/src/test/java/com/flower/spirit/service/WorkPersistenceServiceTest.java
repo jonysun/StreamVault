@@ -44,7 +44,7 @@ class WorkPersistenceServiceTest {
 	@BeforeEach
 	void setUp() {
 		service = new WorkPersistenceService(new WorkMetadataNormalizer(ZoneId.of("UTC")), deduplicationService,
-				videoDataDao, graphicContentDao, authorProfileService, mediaPathService);
+				videoDataDao, graphicContentDao, authorProfileService, mediaPathService, new RawPayloadService());
 		when(deduplicationService.findExisting(any())).thenReturn(Optional.empty());
 	}
 

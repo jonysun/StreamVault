@@ -74,6 +74,9 @@ public class AuthorProfileService {
 	@Autowired
 	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
 
+	@Autowired
+	private RawPayloadService rawPayloadService;
+
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName,
 			String avatar, String homepage) {
 		upsertAuthor(platform, authoruid, username, displayName, avatar, homepage, null);
@@ -814,7 +817,7 @@ public class AuthorProfileService {
 		}
 		String before = videoIdentityFingerprint(video);
 		String legacyUid = trimToNull(video.getAuthoruid());
-		JSONObject localAuthor = observedAuthor == null ? findStoredAuthor(video.getJsonData()) : observedAuthor;
+		JSONObject localAuthor = observedAuthor == null ? findStoredAuthor(rawPayload().loadVideoRawPayload(video)) : observedAuthor;
 		applyVideoAuthorFromAuthor(video, localAuthor);
 
 		String canonicalUid = AuthorIdentityUtil.canonicalAuthorUid(video.getVideoplatform(), video.getAuthoruid(), video.getSecuid());
@@ -845,6 +848,10 @@ public class AuthorProfileService {
 
 	public WorkAuthorReconcileResult reconcileDouyinVideo(VideoDataEntity video, Map<String, JSONObject> profileCache) {
 		return reconcileDouyinVideo(video, null, profileCache, true);
+	}
+
+	private RawPayloadService rawPayload() {
+		return rawPayloadService == null ? new RawPayloadService() : rawPayloadService;
 	}
 
 	public WorkAuthorReconcileResult reconcileDouyinGraphic(GraphicContentEntity graphic, JSONObject observedAuthor,

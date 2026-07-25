@@ -25,7 +25,8 @@ public class SqliteSchemaPreflight {
 			"biz_collect_run",
 			"biz_collect_run_item",
 			"biz_collect_run_event",
-			"biz_job_queue");
+			"biz_job_queue",
+			"biz_database_maintenance_operation");
 
 	private final JdbcTemplate jdbcTemplate;
 

@@ -114,6 +114,9 @@ public class AnalysisService {
 	@Autowired
 	private WorkIngestService workIngestService;
 
+	@Autowired
+	private RawPayloadService rawPayloadService;
+
 
 	/**
 	 * 解析资源
@@ -289,7 +292,7 @@ public class AnalysisService {
 						continue;
 					}
 					VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,detectedPlatform, coverdb, filename, videodb, url);
-					videoDataEntity.setVideoinfo(exec);
+					rawPayloadService.storeVideoRawPayload(videoDataEntity, parseObject.toJSONString());
 					videoDataEntity.setVideoauthor(parseObject.getString("uploader"));
 					videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
 					videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
@@ -363,7 +366,7 @@ public class AnalysisService {
 				VideoDataEntity videoDataEntity = new VideoDataEntity(videoId, title, title, platform, coverunaddr,
 						videofile,
 						videounrealaddr, url);
-				videoDataEntity.setVideoinfo(JSONObject.toJSONString(video));
+				rawPayloadService.storeVideoRawPayload(videoDataEntity, JSONObject.toJSONString(video));
 				videoDataEntity.setVideoauthor(author);
 				videoDataEntity.setAuthoruid(video.getAuthorId());
 				videoDataEntity.setAuthorusername(video.getAuthorId());
@@ -787,7 +790,7 @@ public class AnalysisService {
 				    JSONObject videoInfoJson = new JSONObject();
 			        videoInfoJson.put("aid", aid);
 			        videoInfoJson.put("duration", duration);
-			        videoDataEntity.setVideoinfo(videoInfoJson.toJSONString());
+			        rawPayloadService.storeVideoRawPayload(videoDataEntity, videoInfoJson.toJSONString());
 					
 				}
 				// 建档
@@ -897,8 +900,8 @@ public class AnalysisService {
 		String uniqueId = map.get("unique_id");
 		String uid = map.get("uid");
 		String authorUidForSave = AuthorProfileService.preferDouyinAuthorUid(secUid, uid);
-		videoDataEntity.setVideoinfo(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
-		videoDataEntity.setJsonData(map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
+		rawPayloadService.storeVideoRawPayload(videoDataEntity,
+				map.get("jsonData") != null ? map.get("jsonData") : JSONObject.toJSONString(map));
 		videoDataEntity.setPublishtime(formatPublishTimeFromEpochSeconds(create_time));
 		videoDataEntity.setSourceurl(DouyinSourceUrlUtil.video(awemeId));
 		authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, map.get("avatar_thumb"),
