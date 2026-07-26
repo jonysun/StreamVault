@@ -343,6 +343,12 @@
 				findList(1);
 			}
 		});
+		setInterval(function(){
+			if (document.visibilityState !== 'hidden' && $('.layui-layer').length === 0) {
+				var page = $('.pagination .active span').text() || 1;
+				findList(parseInt(page, 10) || 1);
+			}
+		}, 15000);
 		$('.monitoring').change(function(){
 		    var val = $(this).val();
 		    if (val === 'N') {
@@ -784,22 +790,9 @@
 								addressValue = list[i].originaladdress;
 							}
 
-							// 任务状态样式
-							var statusClass = '';
-							var statusText = list[i].taskstatus;
-							switch(list[i].taskstatus) {
-								case '处理完成':
-									statusClass = 'text-success';
-									break;
-								case '已提交待处理':
-									statusClass = 'text-warning';
-									break;
-								case '已开始处理':
-									statusClass = 'text-info';
-									break;
-								default:
-									statusClass = 'text-secondary';
-							}
+							var runtimeStatus = buildCollectRuntimeStatus(list[i]);
+							var statusClass = runtimeStatus.statusClass;
+							var statusText = runtimeStatus.statusText;
 
 							// 监控状态样式
 							var monitorClass = list[i].monitoring === 'Y' ? 'text-success' : 'text-secondary';
@@ -829,7 +822,7 @@
 									+'</td>'
 									+'<td title="'+list[i].platform+'">'+list[i].platform+'</td>'
 								+'<td><span class="'+monitorClass+'">'+monitorText+'</span><br/><small class="'+enabledClass+'">'+enabledText+'</small></td>'
-								+'<td><span class="'+statusClass+'">'+textnone(statusText)+'</span></td>'
+								+'<td><span class="'+statusClass+'">'+textnone(statusText)+'</span>'+runtimeStatus.detailHtml+'</td>'
 									+'<td>'+textnone(list[i].count)+'/'+textnone(list[i].carriedout)+'</td>'
 									+'<td>'+textnone(list[i].taskcron)+'</td>'
 									+'<td>'+textnone(list[i].createtime)+'</td>'
@@ -879,6 +872,52 @@
 		$('.viewSnapshot').click(function(){
 			showLatestRunItems($(this).data('id'), 'all');
 		});
+	}
+
+	function buildCollectRuntimeStatus(item) {
+		var jobState = (item.jobState || '').toString().toUpperCase();
+		var runState = (item.runState || '').toString().toUpperCase();
+		var statusText = item.taskstatus || '--';
+		var statusClass = 'text-secondary';
+		if (jobState === 'RUNNING' || runState === 'FETCHING' || runState === 'PROCESSING') {
+			statusText = runState === 'PROCESSING' ? '正在入库' : '正在抓取';
+			statusClass = 'text-info';
+		} else if (jobState === 'QUEUED' || jobState === 'RETRY_WAIT' || runState === 'QUEUED') {
+			statusText = jobState === 'RETRY_WAIT' ? '等待重试' : '排队中';
+			if (item.queuePosition) {
+				statusText += ' #' + item.queuePosition;
+			}
+			statusClass = 'text-warning';
+		} else {
+			switch(item.taskstatus) {
+				case '处理完成':
+					statusClass = 'text-success';
+					break;
+				case '已提交待处理':
+				case '排队中':
+				case '等待重试':
+					statusClass = 'text-warning';
+					break;
+				case '已开始处理':
+				case '正在抓取':
+				case '正在入库':
+					statusClass = 'text-info';
+					break;
+				default:
+					statusClass = 'text-secondary';
+			}
+		}
+		var details = [];
+		if (item.activeRunId) details.push('run ' + item.activeRunId);
+		if (item.activeJobId) details.push('job ' + item.activeJobId);
+		if (item.heartbeatAt && (runState === 'FETCHING' || runState === 'PROCESSING')) {
+			details.push('心跳 ' + item.heartbeatAt);
+		}
+		return {
+			statusText: statusText,
+			statusClass: statusClass,
+			detailHtml: details.length ? '<br/><small class="text-muted">' + details.join(' / ') + '</small>' : ''
+		};
 	}
 
 	function viewPlan(){

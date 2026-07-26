@@ -35,9 +35,58 @@ class CollectDataServiceFindPageTest {
 		Page<?> page = (Page<?>) response.getRecord();
 		assertThat(page.getContent()).singleElement().isInstanceOf(CollectTaskListItem.class);
 		assertThat(jdbc.queries).anySatisfy(sql -> {
-			assertThat(sql).startsWith("SELECT id, taskid");
+			assertThat(sql).startsWith("SELECT c.id, c.taskid");
 			assertThat(sql).doesNotContain("lastfetchsnapshot", "lastplanitems", "SELECT *");
 		});
+	}
+
+	@Test
+	void taskListIncludesActiveQueueAndRunMetadata() throws Exception {
+		CapturingJdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id, taskid, taskname, taskstatus) VALUES (1, 'task-1', 'Queued One', '排队中')");
+		jdbc.update("INSERT INTO biz_collect_data(id, taskid, taskname, taskstatus) VALUES (2, 'task-2', 'Queued Two', '排队中')");
+		jdbc.update("INSERT INTO biz_collect_data(id, taskid, taskname, taskstatus) VALUES (3, 'task-3', 'Running', '排队中')");
+		jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
+				+ "VALUES (11, 1, 'MANUAL', 'QUEUED', '2026-07-26 20:31:00')");
+		jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
+				+ "VALUES (12, 2, 'MANUAL', 'QUEUED', '2026-07-26 20:31:01')");
+		jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, heartbeat_at, created_at) "
+				+ "VALUES (13, 3, 'MANUAL', 'FETCHING', '2026-07-26 20:32:00', '2026-07-26 20:31:02')");
+		jdbc.update("INSERT INTO biz_job_queue(id, job_type, dedupe_key, payload, state, priority, available_at, "
+				+ "attempt_count, max_attempts, created_at, updated_at) VALUES "
+				+ "(101, 'COLLECT_FETCH', 'collect:1', '{}', 'QUEUED', 10, '2026-07-26 20:31:00', 0, 3, "
+				+ "'2026-07-26 20:31:00', '2026-07-26 20:31:00')");
+		jdbc.update("INSERT INTO biz_job_queue(id, job_type, dedupe_key, payload, state, priority, available_at, "
+				+ "attempt_count, max_attempts, created_at, updated_at) VALUES "
+				+ "(102, 'COLLECT_FETCH', 'collect:2', '{}', 'QUEUED', 10, '2026-07-26 20:31:01', 0, 3, "
+				+ "'2026-07-26 20:31:01', '2026-07-26 20:31:01')");
+		jdbc.update("INSERT INTO biz_job_queue(id, job_type, dedupe_key, payload, state, priority, available_at, "
+				+ "attempt_count, max_attempts, locked_by, locked_at, created_at, updated_at) VALUES "
+				+ "(103, 'COLLECT_FETCH', 'collect:3', '{}', 'RUNNING', 10, '2026-07-26 20:31:02', 1, 3, "
+				+ "'worker-1', '2026-07-26 20:32:00', '2026-07-26 20:31:02', '2026-07-26 20:32:00')");
+		CollectDataService service = new CollectDataService();
+		ReflectionTestUtils.setField(service, "jdbcTemplate", jdbc);
+
+		Page<?> page = (Page<?>) service.findPage(new CollectDataEntity()).getRecord();
+
+		CollectTaskListItem running = findById(page, 3);
+		assertThat(running.activeJobId()).isEqualTo(103L);
+		assertThat(running.activeRunId()).isEqualTo(13L);
+		assertThat(running.jobState()).isEqualTo("RUNNING");
+		assertThat(running.runState()).isEqualTo("FETCHING");
+		assertThat(running.queuePosition()).isNull();
+		assertThat(running.heartbeatAt()).isEqualTo("2026-07-26 20:32:00");
+
+		CollectTaskListItem firstQueued = findById(page, 1);
+		assertThat(firstQueued.activeJobId()).isEqualTo(101L);
+		assertThat(firstQueued.activeRunId()).isEqualTo(11L);
+		assertThat(firstQueued.jobState()).isEqualTo("QUEUED");
+		assertThat(firstQueued.runState()).isEqualTo("QUEUED");
+		assertThat(firstQueued.queuePosition()).isEqualTo(1);
+
+		CollectTaskListItem secondQueued = findById(page, 2);
+		assertThat(secondQueued.queuePosition()).isEqualTo(2);
 	}
 
 	@Test
@@ -76,6 +125,24 @@ class CollectDataServiceFindPageTest {
 				+ "originaladdress TEXT, monitoring TEXT, taskenabled TEXT, lastCheckTime TEXT, lastid TEXT, "
 				+ "maxcur INTEGER, omaxcur INTEGER, generatenfo TEXT, taskcron TEXT, lastfetchtime TEXT, "
 				+ "lastfetchcount INTEGER, lastfetchsnapshot TEXT, lastplanitems TEXT)");
+		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY AUTOINCREMENT, collect_task_id INTEGER NOT NULL, "
+				+ "trigger_type TEXT NOT NULL, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
+				+ "planned_count INTEGER, inserted_count INTEGER, skipped_existing_count INTEGER, failed_item_count INTEGER, "
+				+ "started_at DATETIME, heartbeat_at DATETIME, finished_at DATETIME, error_code TEXT, error_message TEXT, "
+				+ "error_detail TEXT, created_at DATETIME NOT NULL)");
+		jdbc.execute("CREATE TABLE biz_job_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, job_type TEXT NOT NULL, "
+				+ "dedupe_key TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL, priority INTEGER NOT NULL, "
+				+ "available_at DATETIME NOT NULL, attempt_count INTEGER NOT NULL, max_attempts INTEGER NOT NULL, "
+				+ "locked_by TEXT, locked_at DATETIME, last_error_code TEXT, last_error_message TEXT, "
+				+ "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+	}
+
+	private CollectTaskListItem findById(Page<?> page, int id) {
+		return page.getContent().stream()
+				.map(CollectTaskListItem.class::cast)
+				.filter(item -> item.id() == id)
+				.findFirst()
+				.orElseThrow();
 	}
 
 	private CapturingJdbcTemplate jdbcTemplate() throws Exception {
