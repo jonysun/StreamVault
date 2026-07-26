@@ -17,7 +17,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.platform.PlatformCatalog;
+import com.flower.spirit.service.transaction.DatabaseInitializationTransaction;
 
 @Service
 public class PlatformSchemaInitializer {
@@ -27,9 +29,14 @@ public class PlatformSchemaInitializer {
 	private static final Map<String, List<String>> COLUMN_DEFINITIONS = columnDefinitions();
 
 	private final JdbcTemplate jdbcTemplate;
+	private final DatabaseInitializationTransaction transaction;
+	private final DatabaseWriteExecutor databaseWriteExecutor;
 
-	public PlatformSchemaInitializer(JdbcTemplate jdbcTemplate) {
+	public PlatformSchemaInitializer(JdbcTemplate jdbcTemplate, DatabaseInitializationTransaction transaction,
+			DatabaseWriteExecutor databaseWriteExecutor) {
 		this.jdbcTemplate = jdbcTemplate;
+		this.transaction = transaction;
+		this.databaseWriteExecutor = databaseWriteExecutor;
 	}
 
 	@Order(100)
@@ -55,7 +62,10 @@ public class PlatformSchemaInitializer {
 				continue;
 			}
 			try {
-				jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + definition);
+				databaseWriteExecutor.execute("schema-add-column", () -> {
+					transaction.execute("ALTER TABLE " + table + " ADD COLUMN " + definition);
+					return null;
+				});
 				existing.add(column);
 			} catch (Exception e) {
 				logger.warn("Failed to add optional column {}.{}", table, column, e);
@@ -102,9 +112,12 @@ public class PlatformSchemaInitializer {
 			}
 			if (!updates.isEmpty()) {
 				try {
-					jdbcTemplate.batchUpdate("UPDATE " + table
-							+ " SET platformkey = ? WHERE id = ? AND (platformkey IS NULL OR trim(platformkey) = '')",
-							updates);
+					databaseWriteExecutor.execute("schema-backfill-platform-key", () -> {
+						transaction.batchUpdate("UPDATE " + table
+								+ " SET platformkey = ? WHERE id = ? AND (platformkey IS NULL OR trim(platformkey) = '')",
+								updates);
+						return null;
+					});
 				} catch (Exception e) {
 					logger.warn("Failed to update platform key backfill batch for table: {}", table, e);
 					return;

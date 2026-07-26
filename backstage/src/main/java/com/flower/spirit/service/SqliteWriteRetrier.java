@@ -1,18 +1,23 @@
 package com.flower.spirit.service;
 
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.database.DatabaseWriteContentionException;
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.utils.SqliteErrors;
 
 @Service
-public class SqliteWriteRetrier {
+@ConditionalOnProperty(name = "streamvault.database.kind", havingValue = "sqlite", matchIfMissing = true)
+public class SqliteWriteRetrier implements DatabaseWriteExecutor {
 
 	private static final Logger logger = LoggerFactory.getLogger(SqliteWriteRetrier.class);
 
@@ -20,12 +25,13 @@ public class SqliteWriteRetrier {
 	private final long initialDelayMs;
 	private final long maxDelayMs;
 	private final Sleeper sleeper;
+	private final AtomicLong busyRetryCount = new AtomicLong();
 
 	@Autowired
 	public SqliteWriteRetrier(
-			@Value("${streamvault.sqlite.write-retry.max-attempts:3}") int maxAttempts,
-			@Value("${streamvault.sqlite.write-retry.initial-delay-ms:100}") long initialDelayMs,
-			@Value("${streamvault.sqlite.write-retry.max-delay-ms:1000}") long maxDelayMs) {
+			@Value("${streamvault.sqlite.write-retry.max-attempts:6}") int maxAttempts,
+			@Value("${streamvault.sqlite.write-retry.initial-delay-ms:150}") long initialDelayMs,
+			@Value("${streamvault.sqlite.write-retry.max-delay-ms:2000}") long maxDelayMs) {
 		this(maxAttempts, initialDelayMs, maxDelayMs, Thread::sleep);
 	}
 
@@ -39,17 +45,19 @@ public class SqliteWriteRetrier {
 		this.sleeper = sleeper;
 	}
 
-	public <T> T execute(Supplier<T> newTransactionCall) {
+	@Override
+	public <T> T execute(String operation, Supplier<T> newTransactionCall) {
 		for (int attempt = 1; attempt <= maxAttempts; attempt++) {
 			try {
 				return newTransactionCall.get();
 			} catch (RuntimeException error) {
-				if (!SqliteErrors.isBusy(error) || attempt == maxAttempts) {
+				if (containsWriteContention(error) || !SqliteErrors.isBusy(error) || attempt == maxAttempts) {
 					throw error;
 				}
+				busyRetryCount.incrementAndGet();
 				long delayMs = retryDelayMs(attempt);
-				logger.warn("SQLite write was busy; retrying in a new transaction attempt={}/{} delayMs={} root={}",
-						attempt + 1, maxAttempts, delayMs, rootMessage(error));
+				logger.warn("SQLite write was busy; retrying in a new transaction operation={} attempt={}/{} delayMs={} root={}",
+						operation, attempt + 1, maxAttempts, delayMs, rootMessage(error));
 				try {
 					sleeper.sleep(delayMs);
 				} catch (InterruptedException interrupted) {
@@ -60,6 +68,20 @@ public class SqliteWriteRetrier {
 			}
 		}
 		throw new IllegalStateException("SQLite retry loop ended unexpectedly");
+	}
+
+	public long busyRetryCount() {
+		return busyRetryCount.get();
+	}
+
+	private boolean containsWriteContention(Throwable error) {
+		for (Throwable current = error; current != null && current.getCause() != current;
+				current = current.getCause()) {
+			if (current instanceof DatabaseWriteContentionException) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private long retryDelayMs(int failedAttempt) {

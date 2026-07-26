@@ -8,6 +8,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
+import jakarta.persistence.Transient;
 
 import com.flower.spirit.common.DataEntity;
 
@@ -73,6 +74,9 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	private String lastfetchtime; // 最近一次拉取时间
 
 	private Integer lastfetchcount; // 最近一次拉取总数
+
+	@Transient
+	private String keyword;
 
 	public Integer getId() {
 		return id;
@@ -249,6 +253,14 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 
 	public void setLastfetchcount(Integer lastfetchcount) {
 		this.lastfetchcount = lastfetchcount;
+	}
+
+	public String getKeyword() {
+		return keyword;
+	}
+
+	public void setKeyword(String keyword) {
+		this.keyword = keyword;
 	}
 
 	@Override

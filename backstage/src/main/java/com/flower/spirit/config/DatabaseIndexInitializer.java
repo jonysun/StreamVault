@@ -11,6 +11,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.database.DatabaseWriteExecutor;
+import com.flower.spirit.service.transaction.DatabaseInitializationTransaction;
+
 @Service
 public class DatabaseIndexInitializer {
 
@@ -18,15 +21,21 @@ public class DatabaseIndexInitializer {
 
 	private final JdbcTemplate jdbcTemplate;
 	private final List<String> indexSqlStatements;
+	private final DatabaseInitializationTransaction transaction;
+	private final DatabaseWriteExecutor databaseWriteExecutor;
 
 	@Autowired
-	public DatabaseIndexInitializer(JdbcTemplate jdbcTemplate) {
-		this(jdbcTemplate, defaultIndexSqlStatements());
+	public DatabaseIndexInitializer(JdbcTemplate jdbcTemplate, DatabaseInitializationTransaction transaction,
+			DatabaseWriteExecutor databaseWriteExecutor) {
+		this(jdbcTemplate, defaultIndexSqlStatements(), transaction, databaseWriteExecutor);
 	}
 
-	DatabaseIndexInitializer(JdbcTemplate jdbcTemplate, List<String> indexSqlStatements) {
+	DatabaseIndexInitializer(JdbcTemplate jdbcTemplate, List<String> indexSqlStatements,
+			DatabaseInitializationTransaction transaction, DatabaseWriteExecutor databaseWriteExecutor) {
 		this.jdbcTemplate = jdbcTemplate;
 		this.indexSqlStatements = indexSqlStatements;
+		this.transaction = transaction;
+		this.databaseWriteExecutor = databaseWriteExecutor;
 	}
 
 	@Order(200)
@@ -34,7 +43,10 @@ public class DatabaseIndexInitializer {
 	public void initialize() {
 		for (String sql : indexSqlStatements) {
 			try {
-				jdbcTemplate.execute(sql);
+				databaseWriteExecutor.execute("schema-create-index", () -> {
+					transaction.execute(sql);
+					return null;
+				});
 			} catch (Exception e) {
 				logger.warn("Database index initialization failed for SQL: {}", sql, e);
 			}

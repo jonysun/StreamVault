@@ -18,7 +18,9 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
+import com.flower.spirit.utils.SqliteErrors;
 
 @Service
 public class CollectJobWorker {
@@ -28,7 +30,7 @@ public class CollectJobWorker {
 	private final CollectQueueTransaction transaction;
 	private final CollectRunService collectRunService;
 	private final CollectDataService collectDataService;
-	private final SqliteWriteRetrier sqliteWriteRetrier;
+	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final String workerId = "sqlite-collect-" + UUID.randomUUID();
 	private final AtomicBoolean running = new AtomicBoolean(false);
 	private final AtomicLong activeRunId = new AtomicLong(0);
@@ -44,11 +46,11 @@ public class CollectJobWorker {
 	});
 
 	public CollectJobWorker(CollectQueueTransaction transaction, CollectRunService collectRunService,
-			CollectDataService collectDataService, SqliteWriteRetrier sqliteWriteRetrier) {
+			CollectDataService collectDataService, DatabaseWriteExecutor databaseWriteExecutor) {
 		this.transaction = transaction;
 		this.collectRunService = collectRunService;
 		this.collectDataService = collectDataService;
-		this.sqliteWriteRetrier = sqliteWriteRetrier;
+		this.databaseWriteExecutor = databaseWriteExecutor;
 	}
 
 	public void processOne() {
@@ -60,7 +62,8 @@ public class CollectJobWorker {
 		ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(this::heartbeatActiveRun,
 				15, 15, TimeUnit.SECONDS);
 		try {
-			CollectJobClaim claim = sqliteWriteRetrier.execute(() -> transaction.claimNext(workerId, Instant.now()));
+			CollectJobClaim claim = databaseWriteExecutor.execute("collect-job-claim",
+					() -> transaction.claimNext(workerId, Instant.now()));
 			if (claim != null) process(claim);
 		} catch (RuntimeException error) {
 			logger.error("[CollectWorker] tick failed", error);
@@ -112,11 +115,15 @@ public class CollectJobWorker {
 			recordFailure(claim, expected, CollectRunState.INTERRUPTED, "PAUSED_DURING_EXECUTION",
 					rootMessage(error), error, 30);
 		} catch (DataAccessException error) {
-			recordFailure(claim, currentExpectedState(claim.runId(), CollectRunState.PROCESSING), CollectRunState.DB_FAILED, "DB_WRITE_FAILED",
-					rootMessage(error), error, 60);
+			boolean sqliteBusy = SqliteErrors.isBusy(error);
+			recordFailure(claim, currentExpectedState(claim.runId(), CollectRunState.PROCESSING),
+					CollectRunState.DB_FAILED, sqliteBusy ? "SQLITE_BUSY" : "DB_WRITE_FAILED",
+					rootMessage(error), error, sqliteBusy ? 30 : 60);
 		} catch (RuntimeException error) {
-			recordFailure(claim, currentExpectedState(claim.runId(), CollectRunState.PROCESSING), CollectRunState.DB_FAILED, "UNEXPECTED",
-					rootMessage(error), error, 60);
+			boolean sqliteBusy = SqliteErrors.isBusy(error);
+			recordFailure(claim, currentExpectedState(claim.runId(), CollectRunState.PROCESSING),
+					CollectRunState.DB_FAILED, sqliteBusy ? "SQLITE_BUSY" : "UNEXPECTED",
+					rootMessage(error), error, sqliteBusy ? 30 : 900);
 		}
 	}
 

@@ -7,6 +7,8 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -22,12 +24,12 @@ public class AuthorEnrichmentQueueService {
 	private static final int MANUAL_PRIORITY = 0;
 
 	private final AuthorEnrichmentTransaction transaction;
-	private final SqliteWriteRetrier sqliteWriteRetrier;
+	private final DatabaseWriteExecutor databaseWriteExecutor;
 
 	public AuthorEnrichmentQueueService(AuthorEnrichmentTransaction transaction,
-			SqliteWriteRetrier sqliteWriteRetrier) {
+			DatabaseWriteExecutor databaseWriteExecutor) {
 		this.transaction = transaction;
-		this.sqliteWriteRetrier = sqliteWriteRetrier;
+		this.databaseWriteExecutor = databaseWriteExecutor;
 	}
 
 	public AuthorCompleteness inspect(AuthorObservation observation) {
@@ -72,12 +74,13 @@ public class AuthorEnrichmentQueueService {
 		if (!"douyin".equals(platformKey) || !AuthorIdentityUtil.isDouyinSecUid(authorUid)) {
 			throw new IllegalArgumentException("Only canonical Douyin author profiles can be refreshed");
 		}
-		return sqliteWriteRetrier.execute(() -> transaction.enqueue(platformKey, authorUid, MANUAL_PRIORITY,
+		return databaseWriteExecutor.execute("author-enrichment-enqueue-manual", () -> transaction.enqueue(platformKey, authorUid, MANUAL_PRIORITY,
 				true, Instant.now()));
 	}
 
 	public int reconcileMissingWorkAuthors(int limit) {
-		return sqliteWriteRetrier.execute(() -> transaction.enqueueMissingWorkAuthors(Instant.now(), limit));
+		return databaseWriteExecutor.execute("author-enrichment-reconcile",
+				() -> transaction.enqueueMissingWorkAuthors(Instant.now(), limit));
 	}
 
 	private boolean isSupportedIncompleteObservation(AuthorObservation observation) {
@@ -90,7 +93,7 @@ public class AuthorEnrichmentQueueService {
 
 	private void enqueueSafely(String platformKey, String authorUid, int priority, boolean promote) {
 		try {
-			sqliteWriteRetrier.execute(() -> transaction.enqueue(platformKey, authorUid, priority, promote,
+			databaseWriteExecutor.execute("author-enrichment-enqueue", () -> transaction.enqueue(platformKey, authorUid, priority, promote,
 					Instant.now()));
 		} catch (RuntimeException error) {
 			logger.error("[AuthorEnrichment] enqueue failed platformKey={} authorUid={}", platformKey, authorUid,

@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.dao.AuthorProfileDao;
 import com.flower.spirit.entity.AuthorProfileEntity;
@@ -26,19 +27,19 @@ public class AuthorEnrichmentWorker {
 	private final AuthorProfileDao authorProfileDao;
 	private final AuthorProfileService authorProfileService;
 	private final DouyinProfileGateway douyinProfileGateway;
-	private final SqliteWriteRetrier sqliteWriteRetrier;
+	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final int maxAttempts;
 	private final AtomicBoolean running = new AtomicBoolean(false);
 
 	public AuthorEnrichmentWorker(AuthorEnrichmentTransaction transaction, AuthorProfileDao authorProfileDao,
 			AuthorProfileService authorProfileService, DouyinProfileGateway douyinProfileGateway,
-			SqliteWriteRetrier sqliteWriteRetrier,
+			DatabaseWriteExecutor databaseWriteExecutor,
 			@Value("${streamvault.author-enrichment.max-attempts:5}") int maxAttempts) {
 		this.transaction = transaction;
 		this.authorProfileDao = authorProfileDao;
 		this.authorProfileService = authorProfileService;
 		this.douyinProfileGateway = douyinProfileGateway;
-		this.sqliteWriteRetrier = sqliteWriteRetrier;
+		this.databaseWriteExecutor = databaseWriteExecutor;
 		this.maxAttempts = Math.max(1, maxAttempts);
 	}
 
@@ -47,7 +48,7 @@ public class AuthorEnrichmentWorker {
 			return;
 		}
 		try {
-			AuthorEnrichmentClaim claim = sqliteWriteRetrier.execute(
+			AuthorEnrichmentClaim claim = databaseWriteExecutor.execute("author-enrichment-claim",
 					() -> transaction.claimNext(Instant.now(), 15));
 			if (claim != null) {
 				process(claim);
@@ -95,13 +96,14 @@ public class AuthorEnrichmentWorker {
 		}
 
 		try {
-			sqliteWriteRetrier.execute(() -> authorProfileService.applyExternalDouyinProfile(profile.getId(), profileUser));
+			databaseWriteExecutor.execute("author-enrichment-apply-profile",
+					() -> authorProfileService.applyExternalDouyinProfile(profile.getId(), profileUser));
 		} catch (RuntimeException error) {
 			retryOrFail(claim, "DB_WRITE_FAILED", rootMessage(error), 1, ChronoUnit.MINUTES);
 			return;
 		}
 
-		sqliteWriteRetrier.execute(() -> {
+		databaseWriteExecutor.execute("author-enrichment-complete", () -> {
 			transaction.complete(claim.id(), Instant.now());
 			return null;
 		});
@@ -136,7 +138,7 @@ public class AuthorEnrichmentWorker {
 		}
 		Instant now = Instant.now();
 		Instant nextAttemptAt = now.plus(amount, unit);
-		sqliteWriteRetrier.execute(() -> {
+		databaseWriteExecutor.execute("author-enrichment-retry", () -> {
 			transaction.retryLater(claim.id(), errorCode, message, nextAttemptAt, now);
 			return null;
 		});
@@ -145,7 +147,7 @@ public class AuthorEnrichmentWorker {
 	}
 
 	private void markFailed(AuthorEnrichmentClaim claim, String errorCode, String message) {
-		sqliteWriteRetrier.execute(() -> {
+		databaseWriteExecutor.execute("author-enrichment-fail", () -> {
 			transaction.fail(claim.id(), errorCode, message, Instant.now());
 			return null;
 		});

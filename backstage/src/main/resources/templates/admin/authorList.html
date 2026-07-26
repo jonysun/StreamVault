@@ -17,6 +17,7 @@
 		.text-ellipsis { max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 		.repair-status { margin:0 0 16px; display:none; }
 		.repair-status strong { margin-right:12px; }
+		.author-actions { display:flex; gap:6px; flex-wrap:nowrap; }
 	</style>
 </head>
 <body>
@@ -42,6 +43,7 @@
 					var authorUid = (item.authoruid || '').toString().trim();
 					var canRefresh = (platformValue === 'douyin' || platformValue.indexOf('抖音') >= 0)
 						&& authorUid.indexOf('MS4') === 0;
+					var canDelete = authorUid.length > 0 && platformValue.length > 0;
 					html += '<tr>';
 					html += '<td>'+ (item.id||'') +'</td>';
 					html += '<td>'+ (item.platform||'') +'</td>';
@@ -52,8 +54,10 @@
 					html += '<td>'+ (item.homepage ? '<a href="'+item.homepage+'" target="_blank">主页</a>' : '--') +'</td>';
 					html += '<td>'+ (item.updatetime || '') +'</td>';
 					html += '<td><button class="btn btn-outline-info btn-sm historyBtn" data-id="'+item.id+'">查看</button></td>';
-					html += '<td><button class="btn btn-outline-primary btn-sm refreshProfileBtn" data-id="'+item.id+'"'
-						+ (canRefresh ? '' : ' disabled title="作者 UID 待修复"') +'><i class="mdi mdi-sync"></i> 刷新</button></td>';
+					html += '<td><div class="author-actions"><button class="btn btn-outline-primary btn-sm refreshProfileBtn" data-id="'+item.id+'"'
+						+ (canRefresh ? '' : ' disabled title="作者 UID 待修复"') +'><i class="mdi mdi-sync"></i> 刷新</button>'
+						+ '<button class="btn btn-outline-danger btn-sm deleteAuthorBtn" data-platform="'+encodeURIComponent(item.platform||'')+'" data-uid="'+encodeURIComponent(authorUid)+'" data-name="'+encodeURIComponent(item.displayname||'')+'"'
+						+ (canDelete ? '' : ' disabled title="作者唯一标识待修复"') +'><i class="mdi mdi-delete"></i> 删除</button></div></td>';
 					html += '</tr>';
 				}
 				$('#tableData').html(html || '<tr><td colspan="10" class="text-center text-muted">暂无作者档案数据</td></tr>');
@@ -92,12 +96,90 @@
 					layer.msg(message);
 				});
 			});
+			$('.deleteAuthorBtn').click(function(){
+				var button = $(this);
+				if (button.prop('disabled')) return;
+				var payload = {
+					platform: decodeURIComponent(button.attr('data-platform') || ''),
+					authoruid: decodeURIComponent(button.attr('data-uid') || '')
+				};
+				var authorName = decodeURIComponent(button.attr('data-name') || '') || payload.authoruid;
+				button.prop('disabled', true);
+				requestAuthorDeletionPreview(payload, authorName, button);
+			});
 			var pages = record.totalPages || (record.page && record.page.totalPages) || 1;
 			laypage({ cont:'pager', pages: pages, curr: page, jump:function(obj,first){ if(!first){ currentPage=obj.curr; findList(obj.curr); } } });
 		});
 	}
 	$('#searchBtn').click(function(){ currentPage = 1; findList(1); });
 	$('#resetBtn').click(function(){ $('#keyword').val(''); $('#platform').val(''); currentPage = 1; findList(1); });
+	function requestAuthorDeletionPreview(payload, authorName, button){
+		$.ajax({
+			url:'/admin/api/previewDeleteAuthor', type:'POST', contentType:'application/json', data:JSON.stringify(payload),
+			success:function(res){
+				if(res.resCode !== '000001'){
+					button.prop('disabled', false); layer.msg(res.message || '删除预检失败'); return;
+				}
+				var preview = res.record || {};
+				var taskCount = (preview.directTasks || []).length;
+				var message = '确定删除作者“' + escapeHtml(authorName) + '”的全部内容？'
+					+ '<br>视频：' + Number(preview.videoCount || 0)
+					+ '<br>图文：' + Number(preview.graphicCount || 0)
+					+ '<br>将停用的直接收藏任务：' + taskCount;
+				layer.confirm(message, {title:'确认删除作者'}, function(index){
+					layer.close(index);
+					payload.confirmationToken = preview.confirmationToken;
+					startAuthorDeletion(payload, button);
+				}, function(){ button.prop('disabled', false); });
+			},
+			error:function(xhr){
+				button.prop('disabled', false);
+				layer.msg(xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : '删除预检请求失败');
+			}
+		});
+	}
+	function startAuthorDeletion(payload, button){
+		$.ajax({
+			url:'/admin/api/deleteAuthor', type:'POST', contentType:'application/json', data:JSON.stringify(payload),
+			success:function(res){
+				if(res.resCode !== '000001'){
+					button.prop('disabled', false); layer.msg(res.message || '删除任务启动失败'); return;
+				}
+				var jobId = res.record && res.record.jobId;
+				if(!jobId){ button.prop('disabled', false); layer.msg('删除任务缺少 jobId'); return; }
+				var progressLayer = layer.open({type:1,title:'删除作者内容',area:['420px','230px'],closeBtn:0,
+					content:'<div id="authorDeletionProgress" style="padding:18px;line-height:1.8;">任务已入队，等待执行...</div>'});
+				pollAuthorDeletion(jobId, progressLayer, button);
+			},
+			error:function(xhr){
+				button.prop('disabled', false);
+				layer.msg(xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : '删除任务请求失败');
+			}
+		});
+	}
+	function pollAuthorDeletion(jobId, progressLayer, button){
+		$.get('/admin/api/authorDeletionStatus', {jobId:jobId}, function(res){
+			if(res.resCode !== '000001'){
+				layer.close(progressLayer); button.prop('disabled', false); layer.msg(res.message || '获取删除进度失败'); return;
+			}
+			var status = res.record || {};
+			$('#authorDeletionProgress').html('状态：'+escapeHtml(status.message || status.state || '--')
+				+'<br>视频：'+Number(status.deletedVideos||0)+' / '+Number(status.totalVideos||0)
+				+'<br>图文：'+Number(status.deletedGraphics||0)+' / '+Number(status.totalGraphics||0)
+				+'<br>已停用收藏任务：'+Number(status.disabledTasks||0)+' / '+Number(status.totalTasks||0));
+			if(status.state === 'queued' || status.state === 'running'){
+				setTimeout(function(){ pollAuthorDeletion(jobId, progressLayer, button); }, 1000);
+				return;
+			}
+			layer.close(progressLayer);
+			var failures = status.failures || [];
+			layer.alert(escapeHtml(status.message || '删除完成') + (failures.length ? '<br>失败项：'+failures.length : ''),
+				{title: failures.length ? '部分失败' : '删除完成'}, function(index){ layer.close(index); findList(currentPage); });
+		}).fail(function(){
+			layer.close(progressLayer); button.prop('disabled', false); layer.msg('获取删除进度请求失败');
+		});
+	}
+	function escapeHtml(value){ return $('<div>').text(value == null ? '' : String(value)).html(); }
 	$('#repairDouyinMetadataBtn').click(function(){
 		layer.confirm('将补充抖音 jsonData 和原作品链接，不会重新下载媒体文件，也不会修改下载时间。继续？', {title:'确认修复'}, function(index){
 			layer.close(index);

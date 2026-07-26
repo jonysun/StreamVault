@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.io.File;
@@ -26,6 +27,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -46,6 +48,7 @@ import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.dto.CollectTaskListItem;
 import com.flower.spirit.executor.DouYinExecutor;
+import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.task.QuartzTaskService;
 import com.flower.spirit.utils.Aria2Util;
 import com.flower.spirit.utils.BiliUtil;
@@ -146,7 +149,24 @@ public class CollectDataService {
 	private String savefile;
 	
     @Transactional
-    public AjaxEntity saveCollectData(CollectDataEntity entity) {
+	public synchronized AjaxEntity saveCollectData(CollectDataEntity entity) {
+		if (entity == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "收藏任务不能为空", null);
+		}
+		String originalAddress = normalizeCollectAddress(entity.getOriginaladdress());
+		if (originalAddress == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "收藏任务来源地址不能为空", null);
+		}
+		entity.setOriginaladdress(originalAddress);
+		entity.setPlatform(trimToNull(entity.getPlatform()));
+		entity.setTaskname(trimToNull(entity.getTaskname()));
+		CollectDataEntity duplicate = findDuplicateCollectTask(entity.getPlatform(), originalAddress);
+		if (duplicate != null) {
+			String message = "收藏任务已存在：ID " + duplicate.getId() + "，"
+					+ valueOr(duplicate.getTaskname(), "未命名任务") + "，状态 "
+					+ valueOr(duplicate.getTaskstatus(), "未执行");
+			return new AjaxEntity(Global.ajax_uri_error, message, duplicate);
+		}
 		if (entity.getTaskenabled() == null || entity.getTaskenabled().trim().isEmpty()) {
 			entity.setTaskenabled("Y");
 		}
@@ -161,6 +181,7 @@ public class CollectDataService {
 		int pageSize = res == null ? 25 : Math.min(Math.max(1, res.getPageSize()), 200);
 		String taskId = res == null || !StringUtil.isString(res.getTaskid()) ? null : "%" + res.getTaskid() + "%";
 		String platform = res == null || !StringUtil.isString(res.getPlatform()) ? null : "%" + res.getPlatform() + "%";
+		String keyword = res == null || !StringUtil.isString(res.getKeyword()) ? null : "%" + res.getKeyword().trim() + "%";
 		List<String> filters = new ArrayList<>();
 		List<Object> parameters = new ArrayList<>();
 		if (taskId != null) {
@@ -170,6 +191,14 @@ public class CollectDataService {
 		if (platform != null) {
 			filters.add("platform LIKE ?");
 			parameters.add(platform);
+		}
+		if (keyword != null) {
+			filters.add("(LOWER(COALESCE(taskname, '')) LIKE LOWER(?) OR CAST(id AS TEXT) LIKE ? "
+					+ "OR LOWER(COALESCE(taskid, '')) LIKE LOWER(?) OR LOWER(COALESCE(originaladdress, '')) LIKE LOWER(?) "
+					+ "OR LOWER(COALESCE(platform, '')) LIKE LOWER(?))");
+			for (int i = 0; i < 5; i++) {
+				parameters.add(keyword);
+			}
 		}
 		String where = filters.isEmpty() ? "" : " WHERE " + String.join(" AND ", filters);
 		Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_data" + where, Long.class,
@@ -193,6 +222,45 @@ public class CollectDataService {
 				total == null ? 0 : total);
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);
     }
+
+	private CollectDataEntity findDuplicateCollectTask(String platform, String originalAddress) {
+		String platformKey = normalizeCollectPlatform(platform);
+		return collectdDataDao.findByNormalizedOriginalAddress(originalAddress).stream()
+				.filter(existing -> platformKey.equals(normalizeCollectPlatform(existing.getPlatform())))
+				.findFirst().orElse(null);
+	}
+
+	private String normalizeCollectPlatform(String platform) {
+		String normalized = trimToNull(platform);
+		if (normalized == null) {
+			return "";
+		}
+		return PlatformCatalog.findByAlias(normalized)
+				.map(definition -> definition.getKey().toLowerCase(Locale.ROOT))
+				.orElse(normalized.toLowerCase(Locale.ROOT));
+	}
+
+	private String normalizeCollectAddress(String address) {
+		String normalized = trimToNull(address);
+		if (normalized == null) {
+			return null;
+		}
+		for (String prefix : List.of("bili-seaarc-", "bili-fav-", "bili-arc-", "recommend", "post", "like", "fav-")) {
+			if (normalized.regionMatches(true, 0, prefix, 0, prefix.length())) {
+				return prefix + normalized.substring(prefix.length()).trim();
+			}
+		}
+		return normalized;
+	}
+
+	private String trimToNull(String value) {
+		return value == null || value.trim().isEmpty() ? null : value.trim();
+	}
+
+	private String valueOr(String value, String fallback) {
+		String normalized = trimToNull(value);
+		return normalized == null ? fallback : normalized;
+	}
 
 	private Integer nullableInteger(java.sql.ResultSet row, String column) throws java.sql.SQLException {
 		int value = row.getInt(column);
@@ -2094,6 +2162,8 @@ public class CollectDataService {
 						result == null ? "收藏任务未返回执行结果" : result.getMessage());
 			}
 		} catch (CollectFetchException e) {
+			throw e;
+		} catch (DataAccessException e) {
 			throw e;
 		} catch (Exception e) {
 			throw new IllegalStateException("收藏任务执行异常: " + rootCauseMessage(e), e);

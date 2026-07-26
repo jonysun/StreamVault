@@ -4,8 +4,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
-import jakarta.transaction.Transactional;
-
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.domain.Pageable;
@@ -13,17 +11,15 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.flower.spirit.entity.GraphicContentEntity;
 
 @Repository
-@Transactional
 public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, Integer>,
 		JpaSpecificationExecutor<GraphicContentEntity> {
 
 	Optional<GraphicContentEntity> findById(Integer id);
-
-	void deleteById(Integer id);
 
 	Optional<GraphicContentEntity> findByVideoidAndPlatform(String post, String name);
 
@@ -48,6 +44,7 @@ public interface GraphicContentDao extends JpaRepository<GraphicContentEntity, I
 	long countDouyinAuthorRepairCandidates(@Param("platforms") List<String> platforms);
 
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Transactional
 	@Query("update GraphicContentEntity g set g.authoruid = :authorUid, g.secuid = :authorUid, "
 			+ "g.author = coalesce(:displayName, g.author), "
 			+ "g.authorusername = coalesce(:username, g.authorusername), "
