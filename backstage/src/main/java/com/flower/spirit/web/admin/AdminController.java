@@ -7,6 +7,7 @@ import java.util.List;
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -75,6 +76,7 @@ import com.flower.spirit.service.WorkMetadataEditService;
 import com.flower.spirit.service.WorkRedownloadService;
 import com.flower.spirit.service.WorkRefreshService;
 import com.flower.spirit.platform.WorkMetadataValidationException;
+import com.flower.spirit.database.sqlite.SqliteRuntimeVerifier;
 
 
 /**
@@ -131,6 +133,9 @@ public class AdminController {
 
 	@Autowired
 	private DatabaseMaintenanceService databaseMaintenanceService;
+
+	@Autowired
+	private ObjectProvider<SqliteRuntimeVerifier> sqliteRuntimeVerifierProvider;
 	
 	
 	@Autowired
@@ -759,6 +764,13 @@ public class AdminController {
 	@GetMapping("/runtime-controls")
 	public AjaxEntity runtimeControls() {
 		return new AjaxEntity(Global.ajax_success, "获取运行控制成功", runtimeControlService.snapshot());
+	}
+
+	@GetMapping("/database-runtime")
+	public AjaxEntity databaseRuntime() {
+		SqliteRuntimeVerifier sqlite = sqliteRuntimeVerifierProvider.getIfAvailable();
+		Object status = sqlite == null ? Map.of("databaseKind", "postgresql") : sqlite.snapshot();
+		return new AjaxEntity(Global.ajax_success, "获取数据库运行状态成功", status);
 	}
 
 	@PostMapping("/runtime-controls/pause-all")

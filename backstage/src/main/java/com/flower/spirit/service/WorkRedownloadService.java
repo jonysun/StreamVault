@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -56,7 +57,7 @@ public class WorkRedownloadService {
 		this.mediaPathService = mediaPathService;
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public RedownloadResult redownload(WorkOperationRequest request) {
 		PreparedWork prepared = refreshService.prepare(request, false);
 		if ("a2".equalsIgnoreCase(Global.downtype) && ("douyin".equals(prepared.metadata().getPlatformKey())

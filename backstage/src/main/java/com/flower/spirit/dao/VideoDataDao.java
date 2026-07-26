@@ -3,8 +3,6 @@ package com.flower.spirit.dao;
 import java.util.Date;
 import java.util.List;
 
-import jakarta.transaction.Transactional;
-
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.domain.Pageable;
@@ -12,9 +10,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import com.flower.spirit.entity.VideoDataEntity;
 @Repository
-@Transactional
 public interface VideoDataDao
 		extends JpaRepository<VideoDataEntity, Integer>, JpaSpecificationExecutor<VideoDataEntity> {
 
@@ -41,6 +39,7 @@ public interface VideoDataDao
 	long countDouyinAuthorRepairCandidates(@Param("platforms") List<String> platforms);
 
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Transactional
 	@Query("update VideoDataEntity v set v.authoruid = :authorUid, v.secuid = :authorUid, "
 			+ "v.videoauthor = coalesce(:displayName, v.videoauthor), "
 			+ "v.authorusername = coalesce(:username, v.authorusername), "

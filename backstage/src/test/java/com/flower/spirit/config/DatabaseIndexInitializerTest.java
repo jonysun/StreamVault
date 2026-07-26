@@ -10,6 +10,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import com.flower.spirit.database.postgresql.DirectDatabaseWriteExecutor;
+import com.flower.spirit.service.transaction.DatabaseInitializationTransaction;
+
 class DatabaseIndexInitializerTest {
 
 	@Test
@@ -53,7 +56,8 @@ class DatabaseIndexInitializerTest {
 				"CREATE INDEX IF NOT EXISTS idx_second ON table_two(column_two)");
 		doThrow(new RuntimeException("boom")).when(jdbcTemplate).execute(statements.get(0));
 
-		new DatabaseIndexInitializer(jdbcTemplate, statements).initialize();
+		new DatabaseIndexInitializer(jdbcTemplate, statements, new DatabaseInitializationTransaction(jdbcTemplate),
+				new DirectDatabaseWriteExecutor()).initialize();
 
 		verify(jdbcTemplate, times(1)).execute(statements.get(0));
 		verify(jdbcTemplate, times(1)).execute(statements.get(1));

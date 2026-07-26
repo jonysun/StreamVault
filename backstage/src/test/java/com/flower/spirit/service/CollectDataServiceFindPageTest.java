@@ -40,6 +40,36 @@ class CollectDataServiceFindPageTest {
 		});
 	}
 
+	@Test
+	void keywordSearchMatchesTaskNameAddressPlatformAndDatabaseId() throws Exception {
+		CapturingJdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id, taskid, platform, taskname, originaladdress) "
+				+ "VALUES (21, 'legacy-one', '抖音', 'Alpha Author', 'postMS4-alpha')");
+		jdbc.update("INSERT INTO biz_collect_data(id, taskid, platform, taskname, originaladdress) "
+				+ "VALUES (22, 'legacy-two', '哔哩', 'Beta Author', 'bili-arc-7788')");
+		CollectDataService service = new CollectDataService();
+		ReflectionTestUtils.setField(service, "jdbcTemplate", jdbc);
+
+		CollectDataEntity byName = new CollectDataEntity();
+		byName.setKeyword("alpha");
+		Page<?> namePage = (Page<?>) service.findPage(byName).getRecord();
+		assertThat(namePage.getContent()).extracting(item -> ((CollectTaskListItem) item).id())
+				.containsExactly(21);
+
+		CollectDataEntity byAddress = new CollectDataEntity();
+		byAddress.setKeyword("7788");
+		Page<?> addressPage = (Page<?>) service.findPage(byAddress).getRecord();
+		assertThat(addressPage.getContent()).extracting(item -> ((CollectTaskListItem) item).id())
+				.containsExactly(22);
+
+		CollectDataEntity byId = new CollectDataEntity();
+		byId.setKeyword("21");
+		Page<?> idPage = (Page<?>) service.findPage(byId).getRecord();
+		assertThat(idPage.getContent()).extracting(item -> ((CollectTaskListItem) item).id())
+				.containsExactly(21);
+	}
+
 	private void createSchema(JdbcTemplate jdbc) {
 		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskid TEXT, platform TEXT, "
 				+ "taskname TEXT, taskstatus TEXT, createtime TEXT, endtime TEXT, count TEXT, carriedout TEXT, "

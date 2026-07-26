@@ -10,6 +10,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.service.RuntimeControlSnapshot.RuntimeControlValue;
 import com.flower.spirit.service.transaction.RuntimeControlTransaction;
@@ -19,18 +20,19 @@ public class RuntimeControlService {
 
 	private static final Logger logger = LoggerFactory.getLogger(RuntimeControlService.class);
 	private final RuntimeControlTransaction transaction;
-	private final SqliteWriteRetrier sqliteWriteRetrier;
+	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private volatile Map<String, RuntimeControlValue> values = Map.of();
 
-	public RuntimeControlService(RuntimeControlTransaction transaction, SqliteWriteRetrier sqliteWriteRetrier) {
+	public RuntimeControlService(RuntimeControlTransaction transaction, DatabaseWriteExecutor databaseWriteExecutor) {
 		this.transaction = transaction;
-		this.sqliteWriteRetrier = sqliteWriteRetrier;
+		this.databaseWriteExecutor = databaseWriteExecutor;
 	}
 
 	@Order(100)
 	@EventListener(ApplicationReadyEvent.class)
 	public void initialize() {
-		values = sqliteWriteRetrier.execute(() -> transaction.initializeAndLoad(Instant.now()));
+		values = databaseWriteExecutor.execute("runtime-control-initialize",
+				() -> transaction.initializeAndLoad(Instant.now()));
 		applyToLegacyGlobals(values);
 		logger.info("[RuntimeControl] loaded all={} collect={} download={} hls={}",
 				enabled(RuntimeControlTransaction.PAUSE_ALL), enabled(RuntimeControlTransaction.PAUSE_COLLECT),
@@ -39,7 +41,8 @@ public class RuntimeControlService {
 
 	public RuntimeControlSnapshot set(String scope, boolean paused, String updatedBy, String reason) {
 		String key = keyForScope(scope);
-		values = sqliteWriteRetrier.execute(() -> transaction.set(key, paused, updatedBy, reason, Instant.now()));
+		values = databaseWriteExecutor.execute("runtime-control-set",
+				() -> transaction.set(key, paused, updatedBy, reason, Instant.now()));
 		applyToLegacyGlobals(values);
 		logger.warn("[RuntimeControl] changed key={} enabled={} updatedBy={} reason={}", key, paused, updatedBy,
 				reason);

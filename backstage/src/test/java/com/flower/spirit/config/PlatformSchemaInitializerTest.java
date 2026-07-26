@@ -12,6 +12,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.sqlite.SQLiteDataSource;
 
+import com.flower.spirit.database.postgresql.DirectDatabaseWriteExecutor;
+import com.flower.spirit.service.transaction.DatabaseInitializationTransaction;
+
 class PlatformSchemaInitializerTest {
 
 	@TempDir
@@ -26,7 +29,7 @@ class PlatformSchemaInitializerTest {
 		jdbcTemplate.update("INSERT INTO biz_graphic_content(id, platform, videoid, sourceurl) VALUES(1, 'rednote', 'g1', 'graphic-1')");
 		jdbcTemplate.update("INSERT INTO biz_author_profile(id, platform, authoruid, displayname) VALUES(1, 'YouTube', 'a1', 'Author')");
 
-		PlatformSchemaInitializer initializer = new PlatformSchemaInitializer(jdbcTemplate);
+		PlatformSchemaInitializer initializer = initializer(jdbcTemplate);
 		initializer.initialize();
 		initializer.initialize();
 
@@ -53,7 +56,12 @@ class PlatformSchemaInitializerTest {
 	void missingOptionalTablesDoNotAbortInitialization() {
 		JdbcTemplate jdbcTemplate = jdbcTemplate("missing.db");
 
-		assertThatCode(() -> new PlatformSchemaInitializer(jdbcTemplate).initialize()).doesNotThrowAnyException();
+		assertThatCode(() -> initializer(jdbcTemplate).initialize()).doesNotThrowAnyException();
+	}
+
+	private PlatformSchemaInitializer initializer(JdbcTemplate jdbcTemplate) {
+		return new PlatformSchemaInitializer(jdbcTemplate, new DatabaseInitializationTransaction(jdbcTemplate),
+				new DirectDatabaseWriteExecutor());
 	}
 
 	private JdbcTemplate jdbcTemplate(String filename) {

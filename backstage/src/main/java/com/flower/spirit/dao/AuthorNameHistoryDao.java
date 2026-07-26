@@ -6,12 +6,10 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 
-import jakarta.transaction.Transactional;
-
-@Transactional
 public interface AuthorNameHistoryDao extends JpaRepository<AuthorNameHistoryEntity, Integer> {
 
 	Optional<AuthorNameHistoryEntity> findByAuthorprofileidAndDisplayname(Integer authorprofileid, String displayname);
@@ -21,5 +19,6 @@ public interface AuthorNameHistoryDao extends JpaRepository<AuthorNameHistoryEnt
 
 	long countByAuthorprofileid(Integer authorprofileid);
 
+	@Transactional
 	void deleteByAuthorprofileid(Integer authorprofileid);
 }

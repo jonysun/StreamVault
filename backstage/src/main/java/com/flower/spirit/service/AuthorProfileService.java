@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.common.AjaxEntity;
@@ -66,7 +67,7 @@ public class AuthorProfileService {
 	private GraphicContentDao graphicContentDao;
 
 	@Autowired
-	private SqliteWriteRetrier sqliteWriteRetrier;
+	private DatabaseWriteExecutor databaseWriteExecutor;
 
 	@Autowired
 	private AuthorWriteTransaction authorWriteTransaction;
@@ -215,7 +216,8 @@ public class AuthorProfileService {
 		if (TransactionSynchronizationManager.isActualTransactionActive()) {
 			return authorWrite.get();
 		}
-		return sqliteWriteRetrier.execute(() -> authorWriteTransaction.execute(authorWrite));
+		return databaseWriteExecutor.execute("author-profile-write",
+				() -> authorWriteTransaction.execute(authorWrite));
 	}
 
 	private AuthorObservation authorObservation(AuthorProfileEntity profile) {

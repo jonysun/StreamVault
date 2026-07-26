@@ -29,6 +29,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.alibaba.fastjson.JSONObject;
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.dao.AuthorNameHistoryDao;
 import com.flower.spirit.dao.AuthorProfileDao;
 import com.flower.spirit.dao.GraphicContentDao;
@@ -62,7 +63,7 @@ class AuthorProfileServiceTest {
 	private GraphicContentDao graphicContentDao;
 
 	@Mock
-	private SqliteWriteRetrier sqliteWriteRetrier;
+	private DatabaseWriteExecutor databaseWriteExecutor;
 
 	@Mock
 	private AuthorWriteTransaction authorWriteTransaction;
@@ -75,8 +76,8 @@ class AuthorProfileServiceTest {
 
 	@BeforeEach
 	void executeAuthorWrites() {
-		org.mockito.Mockito.lenient().when(sqliteWriteRetrier.execute(any())).thenAnswer(invocation ->
-				((Supplier<?>) invocation.getArgument(0)).get());
+		org.mockito.Mockito.lenient().when(databaseWriteExecutor.execute(any(), any())).thenAnswer(invocation ->
+				((Supplier<?>) invocation.getArgument(1)).get());
 		org.mockito.Mockito.lenient().when(authorWriteTransaction.execute(any())).thenAnswer(invocation ->
 				((Supplier<?>) invocation.getArgument(0)).get());
 	}

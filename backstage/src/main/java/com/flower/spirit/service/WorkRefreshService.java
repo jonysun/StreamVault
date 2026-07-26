@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.flower.spirit.dao.GraphicContentDao;
@@ -40,7 +41,7 @@ public class WorkRefreshService {
 		this.editService = editService;
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public PersistenceResult refresh(WorkOperationRequest request) {
 		PreparedWork prepared = prepare(request, true);
 		PersistenceResult result = persistenceService.persist(prepared.metadata());

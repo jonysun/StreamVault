@@ -9,6 +9,8 @@ import java.util.Set;
 import org.sqlite.SQLiteErrorCode;
 import org.sqlite.SQLiteException;
 
+import com.flower.spirit.database.DatabaseWriteContentionException;
+
 public final class SqliteErrors {
 
 	private SqliteErrors() {
@@ -17,6 +19,9 @@ public final class SqliteErrors {
 	public static boolean isBusy(Throwable error) {
 		Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
 		for (Throwable current = error; current != null && visited.add(current); current = current.getCause()) {
+			if (current instanceof DatabaseWriteContentionException) {
+				return true;
+			}
 			if (current instanceof SQLiteException sqliteException
 					&& isBusyCode(sqliteException.getResultCode())) {
 				return true;

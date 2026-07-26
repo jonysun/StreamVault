@@ -9,6 +9,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
+import com.flower.spirit.database.DatabaseWriteContentionException;
+
 class SqliteWriteRetrierTest {
 
 	@Test
@@ -47,6 +49,19 @@ class SqliteWriteRetrierTest {
 		AtomicInteger attempts = new AtomicInteger();
 		RuntimeException failure = new RuntimeException("validation failed");
 		SqliteWriteRetrier retrier = new SqliteWriteRetrier(3, 0, 0, ignored -> { });
+
+		assertThatThrownBy(() -> retrier.execute(() -> {
+			attempts.incrementAndGet();
+			throw failure;
+		})).isSameAs(failure);
+		assertThat(attempts).hasValue(1);
+	}
+
+	@Test
+	void processWriterTimeoutIsNotMultipliedByDatabaseBusyRetries() {
+		AtomicInteger attempts = new AtomicInteger();
+		DatabaseWriteContentionException failure = new DatabaseWriteContentionException("writer timeout");
+		SqliteWriteRetrier retrier = new SqliteWriteRetrier(6, 0, 0, ignored -> { });
 
 		assertThatThrownBy(() -> retrier.execute(() -> {
 			attempts.incrementAndGet();

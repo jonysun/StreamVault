@@ -84,7 +84,13 @@
 							<div class="card-body">
 								<form action="#!" method="post" class="form-horizontal form-search">
 									<div class="row">
-										<div class="col-md-4">
+										<div class="col-md-6">
+											<div class="form-group">
+												<label class="control-label">关键词</label>
+												<input type="search" class="form-control collectKeyword" placeholder="任务名称、ID 或来源地址">
+											</div>
+										</div>
+										<div class="col-md-3">
 											<div class="form-group">
 												<label class="control-label">平台</label>
 												<select name="videoplatform" class="form-control videoplatform" id="type">
@@ -331,6 +337,12 @@
 		$('.searchData').click(function () {
 			findList(1)
 		})
+		$('.collectKeyword').on('keydown', function (event) {
+			if (event.key === 'Enter') {
+				event.preventDefault();
+				findList(1);
+			}
+		});
 		$('.monitoring').change(function(){
 		    var val = $(this).val();
 		    if (val === 'N') {
@@ -718,7 +730,8 @@
 	function  findList(page){
 		var option = {
 			pageNo:page,
-			pageSize:25
+			pageSize:25,
+			keyword: $('.collectKeyword').val()
 		}
 		var  videoplatform = $('.videoplatform').val();
 		if(videoplatform != "" ){
