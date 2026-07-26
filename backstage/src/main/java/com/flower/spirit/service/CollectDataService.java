@@ -185,28 +185,42 @@ public class CollectDataService {
 		List<String> filters = new ArrayList<>();
 		List<Object> parameters = new ArrayList<>();
 		if (taskId != null) {
-			filters.add("taskid LIKE ?");
+			filters.add("c.taskid LIKE ?");
 			parameters.add(taskId);
 		}
 		if (platform != null) {
-			filters.add("platform LIKE ?");
+			filters.add("c.platform LIKE ?");
 			parameters.add(platform);
 		}
 		if (keyword != null) {
-			filters.add("(LOWER(COALESCE(taskname, '')) LIKE LOWER(?) OR CAST(id AS TEXT) LIKE ? "
-					+ "OR LOWER(COALESCE(taskid, '')) LIKE LOWER(?) OR LOWER(COALESCE(originaladdress, '')) LIKE LOWER(?) "
-					+ "OR LOWER(COALESCE(platform, '')) LIKE LOWER(?))");
+			filters.add("(LOWER(COALESCE(c.taskname, '')) LIKE LOWER(?) OR CAST(c.id AS TEXT) LIKE ? "
+					+ "OR LOWER(COALESCE(c.taskid, '')) LIKE LOWER(?) OR LOWER(COALESCE(c.originaladdress, '')) LIKE LOWER(?) "
+					+ "OR LOWER(COALESCE(c.platform, '')) LIKE LOWER(?))");
 			for (int i = 0; i < 5; i++) {
 				parameters.add(keyword);
 			}
 		}
 		String where = filters.isEmpty() ? "" : " WHERE " + String.join(" AND ", filters);
-		Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_data" + where, Long.class,
+		Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_data c" + where, Long.class,
 				parameters.toArray());
-		String sql = "SELECT id, taskid, platform, taskname, taskstatus, createtime, endtime, count, carriedout, "
-				+ "originaladdress, monitoring, taskenabled, lastCheckTime, lastid, maxcur, omaxcur, generatenfo, "
-				+ "taskcron, lastfetchtime, lastfetchcount FROM biz_collect_data" + where
-				+ " ORDER BY id DESC LIMIT ? OFFSET ?";
+		String sql = "SELECT c.id, c.taskid, c.platform, c.taskname, c.taskstatus, c.createtime, c.endtime, "
+				+ "c.count, c.carriedout, c.originaladdress, c.monitoring, c.taskenabled, c.lastCheckTime, "
+				+ "c.lastid, c.maxcur, c.omaxcur, c.generatenfo, c.taskcron, c.lastfetchtime, c.lastfetchcount, "
+				+ "q.id AS activeJobId, r.id AS activeRunId, q.state AS jobState, r.state AS runState, "
+				+ "CASE WHEN q.state IN ('QUEUED','RETRY_WAIT') THEN (SELECT COUNT(*) FROM biz_job_queue q2 "
+				+ "WHERE q2.job_type = 'COLLECT_FETCH' AND q2.state IN ('QUEUED','RETRY_WAIT') AND ("
+				+ "q2.priority < q.priority OR (q2.priority = q.priority AND q2.available_at < q.available_at) "
+				+ "OR (q2.priority = q.priority AND q2.available_at = q.available_at AND q2.id <= q.id))) "
+				+ "ELSE NULL END AS queuePosition, r.heartbeat_at AS heartbeatAt "
+				+ "FROM biz_collect_data c "
+				+ "LEFT JOIN biz_job_queue q ON q.id = (SELECT qx.id FROM biz_job_queue qx "
+				+ "WHERE qx.job_type = 'COLLECT_FETCH' AND qx.dedupe_key = ('collect:' || CAST(c.id AS TEXT)) "
+				+ "AND qx.state IN ('QUEUED','RETRY_WAIT','RUNNING') "
+				+ "ORDER BY CASE qx.state WHEN 'RUNNING' THEN 0 WHEN 'QUEUED' THEN 1 ELSE 2 END, "
+				+ "qx.priority ASC, qx.available_at ASC, qx.id ASC LIMIT 1) "
+				+ "LEFT JOIN biz_collect_run r ON r.id = (SELECT rr.id FROM biz_collect_run rr "
+				+ "WHERE rr.collect_task_id = c.id ORDER BY rr.id DESC LIMIT 1)" + where
+				+ " ORDER BY c.id DESC LIMIT ? OFFSET ?";
 		List<Object> pageParameters = new ArrayList<>(parameters);
 		pageParameters.add(pageSize);
 		pageParameters.add((long) pageNo * pageSize);
@@ -217,7 +231,9 @@ public class CollectDataService {
 				row.getString("monitoring"), row.getString("taskenabled"), row.getString("lastCheckTime"),
 				row.getString("lastid"), nullableInteger(row, "maxcur"), nullableInteger(row, "omaxcur"),
 				row.getString("generatenfo"), row.getString("taskcron"), row.getString("lastfetchtime"),
-				nullableInteger(row, "lastfetchcount")), pageParameters.toArray());
+				nullableInteger(row, "lastfetchcount"), nullableLong(row, "activeJobId"),
+				nullableLong(row, "activeRunId"), row.getString("jobState"), row.getString("runState"),
+				nullableInteger(row, "queuePosition"), row.getString("heartbeatAt")), pageParameters.toArray());
 		Page<CollectTaskListItem> page = new PageImpl<>(items, PageRequest.of(pageNo, pageSize),
 				total == null ? 0 : total);
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);
@@ -264,6 +280,11 @@ public class CollectDataService {
 
 	private Integer nullableInteger(java.sql.ResultSet row, String column) throws java.sql.SQLException {
 		int value = row.getInt(column);
+		return row.wasNull() ? null : value;
+	}
+
+	private Long nullableLong(java.sql.ResultSet row, String column) throws java.sql.SQLException {
+		long value = row.getLong(column);
 		return row.wasNull() ? null : value;
 	}
 
