@@ -608,7 +608,7 @@ git commit -m "feat: complete collection runs after fetch planning"
 - Create: `backstage/src/main/java/com/flower/spirit/service/transaction/CollectDownloadTransaction.java`
 - Test: `backstage/src/test/java/com/flower/spirit/service/transaction/CollectDownloadTransactionTest.java`
 
-- [ ] **Step 1: Write failing transaction tests**
+- [x] **Step 1: Write failing transaction tests**
 
 Cover atomic claim, fair ordering, generation isolation, retry timing, final failure, manual retry, and stale recovery:
 
@@ -636,21 +636,23 @@ void retryScheduleIsOneFiveThirtyMinutesThenFailed() {
 
 Use two transaction instances against the same SQLite file and assert only one can update the same selected row to `RUNNING`.
 
-- [ ] **Step 2: Run the transaction test and verify it fails**
+- [x] **Step 2: Run the transaction test and verify it fails**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDownloadTransactionTest test`
 
 Expected: FAIL because claim/retry operations do not exist.
 
-- [ ] **Step 3: Implement claim payload and guarded claim**
+- [x] **Step 3: Implement claim payload and guarded claim**
 
 Use this immutable payload:
 
 ```java
 public record CollectDownloadClaim(long id, long runId, int taskId, String taskName,
         String platformKey, String workId, String mediaType, int ordinal,
-        int attemptCount, int maxAttempts) { }
+        int attemptCount, int maxAttempts, String lockToken) { }
 ```
+
+Each successful claim writes a unique lease token (prefixed with the worker ID) to `locked_by`. Every later `RUNNING -> ...` transition must match that token so a worker returning after stale recovery cannot overwrite a newer owner.
 
 `claimNext(workerId, now)` must select one eligible row and then issue a guarded update in the same short transaction:
 
@@ -678,7 +680,7 @@ WHERE id=? AND queue_generation='FETCH_DOWNLOAD_V1'
 
 Return a claim only when the update count is one. Network and filesystem operations happen after this transaction commits.
 
-- [ ] **Step 4: Implement terminal, retry, and recovery transitions**
+- [x] **Step 4: Implement terminal, retry, and recovery transitions**
 
 Use delays indexed by the completed failed attempt:
 
@@ -689,15 +691,17 @@ private static final List<Duration> RETRY_DELAYS = List.of(
 
 If `claim.attemptCount() < claim.maxAttempts()`, transition `RUNNING -> RETRY_WAIT`, clear lock fields, set the corresponding `available_at`, and retain `error_code`, a 2048-character `error_message`, and a 10000-character `error_detail`. Otherwise transition to `FAILED` and set `finished_at`.
 
-`recoverStale(staleBefore, now)` changes stale generation-tagged `RUNNING` rows to `RETRY_WAIT`, clears locks, sets `available_at=now`, and records `WORKER_RESTART_RECOVERY`. `manualRetry(itemId, now)` changes only `FAILED` to `QUEUED`, resets `attempt_count=0`, sets `decision='MANUAL_RETRY'`, and retains the prior error detail for audit. `retryFailedRun(runId, now)` performs the same guarded update for failed rows in that run.
+`recoverStale(staleBefore, now)` changes stale generation-tagged `RUNNING` rows with attempts remaining to `RETRY_WAIT`, clears locks, sets `available_at=now`, and records `WORKER_RESTART_RECOVERY`. A stale row already at `max_attempts` becomes `FAILED`, and normal claiming also requires `attempt_count < max_attempts`. `manualRetry(itemId, now)` changes only `FAILED` to `QUEUED`, resets `attempt_count=0`, sets `decision='MANUAL_RETRY'`, and retains the prior error detail for audit. `retryFailedRun(runId, now)` performs the same guarded update for failed rows in that run.
 
-- [ ] **Step 5: Run transaction tests**
+The SQLite implementation uses the guarded select/update above. A PostgreSQL deployment must replace only the claim SQL with `FOR UPDATE SKIP LOCKED` (or a CTE plus `UPDATE ... RETURNING`) while preserving the same lease-token and state semantics.
+
+- [x] **Step 5: Run transaction tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDownloadTransactionTest test`
 
 Expected: PASS, including the old `PENDING` row never being claimable.
 
-- [ ] **Step 6: Commit queue transactions**
+- [x] **Step 6: Commit queue transactions**
 
 ```bash
 git add backstage/src/main/java/com/flower/spirit/service/CollectDownloadClaim.java backstage/src/main/java/com/flower/spirit/service/transaction/CollectDownloadTransaction.java backstage/src/test/java/com/flower/spirit/service/transaction/CollectDownloadTransactionTest.java

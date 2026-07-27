@@ -407,11 +407,14 @@ ORDER BY 手动优先级、ordinal、available_at、created_at、id
 
 UPDATE 同一 item
 SET process_state='RUNNING', attempt_count=attempt_count+1,
-    locked_by=?, locked_at=?, started_at=COALESCE(started_at, ?)
+    locked_by=<唯一 lease token>, locked_at=?, started_at=COALESCE(started_at, ?)
 WHERE id=? AND process_state IN ('QUEUED','RETRY_WAIT')
+  AND attempt_count < max_attempts
 ```
 
-只有 `UPDATE` 影响一行时才真正领取。网络请求和文件下载在该事务提交后执行。
+只有 `UPDATE` 影响一行时才真正领取。后续完成、失败和重试更新必须同时匹配该 lease token，避免超时恢复后的旧 worker 覆盖新领取者。网络请求和文件下载在该事务提交后执行。
+
+恢复 stale `RUNNING` 时，尚有尝试次数的 item 进入 `RETRY_WAIT`；已经达到 `max_attempts` 的 item 直接进入 `FAILED`，不能因 worker 反复崩溃绕过四次上限。
 
 以 `ordinal` 优先可让各 run 的第 1 条、新作品先被处理，然后才到各 run 的第 2 条，形成近似作者轮转。手动重试项有更高优先级。
 
