@@ -83,8 +83,6 @@ public class DatabaseIndexInitializer {
 						+ "ON biz_collect_run(collect_task_id, created_at DESC, id DESC)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_state_heartbeat "
 						+ "ON biz_collect_run(state, heartbeat_at)",
-				"CREATE UNIQUE INDEX IF NOT EXISTS uq_collect_run_item_work "
-						+ "ON biz_collect_run_item(run_id, platform_key, work_id)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_run_ordinal "
 						+ "ON biz_collect_run_item(run_id, ordinal)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_download_claim "

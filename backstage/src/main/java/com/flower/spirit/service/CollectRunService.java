@@ -40,6 +40,14 @@ public class CollectRunService {
 		});
 	}
 
+	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, String stopReason,
+			CollectRunFetchedItem.FetchWatermark watermark) {
+		databaseWriteExecutor.execute("collect-run-store-fetch-plan", () -> {
+			transaction.storeFetchPlan(runId, taskId, items, stopReason, watermark, Instant.now());
+			return null;
+		});
+	}
+
 	public void updateItem(long runId, String workId, String decision, String processState, String errorCode,
 			String errorMessage) {
 		databaseWriteExecutor.execute("collect-run-update-item", () -> {

@@ -117,6 +117,8 @@ flowchart LR
 
 抓取和下载各自持久化、各自恢复、各自暂停。网络、文件系统和 FFmpeg 操作必须在数据库事务之外执行。
 
+当前持久化抓取流水线只接收抖音任务。其他平台在入队边界返回明确的“不支持”结果，不创建 run 或 job；旧的非持久化兼容入口继续保留，避免不支持的平台任务进入重试循环。
+
 ## 5. 阶段与状态模型
 
 ### 5.1 作者抓取 run
@@ -351,6 +353,8 @@ pip install --no-cache-dir f2
 ### 8.1 为什么复用 run item
 
 `biz_collect_run_item` 已持有：run、顺序、平台、作品 ID、作者 ID、标题快照、发布时间、媒体类型、决策和错误信息。它是天然的持久化作品计划，不再创建第二套重复 download job 表。
+
+上游可能在同页或跨页重复返回同一作品。全量观察记录必须保留：同一 run 中首次出现的候选可进入下载队列，后续出现项记录为 `DUPLICATE_OBSERVATION/SKIPPED_EXISTING`。因此 `(run_id, platform_key, work_id)` 只建立普通查询索引，不使用唯一索引；是否可下载由计划决策和跨 run 活跃下载检查共同保证，不能依赖 `INSERT OR IGNORE` 静默丢弃观察项。
 
 ### 8.2 schema 增量
 

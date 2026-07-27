@@ -43,6 +43,7 @@ import com.flower.spirit.entity.VideoMixEntity;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CollectDataDetailService;
 import com.flower.spirit.service.CollectDataService;
+import com.flower.spirit.service.CollectEnqueueResult;
 import com.flower.spirit.service.CollectEnqueueService;
 import com.flower.spirit.service.CollectRunQueryService;
 import com.flower.spirit.service.AnalysisService;
@@ -727,7 +728,11 @@ public class AdminController {
 		}
 		try {
 			int taskId = ((Number) preview.get("taskId")).intValue();
-			return new AjaxEntity(Global.ajax_success, "已重新入队", collectEnqueueService.enqueueManual(taskId));
+			CollectEnqueueResult result = collectEnqueueService.enqueueManual(taskId);
+			if (result.skippedUnsupported()) {
+				return new AjaxEntity(Global.ajax_uri_error, result.reason(), result);
+			}
+			return new AjaxEntity(Global.ajax_success, "已重新入队", result);
 		} catch (RuntimeException error) {
 			return new AjaxEntity(Global.ajax_uri_error, "重排队失败: " + error.getMessage(), null);
 		}

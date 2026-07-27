@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.io.File;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -121,6 +122,9 @@ public class CollectDataService {
 	private CollectRunQueryService collectRunQueryService;
 
 	@Autowired
+	private DouyinIncrementalFetchService douyinIncrementalFetchService;
+
+	@Autowired
 	private RawPayloadService rawPayloadService;
 
 	@Autowired
@@ -147,6 +151,21 @@ public class CollectDataService {
 	 */
 	@Value("${file.save}")
 	private String savefile;
+
+	@Value("${streamvault.collect.incremental-known-boundary:20}")
+	private int incrementalKnownBoundary;
+
+	@Value("${streamvault.collect.incremental-max-pages:100}")
+	private int incrementalMaxPages;
+
+	@Value("${streamvault.collect.audit-max-pages:500}")
+	private int auditMaxPages;
+
+	@Value("${streamvault.collect.empty-page-limit:3}")
+	private int emptyPageLimit;
+
+	@Value("${streamvault.collect.initial-fetch-limit:80}")
+	private int initialFetchLimit;
 	
     @Transactional
 	public synchronized AjaxEntity saveCollectData(CollectDataEntity entity) {
@@ -1187,7 +1206,8 @@ public class CollectDataService {
 			result.add(new CollectRunFetchedItem(i + 1, "douyin", workId,
 					firstNotBlank(item.getString("sec_uid"), item.getString("author_uid")),
 					item.getString("nickname"), item.getString("desc"),
-					firstNotBlank(item.getString("publish_time"), item.getString("create_time")), mediaType));
+					firstNotBlank(item.getString("publish_time"), item.getString("create_time")), mediaType,
+					"PENDING", "PENDING"));
 		}
 		return result;
 	}
@@ -2158,40 +2178,185 @@ public class CollectDataService {
 	}
 
 	public void executeQueuedCollectTask(Integer taskId, long runId) {
+		executeQueuedCollectTask(taskId, runId, CollectTriggerType.SCHEDULED);
+	}
+
+	public void executeQueuedCollectTask(int taskId, long runId, CollectTriggerType triggerType) {
 		CollectDataEntity task = collectdDataDao.findById(taskId)
 				.orElseThrow(() -> new IllegalArgumentException("收藏任务不存在: " + taskId));
-		activePersistentRunId.set(runId);
 		try {
-			assertCollectExecutionAllowed();
-			if ("抖音".equals(task.getPlatform())) {
-				String cookie = platformCookieService.currentDouyinCookie("collect_worker");
-				if (cookie == null || cookie.isBlank()) {
-					throw new CollectFetchException("COOKIE_MISSING", "抖音 Cookie 为空，无法抓取作品列表");
-				}
-				String address = task.getOriginaladdress();
-				if (address == null || !(address.startsWith("post") || address.startsWith("like")
-						|| address.startsWith("fav-") || address.startsWith("recommend"))) {
-					throw new CollectFetchException("INVALID_SOURCE", "收藏任务地址格式不受支持");
-				}
-				createDyData(task, "Y", runId);
-				return;
+			assertCollectFetchAllowed();
+			ensurePersistentDouyinTask(task);
+			String address = valueOrEmpty(task.getOriginaladdress());
+			if (address.startsWith("post")) {
+				executeIncrementalPostFetch(task, runId, triggerType);
+			} else if (address.startsWith("like") || address.startsWith("fav-")
+					|| address.startsWith("recommend")) {
+				executeBoundedLegacyFetchAndPlan(task, runId);
+			} else {
+				throw new CollectFetchException("INVALID_SOURCE", "收藏任务地址格式不受支持");
 			}
-			collectRunService.storeFetchedItems(runId, List.of());
-			AjaxEntity result = submitCollectData(task, "Y");
-			if (result == null || !Global.ajax_success.equals(result.getResCode())) {
-				throw new CollectFetchException("COLLECT_EXECUTION_FAILED",
-						result == null ? "收藏任务未返回执行结果" : result.getMessage());
-			}
-		} catch (CollectFetchException e) {
-			throw e;
-		} catch (DataAccessException e) {
+		} catch (CollectFetchException | DataAccessException e) {
 			throw e;
 		} catch (Exception e) {
 			throw new IllegalStateException("收藏任务执行异常: " + rootCauseMessage(e), e);
 		} finally {
-			activePersistentRunId.remove();
 			lastF2FailureDiagnosis.remove();
 			lastFetchRunContext.remove();
+		}
+	}
+
+	private void executeIncrementalPostFetch(CollectDataEntity task, long runId, CollectTriggerType triggerType) {
+		DouyinFetchMode mode = triggerType == CollectTriggerType.AUDIT
+				? DouyinFetchMode.AUDIT
+				: task.getLastSuccessfulFetchAt() == null ? DouyinFetchMode.INITIAL : DouyinFetchMode.INCREMENTAL;
+		Set<String> knownIds = collectRunQueryService.findKnownWorkIds(task.getId());
+		DouyinFetchRequest request = new DouyinFetchRequest(sourceId(task), knownIds,
+				task.getLastSeenPublishTime(), incrementalKnownBoundary,
+				mode == DouyinFetchMode.AUDIT ? auditMaxPages : incrementalMaxPages,
+				emptyPageLimit, mode, mode == DouyinFetchMode.INITIAL ? firstFetchLimit(task) : 0);
+		DouyinFetchEnvelope envelope = douyinIncrementalFetchService.fetch(request);
+		List<CollectRunFetchedItem> plan = buildFetchPlan(task, envelope, mode);
+		collectRunService.storeFetchPlan(runId, task.getId(), plan, envelope.outcome(), newestWatermark(envelope));
+	}
+
+	private void executeBoundedLegacyFetchAndPlan(CollectDataEntity task, long runId) throws IOException {
+		JSONArray fetched = getDYData(task, "Y", "collect-run-" + runId);
+		if (fetched == null) {
+			F2FailureDiagnosis diagnosis = lastF2FailureDiagnosis.get();
+			throw new CollectFetchException(diagnosis == null ? "FETCH_DY_DATA_FAIL" : diagnosis.errorCode(),
+					diagnosis == null ? "用户作品列表抓取失败" : diagnosis.rootCause());
+		}
+		List<JSONObject> items = new ArrayList<>();
+		Set<String> knownIds = collectRunQueryService.findKnownWorkIds(task.getId());
+		Set<String> newIds = new java.util.LinkedHashSet<>();
+		for (int index = 0; index < fetched.size(); index++) {
+			JSONObject item = fetched.getJSONObject(index);
+			if (item == null) continue;
+			items.add(item);
+			String workId = item.getString("aweme_id");
+			if (workId != null && !workId.isBlank() && !knownIds.contains(workId)) newIds.add(workId);
+		}
+		JSONObject diagnostics = new JSONObject();
+		diagnostics.put("legacyBounded", true);
+		DouyinFetchEnvelope envelope = new DouyinFetchEnvelope(List.copyOf(items), Set.copyOf(newIds),
+				"LEGACY_BOUNDED", 0, 0, "", diagnostics);
+		List<CollectRunFetchedItem> plan = buildFetchPlan(task, envelope, DouyinFetchMode.INCREMENTAL);
+		collectRunService.storeFetchPlan(runId, task.getId(), plan, envelope.outcome(),
+				new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, ""));
+	}
+
+	private List<CollectRunFetchedItem> buildFetchPlan(CollectDataEntity task, DouyinFetchEnvelope envelope,
+			DouyinFetchMode mode) {
+		List<CollectRunFetchedItem> result = new ArrayList<>();
+		Set<String> newWorkIds = envelope.newWorkIds() == null ? Set.of() : envelope.newWorkIds();
+		Set<String> observedWorkIds = new java.util.HashSet<>();
+		for (int index = 0; index < envelope.items().size(); index++) {
+			JSONObject item = envelope.items().get(index);
+			String workId = item.getString("aweme_id");
+			if (workId == null || workId.isBlank()) {
+				throw new CollectFetchException("UPSTREAM_SCHEMA_ERROR",
+						"作品列表第 " + (index + 1) + " 项缺少 aweme_id");
+			}
+			String mediaType = normalizedMediaType(item);
+			String decision;
+			String processState;
+			if (!observedWorkIds.add(workId)) {
+				decision = "DUPLICATE_OBSERVATION";
+				processState = "SKIPPED_EXISTING";
+			} else if (isBlocked(task, workId, mediaType)) {
+				decision = "BLOCKED";
+				processState = "SKIPPED_BLOCKED";
+			} else if (newWorkIds.contains(workId)) {
+				decision = "NEW";
+				processState = "QUEUED";
+			} else if (mode == DouyinFetchMode.AUDIT
+					&& collectRunQueryService.needsAuditRequeue(task.getId(), "douyin", workId, mediaType)) {
+				decision = "AUDIT_REPAIR";
+				processState = "QUEUED";
+			} else {
+				decision = "EXISTING";
+				processState = "SKIPPED_EXISTING";
+			}
+			result.add(new CollectRunFetchedItem(index + 1, "douyin", workId,
+					firstNotBlank(item.getString("uid"),
+							firstNotBlank(item.getString("sec_uid"), item.getString("author_uid"))),
+					item.getString("nickname"), item.getString("desc"), item.getString("create_time"), mediaType,
+					decision, processState));
+		}
+		return List.copyOf(result);
+	}
+
+	private CollectRunFetchedItem.FetchWatermark newestWatermark(DouyinFetchEnvelope envelope) {
+		JSONObject newest = null;
+		long newestPublishTime = Long.MIN_VALUE;
+		for (JSONObject item : envelope.items()) {
+			String raw = item.getString("create_time");
+			try {
+				long candidate = Long.parseLong(raw);
+				if (candidate > newestPublishTime) {
+					newestPublishTime = candidate;
+					newest = item;
+				}
+			} catch (NumberFormatException ignored) {
+				// Invalid upstream timestamps cannot advance the durable watermark.
+			}
+		}
+		return new CollectRunFetchedItem.FetchWatermark(
+				newest == null ? null : String.valueOf(newestPublishTime),
+				newest == null ? null : newest.getString("aweme_id"), envelope.pagesFetched(),
+				envelope.emptyPages(), envelope.lastCursor());
+	}
+
+	private String normalizedMediaType(JSONObject item) {
+		String explicit = item.getString("media_type");
+		if ("image".equalsIgnoreCase(explicit)) return "image";
+		if ("video".equalsIgnoreCase(explicit)) return "video";
+		JSONArray playAddress = item.getJSONArray("video_play_addr");
+		return playAddress == null || playAddress.isEmpty() ? "image" : "video";
+	}
+
+	private boolean isBlocked(CollectDataEntity task, String workId, String mediaType) {
+		Set<String> platforms = new java.util.LinkedHashSet<>(PlatformCatalog.aliases("douyin", task.getPlatform()));
+		platforms.add("douyin");
+		if (task.getPlatform() != null && !task.getPlatform().isBlank()) platforms.add(task.getPlatform().trim());
+		Set<String> workTypes = "image".equals(mediaType) ? Set.of("image", "graphic") : Set.of(mediaType);
+		for (String platform : platforms) {
+			for (String workType : workTypes) {
+				if (blockedWorkService.isBlocked(platform, workId, workType)) return true;
+			}
+		}
+		return false;
+	}
+
+	private int firstFetchLimit(CollectDataEntity task) {
+		return task.getOmaxcur() != null && task.getOmaxcur() > 0 ? task.getOmaxcur()
+				: Math.max(1, initialFetchLimit);
+	}
+
+	private String sourceId(CollectDataEntity task) {
+		String address = valueOrEmpty(task.getOriginaladdress());
+		String sourceId = address.startsWith("post") ? address.substring(4).trim() : "";
+		if (sourceId.isEmpty()) throw new CollectFetchException("INVALID_SOURCE", "抖音作者 UID 为空");
+		return sourceId;
+	}
+
+	private void ensurePersistentDouyinTask(CollectDataEntity task) {
+		String platformKey = PlatformCatalog.canonicalKey(null, task.getPlatform());
+		if (!"douyin".equals(platformKey)) {
+			throw new CollectFetchException("UNSUPPORTED_PERSISTENT_FETCH",
+					"当前持久化抓取流水线仅支持抖音收藏任务");
+		}
+		String cookie = platformCookieService.currentDouyinCookie("collect_worker");
+		if (cookie == null || cookie.isBlank()) {
+			throw new CollectFetchException("COOKIE_MISSING", "抖音 Cookie 为空，无法抓取作品列表");
+		}
+	}
+
+	private void assertCollectFetchAllowed() {
+		PauseDecision collect = runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH);
+		if (!collect.allowed()) {
+			throw new CollectExecutionPausedException(collect.controlKey(), collect.reason());
 		}
 	}
 
@@ -2206,6 +2371,9 @@ public class CollectDataService {
 		}
 		try {
 			CollectEnqueueResult result = collectEnqueueService.enqueueManual(collectDataEntity.getId());
+			if (result.skippedUnsupported()) {
+				return new AjaxEntity(Global.ajax_uri_error, result.reason(), result);
+			}
 			String message = result.skippedPaused() ? "任务当前已暂停，本次已记录为跳过"
 					: result.inserted() ? "任务已进入持久队列" : "当前任务已在队列或运行中，请勿重复提交";
 			return new AjaxEntity(Global.ajax_success, message, result);

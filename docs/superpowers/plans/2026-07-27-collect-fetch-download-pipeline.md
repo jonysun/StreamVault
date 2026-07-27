@@ -65,7 +65,7 @@ The implementation is one deployable feature, but it is split into independently
 - Test: `backstage/src/test/java/com/flower/spirit/config/DatabaseIndexInitializerTest.java`
 - Test: `backstage/src/test/java/com/flower/spirit/config/SqliteSchemaPreflightTest.java`
 
-- [ ] **Step 1: Write failing idempotent migration tests**
+- [x] **Step 1: Write failing idempotent migration tests**
 
 Create a SQLite test database with the current production-shaped tables, call `initialize()` twice, and assert these exact columns and defaults:
 
@@ -93,13 +93,13 @@ void addsPipelineColumnsWithoutChangingHistoricalRows() {
 }
 ```
 
-- [ ] **Step 2: Run the migration tests and verify they fail**
+- [x] **Step 2: Run the migration tests and verify they fail**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectPipelineSchemaInitializerTest,DatabaseIndexInitializerTest,SqliteSchemaPreflightTest test`
 
 Expected: FAIL because `CollectPipelineSchemaInitializer` and the required columns/indexes do not exist.
 
-- [ ] **Step 3: Implement the schema initializer and mappings**
+- [x] **Step 3: Implement the schema initializer and mappings**
 
 Use `DatabaseWriteExecutor` plus `DatabaseInitializationTransaction` for each DDL statement. The initializer must inspect `PRAGMA table_info`, add only missing columns, and never update old rows:
 
@@ -157,13 +157,13 @@ private static final Map<String, Set<String>> REQUIRED_PIPELINE_COLUMNS = Map.of
 
 Move the preflight listener to `@Order(180)` so it validates after schema initialization and before queue workers receive scheduled ticks.
 
-- [ ] **Step 4: Run focused schema tests**
+- [x] **Step 4: Run focused schema tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectPipelineSchemaInitializerTest,DatabaseIndexInitializerTest,SqliteSchemaPreflightTest test`
 
 Expected: PASS; the historical row remains `PENDING` with `queue_generation IS NULL`.
 
-- [ ] **Step 5: Commit the schema boundary**
+- [x] **Step 5: Commit the schema boundary**
 
 ```bash
 git add backstage/src/main/java/com/flower/spirit/config backstage/src/main/java/com/flower/spirit/entity backstage/src/test/java/com/flower/spirit/config
@@ -176,7 +176,7 @@ git commit -m "feat: add collection pipeline queue schema"
 - Create: `backstage/src/main/docker/buildx/script/douyin_incremental.py`
 - Create: `backstage/src/test/python/test_douyin_incremental.py`
 
-- [ ] **Step 1: Write failing paginator tests**
+- [x] **Step 1: Write failing paginator tests**
 
 Cover all stopping and diagnostic cases using an injected async page fetcher:
 
@@ -219,13 +219,13 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(["new-2"], result["newWorkIds"])
 ```
 
-- [ ] **Step 2: Run the Python test and verify it fails**
+- [x] **Step 2: Run the Python test and verify it fails**
 
 Run: `python -m unittest discover -s backstage/src/test/python -p "test_douyin_incremental.py" -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'douyin_incremental'`.
 
-- [ ] **Step 3: Implement normalized item and pagination functions**
+- [x] **Step 3: Implement normalized item and pagination functions**
 
 The module must have no top-level F2 import so unit tests remain offline. Implement these public functions with the exact result keys:
 
@@ -319,13 +319,13 @@ def envelope(items, new_work_ids, outcome, pages_fetched, empty_pages,
     }
 ```
 
-- [ ] **Step 4: Run the paginator tests**
+- [x] **Step 4: Run the paginator tests**
 
 Run: `python -m unittest discover -s backstage/src/test/python -p "test_douyin_incremental.py" -v`
 
 Expected: PASS for known boundary, no-more, null list, empty-page guard, max-page guard, and audit mode.
 
-- [ ] **Step 5: Commit the pure pagination policy**
+- [x] **Step 5: Commit the pure pagination policy**
 
 ```bash
 git add backstage/src/main/docker/buildx/script/douyin_incremental.py backstage/src/test/python/test_douyin_incremental.py
@@ -343,7 +343,7 @@ git commit -m "feat: add deterministic douyin incremental paginator"
 - Create: `backstage/src/main/java/com/flower/spirit/service/DouyinIncrementalFetchService.java`
 - Test: `backstage/src/test/java/com/flower/spirit/service/DouyinIncrementalFetchServiceTest.java`
 
-- [ ] **Step 1: Write failing envelope and cleanup tests**
+- [x] **Step 1: Write failing envelope and cleanup tests**
 
 Inject a command runner into a package-private constructor. Verify object parsing, legacy-array compatibility, nonzero exit failure, malformed JSON diagnostics, and deletion of both temporary files:
 
@@ -366,13 +366,13 @@ void parsesStructuredEnvelopeAndAlwaysDeletesTemporaryFiles() {
 }
 ```
 
-- [ ] **Step 2: Run the client test and verify it fails**
+- [x] **Step 2: Run the client test and verify it fails**
 
 Run: `mvn -f backstage/pom.xml -Dtest=DouyinIncrementalFetchServiceTest test`
 
 Expected: FAIL because the typed protocol classes do not exist.
 
-- [ ] **Step 3: Implement the F2 command**
+- [x] **Step 3: Implement the F2 command**
 
 In `douyin.py`, import `DouyinCrawler`, `UserPost`, and `UserProfile`, then add a command whose closure performs one direct request per cursor:
 
@@ -402,7 +402,7 @@ async def fetch_douyin_list_incremental(cookie, sec_user_id, known_ids_file,
 
 Register all arguments with `argparse`. Do not call `DouyinHandler.fetch_user_post_videos`; therefore the `nickname_raw` tail notification cannot replace a valid empty/partial result.
 
-- [ ] **Step 4: Implement the Java protocol and cleanup**
+- [x] **Step 4: Implement the Java protocol and cleanup**
 
 Use these exact types:
 
@@ -439,7 +439,7 @@ List<String> command = List.of(
 
 Before the first post page, request `UserProfile(sec_user_id=sec_user_id)` with the same crawler. If `special_state_info`, `user_not_see`, or the profile status text identifies a cancelled/deactivated account, write an empty `ACCOUNT_DEACTIVATED` envelope. Put a redacted profile status summary in `diagnostics`; never put the cookie or complete upstream payload there. A verification/login/captcha response must exit nonzero with structured code `F2_COOKIE_OR_VERIFY_REQUIRED`; a non-object response or missing required page keys must exit nonzero with `UPSTREAM_SCHEMA_ERROR`. These two conditions remain fetch failures and use the existing cookie-health/retry flow rather than becoming successful empty lists.
 
-- [ ] **Step 5: Run Python and Java protocol tests**
+- [x] **Step 5: Run Python and Java protocol tests**
 
 Run: `python -m unittest discover -s backstage/src/test/python -p "test_douyin_incremental.py" -v`
 
@@ -447,7 +447,7 @@ Run: `mvn -f backstage/pom.xml -Dtest=DouyinIncrementalFetchServiceTest test`
 
 Expected: both PASS; logs include page/cursor/has-more/item-count diagnostics but never an unmasked cookie.
 
-- [ ] **Step 6: Commit the fetch protocol**
+- [x] **Step 6: Commit the fetch protocol**
 
 ```bash
 git add backstage/src/main/docker/buildx/script backstage/src/main/java/com/flower/spirit/utils/CommandUtil.java backstage/src/main/java/com/flower/spirit/service/DouyinFetch*.java backstage/src/main/java/com/flower/spirit/service/DouyinIncrementalFetchService.java backstage/src/test/java/com/flower/spirit/service/DouyinIncrementalFetchServiceTest.java
@@ -464,11 +464,15 @@ git commit -m "feat: add structured douyin fetch envelope"
 - Modify: `backstage/src/main/java/com/flower/spirit/service/transaction/CollectQueueTransaction.java`
 - Modify: `backstage/src/main/java/com/flower/spirit/service/CollectJobWorker.java`
 - Modify: `backstage/src/main/java/com/flower/spirit/service/CollectTriggerType.java`
+- Modify: `backstage/src/main/java/com/flower/spirit/config/CollectPipelineSchemaInitializer.java`
+- Modify: `backstage/src/main/java/com/flower/spirit/config/DatabaseIndexInitializer.java`
+- Modify: `backstage/src/main/java/com/flower/spirit/config/SqliteSchemaPreflight.java`
+- Modify: `backstage/src/main/java/com/flower/spirit/service/transaction/DatabaseInitializationTransaction.java`
 - Test: `backstage/src/test/java/com/flower/spirit/service/CollectDataServiceFetchPlanTest.java`
 - Test: `backstage/src/test/java/com/flower/spirit/service/transaction/CollectQueueTransactionTest.java`
 - Test: `backstage/src/test/java/com/flower/spirit/service/CollectJobWorkerTest.java`
 
-- [ ] **Step 1: Write failing fetch-plan tests**
+- [x] **Step 1: Write failing fetch-plan tests**
 
 Assert these behaviors separately:
 
@@ -496,13 +500,13 @@ Also assert that known IDs are the union of `biz_collect_data_detail.videoid` an
 
 Add two more cases: a candidate already active in another run becomes `SKIPPED_EXISTING_ACTIVE_DOWNLOAD`, and an `AUDIT` run requeues a known work when its detail status is failed or its media row/file is missing.
 
-- [ ] **Step 2: Run focused tests and verify they fail**
+- [x] **Step 2: Run focused tests and verify they fail**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDataServiceFetchPlanTest,CollectQueueTransactionTest,CollectJobWorkerTest test`
 
 Expected: FAIL because persistent execution still enters the old per-item download loop.
 
-- [ ] **Step 3: Extend the fetched-item contract**
+- [x] **Step 3: Extend the fetched-item contract**
 
 Replace the record with:
 
@@ -512,9 +516,11 @@ public record CollectRunFetchedItem(int ordinal, String platformKey, String work
         String mediaType, String decision, String processState) { }
 ```
 
-For every observed envelope item, produce one run item. Use `newWorkIds` to choose `NEW/QUEUED`; known works use `EXISTING/SKIPPED_EXISTING`; blocked works use `BLOCKED/SKIPPED_BLOCKED`. Only `QUEUED` rows receive `available_at=now`, `max_attempts=4`, and `queue_generation='FETCH_DOWNLOAD_V1'`.
+For every observed envelope item, produce one run item. Use `newWorkIds` to choose `NEW/QUEUED`; known works use `EXISTING/SKIPPED_EXISTING`; blocked works use `BLOCKED/SKIPPED_BLOCKED`. If upstream repeats a work in the same run, retain the later observation as `DUPLICATE_OBSERVATION/SKIPPED_EXISTING`; only the first occurrence can be queued. Only `QUEUED` rows receive `available_at=now`, `max_attempts=4`, and `queue_generation='FETCH_DOWNLOAD_V1'`.
 
-- [ ] **Step 4: Add fetch mode, known IDs, watermarks, and compatibility routing**
+Replace the old unique `(run_id, platform_key, work_id)` index with a nonunique lookup index so repeated upstream observations remain auditable. Download deduplication remains enforced by the plan decision plus the active-work check, not by silently discarding observed rows.
+
+- [x] **Step 4: Add fetch mode, known IDs, watermarks, and compatibility routing**
 
 Add a new public method and keep `createDyData(entity, monitor)` unchanged for nonpersistent legacy calls:
 
@@ -543,16 +549,18 @@ public void executeQueuedCollectTask(int taskId, long runId, CollectTriggerType 
 
 For `like`, `fav`, and `recommend`, retain current bounded F2 list retrieval but stop before media download and convert the returned list into the same run-item plan. Do not apply post-mode `sec_uid`, watermark, or known-boundary assumptions to those modes.
 
+Reject non-Douyin tasks in `CollectEnqueueService` before creating a persistent run or job. Return an explicit unsupported result to manual and scheduled callers; retain the fetch-worker platform assertion only as defense for historical malformed queue rows.
+
 `firstFetchLimit(task)` returns positive `omaxcur`, falling back to the existing initial default. `AUDIT` ignores this count and is guarded only by `auditMaxPages`. During audit planning, queue a work when it is newly observed, has a failed collection-detail status, lacks its expected `biz_video`/`biz_graphic_content` row, or references a missing/empty local file. Otherwise mark it `SKIPPED_EXISTING`. Before inserting any candidate, atomically check for another generation-tagged active item with the same `platform_key + work_id`; if present, mark the current row `SKIPPED_EXISTING_ACTIVE_DOWNLOAD` with no queue generation.
 
 Implement `CollectRunQueryService.findKnownWorkIds(int taskId)` with two indexed queries and a `LinkedHashSet`: select nonblank `videoid` from `biz_collect_data_detail WHERE dataid=?`, then select `work_id` from generation-tagged items joined through `biz_collect_run.collect_task_id=?` where state is active or completed. This method is read-only and must not parse legacy snapshots.
 
-- [ ] **Step 5: Make plan persistence and run completion atomic at the database boundary**
+- [x] **Step 5: Make plan persistence and run completion atomic at the database boundary**
 
 Add `CollectRunService.storeFetchPlan(runId, taskId, items, stopReason, watermark)` as one `DatabaseWriteExecutor` operation calling one `@Transactional(REQUIRES_NEW)` transaction method. That method must:
 
 1. Transition `FETCHING -> PROCESSING`.
-2. Insert all run items with `INSERT OR IGNORE`.
+2. Insert all run items with strict `INSERT`; any constraint or write failure rolls back the full plan and prevents watermark advancement.
 3. Update `biz_collect_data` watermarks only after all inserts succeed.
 4. Store the envelope outcome in `biz_collect_run.fetch_stop_reason`, store its nonfatal warning classification in `fetch_warning`, and append a `FETCH_STOP` run event containing page and cursor counts.
 
@@ -568,7 +576,7 @@ FROM biz_collect_run_item WHERE run_id = ?
 
 Set compatibility `taskstatus` to `抓取完成，下载排队 N` and do not overwrite `carriedout` with a fetch-stage count.
 
-- [ ] **Step 6: Stop the fetch worker after persistence**
+- [x] **Step 6: Stop the fetch worker after persistence**
 
 Pass `claim.triggerType()` into `executeQueuedCollectTask`. The worker sequence must be exactly:
 
@@ -580,13 +588,13 @@ collectRunService.complete(claim.runId(), claim.jobId());
 
 The method returns after the plan commit. There must be no media HTTP request, sleep-per-item, FFmpeg, or filesystem write in the fetch worker.
 
-- [ ] **Step 7: Run fetch-stage tests**
+- [x] **Step 7: Run fetch-stage tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDataServiceFetchPlanTest,CollectQueueTransactionTest,CollectJobWorkerTest test`
 
 Expected: PASS; the run is `COMPLETED` while its new item is still `QUEUED`.
 
-- [ ] **Step 8: Commit fetch-only execution**
+- [x] **Step 8: Commit fetch-only execution**
 
 ```bash
 git add backstage/src/main/java/com/flower/spirit/service backstage/src/main/java/com/flower/spirit/service/transaction backstage/src/test/java/com/flower/spirit/service

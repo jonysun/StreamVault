@@ -28,6 +28,8 @@ class CollectPipelineSchemaInitializerTest {
 	void upgradesProductionShapedTablesIdempotentlyWithoutMakingHistoricalItemsClaimable() {
 		JdbcTemplate jdbcTemplate = jdbcTemplate("pipeline-upgrade.db");
 		createProductionShapedTables(jdbcTemplate);
+		jdbcTemplate.execute("CREATE UNIQUE INDEX uq_collect_run_item_work "
+				+ "ON biz_collect_run_item(run_id, platform_key, work_id)");
 		jdbcTemplate.update("INSERT INTO biz_collect_run_item(id, run_id, ordinal, platform_key, work_id, decision, "
 				+ "process_state, created_at, updated_at) VALUES(1, 10, 1, 'douyin', 'work-1', 'DOWNLOAD', "
 				+ "'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
@@ -66,6 +68,14 @@ class CollectPipelineSchemaInitializerTest {
 				.containsEntry("attempt_count", 0)
 				.containsEntry("max_attempts", 4)
 				.containsEntry("queue_generation", null);
+		assertThat(indexNames(jdbcTemplate, "biz_collect_run_item"))
+				.contains("idx_collect_run_item_work")
+				.doesNotContain("uq_collect_run_item_work");
+		jdbcTemplate.update("INSERT INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, decision, "
+				+ "process_state, created_at, updated_at) VALUES(10, 2, 'douyin', 'work-1', "
+				+ "'DUPLICATE_OBSERVATION', 'SKIPPED_EXISTING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item WHERE run_id=10 "
+				+ "AND work_id='work-1'", Integer.class)).isEqualTo(2);
 	}
 
 	@Test
@@ -161,5 +171,11 @@ class CollectPipelineSchemaInitializerTest {
 	private Map<String, Map<String, Object>> columnInfo(JdbcTemplate jdbcTemplate, String table) {
 		return jdbcTemplate.queryForList("PRAGMA table_info(" + table + ")").stream()
 				.collect(Collectors.toMap(row -> String.valueOf(row.get("name")), Function.identity()));
+	}
+
+	private java.util.List<String> indexNames(JdbcTemplate jdbcTemplate, String table) {
+		return jdbcTemplate.queryForList("PRAGMA index_list(" + table + ")").stream()
+				.map(row -> String.valueOf(row.get("name")))
+				.toList();
 	}
 }

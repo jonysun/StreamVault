@@ -51,6 +51,22 @@ public class SqliteSchemaPreflight {
 	@EventListener(ApplicationReadyEvent.class)
 	public void verifyPipelineSchemas() {
 		REQUIRED_PIPELINE_COLUMNS.forEach(this::verifyRequiredColumns);
+		verifyRunItemObservationIndex();
+	}
+
+	private void verifyRunItemObservationIndex() {
+		List<Map<String, Object>> indexes = jdbcTemplate.queryForList("PRAGMA index_list(biz_collect_run_item)");
+		boolean legacyUniquePresent = indexes.stream()
+				.anyMatch(index -> "uq_collect_run_item_work".equalsIgnoreCase(String.valueOf(index.get("name"))));
+		boolean lookupIndexPresent = indexes.stream()
+				.anyMatch(index -> "idx_collect_run_item_work".equalsIgnoreCase(String.valueOf(index.get("name")))
+						&& intValue(index.get("unique")) == 0);
+		if (legacyUniquePresent || !lookupIndexPresent) {
+			throw new IllegalStateException("SQLite collection pipeline index migration is incomplete for "
+					+ "biz_collect_run_item: expected nonunique idx_collect_run_item_work and no "
+					+ "uq_collect_run_item_work");
+		}
+		logger.info("SQLite collection pipeline preflight passed: biz_collect_run_item observation index");
 	}
 
 	void verifyIdentitySchema(String table) {

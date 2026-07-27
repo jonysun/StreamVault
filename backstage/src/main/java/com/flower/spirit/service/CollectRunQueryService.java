@@ -1,15 +1,23 @@
 package com.flower.spirit.service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+
+import com.alibaba.fastjson.JSON;
 
 @Service
 public class CollectRunQueryService {
@@ -19,10 +27,84 @@ public class CollectRunQueryService {
 	private final JdbcTemplate jdbcTemplate;
 	private final SnapshotCodec snapshotCodec;
 	private final Map<Integer, Long> legacyWarningTimes = new ConcurrentHashMap<>();
+	private MediaPathService mediaPathService;
 
 	public CollectRunQueryService(JdbcTemplate jdbcTemplate, SnapshotCodec snapshotCodec) {
 		this.jdbcTemplate = jdbcTemplate;
 		this.snapshotCodec = snapshotCodec;
+	}
+
+	@Autowired
+	void setMediaPathService(MediaPathService mediaPathService) {
+		this.mediaPathService = mediaPathService;
+	}
+
+	public Set<String> findKnownWorkIds(int taskId) {
+		LinkedHashSet<String> result = new LinkedHashSet<>();
+		addNonblank(result, jdbcTemplate.queryForList(
+				"SELECT videoid FROM biz_collect_data_detail WHERE dataid = ? "
+						+ "AND videoid IS NOT NULL AND TRIM(videoid) <> '' ORDER BY id ASC",
+				String.class, taskId));
+		addNonblank(result, jdbcTemplate.queryForList(
+				"SELECT i.work_id FROM biz_collect_run_item i "
+						+ "JOIN biz_collect_run r ON r.id = i.run_id "
+						+ "WHERE r.collect_task_id = ? AND i.queue_generation = 'FETCH_DOWNLOAD_V1' "
+						+ "AND i.process_state IN ('QUEUED','RUNNING','RETRY_WAIT','COMPLETED') "
+						+ "AND i.work_id IS NOT NULL AND TRIM(i.work_id) <> '' ORDER BY i.id ASC",
+				String.class, taskId));
+		return Collections.unmodifiableSet(result);
+	}
+
+	public boolean needsAuditRequeue(int taskId, String platformKey, String workId, String mediaType) {
+		Integer failedDetails = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM biz_collect_data_detail WHERE dataid = ? AND videoid = ? "
+						+ "AND (COALESCE(TRIM(errorcode), '') <> '' OR status LIKE '%失败%')",
+				Integer.class, taskId, workId);
+		if (failedDetails != null && failedDetails > 0) return true;
+		String normalizedType = mediaType == null ? "video" : mediaType.trim().toLowerCase();
+		if ("image".equals(normalizedType)) {
+			List<String> storedImageSets = jdbcTemplate.queryForList(
+					"SELECT images FROM biz_graphic_content WHERE videoid = ? "
+							+ "AND (platformkey = ? OR (? = 'douyin' AND platform IN ('抖音', 'douyin'))) "
+							+ "AND COALESCE(TRIM(images), '') <> ''",
+					String.class, workId, platformKey, platformKey);
+			return storedImageSets.stream().noneMatch(this::hasCompleteGraphicFiles);
+		}
+		List<String> storedVideoPaths = jdbcTemplate.queryForList(
+				"SELECT videoaddr FROM biz_video WHERE videoid = ? "
+						+ "AND (platformkey = ? OR (? = 'douyin' AND videoplatform IN ('抖音', 'douyin'))) "
+						+ "AND COALESCE(TRIM(videoaddr), '') <> ''",
+				String.class, workId, platformKey, platformKey);
+		return storedVideoPaths.stream().noneMatch(this::isNonEmptyLocalFile);
+	}
+
+	private boolean hasCompleteGraphicFiles(String storedImages) {
+		try {
+			List<String> paths = JSON.parseArray(storedImages, String.class);
+			return paths != null && !paths.isEmpty() && paths.stream().allMatch(this::isNonEmptyLocalFile);
+		} catch (RuntimeException e) {
+			logger.debug("Invalid graphic media paths during collection audit", e);
+			return false;
+		}
+	}
+
+	private boolean isNonEmptyLocalFile(String storedPath) {
+		if (storedPath == null || storedPath.isBlank()) return false;
+		try {
+			Path path = mediaPathService == null
+					? Path.of(storedPath.trim()).toAbsolutePath().normalize()
+					: mediaPathService.requireOwnedLocalPath(storedPath);
+			return Files.isRegularFile(path) && Files.size(path) > 0;
+		} catch (Exception e) {
+			logger.debug("Unavailable media path during collection audit: {}", storedPath, e);
+			return false;
+		}
+	}
+
+	private void addNonblank(Set<String> target, List<String> values) {
+		for (String value : values) {
+			if (value != null && !value.isBlank()) target.add(value.trim());
+		}
 	}
 
 	public List<Map<String, Object>> findRuns(int taskId, int limit, long afterId) {

@@ -101,7 +101,7 @@ public class CollectJobWorker {
 				return;
 			}
 			collectRunService.start(claim.runId());
-			collectDataService.executeQueuedCollectTask(claim.taskId(), claim.runId());
+			collectDataService.executeQueuedCollectTask(claim.taskId(), claim.runId(), claim.triggerType());
 			collectRunService.complete(claim.runId(), claim.jobId());
 			logger.info("[CollectWorker] complete jobId={} runId={} taskId={}", claim.jobId(), claim.runId(),
 					claim.taskId());

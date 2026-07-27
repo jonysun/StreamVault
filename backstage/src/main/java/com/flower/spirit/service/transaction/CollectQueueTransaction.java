@@ -113,20 +113,56 @@ public class CollectQueueTransaction {
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void storeFetchedItems(long runId, List<CollectRunFetchedItem> items, Instant now) {
-		Timestamp timestamp = Timestamp.from(now);
-		for (CollectRunFetchedItem item : items) {
-			jdbcTemplate.update("INSERT OR IGNORE INTO biz_collect_run_item "
-					+ "(run_id, ordinal, platform_key, work_id, author_uid, nickname_snapshot, title_snapshot, "
-					+ "publish_time, media_type, decision, process_state, created_at, updated_at) "
-					+ "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'PENDING', ?, ?)", runId, item.ordinal(),
-					item.platformKey(), item.workId(), item.authorUid(), item.nickname(), truncate(item.title(), 2000),
-					item.publishTime(), item.mediaType(), timestamp, timestamp);
+		storeFetchPlan(runId, taskId(runId), items, "LEGACY_FETCH",
+				new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, ""), now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, String stopReason,
+			CollectRunFetchedItem.FetchWatermark watermark, Instant now) {
+		Integer runTaskId = taskId(runId);
+		if (runTaskId == null || runTaskId != taskId) {
+			throw new IllegalArgumentException("collection run does not belong to task: runId=" + runId
+					+ " taskId=" + taskId);
 		}
-		jdbcTemplate.update("UPDATE biz_collect_run SET fetched_count = ?, heartbeat_at = ? WHERE id = ? "
-				+ "AND state = 'FETCHING'", items.size(), timestamp, runId);
+		Timestamp timestamp = Timestamp.from(now);
 		transitionInCurrentTransaction(runId, CollectRunState.FETCHING, CollectRunState.PROCESSING, now);
-		appendEvent(runId, "INFO", "FETCH", "FETCH_COMPLETED", "抓取列表已保存，共 " + items.size() + " 条",
-				null, now);
+		appendEvent(runId, "INFO", "PROCESSING", "STATE_TRANSITION", "FETCHING -> PROCESSING", null, now);
+		for (CollectRunFetchedItem item : items) {
+			boolean queued = "QUEUED".equals(item.processState());
+			boolean activeElsewhere = queued && hasActiveDownload(runId, item.platformKey(), item.workId());
+			String decision = activeElsewhere ? "EXISTING_ACTIVE_DOWNLOAD" : valueOr(item.decision(), "EXISTING");
+			String processState = activeElsewhere ? "SKIPPED_EXISTING_ACTIVE_DOWNLOAD"
+					: valueOr(item.processState(), "SKIPPED_EXISTING");
+			boolean claimable = "QUEUED".equals(processState);
+			jdbcTemplate.update("INSERT INTO biz_collect_run_item "
+					+ "(run_id, ordinal, platform_key, work_id, author_uid, nickname_snapshot, title_snapshot, "
+					+ "publish_time, media_type, decision, process_state, attempt_count, max_attempts, available_at, "
+					+ "queue_generation, created_at, updated_at) "
+					+ "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", runId, item.ordinal(),
+					item.platformKey(), item.workId(), item.authorUid(), item.nickname(), truncate(item.title(), 2000),
+					item.publishTime(), item.mediaType(), decision, processState, claimable ? 4 : 0,
+					claimable ? timestamp : null, claimable ? "FETCH_DOWNLOAD_V1" : null, timestamp, timestamp);
+		}
+		CollectRunFetchedItem.FetchWatermark safeWatermark = watermark == null
+				? new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, "") : watermark;
+		String incomingPublishTime = blankToNull(safeWatermark.publishTime());
+		jdbcTemplate.update("UPDATE biz_collect_data SET last_successful_fetch_at = ?, "
+				+ "last_seen_publish_time = CASE WHEN ? IS NOT NULL AND (last_seen_publish_time IS NULL "
+				+ "OR CAST(? AS INTEGER) >= CAST(last_seen_publish_time AS INTEGER)) THEN ? "
+				+ "ELSE last_seen_publish_time END, "
+				+ "last_seen_work_id = CASE WHEN ? IS NOT NULL AND (last_seen_publish_time IS NULL "
+				+ "OR CAST(? AS INTEGER) >= CAST(last_seen_publish_time AS INTEGER)) THEN ? "
+				+ "ELSE last_seen_work_id END WHERE id = ?", timestamp,
+				incomingPublishTime, incomingPublishTime, incomingPublishTime,
+				incomingPublishTime, incomingPublishTime, blankToNull(safeWatermark.workId()), taskId);
+		jdbcTemplate.update("UPDATE biz_collect_run SET fetched_count = ?, fetch_stop_reason = ?, fetch_warning = ?, "
+				+ "heartbeat_at = ? WHERE id = ? AND state = 'PROCESSING'", items.size(), stopReason,
+				warningFor(stopReason), timestamp, runId);
+		appendEvent(runId, warningFor(stopReason) == null ? "INFO" : "WARN", "FETCH", "FETCH_STOP",
+				"outcome=" + valueOr(stopReason, "UNKNOWN") + ", pages=" + safeWatermark.pagesFetched()
+						+ ", emptyPages=" + safeWatermark.emptyPages() + ", cursor="
+						+ valueOr(safeWatermark.lastCursor(), ""), null, now);
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -172,12 +208,11 @@ public class CollectQueueTransaction {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void complete(long runId, long jobId, Instant now) {
 		RunCounts counts = jdbcTemplate.queryForObject("SELECT COUNT(*) AS fetched, "
-				+ "SUM(CASE WHEN process_state <> 'PENDING' THEN 1 ELSE 0 END) AS planned, "
-				+ "SUM(CASE WHEN process_state = 'COMPLETED' THEN 1 ELSE 0 END) AS inserted, "
-				+ "SUM(CASE WHEN process_state = 'SKIPPED' THEN 1 ELSE 0 END) AS skipped, "
+				+ "SUM(CASE WHEN process_state IN ('QUEUED','RUNNING','RETRY_WAIT','COMPLETED') THEN 1 ELSE 0 END) AS planned, "
+				+ "SUM(CASE WHEN process_state IN ('SKIPPED_EXISTING','SKIPPED_EXISTING_ACTIVE_DOWNLOAD') THEN 1 ELSE 0 END) AS skipped, "
 				+ "SUM(CASE WHEN process_state = 'FAILED' THEN 1 ELSE 0 END) AS failed "
 				+ "FROM biz_collect_run_item WHERE run_id = ?", (rs, rowNum) -> new RunCounts(
-					rs.getInt("fetched"), rs.getInt("planned"), rs.getInt("inserted"), rs.getInt("skipped"),
+					rs.getInt("fetched"), rs.getInt("planned"), 0, rs.getInt("skipped"),
 					rs.getInt("failed")), runId);
 		Timestamp timestamp = Timestamp.from(now);
 		int updated = jdbcTemplate.update("UPDATE biz_collect_run SET state = 'COMPLETED', fetched_count = ?, "
@@ -188,14 +223,14 @@ public class CollectQueueTransaction {
 			throw new IllegalCollectRunTransitionException(runId, CollectRunState.PROCESSING, CollectRunState.COMPLETED);
 		}
 		Integer taskId = taskId(runId);
-		String taskStatus = counts.failed() > 0 ? "执行失败(部分作品)" : "处理完成";
-		jdbcTemplate.update("UPDATE biz_collect_data SET taskstatus = ?, count = ?, carriedout = ?, endtime = ? "
-				+ "WHERE id = ?", taskStatus, String.valueOf(counts.fetched()),
-				String.valueOf(counts.inserted() + counts.skipped()), timestamp.toString(), taskId);
+		String taskStatus = "抓取完成，下载排队 " + counts.planned();
+		jdbcTemplate.update("UPDATE biz_collect_data SET taskstatus = ?, count = ?, endtime = ? WHERE id = ?",
+				taskStatus, String.valueOf(counts.fetched()), timestamp.toString(), taskId);
 		jdbcTemplate.update("UPDATE biz_job_queue SET state = 'COMPLETED', locked_by = NULL, locked_at = NULL, "
 				+ "updated_at = ? WHERE id = ? AND state = 'RUNNING'", timestamp, jobId);
 		appendEvent(runId, "INFO", "COMPLETE", "RUN_COMPLETED",
-				"运行完成，成功 " + counts.inserted() + "，跳过 " + counts.skipped() + "，失败 " + counts.failed(),
+				"抓取完成，观察 " + counts.fetched() + "，下载排队 " + counts.planned()
+						+ "，跳过 " + counts.skipped() + "，失败 " + counts.failed(),
 				null, now);
 	}
 
@@ -344,6 +379,28 @@ public class CollectQueueTransaction {
 	private Integer taskId(long runId) {
 		return jdbcTemplate.queryForObject("SELECT collect_task_id FROM biz_collect_run WHERE id = ?", Integer.class,
 				runId);
+	}
+
+	private boolean hasActiveDownload(long runId, String platformKey, String workId) {
+		Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item "
+				+ "WHERE run_id <> ? AND platform_key = ? AND work_id = ? "
+				+ "AND queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND process_state IN ('QUEUED','RUNNING','RETRY_WAIT')", Integer.class,
+				runId, platformKey, workId);
+		return count != null && count > 0;
+	}
+
+	private String warningFor(String stopReason) {
+		if (stopReason == null) return null;
+		return switch (stopReason) {
+		case "NO_PUBLIC_WORKS", "ACCOUNT_DEACTIVATED", "WORKS_UNAVAILABLE", "EMPTY_PAGINATION",
+				"MAX_PAGE_GUARD" -> stopReason;
+		default -> null;
+		};
+	}
+
+	private String blankToNull(String value) {
+		return value == null || value.isBlank() ? null : value;
 	}
 
 	private CollectRunState currentRunState(long runId) {

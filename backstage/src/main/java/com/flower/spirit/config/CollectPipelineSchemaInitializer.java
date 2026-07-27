@@ -23,6 +23,10 @@ public class CollectPipelineSchemaInitializer {
 
 	private static final Logger logger = LoggerFactory.getLogger(CollectPipelineSchemaInitializer.class);
 	private static final Map<String, List<String>> COLUMN_DEFINITIONS = columnDefinitions();
+	private static final List<String> RUN_ITEM_OBSERVATION_INDEX_MIGRATION = List.of(
+			"DROP INDEX IF EXISTS uq_collect_run_item_work",
+			"CREATE INDEX IF NOT EXISTS idx_collect_run_item_work "
+					+ "ON biz_collect_run_item(run_id, platform_key, work_id)");
 
 	private final JdbcTemplate jdbcTemplate;
 	private final DatabaseInitializationTransaction transaction;
@@ -39,6 +43,18 @@ public class CollectPipelineSchemaInitializer {
 	@EventListener(ApplicationReadyEvent.class)
 	public void initialize() {
 		COLUMN_DEFINITIONS.forEach(this::ensureColumns);
+		migrateRunItemObservationIndex();
+	}
+
+	private void migrateRunItemObservationIndex() {
+		if (tableColumns("biz_collect_run_item").isEmpty()) {
+			logger.warn("Skipping collection run-item index migration because the table is missing");
+			return;
+		}
+		databaseWriteExecutor.execute("schema-migrate-collect-run-item-observation-index", () -> {
+			transaction.executeAll(RUN_ITEM_OBSERVATION_INDEX_MIGRATION);
+			return null;
+		});
 	}
 
 	private void ensureColumns(String table, List<String> definitions) {

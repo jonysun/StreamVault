@@ -102,6 +102,32 @@ class SqliteSchemaPreflightTest {
 	}
 
 	@Test
+	void rejectsLegacyUniqueRunItemIndexAndAcceptsTheObservationIndex() {
+		JdbcTemplate jdbcTemplate = jdbcTemplate("pipeline-index-migration.db");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, "
+				+ "last_successful_fetch_at TIMESTAMP, last_seen_publish_time TEXT, last_seen_work_id TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, "
+				+ "fetch_stop_reason TEXT, fetch_warning TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER, "
+				+ "platform_key TEXT, work_id TEXT, attempt_count INTEGER, max_attempts INTEGER, available_at TIMESTAMP, "
+				+ "locked_by TEXT, locked_at TIMESTAMP, started_at TIMESTAMP, finished_at TIMESTAMP, "
+				+ "error_detail TEXT, queue_generation TEXT)");
+		jdbcTemplate.execute("CREATE UNIQUE INDEX uq_collect_run_item_work "
+				+ "ON biz_collect_run_item(run_id, platform_key, work_id)");
+		SqliteSchemaPreflight preflight = new SqliteSchemaPreflight(jdbcTemplate);
+
+		assertThatThrownBy(preflight::verifyPipelineSchemas)
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("index migration is incomplete")
+				.hasMessageContaining("uq_collect_run_item_work");
+
+		jdbcTemplate.execute("DROP INDEX uq_collect_run_item_work");
+		jdbcTemplate.execute("CREATE INDEX idx_collect_run_item_work "
+				+ "ON biz_collect_run_item(run_id, platform_key, work_id)");
+		assertThatCode(preflight::verifyPipelineSchemas).doesNotThrowAnyException();
+	}
+
+	@Test
 	void identityAndPipelineListenersRunAtTheirRequiredOrders() throws Exception {
 		Method identityListener = SqliteSchemaPreflight.class.getMethod("verifyIdentitySchemas");
 		Method pipelineListener = SqliteSchemaPreflight.class.getMethod("verifyPipelineSchemas");
