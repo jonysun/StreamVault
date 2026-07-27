@@ -49,9 +49,9 @@ public class CollectRunItemEntity implements Serializable {
 	private Date createdAt;
 	@Column(name = "updated_at", nullable = false)
 	private Date updatedAt;
-	@Column(name = "attempt_count", nullable = false)
+	@Column(name = "attempt_count", nullable = false, columnDefinition = "INTEGER DEFAULT 0")
 	private Integer attemptCount;
-	@Column(name = "max_attempts", nullable = false)
+	@Column(name = "max_attempts", nullable = false, columnDefinition = "INTEGER DEFAULT 4")
 	private Integer maxAttempts;
 	@Column(name = "available_at")
 	private Date availableAt;

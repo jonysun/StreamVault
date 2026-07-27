@@ -1,5 +1,6 @@
 package com.flower.spirit.config;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -38,12 +39,17 @@ public class SqliteSchemaPreflight {
 		this.jdbcTemplate = jdbcTemplate;
 	}
 
-	@Order(180)
+	@Order(10)
 	@EventListener(ApplicationReadyEvent.class)
 	public void verifyIdentitySchemas() {
 		for (String table : IDENTITY_TABLES) {
 			verifyIdentitySchema(table);
 		}
+	}
+
+	@Order(180)
+	@EventListener(ApplicationReadyEvent.class)
+	public void verifyPipelineSchemas() {
 		REQUIRED_PIPELINE_COLUMNS.forEach(this::verifyRequiredColumns);
 	}
 
@@ -75,8 +81,7 @@ public class SqliteSchemaPreflight {
 	private void verifyRequiredColumns(String table, List<String> requiredColumns) {
 		List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(" + table + ")");
 		if (columns.isEmpty()) {
-			logger.info("SQLite pipeline preflight skipped because Hibernate has not created table: {}", table);
-			return;
+			throw new IllegalStateException("SQLite schema is missing required collection pipeline table: " + table);
 		}
 
 		Set<String> existingColumns = columns.stream()
@@ -100,7 +105,7 @@ public class SqliteSchemaPreflight {
 		columns.put("biz_collect_run_item", List.of(
 				"attempt_count", "max_attempts", "available_at", "locked_by", "locked_at", "started_at",
 				"finished_at", "error_detail", "queue_generation"));
-		return Map.copyOf(columns);
+		return Collections.unmodifiableMap(columns);
 	}
 
 	private int intValue(Object value) {

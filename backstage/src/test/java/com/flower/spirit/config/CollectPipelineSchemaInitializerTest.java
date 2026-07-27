@@ -10,11 +10,16 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.hibernate.SessionFactory;
+import org.hibernate.boot.MetadataSources;
+import org.hibernate.boot.registry.StandardServiceRegistry;
+import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.sqlite.SQLiteDataSource;
 
 import com.flower.spirit.database.postgresql.DirectDatabaseWriteExecutor;
+import com.flower.spirit.entity.CollectRunItemEntity;
 import com.flower.spirit.service.transaction.DatabaseInitializationTransaction;
 
 class CollectPipelineSchemaInitializerTest {
@@ -68,21 +73,62 @@ class CollectPipelineSchemaInitializerTest {
 		assertThatCode(() -> initializer(jdbcTemplate("missing.db")).initialize()).doesNotThrowAnyException();
 	}
 
+	@Test
+	void hibernateFreshSchemaDeclaresRetryDefaultsAndRawInsertCanOmitRetryColumns() {
+		String jdbcUrl = jdbcUrl("hibernate-fresh.db");
+		StandardServiceRegistry registry = new StandardServiceRegistryBuilder()
+				.applySetting("hibernate.connection.driver_class", "org.sqlite.JDBC")
+				.applySetting("hibernate.connection.url", jdbcUrl)
+				.applySetting("hibernate.dialect", "org.hibernate.community.dialect.SQLiteDialect")
+				.applySetting("hibernate.hbm2ddl.auto", "create")
+				.build();
+		try (SessionFactory ignored = new MetadataSources(registry)
+				.addAnnotatedClass(CollectRunItemEntity.class)
+				.buildMetadata()
+				.buildSessionFactory()) {
+			// Building the session factory creates the fresh Hibernate schema.
+		} finally {
+			StandardServiceRegistryBuilder.destroy(registry);
+		}
+
+		JdbcTemplate jdbcTemplate = jdbcTemplateForUrl(jdbcUrl);
+		Map<String, Object> attemptCount = columnInfo(jdbcTemplate, "biz_collect_run_item").get("attempt_count");
+		Map<String, Object> maxAttempts = columnInfo(jdbcTemplate, "biz_collect_run_item").get("max_attempts");
+		assertThat(attemptCount).containsEntry("notnull", 1).containsEntry("dflt_value", "0");
+		assertThat(maxAttempts).containsEntry("notnull", 1).containsEntry("dflt_value", "4");
+
+		jdbcTemplate.update("INSERT OR IGNORE INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, "
+				+ "decision, process_state, created_at, updated_at) VALUES(1, 1, 'douyin', 'work-1', "
+				+ "'DOWNLOAD', 'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item", Integer.class)).isOne();
+		assertThat(jdbcTemplate.queryForMap("SELECT attempt_count, max_attempts FROM biz_collect_run_item"))
+				.containsEntry("attempt_count", 0)
+				.containsEntry("max_attempts", 4);
+	}
+
 	private CollectPipelineSchemaInitializer initializer(JdbcTemplate jdbcTemplate) {
 		return new CollectPipelineSchemaInitializer(jdbcTemplate,
 				new DatabaseInitializationTransaction(jdbcTemplate), new DirectDatabaseWriteExecutor());
 	}
 
 	private JdbcTemplate jdbcTemplate(String filename) {
+		return jdbcTemplateForUrl(jdbcUrl(filename));
+	}
+
+	private JdbcTemplate jdbcTemplateForUrl(String jdbcUrl) {
+		SQLiteDataSource dataSource = new SQLiteDataSource();
+		dataSource.setUrl(jdbcUrl);
+		return new JdbcTemplate(dataSource);
+	}
+
+	private String jdbcUrl(String filename) {
 		Path databaseDirectory = Path.of("target", "test-databases");
 		try {
 			Files.createDirectories(databaseDirectory);
 		} catch (java.io.IOException e) {
 			throw new IllegalStateException("Failed to create SQLite test directory", e);
 		}
-		SQLiteDataSource dataSource = new SQLiteDataSource();
-		dataSource.setUrl("jdbc:sqlite:" + databaseDirectory.resolve(UUID.randomUUID() + "-" + filename));
-		return new JdbcTemplate(dataSource);
+		return "jdbc:sqlite:" + databaseDirectory.resolve(UUID.randomUUID() + "-" + filename);
 	}
 
 	private void createProductionShapedTables(JdbcTemplate jdbcTemplate) {

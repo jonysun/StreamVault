@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.sqlite.SQLiteDataSource;
 
@@ -83,12 +85,29 @@ class SqliteSchemaPreflightTest {
 		JdbcTemplate jdbcTemplate = jdbcTemplate("missing-pipeline-columns.db");
 		jdbcTemplate.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT)");
 
-		assertThatThrownBy(() -> new SqliteSchemaPreflight(jdbcTemplate).verifyIdentitySchemas())
+		assertThatThrownBy(() -> new SqliteSchemaPreflight(jdbcTemplate).verifyPipelineSchemas())
 				.isInstanceOf(IllegalStateException.class)
 				.hasMessageContaining("biz_collect_data")
 				.hasMessageContaining("last_successful_fetch_at")
 				.hasMessageContaining("last_seen_publish_time")
 				.hasMessageContaining("last_seen_work_id");
+	}
+
+	@Test
+	void rejectsMissingRequiredPipelineTableAndNamesIt() {
+		assertThatThrownBy(() -> new SqliteSchemaPreflight(jdbcTemplate("missing-table.db")).verifyPipelineSchemas())
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("biz_collect_data")
+				.hasMessageContaining("missing required collection pipeline table");
+	}
+
+	@Test
+	void identityAndPipelineListenersRunAtTheirRequiredOrders() throws Exception {
+		Method identityListener = SqliteSchemaPreflight.class.getMethod("verifyIdentitySchemas");
+		Method pipelineListener = SqliteSchemaPreflight.class.getMethod("verifyPipelineSchemas");
+
+		assertThat(identityListener.getAnnotation(Order.class).value()).isEqualTo(10);
+		assertThat(pipelineListener.getAnnotation(Order.class).value()).isEqualTo(180);
 	}
 
 	private JdbcTemplate jdbcTemplate(String filename) {
