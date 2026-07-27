@@ -29,6 +29,21 @@ public class RuntimeJobQueryService {
 		result.put("running", findJobs("RUNNING", safeLimit));
 		result.put("queued", findJobs("QUEUED,RETRY_WAIT", safeLimit));
 		result.put("recentFailed", findJobs("FAILED", Math.min(safeLimit, 20)));
+		result.put("fetchQueue", queueCounts("biz_job_queue", "job_type = 'COLLECT_FETCH' "
+				+ "AND state IN ('QUEUED','RUNNING','RETRY_WAIT')", "state"));
+		result.put("downloadQueue", queueCounts("biz_collect_run_item",
+				"queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND process_state IN ('QUEUED','RUNNING','RETRY_WAIT')", "process_state"));
+		return result;
+	}
+
+	private Map<String, Long> queueCounts(String table, String filter, String stateColumn) {
+		Map<String, Long> result = new LinkedHashMap<>();
+		for (Map<String, Object> row : jdbcTemplate.queryForList("SELECT " + stateColumn
+				+ " AS state, COUNT(*) AS itemCount FROM " + table + " WHERE " + filter + " GROUP BY " + stateColumn)) {
+			Object count = row.get("itemCount");
+			result.put(String.valueOf(row.get("state")), count instanceof Number n ? n.longValue() : 0L);
+		}
 		return result;
 	}
 

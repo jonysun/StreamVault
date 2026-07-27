@@ -2,6 +2,8 @@ package com.flower.spirit.service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -144,7 +146,10 @@ public class CollectRunQueryService {
 		String sql = "SELECT id, ordinal, platform_key AS platformKey, work_id AS workId, author_uid AS authorUid, "
 				+ "nickname_snapshot AS nicknameSnapshot, title_snapshot AS titleSnapshot, publish_time AS publishTime, "
 				+ "media_type AS mediaType, decision, process_state AS processState, error_code AS errorCode, "
-				+ "error_message AS errorMessage, created_at AS createdAt, updated_at AS updatedAt "
+				+ "error_message AS errorMessage, error_detail AS errorDetail, attempt_count AS attemptCount, "
+				+ "max_attempts AS maxAttempts, available_at AS availableAt, locked_by AS lockedBy, "
+				+ "locked_at AS lockedAt, started_at AS startedAt, finished_at AS finishedAt, "
+				+ "queue_generation AS queueGeneration, created_at AS createdAt, updated_at AS updatedAt "
 				+ "FROM biz_collect_run_item WHERE run_id = ? AND id > ?";
 		boolean plan = "plan".equalsIgnoreCase(decision);
 		if (plan) sql += " AND UPPER(decision) IN ('NEW','RETRY')";
@@ -153,6 +158,54 @@ public class CollectRunQueryService {
 		return !plan && decision != null && !decision.isBlank() && !"all".equalsIgnoreCase(decision)
 				? jdbcTemplate.queryForList(sql, runId, afterId, decision)
 				: jdbcTemplate.queryForList(sql, runId, afterId);
+	}
+
+	public Map<String, Object> downloadQueue(Integer taskId, int limit) {
+		int safeLimit = Math.min(Math.max(limit, 1), 200);
+		Timestamp now = Timestamp.from(Instant.now());
+		String taskFilter = taskId == null ? "" : " AND r.collect_task_id = ?";
+		Object[] taskArgs = taskId == null ? new Object[0] : new Object[] { taskId };
+		Object[] eligibleArgs = taskId == null ? new Object[] { now } : new Object[] { now, taskId };
+		List<Map<String, Object>> countRows = jdbcTemplate.queryForList(
+				"SELECT i.process_state AS processState, COUNT(*) AS itemCount FROM biz_collect_run_item i "
+						+ "JOIN biz_collect_run r ON r.id = i.run_id WHERE i.queue_generation = 'FETCH_DOWNLOAD_V1'"
+						+ " AND i.process_state IN ('QUEUED','RUNNING','RETRY_WAIT')"
+						+ taskFilter + " GROUP BY i.process_state", taskArgs);
+		Map<String, Long> counts = new LinkedHashMap<>();
+		for (Map<String, Object> row : countRows) {
+			Object count = row.get("itemCount");
+			counts.put(String.valueOf(row.get("processState")), count instanceof Number n ? n.longValue() : 0L);
+		}
+		String itemsSql = "SELECT i.id AS itemId, i.run_id AS runId, r.collect_task_id AS taskId, "
+				+ "t.taskname AS taskName, i.work_id AS workId, i.media_type AS mediaType, i.decision, "
+				+ "i.process_state AS processState, i.attempt_count AS attemptCount, i.max_attempts AS maxAttempts, "
+				+ "i.available_at AS availableAt, i.locked_by AS lockedBy, i.locked_at AS lockedAt, "
+				+ "i.error_code AS errorCode, i.error_message AS errorMessage, i.created_at AS createdAt "
+				+ "FROM biz_collect_run_item i JOIN biz_collect_run r ON r.id = i.run_id "
+				+ "LEFT JOIN biz_collect_data t ON t.id = r.collect_task_id "
+				+ "WHERE i.queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND i.process_state IN ('QUEUED','RETRY_WAIT') "
+				+ "AND i.attempt_count < i.max_attempts "
+				+ "AND (i.available_at IS NULL OR i.available_at <= ?)" + taskFilter
+				+ " ORDER BY CASE WHEN i.decision LIKE 'MANUAL_RETRY%' THEN 0 ELSE 1 END, "
+				+ "i.ordinal ASC, i.available_at ASC, i.created_at ASC, i.id ASC LIMIT " + safeLimit;
+		List<Map<String, Object>> items = jdbcTemplate.queryForList(itemsSql, eligibleArgs);
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("counts", counts);
+		result.put("items", items);
+		result.put("oldestQueuedAt", scalarTime("SELECT MIN(i.created_at) FROM biz_collect_run_item i "
+				+ "JOIN biz_collect_run r ON r.id=i.run_id WHERE i.queue_generation='FETCH_DOWNLOAD_V1' "
+				+ "AND i.process_state IN ('QUEUED','RETRY_WAIT') "
+				+ "AND i.attempt_count < i.max_attempts "
+				+ "AND (i.available_at IS NULL OR i.available_at <= ?)" + taskFilter, eligibleArgs));
+		result.put("nextRetryAt", scalarTime("SELECT MIN(i.available_at) FROM biz_collect_run_item i "
+				+ "JOIN biz_collect_run r ON r.id=i.run_id WHERE i.queue_generation='FETCH_DOWNLOAD_V1' "
+				+ "AND i.process_state='RETRY_WAIT' AND i.attempt_count < i.max_attempts" + taskFilter, taskArgs));
+		return result;
+	}
+
+	private Object scalarTime(String sql, Object[] args) {
+		return jdbcTemplate.queryForObject(sql, Object.class, args);
 	}
 
 	public Map<String, Object> findLatestItems(int taskId, String view, int limit, long afterId) {

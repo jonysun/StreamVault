@@ -895,7 +895,7 @@ git commit -m "feat: run collection fetch and download independently"
 - Test: `backstage/src/test/java/com/flower/spirit/service/RuntimeJobQueryServiceTest.java`
 - Test: `backstage/src/test/java/com/flower/spirit/service/CollectDataServiceFindPageTest.java`
 
-- [ ] **Step 1: Write failing projection tests**
+- [x] **Step 1: Write failing projection tests**
 
 Seed one completed fetch run with items in every download state and assert the task row contains:
 
@@ -914,13 +914,13 @@ assertThat(item).extracting(
 
 Assert run-item rows include `attemptCount`, `maxAttempts`, `availableAt`, `startedAt`, `finishedAt`, `errorDetail`, and `queueGeneration`.
 
-- [ ] **Step 2: Run query tests and verify they fail**
+- [x] **Step 2: Run query tests and verify they fail**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectRunQueryServiceTest,RuntimeJobQueryServiceTest,CollectDataServiceFindPageTest test`
 
 Expected: FAIL because only legacy run/job fields are projected.
 
-- [ ] **Step 3: Extend task and run projections**
+- [x] **Step 3: Extend task and run projections**
 
 Append these exact fields to `CollectTaskListItem`:
 
@@ -932,7 +932,7 @@ String latestStopReason, String latestFetchWarning
 
 Join a latest-run item aggregate with conditional `SUM` expressions. Keep `jobState`, `runState`, queue position, and heartbeat for compatibility. `findItems` must select every queue timing/attempt/error field and still paginate by `id`.
 
-- [ ] **Step 4: Add download queue diagnostics**
+- [x] **Step 4: Add download queue diagnostics**
 
 Add:
 
@@ -944,13 +944,13 @@ public Map<String, Object> downloadQueue(Integer taskId, int limit) {
 
 Return `counts`, `items`, `oldestQueuedAt`, and `nextRetryAt`. Do not return raw snapshot JSON. Extend `RuntimeJobQueryService.dashboard` with `fetchQueue` from `biz_job_queue`, `downloadQueue` from generation-tagged run items, and the existing HLS summary supplied by its current service/controller integration.
 
-- [ ] **Step 5: Run query tests**
+- [x] **Step 5: Run query tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectRunQueryServiceTest,RuntimeJobQueryServiceTest,CollectDataServiceFindPageTest test`
 
 Expected: PASS and query plans use `idx_collect_run_item_run_state` or `idx_collect_run_item_download_claim`.
 
-- [ ] **Step 6: Commit observable query models**
+- [x] **Step 6: Commit observable query models**
 
 ```bash
 git add backstage/src/main/java/com/flower/spirit/dto/CollectTaskListItem.java backstage/src/main/java/com/flower/spirit/service/CollectDataService.java backstage/src/main/java/com/flower/spirit/service/CollectRunQueryService.java backstage/src/main/java/com/flower/spirit/service/RuntimeJobQueryService.java backstage/src/test/java/com/flower/spirit/service

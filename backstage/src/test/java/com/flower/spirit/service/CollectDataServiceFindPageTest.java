@@ -90,6 +90,38 @@ class CollectDataServiceFindPageTest {
 	}
 
 	@Test
+	void taskListSeparatesLatestFetchAndDownloadStates() throws Exception {
+		CapturingJdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id, taskid, taskname) VALUES (1, 'task-1', 'Author')");
+		jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, fetch_stop_reason, "
+				+ "fetch_warning, created_at) VALUES (11, 1, 'SCHEDULED', 'COMPLETED', 'KNOWN_BOUNDARY', "
+				+ "'cookie nearing expiry', '2026-07-27 01:00:00')");
+		String[] states = { "QUEUED", "QUEUED", "RUNNING", "RETRY_WAIT", "COMPLETED", "COMPLETED",
+				"SKIPPED_EXISTING", "FAILED" };
+		for (int index = 0; index < states.length; index++) {
+			jdbc.update("INSERT INTO biz_collect_run_item(id, run_id, ordinal, work_id, decision, process_state, "
+					+ "queue_generation, created_at, updated_at) VALUES (?, 11, ?, ?, 'NEW', ?, "
+					+ "'FETCH_DOWNLOAD_V1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+					100 + index, index + 1, "work-" + index, states[index]);
+		}
+		CollectDataService service = new CollectDataService();
+		ReflectionTestUtils.setField(service, "jdbcTemplate", jdbc);
+
+		CollectTaskListItem item = findById((Page<?>) service.findPage(new CollectDataEntity()).getRecord(), 1);
+
+		assertThat(item.fetchState()).isEqualTo("COMPLETED");
+		assertThat(item.downloadQueued()).isEqualTo(2);
+		assertThat(item.downloadRunning()).isEqualTo(1);
+		assertThat(item.downloadRetryWait()).isEqualTo(1);
+		assertThat(item.downloadCompleted()).isEqualTo(2);
+		assertThat(item.downloadSkipped()).isEqualTo(1);
+		assertThat(item.downloadFailed()).isEqualTo(1);
+		assertThat(item.latestStopReason()).isEqualTo("KNOWN_BOUNDARY");
+		assertThat(item.latestFetchWarning()).isEqualTo("cookie nearing expiry");
+	}
+
+	@Test
 	void keywordSearchMatchesTaskNameAddressPlatformAndDatabaseId() throws Exception {
 		CapturingJdbcTemplate jdbc = jdbcTemplate();
 		createSchema(jdbc);
@@ -129,7 +161,10 @@ class CollectDataServiceFindPageTest {
 				+ "trigger_type TEXT NOT NULL, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
 				+ "planned_count INTEGER, inserted_count INTEGER, skipped_existing_count INTEGER, failed_item_count INTEGER, "
 				+ "started_at DATETIME, heartbeat_at DATETIME, finished_at DATETIME, error_code TEXT, error_message TEXT, "
-				+ "error_detail TEXT, created_at DATETIME NOT NULL)");
+				+ "error_detail TEXT, fetch_stop_reason TEXT, fetch_warning TEXT, created_at DATETIME NOT NULL)");
+		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER, ordinal INTEGER, "
+				+ "work_id TEXT, decision TEXT, process_state TEXT, queue_generation TEXT, created_at DATETIME, "
+				+ "updated_at DATETIME)");
 		jdbc.execute("CREATE TABLE biz_job_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, job_type TEXT NOT NULL, "
 				+ "dedupe_key TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL, priority INTEGER NOT NULL, "
 				+ "available_at DATETIME NOT NULL, attempt_count INTEGER NOT NULL, max_attempts INTEGER NOT NULL, "

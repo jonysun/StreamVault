@@ -230,7 +230,20 @@ public class CollectDataService {
 				+ "WHERE q2.job_type = 'COLLECT_FETCH' AND q2.state IN ('QUEUED','RETRY_WAIT') AND ("
 				+ "q2.priority < q.priority OR (q2.priority = q.priority AND q2.available_at < q.available_at) "
 				+ "OR (q2.priority = q.priority AND q2.available_at = q.available_at AND q2.id <= q.id))) "
-				+ "ELSE NULL END AS queuePosition, r.heartbeat_at AS heartbeatAt "
+				+ "ELSE NULL END AS queuePosition, r.heartbeat_at AS heartbeatAt, r.state AS fetchState, "
+				+ "(SELECT COUNT(*) FROM biz_collect_run_item di WHERE di.run_id = r.id "
+				+ "AND di.queue_generation = 'FETCH_DOWNLOAD_V1' AND di.process_state = 'QUEUED') AS downloadQueued, "
+				+ "(SELECT COUNT(*) FROM biz_collect_run_item di WHERE di.run_id = r.id "
+				+ "AND di.queue_generation = 'FETCH_DOWNLOAD_V1' AND di.process_state = 'RUNNING') AS downloadRunning, "
+				+ "(SELECT COUNT(*) FROM biz_collect_run_item di WHERE di.run_id = r.id "
+				+ "AND di.queue_generation = 'FETCH_DOWNLOAD_V1' AND di.process_state = 'RETRY_WAIT') AS downloadRetryWait, "
+				+ "(SELECT COUNT(*) FROM biz_collect_run_item di WHERE di.run_id = r.id "
+				+ "AND di.queue_generation = 'FETCH_DOWNLOAD_V1' AND di.process_state = 'COMPLETED') AS downloadCompleted, "
+				+ "(SELECT COUNT(*) FROM biz_collect_run_item di WHERE di.run_id = r.id "
+				+ "AND di.queue_generation = 'FETCH_DOWNLOAD_V1' AND di.process_state LIKE 'SKIPPED_%') AS downloadSkipped, "
+				+ "(SELECT COUNT(*) FROM biz_collect_run_item di WHERE di.run_id = r.id "
+				+ "AND di.queue_generation = 'FETCH_DOWNLOAD_V1' AND di.process_state = 'FAILED') AS downloadFailed, "
+				+ "r.fetch_stop_reason AS latestStopReason, r.fetch_warning AS latestFetchWarning "
 				+ "FROM biz_collect_data c "
 				+ "LEFT JOIN biz_job_queue q ON q.id = (SELECT qx.id FROM biz_job_queue qx "
 				+ "WHERE qx.job_type = 'COLLECT_FETCH' AND qx.dedupe_key = ('collect:' || CAST(c.id AS TEXT)) "
@@ -252,7 +265,10 @@ public class CollectDataService {
 				row.getString("generatenfo"), row.getString("taskcron"), row.getString("lastfetchtime"),
 				nullableInteger(row, "lastfetchcount"), nullableLong(row, "activeJobId"),
 				nullableLong(row, "activeRunId"), row.getString("jobState"), row.getString("runState"),
-				nullableInteger(row, "queuePosition"), row.getString("heartbeatAt")), pageParameters.toArray());
+				nullableInteger(row, "queuePosition"), row.getString("heartbeatAt"), row.getString("fetchState"),
+				row.getLong("downloadQueued"), row.getLong("downloadRunning"), row.getLong("downloadRetryWait"),
+				row.getLong("downloadCompleted"), row.getLong("downloadSkipped"), row.getLong("downloadFailed"),
+				row.getString("latestStopReason"), row.getString("latestFetchWarning")), pageParameters.toArray());
 		Page<CollectTaskListItem> page = new PageImpl<>(items, PageRequest.of(pageNo, pageSize),
 				total == null ? 0 : total);
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);

@@ -81,6 +81,8 @@ public class DatabaseIndexInitializer {
 						+ "WHERE state IN ('QUEUED', 'FETCHING', 'PROCESSING')",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_task_created "
 						+ "ON biz_collect_run(collect_task_id, created_at DESC, id DESC)",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_task_id "
+						+ "ON biz_collect_run(collect_task_id, id DESC)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_state_heartbeat "
 						+ "ON biz_collect_run(state, heartbeat_at)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_run_ordinal "

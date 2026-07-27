@@ -46,6 +46,7 @@ class DatabaseIndexInitializerTest {
 				.anyMatch(sql -> sql.contains("idx_author_enrichment_due"))
 				.anyMatch(sql -> sql.contains("uq_collect_run_active_task"))
 				.anyMatch(sql -> sql.contains("idx_collect_run_task_created"))
+				.contains("CREATE INDEX IF NOT EXISTS idx_collect_run_task_id ON biz_collect_run(collect_task_id, id DESC)")
 				.contains(
 						"CREATE INDEX IF NOT EXISTS idx_collect_run_item_download_claim ON biz_collect_run_item(queue_generation, process_state, available_at, ordinal, created_at, id)",
 						"CREATE INDEX IF NOT EXISTS idx_collect_run_item_active_work ON biz_collect_run_item(platform_key, work_id, process_state)",
@@ -88,6 +89,8 @@ class DatabaseIndexInitializerTest {
 				"platform_key", "work_id", "process_state");
 		assertThat(indexColumns(jdbcTemplate, "idx_collect_run_item_run_state")).containsExactly(
 				"run_id", "process_state");
+		assertThat(indexColumns(jdbcTemplate, "idx_collect_run_task_id")).containsExactly(
+				"collect_task_id", "id");
 	}
 
 	private JdbcTemplate jdbcTemplate(String filename) throws Exception {
