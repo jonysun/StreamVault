@@ -1,6 +1,15 @@
 import json
+import argparse
+import contextlib
+import importlib.util
+import io
+import os
+import pathlib
 import sys
+import tempfile
+import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -619,6 +628,23 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("WORKS_UNAVAILABLE", result["outcome"])
 
+    async def test_null_aweme_list_without_pagination_keys_is_works_unavailable(self):
+        result = await paginate(
+            fake_fetch([{"aweme_list": None}]),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "initial",
+        )
+
+        self.assertEqual("WORKS_UNAVAILABLE", result["outcome"])
+        self.assertEqual("0", result["lastCursor"])
+        summary = result["diagnostics"]["lastResponseSummary"]
+        self.assertEqual(0, summary["hasMore"])
+        self.assertEqual("0", summary["nextCursor"])
+
     async def test_audit_ignores_known_boundary(self):
         result = await paginate(
             fake_fetch(
@@ -767,10 +793,618 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
         summary = result["diagnostics"]["lastResponseSummary"]
         self.assertEqual("null", summary["awemeListState"])
         self.assertEqual(0, summary["itemCount"])
-        self.assertEqual(1, summary["hasMore"])
-        self.assertEqual("7", summary["nextCursor"])
+        self.assertEqual(0, summary["hasMore"])
+        self.assertEqual("0", summary["nextCursor"])
         self.assertEqual([], summary["observedAwemeIds"])
         self.assertNotIn("must-not-appear", json.dumps(result["diagnostics"]))
+
+
+class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.module_path = SCRIPT_DIR / "douyin.py"
+
+    async def test_uses_profile_precheck_and_direct_page_requests(self):
+        profile = {"status_code": 0, "user": {"nickname": "author"}}
+        pages = [{
+            "status_code": 0,
+            "aweme_list": [{
+                "aweme_id": "new-1", "desc": "first", "create_time": 200,
+                "author": {"nickname": "author", "sec_uid": "MS4-author"},
+                "video": {"cover": {"url_list": ["cover"]}},
+            }],
+            "has_more": 0,
+            "max_cursor": 10,
+        }]
+        module, crawlers = self._load_command_module(profile, pages)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            known_file = pathlib.Path(temp_dir) / "known.json"
+            output_file = pathlib.Path(temp_dir) / "result.json"
+            known_file.write_text("[]", encoding="utf-8")
+            await module.fetch_douyin_list_incremental(
+                "sessionid=secret", "MS4-author", str(known_file), "", 20,
+                20, 3, "initial", 1, str(output_file)
+            )
+            result = json.loads(output_file.read_text(encoding="utf-8"))
+
+        crawler = crawlers[0]
+        self.assertEqual("INITIAL_LIMIT", result["outcome"])
+        self.assertEqual([0], crawler.post_cursors)
+        self.assertEqual(["MS4-author"], crawler.profile_ids)
+        self.assertEqual(20, crawler.post_params[0].count)
+
+    async def test_deactivated_profile_writes_successful_empty_envelope(self):
+        module, crawlers = self._load_command_module(
+            {"status_code": 0, "user": {"special_state_info": "账号已注销"}}, []
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            known_file = pathlib.Path(temp_dir) / "known.json"
+            output_file = pathlib.Path(temp_dir) / "result.json"
+            known_file.write_text("[]", encoding="utf-8")
+            await module.fetch_douyin_list_incremental(
+                "cookie", "MS4-author", str(known_file), "", 20, 20, 3,
+                "incremental", 0, str(output_file)
+            )
+            result = json.loads(output_file.read_text(encoding="utf-8"))
+
+        crawler = crawlers[0]
+        self.assertEqual("ACCOUNT_DEACTIVATED", result["outcome"])
+        self.assertEqual([], result["items"])
+        self.assertEqual([], crawler.post_cursors)
+        self.assertIn("profileStatus", result["diagnostics"])
+
+    async def test_verification_profile_emits_structured_nonzero_failure(self):
+        module, _ = self._load_command_module(
+            {
+                "status_code": 10000,
+                "status_msg": "请完成验证码后登录",
+                "raw_payload": "must-not-appear",
+            },
+            [],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            await module.run_incremental_command(args)
+
+        self.assertNotEqual(0, raised.exception.code)
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        profile = payload["diagnostics"]["profileStatus"]
+        self.assertEqual(10000, profile["statusCode"])
+        self.assertIn("raw_payload", profile["topLevelKeys"])
+        self.assertNotIn("must-not-appear", stderr.getvalue())
+        self.assertNotIn("sessionid=secret", stderr.getvalue())
+
+    async def test_structured_profile_captcha_is_cookie_failure(self):
+        module, _ = self._load_command_module(
+            {
+                "status_code": 0,
+                "user": {
+                    "nickname": "author",
+                    "captcha": {"verify_id": "bounded-only"},
+                },
+            },
+            [],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+
+    async def test_structured_page_verification_signals_are_cookie_failures(self):
+        signals = (
+            {"verify_status": 1},
+            {"verify_required": True},
+            {"captcha": {"status": "pending"}},
+            {"login_status": "expired"},
+        )
+        for signal in signals:
+            with self.subTest(signal=signal):
+                module, _ = self._load_command_module(
+                    {"status_code": 0, "user": {"nickname": "author"}},
+                    [{
+                        "status_code": 0,
+                        "aweme_list": [],
+                        "has_more": 0,
+                        "max_cursor": 0,
+                        **signal,
+                    }],
+                )
+                args = self._args()
+
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+                    await module.run_incremental_command(args)
+
+                payload = self._error_payload(stderr.getvalue())
+                self.assertEqual(
+                    "F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"]
+                )
+
+    async def test_structured_verification_success_values_are_not_failures(self):
+        module, _ = self._load_command_module(
+            {
+                "status_code": 0,
+                "verify_status": "passed",
+                "verify_required": "not_required",
+                "user": {
+                    "nickname": "author",
+                    "captcha": {"status": "success"},
+                },
+            },
+            [{
+                "status_code": 0,
+                "captcha": {"result": "ok"},
+                "verify_status": "pass",
+                "verify_required": "no",
+                "aweme_list": [],
+                "has_more": 0,
+                "max_cursor": 0,
+            }],
+        )
+        args = self._args()
+
+        result = await module.fetch_douyin_list_incremental(
+            args.cookie, args.sec_user_id, args.known_ids_file,
+            args.last_seen_publish_time, args.known_boundary, args.max_pages,
+            args.empty_page_limit, args.mode, args.max_items, args.output,
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+
+    async def test_unknown_structured_verification_strings_are_not_failures(self):
+        module, _ = self._load_command_module(
+            {
+                "status_code": 0,
+                "verify_status": "future-state",
+                "user": {"nickname": "author"},
+            },
+            [{
+                "status_code": 0,
+                "verify_required": "upstream-extension",
+                "aweme_list": [],
+                "has_more": 0,
+                "max_cursor": 0,
+            }],
+        )
+        args = self._args()
+
+        result = await module.fetch_douyin_list_incremental(
+            args.cookie, args.sec_user_id, args.known_ids_file,
+            args.last_seen_publish_time, args.known_boundary, args.max_pages,
+            args.empty_page_limit, args.mode, args.max_items, args.output,
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+
+    async def test_normal_login_status_is_not_verification_failure(self):
+        module, _ = self._load_command_module(
+            {
+                "status_code": 0,
+                "login_status": "login_success",
+                "user": {"nickname": "author"},
+            },
+            [{
+                "status_code": 0,
+                "login_status": 1,
+                "aweme_list": [],
+                "has_more": 0,
+                "max_cursor": 0,
+            }],
+        )
+        args = self._args()
+
+        result = await module.fetch_douyin_list_incremental(
+            args.cookie, args.sec_user_id, args.known_ids_file,
+            args.last_seen_publish_time, args.known_boundary, args.max_pages,
+            args.empty_page_limit, args.mode, args.max_items, args.output,
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+
+    async def test_verification_page_emits_cookie_failure_not_schema_failure(self):
+        cookie = (
+            "sid_guard=guard-secret; sid_tt=tt-secret; "
+            "passport_auth_status=auth-secret"
+        )
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [{
+                "status_code": 10000,
+                "status_msg": "login expired " + cookie,
+                "raw_payload": "must-not-appear",
+            }],
+        )
+        args = self._args(cookie)
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        page = payload["diagnostics"]["lastPage"]
+        self.assertEqual(1, page["page"])
+        self.assertEqual("0", page["cursor"])
+        self.assertEqual(10000, page["statusCode"])
+        self.assertIn("raw_payload", page["topLevelKeys"])
+        for secret in (cookie, "guard-secret", "tt-secret", "auth-secret", "must-not-appear"):
+            self.assertNotIn(secret, output)
+
+    async def test_short_numeric_cookie_values_do_not_corrupt_diagnostic_json(self):
+        cookie = "passport_auth_status=0; flag=1; sid_guard=guard-secret"
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [{
+                "status_code": 10000,
+                "status_msg": "login required cookie=" + cookie,
+                "aweme_list": [],
+                "has_more": 0,
+                "max_cursor": 7,
+            }],
+        )
+        args = self._args(cookie)
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        page = payload["diagnostics"]["lastPage"]
+        self.assertEqual(10000, page["statusCode"])
+        self.assertEqual(1, page["page"])
+        self.assertEqual(0, page["itemCount"])
+        self.assertEqual(0, page["hasMore"])
+        self.assertEqual("7", page["nextCursor"])
+        self.assertNotIn(cookie, output)
+        self.assertNotIn("passport_auth_status=0", output)
+        self.assertNotIn("guard-secret", output)
+
+    async def test_profile_request_verification_exception_is_cookie_failure(self):
+        cookie = "sid_guard=guard-secret; passport_auth_status=0"
+        module, _ = self._load_command_module(
+            RuntimeError("captcha verification required guard-secret"), []
+        )
+        args = self._args(cookie)
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        self.assertEqual("NoneType", payload["diagnostics"]["profileStatus"]["responseType"])
+        self.assertNotIn("guard-secret", output)
+        self.assertNotIn("captcha verification required", output)
+
+    async def test_page_request_exception_classification_uses_safe_markers(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [RuntimeError("login expired; raw upstream detail")],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        self.assertEqual(1, payload["diagnostics"]["lastPage"]["page"])
+        self.assertNotIn("raw upstream detail", output)
+
+    async def test_non_verification_page_request_exception_remains_schema_error(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [RuntimeError("network timeout with raw detail")],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        self.assertEqual("UPSTREAM_SCHEMA_ERROR", payload["errorCode"])
+        self.assertNotIn("network timeout with raw detail", output)
+
+    async def test_top_level_special_state_is_deactivated(self):
+        module, crawlers = self._load_command_module(
+            {"status_code": 0, "special_state_info": {"type": 1}}, []
+        )
+        args = self._args()
+
+        result = await module.fetch_douyin_list_incremental(
+            args.cookie, args.sec_user_id, args.known_ids_file,
+            args.last_seen_publish_time, args.known_boundary, args.max_pages,
+            args.empty_page_limit, args.mode, args.max_items, args.output,
+        )
+
+        self.assertEqual("ACCOUNT_DEACTIVATED", result["outcome"])
+        self.assertEqual([], crawlers[0].post_cursors)
+
+    async def test_page_schema_error_emits_structured_nonzero_failure(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [{"aweme_list": [], "has_more": 0, "raw_payload": "must-not-appear"}],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            await module.run_incremental_command(args)
+
+        self.assertNotEqual(0, raised.exception.code)
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("UPSTREAM_SCHEMA_ERROR", payload["errorCode"])
+        page = payload["diagnostics"]["lastPage"]
+        self.assertEqual("list", page["awemeListState"])
+        self.assertEqual(0, page["itemCount"])
+        self.assertNotIn("must-not-appear", stderr.getvalue())
+
+    async def test_nonzero_page_status_without_login_marker_is_schema_error(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [{"status_code": 9, "status_msg": "upstream denied"}],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("UPSTREAM_SCHEMA_ERROR", payload["errorCode"])
+        self.assertEqual(9, payload["diagnostics"]["lastPage"]["statusCode"])
+
+    async def test_null_aweme_without_pagination_keys_is_works_unavailable(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [{"status_code": 0, "aweme_list": None}],
+        )
+        args = self._args()
+
+        result = await module.fetch_douyin_list_incremental(
+            args.cookie, args.sec_user_id, args.known_ids_file,
+            args.last_seen_publish_time, args.known_boundary, args.max_pages,
+            args.empty_page_limit, args.mode, args.max_items, args.output,
+        )
+
+        self.assertEqual("WORKS_UNAVAILABLE", result["outcome"])
+        self.assertEqual("0", result["lastCursor"])
+
+    async def test_null_aweme_without_status_code_is_schema_error(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [{"aweme_list": None}],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("UPSTREAM_SCHEMA_ERROR", payload["errorCode"])
+        page = payload["diagnostics"]["lastPage"]
+        self.assertIsNone(page["statusCode"])
+        self.assertEqual("null", page["awemeListState"])
+        self.assertIn("aweme_list", page["topLevelKeys"])
+
+    async def test_delays_once_before_second_page_only(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [
+                {
+                    "status_code": 0,
+                    "aweme_list": [],
+                    "has_more": 1,
+                    "max_cursor": 10,
+                },
+                {
+                    "status_code": 0,
+                    "aweme_list": [],
+                    "has_more": 0,
+                    "max_cursor": 20,
+                },
+            ],
+        )
+        delays = []
+
+        async def record_delay(page_number, delay_seconds):
+            delays.append((page_number, delay_seconds))
+
+        module._configured_page_delay_seconds = lambda: 0.75
+        module._delay_before_page = record_delay
+        args = self._args()
+
+        result = await module.fetch_douyin_list_incremental(
+            args.cookie, args.sec_user_id, args.known_ids_file,
+            args.last_seen_publish_time, args.known_boundary, args.max_pages,
+            args.empty_page_limit, args.mode, args.max_items, args.output,
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+        self.assertEqual([(2, 0.75)], delays)
+
+    async def test_page_delay_environment_is_validated(self):
+        module, _ = self._load_command_module({}, [])
+
+        for value in ("-0.1", "10.1", "nan", "not-a-number"):
+            with self.subTest(value=value), mock.patch.dict(
+                os.environ,
+                {"STREAMVAULT_DOUYIN_PAGE_DELAY_SECONDS": value},
+            ):
+                with self.assertRaises(ValueError):
+                    module._configured_page_delay_seconds()
+
+    async def test_nested_item_schema_error_keeps_only_bounded_page_summary(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [{
+                "status_code": 0,
+                "aweme_list": [{
+                    "aweme_id": "bad-1", "create_time": 100,
+                    "author": ["invalid"],
+                }],
+                "has_more": 0,
+                "max_cursor": 7,
+                "raw_payload": "must-not-appear",
+            }],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        payload = self._error_payload(stderr.getvalue())
+        page = payload["diagnostics"]["lastPage"]
+        self.assertEqual("UPSTREAM_SCHEMA_ERROR", payload["errorCode"])
+        self.assertEqual(1, page["itemCount"])
+        self.assertEqual(0, page["hasMore"])
+        self.assertEqual("7", page["nextCursor"])
+        self.assertNotIn("invalid", stderr.getvalue())
+        self.assertNotIn("must-not-appear", stderr.getvalue())
+
+    async def test_actual_argparse_dispatch_wires_incremental_arguments(self):
+        module, _ = self._load_command_module({}, [])
+        captured = []
+
+        async def capture(args):
+            captured.append(args)
+
+        module.run_incremental_command = capture
+        argv = [
+            "douyin.py", "fetch_douyin_list_incremental",
+            "--cookie", "sid_tt=secret",
+            "--sec_user_id", "MS4-author",
+            "--known_ids_file", "known.json",
+            "--last_seen_publish_time", "",
+            "--known_boundary", "20",
+            "--max_pages", "30",
+            "--empty_page_limit", "3",
+            "--mode", "audit",
+            "--max_items", "41",
+            "--output", "result.json",
+        ]
+
+        with mock.patch.object(sys, "argv", argv):
+            await module.main()
+
+        self.assertEqual(1, len(captured))
+        args = captured[0]
+        self.assertEqual("", args.last_seen_publish_time)
+        self.assertEqual("audit", args.mode)
+        self.assertEqual(41, args.max_items)
+        self.assertEqual("known.json", args.known_ids_file)
+        self.assertEqual("result.json", args.output)
+
+    def _args(self, cookie="sessionid=secret"):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        known_file = pathlib.Path(temp_dir.name) / "known.json"
+        known_file.write_text("[]", encoding="utf-8")
+        return argparse.Namespace(
+            cookie=cookie, sec_user_id="MS4-author",
+            known_ids_file=str(known_file), last_seen_publish_time="",
+            known_boundary=20, max_pages=20, empty_page_limit=3,
+            mode="incremental", max_items=0,
+            output=str(pathlib.Path(temp_dir.name) / "result.json"),
+        )
+
+    def _error_payload(self, output):
+        prefix = "stream-vault-fetch-error="
+        line = next(line for line in output.splitlines() if line.startswith(prefix))
+        return json.loads(line[len(prefix):])
+
+    def _load_command_module(self, profile_response, post_responses):
+        crawler_instances = []
+
+        class FakeUserProfile:
+            def __init__(self, sec_user_id):
+                self.sec_user_id = sec_user_id
+
+        class FakeUserPost:
+            def __init__(self, max_cursor, count, sec_user_id):
+                self.max_cursor = max_cursor
+                self.count = count
+                self.sec_user_id = sec_user_id
+
+        class FakeCrawler:
+            def __init__(self, kwargs):
+                self.kwargs = kwargs
+                self.profile_ids = []
+                self.post_cursors = []
+                self.post_params = []
+                self._pages = list(post_responses)
+                crawler_instances.append(self)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return None
+
+            async def fetch_user_profile(self, params):
+                self.profile_ids.append(params.sec_user_id)
+                if isinstance(profile_response, Exception):
+                    raise profile_response
+                return profile_response
+
+            async def fetch_user_post(self, params):
+                self.post_cursors.append(params.max_cursor)
+                self.post_params.append(params)
+                response = self._pages.pop(0)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+        fake_modules = {
+            "f2": types.ModuleType("f2"),
+            "f2.apps": types.ModuleType("f2.apps"),
+            "f2.apps.douyin": types.ModuleType("f2.apps.douyin"),
+            "f2.apps.douyin.handler": types.ModuleType("f2.apps.douyin.handler"),
+            "f2.apps.douyin.crawler": types.ModuleType("f2.apps.douyin.crawler"),
+            "f2.apps.douyin.model": types.ModuleType("f2.apps.douyin.model"),
+            "f2.log": types.ModuleType("f2.log"),
+            "f2.log.logger": types.ModuleType("f2.log.logger"),
+        }
+        fake_modules["f2.apps.douyin.handler"].DouyinHandler = object
+        fake_modules["f2.apps.douyin.crawler"].DouyinCrawler = FakeCrawler
+        fake_modules["f2.apps.douyin.model"].UserProfile = FakeUserProfile
+        fake_modules["f2.apps.douyin.model"].UserPost = FakeUserPost
+        fake_modules["f2.log.logger"].logger = types.SimpleNamespace(
+            setLevel=lambda *_: None
+        )
+
+        saved_modules = {name: sys.modules.get(name) for name in fake_modules}
+        sys.modules.update(fake_modules)
+        try:
+            module_name = "douyin_command_under_test"
+            spec = importlib.util.spec_from_file_location(module_name, self.module_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        finally:
+            for name, previous in saved_modules.items():
+                if previous is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = previous
+
+        return module, crawler_instances
 
 
 if __name__ == "__main__":

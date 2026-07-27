@@ -6,7 +6,7 @@ _SUMMARY_ID_LIMIT = 20
 _SUMMARY_KEY_LENGTH = 64
 _SUMMARY_VALUE_LENGTH = 128
 _VALID_MODES = ("initial", "incremental", "audit")
-_REQUIRED_PAGE_KEYS = ("aweme_list", "has_more", "max_cursor")
+_REQUIRED_PAGINATION_KEYS = ("has_more", "max_cursor")
 
 
 class UpstreamSchemaError(ValueError):
@@ -104,19 +104,24 @@ def _validate_config(
     return parsed_watermark
 
 
-def _validate_page(raw):
+def _validate_page(raw, current_cursor):
     if not isinstance(raw, dict):
         raise UpstreamSchemaError("response must be an object")
 
-    missing_keys = [key for key in _REQUIRED_PAGE_KEYS if key not in raw]
+    if "aweme_list" not in raw:
+        raise UpstreamSchemaError("missing required keys: aweme_list")
+
+    aweme_list = raw["aweme_list"]
+    if aweme_list is None:
+        return None, 0, current_cursor
+    if not isinstance(aweme_list, list):
+        raise UpstreamSchemaError("aweme_list must be a list or null")
+
+    missing_keys = [key for key in _REQUIRED_PAGINATION_KEYS if key not in raw]
     if missing_keys:
         raise UpstreamSchemaError(
             "missing required keys: " + ", ".join(missing_keys)
         )
-
-    aweme_list = raw["aweme_list"]
-    if aweme_list is not None and not isinstance(aweme_list, list):
-        raise UpstreamSchemaError("aweme_list must be a list or null")
 
     raw_has_more = raw["has_more"]
     if isinstance(raw_has_more, bool):
@@ -273,7 +278,7 @@ async def paginate(
 
     for page_number in range(1, max_pages + 1):
         raw = await fetch_page(cursor)
-        aweme_list, has_more, next_cursor = _validate_page(raw)
+        aweme_list, has_more, next_cursor = _validate_page(raw, cursor)
         diagnostics["lastResponseSummary"] = _response_summary(
             raw, aweme_list, has_more, next_cursor
         )
