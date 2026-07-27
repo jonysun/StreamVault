@@ -1,0 +1,777 @@
+import json
+import sys
+import unittest
+from pathlib import Path
+
+
+SCRIPT_DIR = (
+    Path(__file__).resolve().parents[2] / "main" / "docker" / "buildx" / "script"
+)
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from douyin_incremental import UpstreamSchemaError, normalize_aweme, paginate
+
+
+def work(
+    aweme_id,
+    create_time,
+    *,
+    desc="",
+    nickname="author",
+    uid="MS4-author",
+    avatar="https://example.test/avatar.jpg",
+    cover=None,
+    images=None,
+):
+    return {
+        "aweme_id": aweme_id,
+        "desc": desc,
+        "create_time": create_time,
+        "author": {
+            "nickname": nickname,
+            "sec_uid": uid,
+            "avatar_thumb": {"url_list": [avatar]},
+        },
+        "video": {"cover": {"url_list": cover or ["https://example.test/cover.jpg"]}},
+        "images": images or [],
+    }
+
+
+def page(works, *, has_more, cursor):
+    return {
+        "aweme_list": works,
+        "has_more": has_more,
+        "max_cursor": cursor,
+    }
+
+
+def fake_fetch(pages):
+    remaining = iter(pages)
+    requested_cursors = []
+
+    async def fetch_page(cursor):
+        requested_cursors.append(cursor)
+        return next(remaining)
+
+    fetch_page.requested_cursors = requested_cursors
+    return fetch_page
+
+
+class NormalizeAwemeTest(unittest.TestCase):
+    def test_normalizes_required_fields_and_image_media_type(self):
+        normalized = normalize_aweme(
+            work(
+                123,
+                1720000000,
+                desc="caption",
+                nickname="display name",
+                uid="MS4-sec-uid",
+                avatar="avatar-url",
+                cover=["cover-1", "cover-2"],
+                images=[{"url_list": ["image-url"]}],
+            )
+        )
+
+        self.assertEqual(
+            {
+                "aweme_id": "123",
+                "desc": "caption",
+                "create_time": "1720000000",
+                "nickname": "display name",
+                "uid": "MS4-sec-uid",
+                "avatar_thumb": "avatar-url",
+                "cover": ["cover-1", "cover-2"],
+                "media_type": "image",
+            },
+            normalized,
+        )
+
+    def test_normalizes_missing_nested_values_without_errors(self):
+        normalized = normalize_aweme(
+            {
+                "aweme_id": None,
+                "desc": None,
+                "create_time": None,
+                "author": None,
+                "video": None,
+                "images": None,
+            }
+        )
+
+        self.assertEqual("", normalized["aweme_id"])
+        self.assertEqual("", normalized["desc"])
+        self.assertEqual("", normalized["create_time"])
+        self.assertEqual("", normalized["nickname"])
+        self.assertEqual("", normalized["uid"])
+        self.assertEqual("", normalized["avatar_thumb"])
+        self.assertEqual([], normalized["cover"])
+        self.assertEqual("video", normalized["media_type"])
+
+    def test_normalizes_numeric_aweme_id_and_create_time(self):
+        normalized = normalize_aweme(work(123, 0))
+
+        self.assertEqual("123", normalized["aweme_id"])
+        self.assertEqual("0", normalized["create_time"])
+
+    def test_rejects_invalid_normalized_scalar_fields(self):
+        cases = [
+            ("aweme_id", -1, "aweme_id must be a string, nonnegative integer, or null"),
+            ("aweme_id", True, "aweme_id must be a string, nonnegative integer, or null"),
+            ("aweme_id", 1.5, "aweme_id must be a string, nonnegative integer, or null"),
+            ("aweme_id", [], "aweme_id must be a string, nonnegative integer, or null"),
+            ("desc", 1, "desc must be a string or null"),
+            ("desc", {}, "desc must be a string or null"),
+            ("author.nickname", False, "author.nickname must be a string or null"),
+            ("author.nickname", [], "author.nickname must be a string or null"),
+            ("author.sec_uid", 1, "author.sec_uid must be a string or null"),
+            ("author.sec_uid", {}, "author.sec_uid must be a string or null"),
+            (
+                "create_time",
+                -1,
+                "create_time must be a string, nonnegative integer, or null",
+            ),
+            (
+                "create_time",
+                True,
+                "create_time must be a string, nonnegative integer, or null",
+            ),
+            (
+                "create_time",
+                1.5,
+                "create_time must be a string, nonnegative integer, or null",
+            ),
+            (
+                "create_time",
+                [],
+                "create_time must be a string, nonnegative integer, or null",
+            ),
+        ]
+
+        for path, value, message in cases:
+            with self.subTest(path=path, value=value):
+                raw_work = work("valid-id", 100)
+                target = raw_work
+                parts = path.split(".")
+                for part in parts[:-1]:
+                    target = target[part]
+                target[parts[-1]] = value
+                with self.assertRaisesRegex(
+                    UpstreamSchemaError, message.replace(".", r"\.")
+                ):
+                    normalize_aweme(raw_work)
+
+    def test_rejects_non_mapping_work(self):
+        with self.assertRaisesRegex(UpstreamSchemaError, "work must be an object"):
+            normalize_aweme("not-a-work")
+
+    def test_rejects_malformed_nested_media_and_author_fields(self):
+        cases = [
+            ({"author": "author"}, "author must be an object or null"),
+            ({"video": "video"}, "video must be an object or null"),
+            (
+                {"video": {"cover": "cover"}},
+                "video.cover must be an object or null",
+            ),
+            (
+                {"video": {"cover": {"url_list": "cover-url"}}},
+                "video.cover.url_list must be a list or null",
+            ),
+            (
+                {"author": {"avatar_thumb": "avatar"}},
+                "author.avatar_thumb must be an object or null",
+            ),
+            (
+                {"author": {"avatar_thumb": {"url_list": "avatar-url"}}},
+                "author.avatar_thumb.url_list must be a list or null",
+            ),
+            ({"images": "images"}, "images must be a list or null"),
+        ]
+
+        for raw_work, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(UpstreamSchemaError, message.replace(".", r"\.")):
+                    normalize_aweme(raw_work)
+
+    def test_rejects_non_string_urls_in_url_lists(self):
+        cases = [
+            (
+                {"video": {"cover": {"url_list": [123]}}},
+                "video.cover.url_list must contain only strings",
+            ),
+            (
+                {"author": {"avatar_thumb": {"url_list": [None]}}},
+                "author.avatar_thumb.url_list must contain only strings",
+            ),
+        ]
+
+        for raw_work, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(UpstreamSchemaError, message.replace(".", r"\.")):
+                    normalize_aweme(raw_work)
+
+
+class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_rejects_invalid_configuration_before_fetch(self):
+        cases = [
+            ("mode", "unknown"),
+            ("known_boundary", 0),
+            ("known_boundary", True),
+            ("max_pages", 0),
+            ("max_pages", 1.5),
+            ("empty_page_limit", -1),
+            ("max_items", -1),
+            ("max_items", False),
+            ("watermark", "not-an-epoch"),
+            ("watermark", -1),
+        ]
+        defaults = {
+            "known_ids": set(),
+            "watermark": None,
+            "known_boundary": 20,
+            "max_pages": 20,
+            "empty_page_limit": 3,
+            "mode": "initial",
+            "max_items": 0,
+        }
+
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                fetch_page = fake_fetch([page([], has_more=0, cursor=0)])
+                arguments = dict(defaults)
+                arguments[field] = value
+                with self.assertRaisesRegex(ValueError, field):
+                    await paginate(fetch_page, **arguments)
+                self.assertEqual([], fetch_page.requested_cursors)
+
+    async def test_rejects_invalid_upstream_page_schema(self):
+        cases = [
+            (None, "response must be an object"),
+            ({}, "missing required keys"),
+            (
+                {"aweme_list": [], "has_more": 0},
+                "missing required keys: max_cursor",
+            ),
+            (
+                {"aweme_list": {}, "has_more": 0, "max_cursor": 0},
+                "aweme_list must be a list or null",
+            ),
+            (
+                {"aweme_list": [], "has_more": 2, "max_cursor": 0},
+                "has_more must be boolean or integer 0/1",
+            ),
+            (
+                {"aweme_list": [], "has_more": "0", "max_cursor": 0},
+                "has_more must be boolean or integer 0/1",
+            ),
+            (
+                {"aweme_list": [], "has_more": 0, "max_cursor": None},
+                "max_cursor must be a nonnegative integer or ASCII decimal string",
+            ),
+            (
+                {"aweme_list": [], "has_more": 0, "max_cursor": []},
+                "max_cursor must be a nonnegative integer or ASCII decimal string",
+            ),
+        ]
+
+        for bad_cursor in (True, 1.5, -1, "", "cursor", "-1", " 1", "\u0661"):
+            cases.append(
+                (
+                    {"aweme_list": [], "has_more": 0, "max_cursor": bad_cursor},
+                    "max_cursor must be a nonnegative integer or ASCII decimal string",
+                )
+            )
+
+        for raw_page, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(UpstreamSchemaError, message.replace("/", r"\/")):
+                    await paginate(
+                        fake_fetch([raw_page]), set(), None, 20, 20, 3, "initial"
+                    )
+
+    async def test_ascii_decimal_cursor_preserves_string_type_for_next_fetch(self):
+        fetch_page = fake_fetch(
+            [
+                page([], has_more=1, cursor="001"),
+                page([], has_more=0, cursor=2),
+            ]
+        )
+
+        result = await paginate(
+            fetch_page, set(), None, 20, 20, 3, "initial"
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+        self.assertEqual([0, "001"], fetch_page.requested_cursors)
+        self.assertEqual("2", result["lastCursor"])
+
+    async def test_boolean_has_more_is_accepted(self):
+        result = await paginate(
+            fake_fetch([page([], has_more=False, cursor=0)]),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "initial",
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+
+    async def test_stops_after_known_streak_crosses_watermark(self):
+        fetch_page = fake_fetch(
+            [
+                page(
+                    [
+                        work("new-1", 200),
+                        work("known-1", 150),
+                        work("known-2", 140),
+                        work("not-observed", 130),
+                    ],
+                    has_more=1,
+                    cursor=100,
+                )
+            ]
+        )
+
+        result = await paginate(
+            fetch_page,
+            known_ids={"known-1", "known-2"},
+            watermark=150,
+            known_boundary=2,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+        )
+
+        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
+        self.assertEqual(["new-1"], result["newWorkIds"])
+        self.assertEqual(
+            ["new-1", "known-1", "known-2"],
+            [item["aweme_id"] for item in result["items"]],
+        )
+        self.assertEqual([False, True, True], [item["knownAtFetch"] for item in result["items"]])
+
+    async def test_new_work_resets_known_streak(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [
+                            work("known-1", 150),
+                            work("new-1", 145),
+                            work("known-2", 140),
+                            work("known-3", 130),
+                        ],
+                        has_more=1,
+                        cursor=10,
+                    )
+                ]
+            ),
+            known_ids={"known-1", "known-2", "known-3"},
+            watermark=150,
+            known_boundary=2,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+        )
+
+        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
+        self.assertEqual(4, len(result["items"]))
+
+    async def test_same_page_duplicate_is_known_and_advances_known_streak(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [
+                            work("duplicate", 200),
+                            work("duplicate", 100),
+                            work("not-observed", 90),
+                        ],
+                        has_more=1,
+                        cursor=10,
+                    )
+                ]
+            ),
+            known_ids=set(),
+            watermark=150,
+            known_boundary=1,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+        )
+
+        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
+        self.assertEqual(["duplicate"], result["newWorkIds"])
+        self.assertEqual(
+            [False, True], [item["knownAtFetch"] for item in result["items"]]
+        )
+        self.assertEqual(
+            ["duplicate", "duplicate"],
+            [item["aweme_id"] for item in result["items"]],
+        )
+
+    async def test_cross_page_duplicate_is_known_and_advances_known_streak(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page([work("duplicate", 200)], has_more=1, cursor=10),
+                    page(
+                        [work("duplicate", 100), work("not-observed", 90)],
+                        has_more=1,
+                        cursor=20,
+                    ),
+                ]
+            ),
+            known_ids=set(),
+            watermark=150,
+            known_boundary=1,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+        )
+
+        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
+        self.assertEqual(2, result["pagesFetched"])
+        self.assertEqual(["duplicate"], result["newWorkIds"])
+        self.assertEqual(
+            [False, True], [item["knownAtFetch"] for item in result["items"]]
+        )
+
+    async def test_empty_work_ids_are_neither_seen_nor_new(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [work("", 200), work("", 100)],
+                        has_more=0,
+                        cursor=10,
+                    )
+                ]
+            ),
+            known_ids={""},
+            watermark=150,
+            known_boundary=1,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+        )
+
+        self.assertEqual("NO_MORE", result["outcome"])
+        self.assertEqual([], result["newWorkIds"])
+        self.assertEqual(
+            [False, False], [item["knownAtFetch"] for item in result["items"]]
+        )
+
+    async def test_known_boundary_requires_watermark_to_be_crossed(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [work("known-1", 300), work("known-2", 250)],
+                        has_more=1,
+                        cursor=1,
+                    ),
+                    page([work("known-3", 190)], has_more=0, cursor=2),
+                ]
+            ),
+            known_ids={"known-1", "known-2", "known-3"},
+            watermark=200,
+            known_boundary=2,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+        )
+
+        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
+        self.assertEqual(2, result["pagesFetched"])
+
+    async def test_invalid_publish_times_do_not_satisfy_known_boundary(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [
+                            work("known-missing", None),
+                            work("known-bad", "not-an-epoch"),
+                            work("known-unicode-digit", "\u00b2"),
+                            work("new-later", 50),
+                        ],
+                        has_more=0,
+                        cursor=10,
+                    )
+                ]
+            ),
+            known_ids={
+                "known-missing",
+                "known-bad",
+                "known-unicode-digit",
+            },
+            watermark=1000,
+            known_boundary=2,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+        )
+
+        self.assertEqual("NO_MORE", result["outcome"])
+        self.assertEqual(["new-later"], result["newWorkIds"])
+        self.assertEqual(4, len(result["items"]))
+
+    async def test_initial_mode_respects_max_items_inside_page(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [work("1", 30), work("2", 20), work("3", 10)],
+                        has_more=1,
+                        cursor=99,
+                    )
+                ]
+            ),
+            known_ids=set(),
+            watermark=None,
+            known_boundary=20,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="initial",
+            max_items=2,
+        )
+
+        self.assertEqual("INITIAL_LIMIT", result["outcome"])
+        self.assertEqual(["1", "2"], result["newWorkIds"])
+        self.assertEqual(["1", "2"], [item["aweme_id"] for item in result["items"]])
+
+    async def test_empty_terminal_page_is_no_public_works(self):
+        result = await paginate(
+            fake_fetch([page([], has_more=0, cursor=0)]),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "initial",
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+        self.assertEqual(1, result["emptyPages"])
+
+    async def test_terminal_page_after_items_is_no_more(self):
+        result = await paginate(
+            fake_fetch([page([work("1", 100)], has_more=0, cursor=9)]),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "incremental",
+        )
+
+        self.assertEqual("NO_MORE", result["outcome"])
+        self.assertEqual("9", result["lastCursor"])
+
+    async def test_three_consecutive_empty_has_more_pages_are_empty_pagination(self):
+        result = await paginate(
+            fake_fetch([page([], has_more=1, cursor=i + 1) for i in range(3)]),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "initial",
+        )
+
+        self.assertEqual("EMPTY_PAGINATION", result["outcome"])
+        self.assertEqual(3, result["pagesFetched"])
+        self.assertEqual(3, result["emptyPages"])
+
+    async def test_nonempty_page_resets_consecutive_empty_page_count(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page([], has_more=1, cursor=1),
+                    page([work("1", 100)], has_more=1, cursor=2),
+                    page([], has_more=1, cursor=3),
+                    page([], has_more=0, cursor=4),
+                ]
+            ),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "audit",
+        )
+
+        self.assertEqual("NO_MORE", result["outcome"])
+        self.assertEqual(2, result["emptyPages"])
+
+    async def test_null_aweme_list_is_works_unavailable(self):
+        result = await paginate(
+            fake_fetch([{"aweme_list": None, "has_more": 0, "max_cursor": 0}]),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "initial",
+        )
+
+        self.assertEqual("WORKS_UNAVAILABLE", result["outcome"])
+
+    async def test_audit_ignores_known_boundary(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page([work("known-1", 100)], has_more=1, cursor=1),
+                    page([work("new-2", 90)], has_more=0, cursor=2),
+                ]
+            ),
+            {"known-1"},
+            100,
+            1,
+            20,
+            3,
+            "audit",
+        )
+
+        self.assertEqual("NO_MORE", result["outcome"])
+        self.assertEqual(["new-2"], result["newWorkIds"])
+
+    async def test_max_page_guard_returns_observed_items(self):
+        fetch_page = fake_fetch(
+            [
+                page([work("1", 200)], has_more=1, cursor=10),
+                page([work("2", 100)], has_more=1, cursor=20),
+            ]
+        )
+        result = await paginate(
+            fetch_page, set(), None, 20, 2, 3, "incremental"
+        )
+
+        self.assertEqual("MAX_PAGE_GUARD", result["outcome"])
+        self.assertEqual(2, result["pagesFetched"])
+        self.assertEqual("20", result["lastCursor"])
+        self.assertEqual([0, 10], fetch_page.requested_cursors)
+
+    async def test_result_has_exact_keys_diagnostics_and_ordered_unique_new_ids(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [work("new-2", 30), work("new-1", 20), work("new-2", 10)],
+                        has_more=0,
+                        cursor=55,
+                    )
+                ]
+            ),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "audit",
+        )
+
+        self.assertEqual(
+            {
+                "items",
+                "newWorkIds",
+                "outcome",
+                "pagesFetched",
+                "emptyPages",
+                "lastCursor",
+                "diagnostics",
+            },
+            set(result),
+        )
+        self.assertEqual(["new-2", "new-1"], result["newWorkIds"])
+        self.assertEqual(
+            {
+                "page": 1,
+                "cursor": "0",
+                "nextCursor": "55",
+                "hasMore": 0,
+                "awemeListState": "list",
+                "itemCount": 3,
+            },
+            result["diagnostics"]["pages"][0],
+        )
+
+    async def test_nonempty_response_summary_is_bounded_and_redacted(self):
+        works = [work("work-%02d" % index, 100 - index) for index in range(25)]
+        raw_page = page(works, has_more=0, cursor=55)
+        raw_page.update({"extra_%02d" % index: index for index in range(25)})
+        raw_page["sensitive_blob"] = "cookie=must-not-appear"
+
+        result = await paginate(
+            fake_fetch([raw_page]), set(), None, 20, 20, 3, "audit"
+        )
+
+        summary = result["diagnostics"]["lastResponseSummary"]
+        self.assertEqual("dict", summary["responseType"])
+        self.assertEqual("nonempty", summary["awemeListState"])
+        self.assertEqual(25, summary["itemCount"])
+        self.assertEqual(0, summary["hasMore"])
+        self.assertEqual("55", summary["nextCursor"])
+        self.assertEqual(20, len(summary["topLevelKeys"]))
+        self.assertEqual(29, summary["topLevelKeyCount"])
+        self.assertEqual(
+            ["work-%02d" % index for index in range(20)],
+            summary["observedAwemeIds"],
+        )
+        self.assertNotIn("must-not-appear", json.dumps(result["diagnostics"]))
+
+    async def test_latest_response_summary_describes_empty_page(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page([work("first", 100)], has_more=1, cursor=1),
+                    page([], has_more=0, cursor=2),
+                ]
+            ),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "audit",
+        )
+
+        summary = result["diagnostics"]["lastResponseSummary"]
+        self.assertEqual("empty", summary["awemeListState"])
+        self.assertEqual(0, summary["itemCount"])
+        self.assertEqual([], summary["observedAwemeIds"])
+        self.assertEqual("2", summary["nextCursor"])
+
+    async def test_latest_response_summary_describes_null_list(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    {
+                        "aweme_list": None,
+                        "has_more": 1,
+                        "max_cursor": 7,
+                        "raw_payload": "must-not-appear",
+                    }
+                ]
+            ),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "initial",
+        )
+
+        summary = result["diagnostics"]["lastResponseSummary"]
+        self.assertEqual("null", summary["awemeListState"])
+        self.assertEqual(0, summary["itemCount"])
+        self.assertEqual(1, summary["hasMore"])
+        self.assertEqual("7", summary["nextCursor"])
+        self.assertEqual([], summary["observedAwemeIds"])
+        self.assertNotIn("must-not-appear", json.dumps(result["diagnostics"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
