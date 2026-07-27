@@ -716,7 +716,7 @@ git commit -m "feat: add persistent collection download claims"
 - Modify: `backstage/src/main/java/com/flower/spirit/service/transaction/CollectDownloadTransaction.java`
 - Test: `backstage/src/test/java/com/flower/spirit/service/CollectDownloadServiceTest.java`
 
-- [ ] **Step 1: Write failing one-item processing tests**
+- [x] **Step 1: Write failing one-item processing tests**
 
 Mock `WorkIngestService` and test completed, duplicate, blocked, retriable network failure, and permanent validation failure. Most importantly, failure of work A must not touch work B:
 
@@ -735,13 +735,13 @@ void oneNetworkFailureSchedulesOnlyThatItemForRetry() {
 }
 ```
 
-- [ ] **Step 2: Run the service test and verify it fails**
+- [x] **Step 2: Run the service test and verify it fails**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDownloadServiceTest test`
 
 Expected: FAIL because the per-work processor does not exist.
 
-- [ ] **Step 3: Implement source URL, output directory, and ingest**
+- [x] **Step 3: Implement source URL, output directory, and ingest**
 
 For Douyin, use a canonical work URL whose ID can be parsed for either video or graphic metadata:
 
@@ -754,7 +754,7 @@ WorkIngestService.IngestResult result = workIngestService.ingest(source, directo
 
 Require `COMPLETED`; the current Douyin adapter is synchronous, so an unexpected `QUEUED` result becomes retryable `INGEST_NOT_TERMINAL` instead of being marked successful. `WorkIngestService` already refreshes signed detail/media URLs, stages files, verifies nonempty resources, atomically promotes them, persists media, and updates the canonical author profile.
 
-- [ ] **Step 4: Link the completed work back to its collection task**
+- [x] **Step 4: Link the completed work back to its collection task**
 
 After ingest commits, call a short `CollectDownloadTransaction.complete(claim, result, now)` that:
 
@@ -764,17 +764,17 @@ After ingest commits, call a short `CollectDownloadTransaction.complete(claim, r
 
 If ingest reports an existing media record, use `SKIPPED_EXISTING` rather than `COMPLETED`, but still ensure the collection-detail link exists.
 
-- [ ] **Step 5: Classify per-work errors without leaking them to the fetch worker**
+- [x] **Step 5: Classify per-work errors without leaking them to the fetch worker**
 
 `CollectDownloadException` carries `errorCode`, `retryable`, and root message. Map `IOException`, OkHttp `IllegalStateException`, `unexpected end of stream`, timeout, empty media, and detail refresh failures to retryable codes. Map blocked work to `SKIPPED_BLOCKED`; unsupported platform/schema validation is terminal. Save stack summaries through the transaction and return normally from `process` after recording the state.
 
-- [ ] **Step 6: Run one-item tests**
+- [x] **Step 6: Run one-item tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDownloadServiceTest,MediaDownloadServiceTest test`
 
 Expected: PASS; staging rollback behavior remains green.
 
-- [ ] **Step 7: Commit the per-work processor**
+- [x] **Step 7: Commit the per-work processor**
 
 ```bash
 git add backstage/src/main/java/com/flower/spirit/service/CollectDownloadException.java backstage/src/main/java/com/flower/spirit/service/CollectDownloadService.java backstage/src/main/java/com/flower/spirit/service/transaction/CollectDownloadTransaction.java backstage/src/test/java/com/flower/spirit/service/CollectDownloadServiceTest.java

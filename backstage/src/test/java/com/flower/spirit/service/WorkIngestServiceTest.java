@@ -147,6 +147,29 @@ class WorkIngestServiceTest {
 	}
 
 	@Test
+	void replacementIngestDoesNotShortCircuitOnExistingPersistence() {
+		stubAdapterPipeline();
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(44);
+		PersistenceResult existing = PersistenceResult.video(false, video);
+		when(persistenceService.findExisting(any())).thenReturn(Optional.of(existing));
+		when(mediaDownloadService.download(any(), any(),
+				org.mockito.ArgumentMatchers.argThat(WorkDownloadRequest::isReplaceExisting)))
+				.thenReturn(DownloadOutcome.completed(List.of(new WorkMediaResource(0,
+						WorkMediaResource.Type.VIDEO, null, Path.of("C:/media/work-1/video.mp4"), "mp4", Map.of())),
+						Path.of("C:/media/work-1")));
+		when(persistenceService.persist(any())).thenReturn(existing);
+
+		WorkIngestService.IngestResult result = service.ingest("https://youtu.be/work-1",
+				Path.of("C:/media/work-1"), true);
+
+		assertThat(result.status()).isEqualTo(DownloadResult.Status.COMPLETED);
+		verify(mediaDownloadService).download(eq(adapter), any(),
+				org.mockito.ArgumentMatchers.argThat(WorkDownloadRequest::isReplaceExisting));
+		verify(persistenceService).persist(any());
+	}
+
+	@Test
 	void postProcessingEnqueuesHlsCompletesHistoryAndNotifiesOnce() {
 		HlsTranscodeService hls = org.mockito.Mockito.mock(HlsTranscodeService.class);
 		WorkNotificationService notifications = org.mockito.Mockito.mock(WorkNotificationService.class);

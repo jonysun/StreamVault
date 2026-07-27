@@ -29,7 +29,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.sqlite.SQLiteDataSource;
 
+import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.platform.DownloadResult;
+import com.flower.spirit.platform.PlatformCatalog;
+import com.flower.spirit.platform.WorkContentType;
+import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.service.CollectDownloadClaim;
+import com.flower.spirit.service.WorkIngestService.IngestResult;
+import com.flower.spirit.service.WorkPersistenceService.PersistenceResult;
 
 class CollectDownloadTransactionTest {
 
@@ -103,7 +110,7 @@ class CollectDownloadTransactionTest {
 				insertItem(jdbc, id, 100, attempt, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", attempt, 4,
 						NOW, "work-" + attempt);
 				CollectDownloadClaim claim = new CollectDownloadClaim(id, 100, 10, "author", "douyin",
-						"work-" + attempt, "video", attempt, attempt, 4, "worker");
+						"work-" + attempt, "video", "NEW", attempt, attempt, 4, "worker");
 				transaction.retryOrFail(claim, "NETWORK_IO", "unexpected end of stream", "stack", NOW);
 				Map<String, Object> state = row(jdbc, id);
 				if (attempt < 4) {
@@ -152,18 +159,23 @@ class CollectDownloadTransactionTest {
 			insertTaskAndRun(jdbc, 10, 100, "author");
 			insertItem(jdbc, 1, 100, 1, "FAILED", "FETCH_DOWNLOAD_V1", "NEW", 4, 4, NOW, "failed");
 			insertItem(jdbc, 2, 100, 2, "COMPLETED", "FETCH_DOWNLOAD_V1", "NEW", 1, 4, NOW, "done");
+			insertItem(jdbc, 6, 100, 3, "FAILED", "FETCH_DOWNLOAD_V1", "AUDIT_REPAIR", 4, 4, NOW,
+					"audit-failed");
 			jdbc.update("UPDATE biz_collect_run_item SET error_code='NETWORK_IO', error_message='old', "
 					+ "error_detail='old-stack', finished_at=? WHERE id=1", Timestamp.from(NOW));
 			CollectDownloadTransaction transaction = context.getBean(CollectDownloadTransaction.class);
 
 			assertThat(transaction.manualRetry(1, NOW.plusSeconds(10))).isTrue();
 			assertThat(transaction.manualRetry(2, NOW.plusSeconds(10))).isFalse();
+			assertThat(transaction.manualRetry(6, NOW.plusSeconds(10))).isTrue();
 			assertThat(row(jdbc, 1)).containsEntry("process_state", "QUEUED")
 					.containsEntry("decision", "MANUAL_RETRY")
 					.containsEntry("attempt_count", 0)
 					.containsEntry("error_detail", "old-stack");
 			assertThat(row(jdbc, 1).get("finished_at")).isNull();
 			assertThat(row(jdbc, 2).get("process_state")).isEqualTo("COMPLETED");
+			assertThat(row(jdbc, 6)).containsEntry("process_state", "QUEUED")
+					.containsEntry("decision", "MANUAL_RETRY_AUDIT_REPAIR");
 		}
 	}
 
@@ -204,6 +216,65 @@ class CollectDownloadTransactionTest {
 		}
 	}
 
+	@Test
+	void completionLinksDetailRecountsProgressAndMarksDuplicatesWithoutAddingRows() throws Exception {
+		try (AnnotationConfigApplicationContext context = context(databasePath())) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			insertTaskAndRun(jdbc, 10, 100, "author");
+			insertItem(jdbc, 1, 100, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 1, 4, NOW, "work");
+			CollectDownloadTransaction transaction = context.getBean(CollectDownloadTransaction.class);
+			CollectDownloadClaim first = new CollectDownloadClaim(1, 100, 10, "author", "douyin", "work",
+					"video", "NEW", 1, 1, 4, "worker");
+
+			transaction.complete(first, completedResult(true), NOW);
+
+			assertThat(row(jdbc, 1).get("process_state")).isEqualTo("COMPLETED");
+			assertThat(jdbc.queryForMap("SELECT * FROM biz_collect_data_detail WHERE dataid=10 AND videoid='work'"))
+					.containsEntry("status", "已完成").containsEntry("mediatype", "video")
+					.containsEntry("videoname", "title");
+			assertThat(jdbc.queryForObject("SELECT carriedout FROM biz_collect_data WHERE id=10", String.class))
+					.isEqualTo("1");
+			jdbc.update("INSERT INTO biz_collect_data_detail(dataid, videoid, status, errorcode, errormsg) "
+					+ "VALUES(10, 'work', '下载失败', 'OLD_ERROR', 'old failure')");
+
+			jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id) VALUES(101, 10)");
+			insertItem(jdbc, 2, 101, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 1, 4,
+					NOW.plusSeconds(1), "work");
+			CollectDownloadClaim duplicate = new CollectDownloadClaim(2, 101, 10, "author", "douyin", "work",
+					"video", "NEW", 1, 1, 4, "worker");
+
+			transaction.complete(duplicate, completedResult(false), NOW.plusSeconds(2));
+
+			assertThat(row(jdbc, 2).get("process_state")).isEqualTo("SKIPPED_EXISTING");
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_data_detail WHERE dataid=10 AND videoid='work'",
+					Integer.class)).isEqualTo(2);
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_data_detail "
+					+ "WHERE dataid=10 AND videoid='work' AND (status<>'已完成' OR errorcode IS NOT NULL)",
+					Integer.class)).isZero();
+			assertThat(jdbc.queryForObject("SELECT carriedout FROM biz_collect_data WHERE id=10", String.class))
+					.isEqualTo("1");
+		}
+	}
+
+	@Test
+	void completionRollsBackDetailWhenLeaseNoLongerOwnsTheItem() throws Exception {
+		try (AnnotationConfigApplicationContext context = context(databasePath())) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			insertTaskAndRun(jdbc, 10, 100, "author");
+			insertItem(jdbc, 1, 100, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 1, 4, NOW, "work");
+			CollectDownloadClaim stale = new CollectDownloadClaim(1, 100, 10, "author", "douyin", "work",
+					"video", "NEW", 1, 1, 4, "old-lease");
+
+			assertThatThrownBy(() -> context.getBean(CollectDownloadTransaction.class)
+					.complete(stale, completedResult(true), NOW)).isInstanceOf(IllegalStateException.class);
+
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_data_detail", Integer.class)).isZero();
+			assertThat(row(jdbc, 1).get("process_state")).isEqualTo("RUNNING");
+		}
+	}
+
 	private void claim(CollectDownloadTransaction transaction, String worker, CountDownLatch start,
 			List<CollectDownloadClaim> claims, List<Throwable> failures) {
 		try {
@@ -235,7 +306,7 @@ class CollectDownloadTransactionTest {
 	}
 
 	private void createSchema(JdbcTemplate jdbc) {
-		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT)");
+		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, carriedout TEXT)");
 		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, collect_task_id INTEGER NOT NULL)");
 		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, "
 				+ "ordinal INTEGER NOT NULL, platform_key TEXT NOT NULL, work_id TEXT NOT NULL, media_type TEXT, "
@@ -244,6 +315,9 @@ class CollectDownloadTransactionTest {
 				+ "available_at TIMESTAMP, locked_by TEXT, locked_at TIMESTAMP, started_at TIMESTAMP, "
 				+ "finished_at TIMESTAMP, error_detail TEXT, queue_generation TEXT, created_at TIMESTAMP NOT NULL, "
 				+ "updated_at TIMESTAMP NOT NULL)");
+		jdbc.execute("CREATE TABLE biz_collect_data_detail (id INTEGER PRIMARY KEY AUTOINCREMENT, dataid INTEGER, "
+				+ "videoid TEXT, videoname TEXT, originaladdress TEXT, status TEXT, mediatype TEXT, detailjson TEXT, "
+				+ "processlog TEXT, errorcode TEXT, errormsg TEXT, createtime TEXT)");
 	}
 
 	private void insertTaskAndRun(JdbcTemplate jdbc, long taskId, long runId, String taskName) {
@@ -263,6 +337,16 @@ class CollectDownloadTransactionTest {
 
 	private Map<String, Object> row(JdbcTemplate jdbc, long id) {
 		return jdbc.queryForMap("SELECT * FROM biz_collect_run_item WHERE id=?", id);
+	}
+
+	private IngestResult completedResult(boolean created) {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(30);
+		WorkMetadata metadata = WorkMetadata.builder().platform(PlatformCatalog.requireByKey("douyin"))
+				.workId("work").contentType(WorkContentType.VIDEO).title("title")
+				.sourceUrl("https://www.douyin.com/video/work").mediaResources(List.of()).build();
+		return new IngestResult(DownloadResult.Status.COMPLETED, null, metadata,
+				PersistenceResult.video(created, video), created ? null : "work already exists", null);
 	}
 
 	private Instant asInstant(Object value) {

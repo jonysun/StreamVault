@@ -12,6 +12,9 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.flower.spirit.service.CollectDownloadClaim;
+import com.flower.spirit.service.WorkIngestService.IngestResult;
+import com.flower.spirit.platform.WorkContentType;
+import com.flower.spirit.platform.WorkMetadata;
 
 @Service
 public class CollectDownloadTransaction {
@@ -31,7 +34,7 @@ public class CollectDownloadTransaction {
 		Timestamp timestamp = Timestamp.from(now);
 		List<DownloadCandidate> candidates = jdbcTemplate.query(
 				"SELECT i.id, i.run_id, r.collect_task_id, t.taskname, i.platform_key, i.work_id, "
-						+ "i.media_type, i.ordinal, i.attempt_count, i.max_attempts "
+						+ "i.media_type, i.decision, i.ordinal, i.attempt_count, i.max_attempts "
 						+ "FROM biz_collect_run_item i "
 						+ "JOIN biz_collect_run r ON r.id = i.run_id "
 						+ "JOIN biz_collect_data t ON t.id = r.collect_task_id "
@@ -39,11 +42,12 @@ public class CollectDownloadTransaction {
 						+ "AND i.process_state IN ('QUEUED','RETRY_WAIT') "
 						+ "AND i.attempt_count < i.max_attempts "
 						+ "AND (i.available_at IS NULL OR i.available_at <= ?) "
-						+ "ORDER BY CASE WHEN i.decision = 'MANUAL_RETRY' THEN 0 ELSE 1 END, "
+						+ "ORDER BY CASE WHEN i.decision LIKE 'MANUAL_RETRY%' THEN 0 ELSE 1 END, "
 						+ "i.ordinal ASC, i.available_at ASC, i.created_at ASC, i.id ASC LIMIT 1",
 				(rs, rowNum) -> new DownloadCandidate(rs.getLong("id"), rs.getLong("run_id"),
 						rs.getInt("collect_task_id"), rs.getString("taskname"), rs.getString("platform_key"),
-						rs.getString("work_id"), rs.getString("media_type"), rs.getInt("ordinal"),
+						rs.getString("work_id"), rs.getString("media_type"), rs.getString("decision"),
+						rs.getInt("ordinal"),
 						rs.getInt("attempt_count"), rs.getInt("max_attempts")),
 				QUEUE_GENERATION, timestamp);
 		if (candidates.isEmpty()) {
@@ -59,8 +63,8 @@ public class CollectDownloadTransaction {
 				lockToken, timestamp, timestamp, timestamp, candidate.id(), QUEUE_GENERATION);
 		if (updated != 1) return null;
 		return new CollectDownloadClaim(candidate.id(), candidate.runId(), candidate.taskId(), candidate.taskName(),
-				candidate.platformKey(), candidate.workId(), candidate.mediaType(), candidate.ordinal(),
-				candidate.attemptCount() + 1, candidate.maxAttempts(), lockToken);
+				candidate.platformKey(), candidate.workId(), candidate.mediaType(), candidate.decision(),
+				candidate.ordinal(), candidate.attemptCount() + 1, candidate.maxAttempts(), lockToken);
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -102,10 +106,64 @@ public class CollectDownloadTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void skipBlocked(CollectDownloadClaim claim, String reason, Instant now) {
+		Timestamp timestamp = Timestamp.from(now);
+		int updated = jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'SKIPPED_BLOCKED', "
+				+ "available_at = NULL, locked_by = NULL, locked_at = NULL, finished_at = ?, "
+				+ "error_code = 'WORK_BLOCKED', error_message = ?, error_detail = NULL, updated_at = ? "
+				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'RUNNING' AND locked_by = ?",
+				timestamp, truncate(reason, 2048), timestamp, claim.id(), QUEUE_GENERATION, claim.lockToken());
+		requireTransition(updated, claim.id(), "SKIPPED_BLOCKED");
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void complete(CollectDownloadClaim claim, IngestResult result, Instant now) {
+		Timestamp timestamp = Timestamp.from(now);
+		WorkMetadata metadata = result.metadata();
+		boolean graphic = metadata.getContentType() != WorkContentType.VIDEO;
+		String mediaType = graphic ? "image" : "video";
+		String status = graphic ? "图文已完成" : "已完成";
+		String source = valueOr(metadata.getOriginalAddress(),
+				valueOr(metadata.getSourceUrl(), "https://www.douyin.com/video/" + claim.workId()));
+		String processState = result.persistence().created() ? "COMPLETED" : "SKIPPED_EXISTING";
+		String processLog = "download item completed; runId=" + claim.runId() + "; persistenceId="
+				+ result.persistence().id() + "; created=" + result.persistence().created();
+		List<Long> existing = jdbcTemplate.queryForList("SELECT id FROM biz_collect_data_detail "
+				+ "WHERE dataid = ? AND videoid = ? ORDER BY id ASC LIMIT 1", Long.class,
+				claim.taskId(), claim.workId());
+		if (existing.isEmpty()) {
+			jdbcTemplate.update("INSERT INTO biz_collect_data_detail "
+					+ "(dataid, videoid, videoname, originaladdress, status, mediatype, processlog, "
+					+ "errorcode, errormsg, createtime) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+					claim.taskId(), claim.workId(), valueOr(metadata.getTitle(), claim.workId()), source, status,
+					mediaType, processLog, now.toString());
+		} else {
+			jdbcTemplate.update("UPDATE biz_collect_data_detail SET videoname = ?, originaladdress = ?, status = ?, "
+					+ "mediatype = ?, processlog = ?, errorcode = NULL, errormsg = NULL "
+					+ "WHERE dataid = ? AND videoid = ?",
+					valueOr(metadata.getTitle(), claim.workId()), source, status, mediaType, processLog,
+					claim.taskId(), claim.workId());
+		}
+		int updated = jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = ?, "
+				+ "available_at = NULL, locked_by = NULL, locked_at = NULL, finished_at = ?, "
+				+ "error_code = NULL, error_message = NULL, error_detail = NULL, updated_at = ? "
+				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'RUNNING' AND locked_by = ?",
+				processState, timestamp, timestamp, claim.id(), QUEUE_GENERATION, claim.lockToken());
+		requireTransition(updated, claim.id(), processState);
+		Integer completed = jdbcTemplate.queryForObject("SELECT COUNT(DISTINCT videoid) FROM biz_collect_data_detail "
+				+ "WHERE dataid = ? AND (status LIKE '已完成%' OR status = '图文已完成')", Integer.class,
+				claim.taskId());
+		jdbcTemplate.update("UPDATE biz_collect_data SET carriedout = ? WHERE id = ?",
+				String.valueOf(completed == null ? 0 : completed), claim.taskId());
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public boolean manualRetry(long itemId, Instant now) {
 		Timestamp timestamp = Timestamp.from(now);
 		return jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'QUEUED', "
-				+ "decision = 'MANUAL_RETRY', attempt_count = 0, available_at = ?, locked_by = NULL, "
+				+ "decision = CASE WHEN decision LIKE '%AUDIT_REPAIR%' "
+				+ "THEN 'MANUAL_RETRY_AUDIT_REPAIR' ELSE 'MANUAL_RETRY' END, "
+				+ "attempt_count = 0, available_at = ?, locked_by = NULL, "
 				+ "locked_at = NULL, finished_at = NULL, updated_at = ? "
 				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'FAILED'",
 				timestamp, timestamp, itemId, QUEUE_GENERATION) == 1;
@@ -115,7 +173,9 @@ public class CollectDownloadTransaction {
 	public int retryFailedRun(long runId, Instant now) {
 		Timestamp timestamp = Timestamp.from(now);
 		return jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'QUEUED', "
-				+ "decision = 'MANUAL_RETRY', attempt_count = 0, available_at = ?, locked_by = NULL, "
+				+ "decision = CASE WHEN decision LIKE '%AUDIT_REPAIR%' "
+				+ "THEN 'MANUAL_RETRY_AUDIT_REPAIR' ELSE 'MANUAL_RETRY' END, "
+				+ "attempt_count = 0, available_at = ?, locked_by = NULL, "
 				+ "locked_at = NULL, finished_at = NULL, updated_at = ? "
 				+ "WHERE run_id = ? AND queue_generation = ? AND process_state = 'FAILED'",
 				timestamp, timestamp, runId, QUEUE_GENERATION);
@@ -163,7 +223,11 @@ public class CollectDownloadTransaction {
 		return value.substring(0, end);
 	}
 
+	private String valueOr(String value, String fallback) {
+		return value == null || value.isBlank() ? fallback : value;
+	}
+
 	private record DownloadCandidate(long id, long runId, int taskId, String taskName, String platformKey,
-			String workId, String mediaType, int ordinal, int attemptCount, int maxAttempts) {
+			String workId, String mediaType, String decision, int ordinal, int attemptCount, int maxAttempts) {
 	}
 }
