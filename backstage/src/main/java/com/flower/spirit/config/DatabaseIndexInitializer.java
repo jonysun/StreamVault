@@ -87,6 +87,12 @@ public class DatabaseIndexInitializer {
 						+ "ON biz_collect_run_item(run_id, platform_key, work_id)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_run_ordinal "
 						+ "ON biz_collect_run_item(run_id, ordinal)",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_download_claim "
+						+ "ON biz_collect_run_item(queue_generation, process_state, available_at, ordinal, created_at, id)",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_active_work "
+						+ "ON biz_collect_run_item(platform_key, work_id, process_state)",
+				"CREATE INDEX IF NOT EXISTS idx_collect_run_item_run_state "
+						+ "ON biz_collect_run_item(run_id, process_state)",
 				"CREATE UNIQUE INDEX IF NOT EXISTS uq_collect_run_event_sequence "
 						+ "ON biz_collect_run_event(run_id, sequence)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_event_run_sequence "

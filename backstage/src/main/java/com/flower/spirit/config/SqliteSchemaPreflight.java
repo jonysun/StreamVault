@@ -1,8 +1,11 @@
 package com.flower.spirit.config;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +30,7 @@ public class SqliteSchemaPreflight {
 			"biz_collect_run_event",
 			"biz_job_queue",
 			"biz_database_maintenance_operation");
+	private static final Map<String, List<String>> REQUIRED_PIPELINE_COLUMNS = requiredPipelineColumns();
 
 	private final JdbcTemplate jdbcTemplate;
 
@@ -34,12 +38,13 @@ public class SqliteSchemaPreflight {
 		this.jdbcTemplate = jdbcTemplate;
 	}
 
-	@Order(10)
+	@Order(180)
 	@EventListener(ApplicationReadyEvent.class)
 	public void verifyIdentitySchemas() {
 		for (String table : IDENTITY_TABLES) {
 			verifyIdentitySchema(table);
 		}
+		REQUIRED_PIPELINE_COLUMNS.forEach(this::verifyRequiredColumns);
 	}
 
 	void verifyIdentitySchema(String table) {
@@ -65,6 +70,37 @@ public class SqliteSchemaPreflight {
 					+ table + ": expected a single id INTEGER PRIMARY KEY; no automatic table rebuild was attempted");
 		}
 		logger.info("SQLite identity preflight passed: {}.id", table);
+	}
+
+	private void verifyRequiredColumns(String table, List<String> requiredColumns) {
+		List<Map<String, Object>> columns = jdbcTemplate.queryForList("PRAGMA table_info(" + table + ")");
+		if (columns.isEmpty()) {
+			logger.info("SQLite pipeline preflight skipped because Hibernate has not created table: {}", table);
+			return;
+		}
+
+		Set<String> existingColumns = columns.stream()
+				.map(column -> String.valueOf(column.get("name")).toLowerCase(Locale.ROOT))
+				.collect(Collectors.toSet());
+		List<String> missingColumns = requiredColumns.stream()
+				.filter(column -> !existingColumns.contains(column))
+				.toList();
+		if (!missingColumns.isEmpty()) {
+			throw new IllegalStateException("SQLite schema is missing required collection pipeline columns for "
+					+ table + ": " + String.join(", ", missingColumns));
+		}
+		logger.info("SQLite collection pipeline preflight passed: {}", table);
+	}
+
+	private static Map<String, List<String>> requiredPipelineColumns() {
+		Map<String, List<String>> columns = new LinkedHashMap<>();
+		columns.put("biz_collect_data", List.of(
+				"last_successful_fetch_at", "last_seen_publish_time", "last_seen_work_id"));
+		columns.put("biz_collect_run", List.of("fetch_stop_reason", "fetch_warning"));
+		columns.put("biz_collect_run_item", List.of(
+				"attempt_count", "max_attempts", "available_at", "locked_by", "locked_at", "started_at",
+				"finished_at", "error_detail", "queue_generation"));
+		return Map.copyOf(columns);
 	}
 
 	private int intValue(Object value) {

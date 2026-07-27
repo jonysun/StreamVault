@@ -49,4 +49,94 @@ public class CollectRunItemEntity implements Serializable {
 	private Date createdAt;
 	@Column(name = "updated_at", nullable = false)
 	private Date updatedAt;
+	@Column(name = "attempt_count", nullable = false)
+	private Integer attemptCount;
+	@Column(name = "max_attempts", nullable = false)
+	private Integer maxAttempts;
+	@Column(name = "available_at")
+	private Date availableAt;
+	@Column(name = "locked_by")
+	private String lockedBy;
+	@Column(name = "locked_at")
+	private Date lockedAt;
+	@Column(name = "started_at")
+	private Date startedAt;
+	@Column(name = "finished_at")
+	private Date finishedAt;
+	@Column(name = "error_detail", columnDefinition = "CLOB")
+	private String errorDetail;
+	@Column(name = "queue_generation", length = 32)
+	private String queueGeneration;
+
+	public Integer getAttemptCount() {
+		return attemptCount;
+	}
+
+	public void setAttemptCount(Integer attemptCount) {
+		this.attemptCount = attemptCount;
+	}
+
+	public Integer getMaxAttempts() {
+		return maxAttempts;
+	}
+
+	public void setMaxAttempts(Integer maxAttempts) {
+		this.maxAttempts = maxAttempts;
+	}
+
+	public Date getAvailableAt() {
+		return availableAt;
+	}
+
+	public void setAvailableAt(Date availableAt) {
+		this.availableAt = availableAt;
+	}
+
+	public String getLockedBy() {
+		return lockedBy;
+	}
+
+	public void setLockedBy(String lockedBy) {
+		this.lockedBy = lockedBy;
+	}
+
+	public Date getLockedAt() {
+		return lockedAt;
+	}
+
+	public void setLockedAt(Date lockedAt) {
+		this.lockedAt = lockedAt;
+	}
+
+	public Date getStartedAt() {
+		return startedAt;
+	}
+
+	public void setStartedAt(Date startedAt) {
+		this.startedAt = startedAt;
+	}
+
+	public Date getFinishedAt() {
+		return finishedAt;
+	}
+
+	public void setFinishedAt(Date finishedAt) {
+		this.finishedAt = finishedAt;
+	}
+
+	public String getErrorDetail() {
+		return errorDetail;
+	}
+
+	public void setErrorDetail(String errorDetail) {
+		this.errorDetail = errorDetail;
+	}
+
+	public String getQueueGeneration() {
+		return queueGeneration;
+	}
+
+	public void setQueueGeneration(String queueGeneration) {
+		this.queueGeneration = queueGeneration;
+	}
 }

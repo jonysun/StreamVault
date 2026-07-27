@@ -78,6 +78,19 @@ class SqliteSchemaPreflightTest {
 				.hasMessageContaining("single id INTEGER PRIMARY KEY");
 	}
 
+	@Test
+	void rejectsExistingPipelineTableWithMissingMigrationColumns() {
+		JdbcTemplate jdbcTemplate = jdbcTemplate("missing-pipeline-columns.db");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT)");
+
+		assertThatThrownBy(() -> new SqliteSchemaPreflight(jdbcTemplate).verifyIdentitySchemas())
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("biz_collect_data")
+				.hasMessageContaining("last_successful_fetch_at")
+				.hasMessageContaining("last_seen_publish_time")
+				.hasMessageContaining("last_seen_work_id");
+	}
+
 	private JdbcTemplate jdbcTemplate(String filename) {
 		Path databaseDirectory = Path.of("target", "test-databases");
 		try {

@@ -1,7 +1,9 @@
 package com.flower.spirit.entity;
 
 import java.io.Serializable;
+import java.util.Date;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -74,6 +76,15 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	private String lastfetchtime; // 最近一次拉取时间
 
 	private Integer lastfetchcount; // 最近一次拉取总数
+
+	@Column(name = "last_successful_fetch_at")
+	private Date lastSuccessfulFetchAt;
+
+	@Column(name = "last_seen_publish_time")
+	private String lastSeenPublishTime;
+
+	@Column(name = "last_seen_work_id")
+	private String lastSeenWorkId;
 
 	@Transient
 	private String keyword;
@@ -253,6 +264,30 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 
 	public void setLastfetchcount(Integer lastfetchcount) {
 		this.lastfetchcount = lastfetchcount;
+	}
+
+	public Date getLastSuccessfulFetchAt() {
+		return lastSuccessfulFetchAt;
+	}
+
+	public void setLastSuccessfulFetchAt(Date lastSuccessfulFetchAt) {
+		this.lastSuccessfulFetchAt = lastSuccessfulFetchAt;
+	}
+
+	public String getLastSeenPublishTime() {
+		return lastSeenPublishTime;
+	}
+
+	public void setLastSeenPublishTime(String lastSeenPublishTime) {
+		this.lastSeenPublishTime = lastSeenPublishTime;
+	}
+
+	public String getLastSeenWorkId() {
+		return lastSeenWorkId;
+	}
+
+	public void setLastSeenWorkId(String lastSeenWorkId) {
+		this.lastSeenWorkId = lastSeenWorkId;
 	}
 
 	public String getKeyword() {

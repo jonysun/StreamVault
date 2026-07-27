@@ -43,6 +43,10 @@ class DatabaseIndexInitializerTest {
 				.anyMatch(sql -> sql.contains("uq_collect_run_active_task"))
 				.anyMatch(sql -> sql.contains("idx_collect_run_task_created"))
 				.anyMatch(sql -> sql.contains("uq_collect_run_item_work"))
+				.contains(
+						"CREATE INDEX IF NOT EXISTS idx_collect_run_item_download_claim ON biz_collect_run_item(queue_generation, process_state, available_at, ordinal, created_at, id)",
+						"CREATE INDEX IF NOT EXISTS idx_collect_run_item_active_work ON biz_collect_run_item(platform_key, work_id, process_state)",
+						"CREATE INDEX IF NOT EXISTS idx_collect_run_item_run_state ON biz_collect_run_item(run_id, process_state)")
 				.anyMatch(sql -> sql.contains("uq_collect_run_event_sequence"))
 				.anyMatch(sql -> sql.contains("uq_job_queue_active_dedupe"))
 				.anyMatch(sql -> sql.contains("idx_job_queue_claim"));
