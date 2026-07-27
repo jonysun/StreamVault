@@ -791,7 +791,7 @@ git commit -m "feat: process collection downloads per work"
 - Test: `backstage/src/test/java/com/flower/spirit/service/CollectDownloadWorkerTest.java`
 - Test: `backstage/src/test/java/com/flower/spirit/task/TaskServiceTest.java`
 
-- [ ] **Step 1: Write failing worker and pause-isolation tests**
+- [x] **Step 1: Write failing worker and pause-isolation tests**
 
 ```java
 @Test
@@ -814,13 +814,13 @@ void failedItemDoesNotStopNextClaim() {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDownloadWorkerTest,TaskServiceTest test`
 
 Expected: FAIL because `TaskService.collectQueueTick()` currently requires both pause categories and no download worker exists.
 
-- [ ] **Step 3: Implement one conservative download worker**
+- [x] **Step 3: Implement one conservative download worker**
 
 Mirror `CollectJobWorker` lifecycle with its own single-thread executor, worker ID, running guard, and shutdown. On first wake after startup, recover stale locks older than the configured threshold. A tick may process up to a bounded batch so it does not monopolize the scheduler:
 
@@ -839,7 +839,7 @@ public void processAvailable() {
 
 No network, filesystem, F2, sleep, or media processing may be wrapped in `DatabaseWriteExecutor`; only claim/transition calls use it.
 
-- [ ] **Step 4: Separate scheduler pause gates**
+- [x] **Step 4: Separate scheduler pause gates**
 
 Replace the existing combined guard with:
 
@@ -871,13 +871,13 @@ streamvault.collect.empty-page-limit=3
 
 Validate `fetch-workers` and `download-workers` are exactly `1` for this release; log a warning and clamp larger values rather than opening unsafe SQLite/Cookie concurrency.
 
-- [ ] **Step 5: Run worker tests**
+- [x] **Step 5: Run worker tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectDownloadWorkerTest,TaskServiceTest test`
 
 Expected: PASS; fetch can run while downloads are paused and vice versa.
 
-- [ ] **Step 6: Commit independent workers**
+- [x] **Step 6: Commit independent workers**
 
 ```bash
 git add backstage/src/main/java/com/flower/spirit/service/CollectDownloadWorker.java backstage/src/main/java/com/flower/spirit/task/TaskService.java backstage/src/main/resources/application-docker.properties backstage/src/main/resources/application-dev.properties backstage/src/test/java/com/flower/spirit/service/CollectDownloadWorkerTest.java backstage/src/test/java/com/flower/spirit/task/TaskServiceTest.java

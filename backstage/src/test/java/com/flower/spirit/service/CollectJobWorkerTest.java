@@ -5,11 +5,14 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
@@ -27,7 +30,7 @@ class CollectJobWorkerTest {
 				.thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
 		when(transaction.claimNext(anyString(), any())).thenReturn(claim);
 		when(dataService.isCollectTaskEnabled(7)).thenReturn(true);
-		CollectJobWorker worker = new CollectJobWorker(transaction, runService, dataService, writes);
+		CollectJobWorker worker = new CollectJobWorker(transaction, runService, dataService, writes, 1);
 
 		try {
 			worker.processOne();
@@ -38,5 +41,18 @@ class CollectJobWorkerTest {
 		} finally {
 			worker.shutdown();
 		}
+	}
+
+	@Test
+	void rejectedWakeDuringShutdownResetsRunningGuard() {
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class),
+				mock(CollectRunService.class), mock(CollectDataService.class), mock(DatabaseWriteExecutor.class), 1);
+		worker.shutdown();
+
+		worker.wakeUp();
+
+		AtomicBoolean running = (AtomicBoolean) ReflectionTestUtils.getField(worker, "running");
+		assertThat(running).isNotNull();
+		assertThat(running.get()).isFalse();
 	}
 }

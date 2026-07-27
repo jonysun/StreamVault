@@ -6,6 +6,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -28,6 +29,8 @@ public class CollectQueueTransaction {
 
 	private static final String ACTIVE_JOB_STATES = "'QUEUED','RUNNING','RETRY_WAIT'";
 	private final JdbcTemplate jdbcTemplate;
+	@Value("${streamvault.collect.download-max-retries:3}")
+	private int downloadMaxRetries;
 
 	public CollectQueueTransaction(JdbcTemplate jdbcTemplate) {
 		this.jdbcTemplate = jdbcTemplate;
@@ -141,7 +144,8 @@ public class CollectQueueTransaction {
 					+ "queue_generation, created_at, updated_at) "
 					+ "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", runId, item.ordinal(),
 					item.platformKey(), item.workId(), item.authorUid(), item.nickname(), truncate(item.title(), 2000),
-					item.publishTime(), item.mediaType(), decision, processState, claimable ? 4 : 0,
+					item.publishTime(), item.mediaType(), decision, processState,
+					claimable ? Math.max(1, downloadMaxRetries + 1) : 0,
 					claimable ? timestamp : null, claimable ? "FETCH_DOWNLOAD_V1" : null, timestamp, timestamp);
 		}
 		CollectRunFetchedItem.FetchWatermark safeWatermark = watermark == null

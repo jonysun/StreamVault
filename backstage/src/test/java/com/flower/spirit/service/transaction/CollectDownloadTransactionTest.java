@@ -275,6 +275,26 @@ class CollectDownloadTransactionTest {
 		}
 	}
 
+	@Test
+	void pauseAfterClaimReturnsItemWithoutConsumingAttempt() throws Exception {
+		try (AnnotationConfigApplicationContext context = context(databasePath())) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			insertTaskAndRun(jdbc, 10, 100, "author");
+			insertItem(jdbc, 1, 100, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 1, 4, NOW, "work");
+			CollectDownloadClaim claim = new CollectDownloadClaim(1, 100, 10, "author", "douyin", "work",
+					"video", "NEW", 1, 1, 4, "worker");
+
+			context.getBean(CollectDownloadTransaction.class).deferPaused(claim, "maintenance", NOW.plusSeconds(1));
+
+			assertThat(row(jdbc, 1)).containsEntry("process_state", "RETRY_WAIT")
+					.containsEntry("attempt_count", 0)
+					.containsEntry("error_code", "PAUSED_AFTER_CLAIM")
+					.containsEntry("error_message", "maintenance");
+			assertThat(row(jdbc, 1).get("locked_by")).isNull();
+		}
+	}
+
 	private void claim(CollectDownloadTransaction transaction, String worker, CountDownLatch start,
 			List<CollectDownloadClaim> claims, List<Throwable> failures) {
 		try {
