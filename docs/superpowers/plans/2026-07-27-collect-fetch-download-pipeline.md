@@ -1114,7 +1114,7 @@ git commit -m "feat: show collection fetch and download stages"
 - Create: `backstage/src/main/java/com/flower/spirit/config/F2RuntimeVersionLogger.java`
 - Test: `backstage/src/test/java/com/flower/spirit/config/F2RuntimeVersionLoggerTest.java`
 
-- [ ] **Step 1: Write failing pin and logger tests**
+- [x] **Step 1: Write failing pin and logger tests**
 
 Read every Dockerfile and assert all F2 installs are exact pins:
 
@@ -1128,13 +1128,13 @@ for (Path dockerfile : dockerfiles) {
 
 Inject a command runner into `F2RuntimeVersionLogger` and assert startup log data contains the package version or a clear `unavailable` warning without failing application startup.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run: `mvn -f backstage/pom.xml -Dtest=F2RuntimeVersionLoggerTest test`
 
 Expected: FAIL because Dockerfiles install floating `f2` and no runtime logger exists.
 
-- [ ] **Step 3: Pin and expose version metadata**
+- [x] **Step 3: Pin and expose version metadata**
 
 Use these exact install/version commands. For `Dockerfile`, `Dockerfile.jre17`, and `Dockerfile.ubuntu`:
 
@@ -1161,13 +1161,15 @@ RUN pip install --upgrade pip && \
 
 `F2RuntimeVersionLogger` checks `/opt/venv/bin/python3` first and `/usr/local/bin/python3` second, runs the metadata expression on `ApplicationReadyEvent`, and logs `pythonPath`, `scriptPath`, and exact version. If neither exists or metadata lookup fails, log one `unavailable` warning without failing application startup. Mask process output if it ever contains sensitive tokens.
 
-- [ ] **Step 4: Run logger and protocol tests**
+- [x] **Step 4: Run logger and protocol tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=F2RuntimeVersionLoggerTest,DouyinIncrementalFetchServiceTest test`
 
 Expected: PASS.
 
 - [ ] **Step 5: Build the primary Docker image through the existing build workflow**
+
+Local verification note: the current Windows workspace has no Docker CLI, so image construction remains a release-environment check.
 
 Run the repository's existing buildx command from `.github/workflows` or documented release script, then run:
 
@@ -1177,7 +1179,7 @@ docker run --rm streamvault-collect-pipeline:test /opt/venv/bin/python3 -c "impo
 
 Expected: output exactly `0.0.1.7`.
 
-- [ ] **Step 6: Commit reproducible F2 runtime**
+- [x] **Step 6: Commit reproducible F2 runtime**
 
 ```bash
 git add backstage/src/main/docker/buildx backstage/src/main/java/com/flower/spirit/config/F2RuntimeVersionLogger.java backstage/src/test/java/com/flower/spirit/config/F2RuntimeVersionLoggerTest.java

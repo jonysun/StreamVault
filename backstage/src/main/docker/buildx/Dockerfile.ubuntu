@@ -26,8 +26,8 @@ RUN apt-get update && \
 
 # 创建 Python 虚拟环境并安装 f2
 RUN python3 -m venv /opt/venv && \
-    . /opt/venv/bin/activate && \
-    pip install --no-cache-dir f2
+    /opt/venv/bin/pip install --no-cache-dir f2==0.0.1.7 && \
+    /opt/venv/bin/python3 -c "import importlib.metadata; print('f2=' + importlib.metadata.version('f2'))"
 
 # 下载 yt-dlp
 RUN wget -O /usr/local/bin/yt-dlp https://github.com/lemon8866/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp && \
