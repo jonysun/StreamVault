@@ -2,20 +2,25 @@ package com.flower.spirit.service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
+import com.flower.spirit.service.transaction.CollectDownloadTransaction;
 
 @Service
 public class CollectRunService {
 
 	private final CollectQueueTransaction transaction;
+	private final CollectDownloadTransaction downloadTransaction;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 
-	public CollectRunService(CollectQueueTransaction transaction, DatabaseWriteExecutor databaseWriteExecutor) {
+	public CollectRunService(CollectQueueTransaction transaction, CollectDownloadTransaction downloadTransaction,
+			DatabaseWriteExecutor databaseWriteExecutor) {
 		this.transaction = transaction;
+		this.downloadTransaction = downloadTransaction;
 		this.databaseWriteExecutor = databaseWriteExecutor;
 	}
 
@@ -87,5 +92,19 @@ public class CollectRunService {
 		Instant now = Instant.now();
 		return databaseWriteExecutor.execute("collect-job-retry-or-fail", () -> transaction.retryOrFailJob(claim, errorCode, message,
 				now.plusSeconds(Math.max(1, delaySeconds)), now));
+	}
+
+	public Map<String, Object> retryDownloadItem(long itemId) {
+		boolean updated = databaseWriteExecutor.execute("collect-download-manual-retry",
+				() -> downloadTransaction.manualRetry(itemId, Instant.now()));
+		if (!updated) {
+			throw new IllegalArgumentException("下载项不存在、不是失败状态或不属于当前下载队列");
+		}
+		return Map.of("itemId", itemId, "processState", "QUEUED");
+	}
+
+	public int retryFailedDownloads(long runId) {
+		return databaseWriteExecutor.execute("collect-download-retry-failed",
+				() -> downloadTransaction.retryFailedRun(runId, Instant.now()));
 	}
 }

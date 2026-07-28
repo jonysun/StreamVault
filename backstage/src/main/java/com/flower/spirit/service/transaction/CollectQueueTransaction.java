@@ -266,9 +266,11 @@ public class CollectQueueTransaction {
 		}
 		Integer requestedLimit = jdbcTemplate.queryForObject(
 				"SELECT requested_limit FROM biz_collect_run WHERE id = ?", Integer.class, claim.runId());
-		long nextRunId = insertRun(claim.taskId(), CollectTriggerType.RETRY, requestedLimit,
+		CollectTriggerType retryTrigger = claim.triggerType() == CollectTriggerType.AUDIT
+				? CollectTriggerType.AUDIT : CollectTriggerType.RETRY;
+		long nextRunId = insertRun(claim.taskId(), retryTrigger, requestedLimit,
 				CollectRunState.QUEUED, now);
-		JSONObject payload = payload(claim.taskId(), nextRunId, CollectTriggerType.RETRY);
+		JSONObject payload = payload(claim.taskId(), nextRunId, retryTrigger);
 		int updated = jdbcTemplate.update("UPDATE biz_job_queue SET payload = ?, state = 'RETRY_WAIT', "
 				+ "available_at = ?, locked_by = NULL, locked_at = NULL, last_error_code = ?, "
 				+ "last_error_message = ?, updated_at = ? WHERE id = ? AND state = 'RUNNING'", payload.toJSONString(),
@@ -310,8 +312,10 @@ public class CollectQueueTransaction {
 			}
 			Integer requestedLimit = jdbcTemplate.queryForObject(
 					"SELECT requested_limit FROM biz_collect_run WHERE id = ?", Integer.class, runId);
-			long retryRunId = insertRun(taskId, CollectTriggerType.RETRY, requestedLimit, CollectRunState.QUEUED, now);
-			JSONObject retryPayload = payload(taskId, retryRunId, CollectTriggerType.RETRY);
+			CollectTriggerType retryTrigger = CollectTriggerType.valueOf(payload.getString("triggerType"))
+					== CollectTriggerType.AUDIT ? CollectTriggerType.AUDIT : CollectTriggerType.RETRY;
+			long retryRunId = insertRun(taskId, retryTrigger, requestedLimit, CollectRunState.QUEUED, now);
+			JSONObject retryPayload = payload(taskId, retryRunId, retryTrigger);
 			jdbcTemplate.update("UPDATE biz_job_queue SET payload = ?, state = 'QUEUED', available_at = ?, "
 					+ "locked_by = NULL, locked_at = NULL, last_error_code = 'PROCESS_RESTART', updated_at = ? "
 					+ "WHERE id = ?", retryPayload.toJSONString(), Timestamp.from(now), Timestamp.from(now), job.id());

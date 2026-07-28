@@ -243,6 +243,33 @@ class CollectQueueTransactionTest {
 	}
 
 	@Test
+	void auditRetryKeepsAuditTriggerType() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-07-25T08:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus) VALUES(12, 'queued')");
+			CollectEnqueueResult queued = transaction.enqueue(12, CollectTriggerType.AUDIT, 20, now, 10, 3);
+			CollectJobClaim claim = transaction.claimNext("audit-worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+			transaction.failRun(claim.runId(), CollectRunState.FETCHING, CollectRunState.FETCH_FAILED,
+					"UPSTREAM_ERROR", "temporary", "diagnostic", now.plusSeconds(3));
+
+			CollectEnqueueResult retry = transaction.retryOrFailJob(claim, "UPSTREAM_ERROR", "temporary",
+					now.plus(1, ChronoUnit.MINUTES), now.plusSeconds(4));
+
+			assertThat(retry.runId()).isNotEqualTo(queued.runId());
+			assertThat(jdbc.queryForObject("SELECT trigger_type FROM biz_collect_run WHERE id = ?", String.class,
+					retry.runId())).isEqualTo("AUDIT");
+			String payload = jdbc.queryForObject("SELECT payload FROM biz_job_queue WHERE id = ?", String.class,
+					queued.jobId());
+			assertThat(payload).contains("\"triggerType\":\"AUDIT\"");
+		}
+	}
+
+	@Test
 	void recoveryInterruptsAClaimedQueuedRunAndRequeuesIt() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);

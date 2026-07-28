@@ -967,7 +967,7 @@ git commit -m "feat: expose collection download queue status"
 - Modify: `backstage/src/main/java/com/flower/spirit/web/admin/AdminController.java`
 - Test: `backstage/src/test/java/com/flower/spirit/web/admin/AdminControllerCollectPipelineTest.java`
 
-- [ ] **Step 1: Write failing controller tests**
+- [x] **Step 1: Write failing controller tests**
 
 ```java
 mockMvc.perform(post("/admin/api/collectData/retryItem").param("id", "41"))
@@ -981,17 +981,17 @@ mockMvc.perform(post("/admin/api/collectData/audit").param("taskId", "7"))
         .andExpect(jsonPath("$.data.state").value("QUEUED"));
 ```
 
-- [ ] **Step 2: Run controller tests and verify they fail**
+- [x] **Step 2: Run controller tests and verify they fail**
 
 Run: `mvn -f backstage/pom.xml -Dtest=AdminControllerCollectPipelineTest test`
 
 Expected: FAIL with 404 for all three endpoints.
 
-- [ ] **Step 3: Add audit enqueue semantics**
+- [x] **Step 3: Add audit enqueue semantics**
 
 Add `AUDIT` to `CollectTriggerType` and `CollectEnqueueService.enqueueAudit(taskId)`, with priority `10`. Reuse active-task dedupe so an audit cannot race an existing fetch run. In `retryOrFailJob`, preserve `AUDIT` when retrying an audit run; ordinary failed runs continue with `RETRY`.
 
-- [ ] **Step 4: Add guarded endpoints**
+- [x] **Step 4: Add guarded endpoints**
 
 Implement:
 
@@ -1026,13 +1026,13 @@ Add `CollectRunService.retryDownloadItem(long)` and `retryFailedDownloads(long)`
 
 Retry endpoints reject nonfailed or old-generation rows. Audit returns the existing active run rather than creating a duplicate. Use the existing authenticated `/admin/api` controller boundary and `AjaxEntity` response conventions.
 
-- [ ] **Step 5: Run endpoint tests**
+- [x] **Step 5: Run endpoint tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=AdminControllerCollectPipelineTest,CollectQueueTransactionTest,CollectDownloadTransactionTest test`
 
 Expected: PASS, including duplicate audit prevention.
 
-- [ ] **Step 6: Commit pipeline controls**
+- [x] **Step 6: Commit pipeline controls**
 
 ```bash
 git add backstage/src/main/java/com/flower/spirit/service backstage/src/main/java/com/flower/spirit/service/transaction backstage/src/main/java/com/flower/spirit/web/admin/AdminController.java backstage/src/test/java/com/flower/spirit/web/admin/AdminControllerCollectPipelineTest.java
