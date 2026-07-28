@@ -24,8 +24,12 @@ class SqliteSchemaPreflightTest {
 		jdbcTemplate.execute("CREATE TABLE biz_author_enrichment_job (id INTEGER NOT NULL PRIMARY KEY, state TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_database_maintenance_operation "
 				+ "(id INTEGER NOT NULL PRIMARY KEY, status TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_video (id INTEGER NOT NULL PRIMARY KEY, videoid TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_graphic_content (id INTEGER NOT NULL PRIMARY KEY, videoid TEXT)");
 		jdbcTemplate.execute("CREATE TABLE seq_common (seq_id TEXT PRIMARY KEY, seq_count INTEGER)");
 		jdbcTemplate.update("INSERT INTO seq_common(seq_id, seq_count) VALUES('author', 91)");
+		jdbcTemplate.update("INSERT INTO seq_common(seq_id, seq_count) VALUES('biz_video', 101)");
+		jdbcTemplate.update("INSERT INTO seq_common(seq_id, seq_count) VALUES('biz_graphic_content', 202)");
 
 		SqliteSchemaPreflight preflight = new SqliteSchemaPreflight(jdbcTemplate);
 		assertThatCode(preflight::verifyIdentitySchemas).doesNotThrowAnyException();
@@ -36,6 +40,8 @@ class SqliteSchemaPreflightTest {
 		jdbcTemplate.update("INSERT INTO biz_author_name_history(displayname) VALUES('second')");
 		jdbcTemplate.update("INSERT INTO biz_author_enrichment_job(state) VALUES('QUEUED')");
 		jdbcTemplate.update("INSERT INTO biz_database_maintenance_operation(status) VALUES('RUNNING')");
+		jdbcTemplate.update("INSERT INTO biz_video(videoid) VALUES('video-1')");
+		jdbcTemplate.update("INSERT INTO biz_graphic_content(videoid) VALUES('graphic-1')");
 
 		assertThat(jdbcTemplate.queryForList("SELECT id FROM biz_author_profile ORDER BY id", Integer.class))
 				.containsExactly(1, 2);
@@ -43,9 +49,15 @@ class SqliteSchemaPreflightTest {
 				.containsExactly(1, 2);
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT seq_count FROM seq_common WHERE seq_id = 'author'", Integer.class)).isEqualTo(91);
+		assertThat(jdbcTemplate.queryForObject(
+				"SELECT seq_count FROM seq_common WHERE seq_id = 'biz_video'", Integer.class)).isEqualTo(101);
+		assertThat(jdbcTemplate.queryForObject(
+				"SELECT seq_count FROM seq_common WHERE seq_id = 'biz_graphic_content'", Integer.class)).isEqualTo(202);
 		assertThat(jdbcTemplate.queryForObject("SELECT id FROM biz_author_enrichment_job", Integer.class)).isEqualTo(1);
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT id FROM biz_database_maintenance_operation", Integer.class)).isEqualTo(1);
+		assertThat(jdbcTemplate.queryForObject("SELECT id FROM biz_video", Integer.class)).isEqualTo(1);
+		assertThat(jdbcTemplate.queryForObject("SELECT id FROM biz_graphic_content", Integer.class)).isEqualTo(1);
 	}
 
 	@Test
@@ -67,6 +79,22 @@ class SqliteSchemaPreflightTest {
 				.hasMessageContaining("no automatic table rebuild");
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT type FROM pragma_table_info('biz_author_profile') WHERE name = 'id'", String.class))
+				.isEqualTo("BIGINT");
+	}
+
+	@Test
+	void rejectsIncompatibleExistingMediaIdentityWithoutChangingSchema() {
+		JdbcTemplate jdbcTemplate = jdbcTemplate("wrong-media-type.db");
+		jdbcTemplate.execute("CREATE TABLE biz_video (id BIGINT PRIMARY KEY, videoid TEXT)");
+		SqliteSchemaPreflight preflight = new SqliteSchemaPreflight(jdbcTemplate);
+
+		assertThatThrownBy(preflight::verifyIdentitySchemas)
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("biz_video")
+				.hasMessageContaining("single id INTEGER PRIMARY KEY")
+				.hasMessageContaining("no automatic table rebuild");
+		assertThat(jdbcTemplate.queryForObject(
+				"SELECT type FROM pragma_table_info('biz_video') WHERE name = 'id'", String.class))
 				.isEqualTo("BIGINT");
 	}
 

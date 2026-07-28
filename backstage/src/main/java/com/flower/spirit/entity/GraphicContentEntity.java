@@ -10,7 +10,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Column;
 import jakarta.persistence.Table;
-import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
 
 import com.flower.spirit.common.DataEntity;
@@ -25,8 +24,7 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	private static final long serialVersionUID = -4654916791710362219L;
 	
 	@Id
-	@GeneratedValue(strategy = GenerationType.TABLE,generator="biz_graphic_content")
-	@TableGenerator(name = "biz_graphic_content", allocationSize = 1, table = "seq_common", pkColumnName = "seq_id", valueColumnName = "seq_count")
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 	
 	private String originaladdress;
