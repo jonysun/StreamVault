@@ -152,7 +152,8 @@ public class CollectRunQueryService {
 				+ "queue_generation AS queueGeneration, created_at AS createdAt, updated_at AS updatedAt "
 				+ "FROM biz_collect_run_item WHERE run_id = ? AND id > ?";
 		boolean plan = "plan".equalsIgnoreCase(decision);
-		if (plan) sql += " AND UPPER(decision) IN ('NEW','RETRY')";
+		if (plan) sql += " AND (UPPER(decision) = 'NEW' OR UPPER(decision) LIKE '%RETRY%' "
+				+ "OR UPPER(decision) LIKE '%AUDIT_REPAIR%')";
 		else if (decision != null && !decision.isBlank() && !"all".equalsIgnoreCase(decision)) sql += " AND decision = ?";
 		sql += " ORDER BY ordinal ASC, id ASC LIMIT " + safeLimit;
 		return !plan && decision != null && !decision.isBlank() && !"all".equalsIgnoreCase(decision)

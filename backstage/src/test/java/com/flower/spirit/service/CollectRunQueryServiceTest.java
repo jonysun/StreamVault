@@ -23,7 +23,10 @@ class CollectRunQueryServiceTest {
 		jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id) VALUES (8, 4), (9, 4), (10, 4)");
 		jdbc.update("INSERT INTO biz_collect_run_item(id, run_id, ordinal, work_id, media_type, decision) "
 				+ "VALUES (80, 8, 1, 'old-work', 'video', 'NEW'), "
-				+ "(90, 9, 1, 'new-work', 'video', 'NEW'), (91, 9, 2, 'skip-work', 'graphic', 'SKIP')");
+				+ "(90, 9, 1, 'new-work', 'video', 'NEW'), "
+				+ "(91, 9, 2, 'skip-work', 'graphic', 'EXISTING'), "
+				+ "(92, 9, 3, 'audit-work', 'video', 'AUDIT_REPAIR'), "
+				+ "(93, 9, 4, 'retry-work', 'video', 'MANUAL_RETRY')");
 		CollectRunQueryService service = new CollectRunQueryService(jdbc, new SnapshotCodec(4096, 2));
 
 		Map<String, Object> result = service.findLatestItems(4, "plan", 20, 0);
@@ -31,7 +34,7 @@ class CollectRunQueryServiceTest {
 		assertThat(result).containsEntry("source", "run-item").containsEntry("runId", 9L);
 		assertThat((List<Map<String, Object>>) result.get("items"))
 				.extracting(item -> item.get("workId"))
-				.containsExactly("new-work");
+				.containsExactly("new-work", "audit-work", "retry-work");
 	}
 
 	@Test

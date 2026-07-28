@@ -1045,7 +1045,7 @@ git commit -m "feat: add collection audit and retry controls"
 - Modify: `backstage/src/main/resources/templates/admin/collectDataList.html`
 - Modify: `backstage/src/test/java/com/flower/spirit/web/admin/AdminTemplateScriptSanityTest.java`
 
-- [ ] **Step 1: Add failing template sanity assertions**
+- [x] **Step 1: Add failing template sanity assertions**
 
 ```java
 assertThat(template).contains("downloadQueued", "downloadRetryWait", "downloadFailed");
@@ -1054,13 +1054,13 @@ assertThat(template).contains("attemptCount", "availableAt", "errorDetail");
 assertThat(template).doesNotContain("JSON.stringify(record.items)");
 ```
 
-- [ ] **Step 2: Run the template test and verify it fails**
+- [x] **Step 2: Run the template test and verify it fails**
 
 Run: `mvn -f backstage/pom.xml -Dtest=AdminTemplateScriptSanityTest test`
 
 Expected: FAIL because the page does not render split-stage fields or new controls.
 
-- [ ] **Step 3: Render split status in the task table**
+- [x] **Step 3: Render split status in the task table**
 
 Keep the existing compact table and render two lines in the status cell:
 
@@ -1080,23 +1080,23 @@ function buildCollectRuntimeStatus(item) {
 
 Show `latestStopReason` and `latestFetchWarning` as short diagnostic text, not as a false risk-control status.
 
-- [ ] **Step 4: Extend plan/full tables and actions**
+- [x] **Step 4: Extend plan/full tables and actions**
 
 The full list continues to show every observed item. The plan list shows queued/running/retry/completed/skipped/failed rows with columns: work ID, title, publish time, media type, process state, attempts (`attemptCount/maxAttempts`), next retry, last error, and updated time. Add a retry icon button only for `FAILED` rows and a “重试失败项” command for a run.
 
 Add “全量审计” to a task's action menu. The first click opens a confirmation dialog stating that it ignores the incremental boundary and may make many upstream requests; only the confirmation callback posts `/admin/api/collectData/audit`.
 
-- [ ] **Step 5: Add incremental table loading**
+- [x] **Step 5: Add incremental table loading**
 
 Retain table rendering and request subsequent pages with `afterId` when a response has `hasMore=true`. Never put an entire JSON array into a `<pre>` block. Keep row insertion incremental so a large audit becomes visible as data arrives.
 
-- [ ] **Step 6: Run template and service projection tests**
+- [x] **Step 6: Run template and service projection tests**
 
 Run: `mvn -f backstage/pom.xml -Dtest=AdminTemplateScriptSanityTest,CollectRunQueryServiceTest,CollectDataServiceFindPageTest test`
 
 Expected: PASS; no JavaScript reference errors and no raw JSON fallback for current run items.
 
-- [ ] **Step 7: Commit the administration UI**
+- [x] **Step 7: Commit the administration UI**
 
 ```bash
 git add backstage/src/main/resources/templates/admin/collectDataList.html backstage/src/test/java/com/flower/spirit/web/admin/AdminTemplateScriptSanityTest.java
