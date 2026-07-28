@@ -17,7 +17,6 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -32,26 +31,37 @@ public class DatabaseMaintenanceService {
 
 	public static final String CLEAR_EXACT_DUPLICATE_VIDEOINFO = "CLEAR_EXACT_DUPLICATE_VIDEOINFO";
 	public static final String PURGE_EXPIRED_RUN_ITEMS = "PURGE_EXPIRED_RUN_ITEMS";
+	public static final String PURGE_EXPIRED_RUN_EVENTS = "PURGE_EXPIRED_RUN_EVENTS";
+	public static final String PURGE_EXPIRED_TERMINAL_RUNS = "PURGE_EXPIRED_TERMINAL_RUNS";
+	public static final String PURGE_EXPIRED_TERMINAL_JOBS = "PURGE_EXPIRED_TERMINAL_JOBS";
+	private static final List<String> DEFAULT_OPERATIONS = List.of(
+			CLEAR_EXACT_DUPLICATE_VIDEOINFO,
+			PURGE_EXPIRED_RUN_ITEMS,
+			PURGE_EXPIRED_RUN_EVENTS,
+			PURGE_EXPIRED_TERMINAL_RUNS,
+			PURGE_EXPIRED_TERMINAL_JOBS);
 	private static final Set<String> ALLOWED_OPERATIONS = Set.of(
-			CLEAR_EXACT_DUPLICATE_VIDEOINFO, PURGE_EXPIRED_RUN_ITEMS);
+			CLEAR_EXACT_DUPLICATE_VIDEOINFO,
+			PURGE_EXPIRED_RUN_ITEMS,
+			PURGE_EXPIRED_RUN_EVENTS,
+			PURGE_EXPIRED_TERMINAL_RUNS,
+			PURGE_EXPIRED_TERMINAL_JOBS);
 
 	private final DatabaseAuditService auditService;
 	private final DatabaseMaintenanceTransaction transaction;
 	private final RuntimeControlService runtimeControlService;
-	private final JdbcTemplate jdbcTemplate;
 	private final boolean applyEnabled;
 	private final long tokenTtlSeconds;
 	private final byte[] signingKey;
 
 	public DatabaseMaintenanceService(DatabaseAuditService auditService, DatabaseMaintenanceTransaction transaction,
-			RuntimeControlService runtimeControlService, JdbcTemplate jdbcTemplate,
+			RuntimeControlService runtimeControlService,
 			@Value("${streamvault.database-maintenance.apply-enabled:false}") boolean applyEnabled,
 			@Value("${streamvault.database-maintenance.preview-token-ttl-seconds:1800}") long tokenTtlSeconds,
 			@Value("${streamvault.database-maintenance.preview-secret:}") String previewSecret) {
 		this.auditService = auditService;
 		this.transaction = transaction;
 		this.runtimeControlService = runtimeControlService;
-		this.jdbcTemplate = jdbcTemplate;
 		this.applyEnabled = applyEnabled;
 		this.tokenTtlSeconds = Math.max(60, tokenTtlSeconds);
 		this.signingKey = signingKey(previewSecret);
@@ -77,7 +87,7 @@ public class DatabaseMaintenanceService {
 		result.put("operations", estimates);
 		result.put("differentRows", number(map(audit.get("video")).get("differentRows")));
 		result.put("fingerprint", audit.get("fingerprint"));
-		result.put("warning", "不会执行 VACUUM；不同内容的 videoinfo 永远不会由此操作清理");
+		result.put("warning", "不会删除作品或媒体文件，不会执行 VACUUM；不同内容的 videoinfo 永远不会清理");
 		return result;
 	}
 
@@ -134,6 +144,12 @@ public class DatabaseMaintenanceService {
 		case CLEAR_EXACT_DUPLICATE_VIDEOINFO -> transaction.clearDuplicateVideoInfo(operationId, lastId, batchSize,
 				Instant.now());
 		case PURGE_EXPIRED_RUN_ITEMS -> transaction.purgeExpiredRunItems(operationId, lastId, batchSize, Instant.now());
+		case PURGE_EXPIRED_RUN_EVENTS -> transaction.purgeExpiredRunEvents(operationId, lastId, batchSize,
+				Instant.now());
+		case PURGE_EXPIRED_TERMINAL_RUNS -> transaction.purgeExpiredTerminalRuns(operationId, lastId, batchSize,
+				Instant.now());
+		case PURGE_EXPIRED_TERMINAL_JOBS -> transaction.purgeExpiredTerminalJobs(operationId, lastId, batchSize,
+				Instant.now());
 		default -> throw new IllegalStateException("未知数据库维护操作: " + operation);
 		};
 	}
@@ -150,6 +166,7 @@ public class DatabaseMaintenanceService {
 	private Map<String, Object> estimates(Map<String, Object> audit, List<String> operations) {
 		Map<String, Object> result = new LinkedHashMap<>();
 		Map<String, Object> video = map(audit.get("video"));
+		Map<String, Object> retention = map(audit.get("retentionCandidates"));
 		for (String operation : operations) {
 			Map<String, Object> estimate = new LinkedHashMap<>();
 			if (CLEAR_EXACT_DUPLICATE_VIDEOINFO.equals(operation)) {
@@ -157,7 +174,7 @@ public class DatabaseMaintenanceService {
 				estimate.put("logicalChars", number(video.get("exactDuplicateVideoInfoChars")));
 				estimate.put("unhandledDifferentRows", number(video.get("differentRows")));
 			} else {
-				estimate.put("rows", countExpiredRunItems());
+				estimate.put("rows", number(retention.get(retentionAuditKey(operation))));
 				estimate.put("logicalChars", 0L);
 			}
 			result.put(operation, estimate);
@@ -165,19 +182,14 @@ public class DatabaseMaintenanceService {
 		return result;
 	}
 
-	private long countExpiredRunItems() {
-		if (!tableExists("biz_collect_run_item")) return 0L;
-		Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item WHERE "
-				+ "((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < datetime('now','-365 days')) "
-				+ "OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' AND created_at < datetime('now','-90 days')))",
-				Long.class);
-		return count == null ? 0L : count;
-	}
-
-	private boolean tableExists(String name) {
-		Integer count = jdbcTemplate.queryForObject(
-				"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", Integer.class, name);
-		return count != null && count > 0;
+	private String retentionAuditKey(String operation) {
+		return switch (operation) {
+		case PURGE_EXPIRED_RUN_ITEMS -> "runItems";
+		case PURGE_EXPIRED_RUN_EVENTS -> "runEvents";
+		case PURGE_EXPIRED_TERMINAL_RUNS -> "terminalRuns";
+		case PURGE_EXPIRED_TERMINAL_JOBS -> "terminalJobs";
+		default -> throw new IllegalStateException("未知保留期操作: " + operation);
+		};
 	}
 
 	private long estimateRows(JSONObject token, String operation) {
@@ -188,7 +200,7 @@ public class DatabaseMaintenanceService {
 
 	private List<String> normalizeOperations(List<String> requested) {
 		List<String> source = requested == null || requested.isEmpty()
-				? List.of(CLEAR_EXACT_DUPLICATE_VIDEOINFO, PURGE_EXPIRED_RUN_ITEMS) : requested;
+				? DEFAULT_OPERATIONS : requested;
 		LinkedHashSet<String> result = new LinkedHashSet<>();
 		for (String operation : source) {
 			String normalized = operation == null ? "" : operation.trim().toUpperCase();
