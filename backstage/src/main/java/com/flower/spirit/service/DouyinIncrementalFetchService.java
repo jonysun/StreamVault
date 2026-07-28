@@ -27,7 +27,7 @@ public class DouyinIncrementalFetchService {
 			"lastCursor", "diagnostics");
 	private static final Set<String> SUCCESSFUL_OUTCOMES = Set.of(
 			"NO_PUBLIC_WORKS", "ACCOUNT_DEACTIVATED", "WORKS_UNAVAILABLE",
-			"EMPTY_PAGINATION", "KNOWN_BOUNDARY", "INITIAL_LIMIT", "NO_MORE",
+			"EMPTY_PAGINATION", "KNOWN_BOUNDARY", "INITIAL_LIMIT", "BATCH_LIMIT", "NO_MORE",
 			"MAX_PAGE_GUARD");
 
 	private final CommandRunner commandRunner;

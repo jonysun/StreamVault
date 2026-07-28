@@ -50,8 +50,7 @@ public class CollectRunQueryService {
 		addNonblank(result, jdbcTemplate.queryForList(
 				"SELECT i.work_id FROM biz_collect_run_item i "
 						+ "JOIN biz_collect_run r ON r.id = i.run_id "
-						+ "WHERE r.collect_task_id = ? AND i.queue_generation = 'FETCH_DOWNLOAD_V1' "
-						+ "AND i.process_state IN ('QUEUED','RUNNING','RETRY_WAIT','COMPLETED') "
+						+ "WHERE r.collect_task_id = ? "
 						+ "AND i.work_id IS NOT NULL AND TRIM(i.work_id) <> '' ORDER BY i.id ASC",
 				String.class, taskId));
 		return Collections.unmodifiableSet(result);

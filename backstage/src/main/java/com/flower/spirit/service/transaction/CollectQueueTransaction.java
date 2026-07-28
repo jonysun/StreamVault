@@ -116,13 +116,22 @@ public class CollectQueueTransaction {
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void storeFetchedItems(long runId, List<CollectRunFetchedItem> items, Instant now) {
-		storeFetchPlan(runId, taskId(runId), items, "LEGACY_FETCH",
+		storeFetchPlan(runId, taskId(runId), items, items.size(), "LEGACY_FETCH",
 				new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, ""), now);
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, String stopReason,
 			CollectRunFetchedItem.FetchWatermark watermark, Instant now) {
+		storeFetchPlan(runId, taskId, items, items.size(), stopReason, watermark, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, int observedCount,
+			String stopReason, CollectRunFetchedItem.FetchWatermark watermark, Instant now) {
+		if (observedCount < 0) {
+			throw new IllegalArgumentException("observedCount must be nonnegative");
+		}
 		Integer runTaskId = taskId(runId);
 		if (runTaskId == null || runTaskId != taskId) {
 			throw new IllegalArgumentException("collection run does not belong to task: runId=" + runId
@@ -161,7 +170,7 @@ public class CollectQueueTransaction {
 				incomingPublishTime, incomingPublishTime, incomingPublishTime,
 				incomingPublishTime, incomingPublishTime, blankToNull(safeWatermark.workId()), taskId);
 		jdbcTemplate.update("UPDATE biz_collect_run SET fetched_count = ?, fetch_stop_reason = ?, fetch_warning = ?, "
-				+ "heartbeat_at = ? WHERE id = ? AND state = 'PROCESSING'", items.size(), stopReason,
+				+ "heartbeat_at = ? WHERE id = ? AND state = 'PROCESSING'", observedCount, stopReason,
 				warningFor(stopReason), timestamp, runId);
 		appendEvent(runId, warningFor(stopReason) == null ? "INFO" : "WARN", "FETCH", "FETCH_STOP",
 				"outcome=" + valueOr(stopReason, "UNKNOWN") + ", pages=" + safeWatermark.pagesFetched()
@@ -211,12 +220,15 @@ public class CollectQueueTransaction {
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void complete(long runId, long jobId, Instant now) {
+		Integer storedObservedCount = jdbcTemplate.queryForObject(
+				"SELECT fetched_count FROM biz_collect_run WHERE id = ?", Integer.class, runId);
 		RunCounts counts = jdbcTemplate.queryForObject("SELECT COUNT(*) AS fetched, "
 				+ "SUM(CASE WHEN process_state IN ('QUEUED','RUNNING','RETRY_WAIT','COMPLETED') THEN 1 ELSE 0 END) AS planned, "
 				+ "SUM(CASE WHEN process_state IN ('SKIPPED_EXISTING','SKIPPED_EXISTING_ACTIVE_DOWNLOAD') THEN 1 ELSE 0 END) AS skipped, "
 				+ "SUM(CASE WHEN process_state = 'FAILED' THEN 1 ELSE 0 END) AS failed "
 				+ "FROM biz_collect_run_item WHERE run_id = ?", (rs, rowNum) -> new RunCounts(
-					rs.getInt("fetched"), rs.getInt("planned"), 0, rs.getInt("skipped"),
+					storedObservedCount == null ? rs.getInt("fetched") : storedObservedCount,
+					rs.getInt("planned"), 0, rs.getInt("skipped"),
 					rs.getInt("failed")), runId);
 		Timestamp timestamp = Timestamp.from(now);
 		int updated = jdbcTemplate.update("UPDATE biz_collect_run SET state = 'COMPLETED', fetched_count = ?, "

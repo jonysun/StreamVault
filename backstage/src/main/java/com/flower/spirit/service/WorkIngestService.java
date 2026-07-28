@@ -7,6 +7,7 @@ import java.util.function.Function;
 
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.entity.ProcessHistoryEntity;
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.PlatformResolver;
@@ -27,18 +28,20 @@ public class WorkIngestService {
 	private final WorkMetadataNormalizer normalizer;
 	private final MediaDownloadService mediaDownloadService;
 	private final WorkPersistenceService persistenceService;
+	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final WorkPostProcessingService postProcessingService;
 	private final ProcessHistoryService processHistoryService;
 
 	public WorkIngestService(PlatformResolver resolver, PlatformAdapterRegistry adapterRegistry,
 			WorkMetadataNormalizer normalizer, MediaDownloadService mediaDownloadService,
-			WorkPersistenceService persistenceService, WorkPostProcessingService postProcessingService,
-			ProcessHistoryService processHistoryService) {
+			WorkPersistenceService persistenceService, DatabaseWriteExecutor databaseWriteExecutor,
+			WorkPostProcessingService postProcessingService, ProcessHistoryService processHistoryService) {
 		this.resolver = resolver;
 		this.adapterRegistry = adapterRegistry;
 		this.normalizer = normalizer;
 		this.mediaDownloadService = mediaDownloadService;
 		this.persistenceService = persistenceService;
+		this.databaseWriteExecutor = databaseWriteExecutor;
 		this.postProcessingService = postProcessingService;
 		this.processHistoryService = processHistoryService;
 	}
@@ -114,7 +117,8 @@ public class WorkIngestService {
 			WorkMetadata downloadedMetadata = copyWithDownloadedResources(metadata, download);
 			stage = "PERSISTING";
 			processHistoryService.recordPlatformStage(historyId, stage);
-			PersistenceResult persistence = persistenceService.persist(downloadedMetadata);
+			PersistenceResult persistence = databaseWriteExecutor.execute(
+					"work-persistence", () -> persistenceService.persist(downloadedMetadata));
 			persisted = true;
 			mediaDownloadService.commit(download);
 			stage = "POST_PROCESSING";

@@ -45,10 +45,10 @@ public class CollectRunService {
 		});
 	}
 
-	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, String stopReason,
-			CollectRunFetchedItem.FetchWatermark watermark) {
+	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, int observedCount,
+			String stopReason, CollectRunFetchedItem.FetchWatermark watermark) {
 		databaseWriteExecutor.execute("collect-run-store-fetch-plan", () -> {
-			transaction.storeFetchPlan(runId, taskId, items, stopReason, watermark, Instant.now());
+			transaction.storeFetchPlan(runId, taskId, items, observedCount, stopReason, watermark, Instant.now());
 			return null;
 		});
 	}

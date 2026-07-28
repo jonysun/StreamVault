@@ -61,7 +61,7 @@ class CollectQueueTransactionTest {
 					new CollectRunFetchedItem(1, "douyin", "work-1", "MS4-author", "作者", "作品一",
 							"200", "video", "NEW", "QUEUED"),
 					new CollectRunFetchedItem(2, "douyin", "work-2", "MS4-author", "作者", "作品二",
-							"100", "image", "EXISTING", "SKIPPED_EXISTING")), "NO_MORE",
+							"100", "image", "EXISTING", "SKIPPED_EXISTING")), 40, "NO_MORE",
 					new CollectRunFetchedItem.FetchWatermark("200", "work-1", 2, 0, "cursor-2"),
 					now.plusSeconds(4));
 			transaction.complete(claim.runId(), claim.jobId(), now.plusSeconds(7));
@@ -74,8 +74,10 @@ class CollectQueueTransactionTest {
 					claim.runId())).isZero();
 			assertThat(jdbc.queryForObject("SELECT skipped_existing_count FROM biz_collect_run WHERE id = ?",
 					Integer.class, claim.runId())).isEqualTo(1);
+			assertThat(jdbc.queryForObject("SELECT fetched_count FROM biz_collect_run WHERE id = ?", Integer.class,
+					claim.runId())).isEqualTo(40);
 			assertThat(jdbc.queryForObject("SELECT count FROM biz_collect_data WHERE id = 7", String.class))
-					.isEqualTo("2");
+					.isEqualTo("40");
 			assertThat(jdbc.queryForObject("SELECT carriedout FROM biz_collect_data WHERE id = 7", String.class))
 					.isEqualTo("8");
 			assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE work_id = 'work-1'",

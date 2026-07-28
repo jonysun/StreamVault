@@ -58,7 +58,8 @@ class CollectDataServiceFetchPlanTest {
 		ReflectionTestUtils.setField(service, "hlsTranscodeService", hlsTranscodeService);
 		ReflectionTestUtils.setField(service, "runtimeControlService", runtimeControlService);
 		ReflectionTestUtils.setField(service, "incrementalKnownBoundary", 20);
-		ReflectionTestUtils.setField(service, "incrementalMaxPages", 100);
+		ReflectionTestUtils.setField(service, "incrementalMinPages", 20);
+		ReflectionTestUtils.setField(service, "backfillMaxPages", 500);
 		ReflectionTestUtils.setField(service, "auditMaxPages", 500);
 		ReflectionTestUtils.setField(service, "emptyPageLimit", 3);
 		ReflectionTestUtils.setField(service, "initialFetchLimit", 80);
@@ -67,7 +68,7 @@ class CollectDataServiceFetchPlanTest {
 	}
 
 	@Test
-	void persistentRunStoresObservedItemsButQueuesOnlyNewWorks() {
+	void persistentRunStoresOnlySelectedUnknownItems() {
 		CollectDataEntity task = postTask(null);
 		when(taskDao.findById(7)).thenReturn(Optional.of(task));
 		when(queryService.findKnownWorkIds(7)).thenReturn(Set.of("known-1"));
@@ -81,12 +82,11 @@ class CollectDataServiceFetchPlanTest {
 		ArgumentCaptor<CollectRunFetchedItem.FetchWatermark> watermark =
 				ArgumentCaptor.forClass(CollectRunFetchedItem.FetchWatermark.class);
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(90L),
-				org.mockito.ArgumentMatchers.eq(7), items.capture(),
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(2),
 				org.mockito.ArgumentMatchers.eq("NO_MORE"), watermark.capture());
 		assertThat(items.getValue()).extracting(CollectRunFetchedItem::workId,
 				CollectRunFetchedItem::processState, CollectRunFetchedItem::decision)
-				.containsExactly(tuple("new-1", "QUEUED", "NEW"),
-						tuple("known-1", "SKIPPED_EXISTING", "EXISTING"));
+				.containsExactly(tuple("new-1", "QUEUED", "NEW"));
 		assertThat(watermark.getValue().publishTime()).isEqualTo("200");
 		assertThat(watermark.getValue().workId()).isEqualTo("new-1");
 		verifyNoInteractions(videoDataService, hlsTranscodeService);
@@ -116,6 +116,25 @@ class CollectDataServiceFetchPlanTest {
 	}
 
 	@Test
+	void incrementalModeUsesMonitorLimitAndExpandsPageBudgetForKnownPrefix() {
+		CollectDataEntity task = postTask(new java.util.Date());
+		task.setMaxcur(20);
+		when(taskDao.findById(7)).thenReturn(Optional.of(task));
+		Set<String> knownIds = java.util.stream.IntStream.range(0, 1000)
+				.mapToObj(index -> "known-" + index).collect(java.util.stream.Collectors.toSet());
+		when(queryService.findKnownWorkIds(7)).thenReturn(knownIds);
+		when(fetchService.fetch(any())).thenReturn(envelope(List.of(), Set.of(), "NO_MORE"));
+
+		service.executeQueuedCollectTask(7, 921L, CollectTriggerType.SCHEDULED);
+
+		ArgumentCaptor<DouyinFetchRequest> request = ArgumentCaptor.forClass(DouyinFetchRequest.class);
+		verify(fetchService).fetch(request.capture());
+		assertThat(request.getValue().mode()).isEqualTo(DouyinFetchMode.INCREMENTAL);
+		assertThat(request.getValue().maxItems()).isEqualTo(20);
+		assertThat(request.getValue().maxPages()).isEqualTo(52);
+	}
+
+	@Test
 	void auditRequeuesKnownWorkWhenStoredMediaNeedsRepair() {
 		CollectDataEntity task = postTask(new java.util.Date());
 		when(taskDao.findById(7)).thenReturn(Optional.of(task));
@@ -128,7 +147,8 @@ class CollectDataServiceFetchPlanTest {
 
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(93L),
-				org.mockito.ArgumentMatchers.eq(7), items.capture(), anyString(), any());
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(1),
+				anyString(), any());
 		assertThat(items.getValue()).singleElement().satisfies(item -> {
 			assertThat(item.decision()).isEqualTo("AUDIT_REPAIR");
 			assertThat(item.processState()).isEqualTo("QUEUED");
@@ -148,7 +168,8 @@ class CollectDataServiceFetchPlanTest {
 
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(94L),
-				org.mockito.ArgumentMatchers.eq(7), items.capture(), anyString(), any());
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(1),
+				anyString(), any());
 		assertThat(items.getValue()).singleElement().satisfies(item -> {
 			assertThat(item.decision()).isEqualTo("BLOCKED");
 			assertThat(item.processState()).isEqualTo("SKIPPED_BLOCKED");
@@ -170,7 +191,8 @@ class CollectDataServiceFetchPlanTest {
 
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(941L),
-				org.mockito.ArgumentMatchers.eq(7), items.capture(), anyString(), any());
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(1),
+				anyString(), any());
 		assertThat(items.getValue()).singleElement().satisfies(item ->
 				assertThat(item.processState()).isEqualTo("SKIPPED_BLOCKED"));
 	}
@@ -186,11 +208,11 @@ class CollectDataServiceFetchPlanTest {
 				service.executeQueuedCollectTask(7, 942L, CollectTriggerType.SCHEDULED))
 				.isInstanceOf(CollectFetchException.class)
 				.hasMessageContaining("aweme_id");
-		verify(runService, never()).storeFetchPlan(anyLong(), anyInt(), any(), anyString(), any());
+		verify(runService, never()).storeFetchPlan(anyLong(), anyInt(), any(), anyInt(), anyString(), any());
 	}
 
 	@Test
-	void duplicateObservationsRemainVisibleButOnlyTheFirstIsQueued() {
+	void duplicateSelectedIdsAreStoredOnlyOnce() {
 		CollectDataEntity task = postTask(null);
 		when(taskDao.findById(7)).thenReturn(Optional.of(task));
 		when(queryService.findKnownWorkIds(7)).thenReturn(Set.of());
@@ -202,9 +224,10 @@ class CollectDataServiceFetchPlanTest {
 
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(943L),
-				org.mockito.ArgumentMatchers.eq(7), items.capture(), anyString(), any());
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(2),
+				anyString(), any());
 		assertThat(items.getValue()).extracting(CollectRunFetchedItem::decision, CollectRunFetchedItem::processState)
-				.containsExactly(tuple("NEW", "QUEUED"), tuple("DUPLICATE_OBSERVATION", "SKIPPED_EXISTING"));
+				.containsExactly(tuple("NEW", "QUEUED"));
 	}
 
 	@Test
@@ -223,18 +246,19 @@ class CollectDataServiceFetchPlanTest {
 	}
 
 	@Test
-	void knownIdsAreUnionOfDetailsAndGenerationTaggedRunItems() {
+	void knownIdsIncludeAllHistoricalRunItemStates() {
 		JdbcTemplate jdbc = mock(JdbcTemplate.class);
 		when(jdbc.queryForList(org.mockito.ArgumentMatchers.startsWith("SELECT videoid"),
 				org.mockito.ArgumentMatchers.eq(String.class), org.mockito.ArgumentMatchers.eq(7)))
 				.thenReturn(List.of("detail-1", "shared", ""));
-		when(jdbc.queryForList(org.mockito.ArgumentMatchers.startsWith("SELECT i.work_id"),
+		when(jdbc.queryForList(org.mockito.ArgumentMatchers.argThat(sql -> sql.startsWith("SELECT i.work_id")
+				&& !sql.contains("queue_generation") && !sql.contains("process_state")),
 				org.mockito.ArgumentMatchers.eq(String.class), org.mockito.ArgumentMatchers.eq(7)))
-				.thenReturn(List.of("queued-1", "shared", "completed-1"));
+				.thenReturn(List.of("queued-1", "shared", "completed-1", "failed-1", "blocked-1"));
 		CollectRunQueryService query = new CollectRunQueryService(jdbc, mock(SnapshotCodec.class));
 
 		assertThat(query.findKnownWorkIds(7))
-				.containsExactly("detail-1", "shared", "queued-1", "completed-1");
+				.containsExactly("detail-1", "shared", "queued-1", "completed-1", "failed-1", "blocked-1");
 	}
 
 	@Test
@@ -284,7 +308,7 @@ class CollectDataServiceFetchPlanTest {
 		ArgumentCaptor<CollectRunFetchedItem.FetchWatermark> watermark =
 				ArgumentCaptor.forClass(CollectRunFetchedItem.FetchWatermark.class);
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(95L),
-				org.mockito.ArgumentMatchers.eq(7), items.capture(),
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(2),
 				org.mockito.ArgumentMatchers.eq("LEGACY_BOUNDED"), watermark.capture());
 		assertThat(items.getValue()).extracting(CollectRunFetchedItem::workId,
 				CollectRunFetchedItem::processState)
@@ -311,6 +335,7 @@ class CollectDataServiceFetchPlanTest {
 	private DouyinFetchEnvelope envelope(List<JSONObject> items, Set<String> newIds, String outcome) {
 		JSONObject diagnostics = new JSONObject();
 		diagnostics.put("test", true);
+		diagnostics.put("observedCount", items.size());
 		return new DouyinFetchEnvelope(items, newIds, outcome, 2, 0, "cursor-2", diagnostics);
 	}
 

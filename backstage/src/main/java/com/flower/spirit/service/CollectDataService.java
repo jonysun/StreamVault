@@ -6,6 +6,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -155,8 +156,11 @@ public class CollectDataService {
 	@Value("${streamvault.collect.incremental-known-boundary:20}")
 	private int incrementalKnownBoundary;
 
-	@Value("${streamvault.collect.incremental-max-pages:100}")
-	private int incrementalMaxPages;
+	@Value("${streamvault.collect.incremental-min-pages:20}")
+	private int incrementalMinPages;
+
+	@Value("${streamvault.collect.backfill-max-pages:500}")
+	private int backfillMaxPages;
 
 	@Value("${streamvault.collect.audit-max-pages:500}")
 	private int auditMaxPages;
@@ -2227,13 +2231,51 @@ public class CollectDataService {
 				? DouyinFetchMode.AUDIT
 				: task.getLastSuccessfulFetchAt() == null ? DouyinFetchMode.INITIAL : DouyinFetchMode.INCREMENTAL;
 		Set<String> knownIds = collectRunQueryService.findKnownWorkIds(task.getId());
+		int batchLimit = mode == DouyinFetchMode.INITIAL ? firstFetchLimit(task)
+				: mode == DouyinFetchMode.INCREMENTAL ? incrementalFetchLimit(task) : 0;
+		int maxPages = mode == DouyinFetchMode.AUDIT ? auditMaxPages
+				: effectiveIncrementalMaxPages(knownIds.size(), batchLimit);
 		DouyinFetchRequest request = new DouyinFetchRequest(sourceId(task), knownIds,
 				task.getLastSeenPublishTime(), incrementalKnownBoundary,
-				mode == DouyinFetchMode.AUDIT ? auditMaxPages : incrementalMaxPages,
-				emptyPageLimit, mode, mode == DouyinFetchMode.INITIAL ? firstFetchLimit(task) : 0);
+				maxPages, emptyPageLimit, mode, batchLimit);
 		DouyinFetchEnvelope envelope = douyinIncrementalFetchService.fetch(request);
-		List<CollectRunFetchedItem> plan = buildFetchPlan(task, envelope, mode);
-		collectRunService.storeFetchPlan(runId, task.getId(), plan, envelope.outcome(), newestWatermark(envelope));
+		DouyinFetchEnvelope planningEnvelope = mode == DouyinFetchMode.AUDIT
+				? envelope : selectedEnvelope(envelope, batchLimit);
+		List<CollectRunFetchedItem> plan = buildFetchPlan(task, planningEnvelope, mode);
+		collectRunService.storeFetchPlan(runId, task.getId(), plan, observedCount(envelope),
+				envelope.outcome(), newestWatermark(envelope));
+	}
+
+	private DouyinFetchEnvelope selectedEnvelope(DouyinFetchEnvelope envelope, int batchLimit) {
+		Set<String> selectedIds = envelope.newWorkIds() == null ? Set.of() : envelope.newWorkIds();
+		Set<String> uniqueSelectedIds = new java.util.LinkedHashSet<>();
+		List<JSONObject> selectedItems = new ArrayList<>();
+		int limit = Math.max(0, batchLimit);
+		for (int index = 0; index < envelope.items().size(); index++) {
+			JSONObject item = envelope.items().get(index);
+			String workId = item.getString("aweme_id");
+			if (workId == null || workId.isBlank()) {
+				throw new CollectFetchException("UPSTREAM_SCHEMA_ERROR",
+						"作品列表第 " + (index + 1) + " 项缺少 aweme_id");
+			}
+			if (selectedItems.size() < limit && selectedIds.contains(workId) && uniqueSelectedIds.add(workId)) {
+				selectedItems.add(item);
+			}
+		}
+		return new DouyinFetchEnvelope(List.copyOf(selectedItems), Collections.unmodifiableSet(uniqueSelectedIds),
+				envelope.outcome(), envelope.pagesFetched(),
+				envelope.emptyPages(), envelope.lastCursor(), envelope.diagnostics());
+	}
+
+	private int observedCount(DouyinFetchEnvelope envelope) {
+		Object value = envelope.diagnostics() == null ? null : envelope.diagnostics().get("observedCount");
+		if (value instanceof Number number) {
+			long count = number.longValue();
+			if (count >= 0 && count <= Integer.MAX_VALUE && number.doubleValue() == count) {
+				return (int) count;
+			}
+		}
+		return envelope.items().size();
 	}
 
 	private void executeBoundedLegacyFetchAndPlan(CollectDataEntity task, long runId) throws IOException {
@@ -2258,7 +2300,7 @@ public class CollectDataService {
 		DouyinFetchEnvelope envelope = new DouyinFetchEnvelope(List.copyOf(items), Set.copyOf(newIds),
 				"LEGACY_BOUNDED", 0, 0, "", diagnostics);
 		List<CollectRunFetchedItem> plan = buildFetchPlan(task, envelope, DouyinFetchMode.INCREMENTAL);
-		collectRunService.storeFetchPlan(runId, task.getId(), plan, envelope.outcome(),
+		collectRunService.storeFetchPlan(runId, task.getId(), plan, items.size(), envelope.outcome(),
 				new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, ""));
 	}
 
@@ -2348,6 +2390,19 @@ public class CollectDataService {
 	private int firstFetchLimit(CollectDataEntity task) {
 		return task.getOmaxcur() != null && task.getOmaxcur() > 0 ? task.getOmaxcur()
 				: Math.max(1, initialFetchLimit);
+	}
+
+	private int incrementalFetchLimit(CollectDataEntity task) {
+		return task.getMaxcur() != null && task.getMaxcur() > 0 ? task.getMaxcur()
+				: Math.max(1, initialFetchLimit);
+	}
+
+	private int effectiveIncrementalMaxPages(int knownCount, int batchLimit) {
+		long requiredItems = Math.max(0L, knownCount) + Math.max(1L, batchLimit) + 20L;
+		long requiredPages = (requiredItems + 19L) / 20L;
+		long minimum = Math.max(1L, incrementalMinPages);
+		long hardLimit = Math.max(minimum, backfillMaxPages);
+		return (int) Math.min(Integer.MAX_VALUE, Math.min(hardLimit, Math.max(minimum, requiredPages)));
 	}
 
 	private String sourceId(CollectDataEntity task) {
