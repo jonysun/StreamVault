@@ -30,7 +30,9 @@ public class SqliteSchemaPreflight {
 			"biz_collect_run_item",
 			"biz_collect_run_event",
 			"biz_job_queue",
-			"biz_database_maintenance_operation");
+			"biz_database_maintenance_operation",
+			"biz_video",
+			"biz_graphic_content");
 	private static final Map<String, List<String>> REQUIRED_PIPELINE_COLUMNS = requiredPipelineColumns();
 
 	private final JdbcTemplate jdbcTemplate;
