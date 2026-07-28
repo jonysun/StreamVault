@@ -15,9 +15,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class DatabaseAuditService {
 
-	private static final int NON_FAILED_RUN_ITEM_DAYS = 90;
-	private static final int FAILED_RUN_ITEM_DAYS = 365;
-	private static final int TERMINAL_HISTORY_DAYS = 90;
 	private static final int DUPLICATE_SAMPLE_LIMIT = 20;
 
 	private final JdbcTemplate jdbcTemplate;
@@ -131,22 +128,23 @@ public class DatabaseAuditService {
 		result.put("runItems", countIfTableExists("biz_collect_run_item",
 				"SELECT COUNT(*) FROM biz_collect_run_item WHERE "
 						+ "((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < "
-						+ sqliteCutoff(FAILED_RUN_ITEM_DAYS) + ") OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' "
-						+ "AND created_at < " + sqliteCutoff(NON_FAILED_RUN_ITEM_DAYS) + "))"));
+						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.FAILED_RUN_ITEM_DAYS)
+						+ ") OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' AND created_at < "
+						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.NON_FAILED_RUN_ITEM_DAYS) + "))"));
 		result.put("terminalRuns", countIfTableExists("biz_collect_run",
 				"SELECT COUNT(*) FROM biz_collect_run WHERE UPPER(COALESCE(state, '')) IN "
 						+ "('COMPLETED','FETCH_FAILED','DB_FAILED','INTERRUPTED','SKIPPED_PAUSED','CANCELLED') "
-						+ "AND created_at < " + sqliteCutoff(TERMINAL_HISTORY_DAYS)));
+						+ "AND created_at < " + sqliteCutoff(RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
 		result.put("runEvents", countIfTableExists("biz_collect_run_event",
 				"SELECT COUNT(*) FROM biz_collect_run_event WHERE created_at < "
-						+ sqliteCutoff(TERMINAL_HISTORY_DAYS)));
+						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
 		result.put("terminalJobs", countIfTableExists("biz_job_queue",
 				"SELECT COUNT(*) FROM biz_job_queue WHERE UPPER(COALESCE(state, '')) IN "
 						+ "('COMPLETED','FAILED','CANCELLED') AND created_at < "
-						+ sqliteCutoff(TERMINAL_HISTORY_DAYS)));
-		result.put("nonFailedRunItemDays", (long) NON_FAILED_RUN_ITEM_DAYS);
-		result.put("failedRunItemDays", (long) FAILED_RUN_ITEM_DAYS);
-		result.put("terminalHistoryDays", (long) TERMINAL_HISTORY_DAYS);
+						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
+		result.put("nonFailedRunItemDays", (long) RuntimeHistoryRetentionPolicy.NON_FAILED_RUN_ITEM_DAYS);
+		result.put("failedRunItemDays", (long) RuntimeHistoryRetentionPolicy.FAILED_RUN_ITEM_DAYS);
+		result.put("terminalHistoryDays", (long) RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS);
 		return result;
 	}
 

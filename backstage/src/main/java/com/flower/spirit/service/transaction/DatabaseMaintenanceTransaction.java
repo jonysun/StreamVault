@@ -4,6 +4,9 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +18,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.flower.spirit.service.RuntimeHistoryRetentionPolicy;
+
 @Service
 public class DatabaseMaintenanceTransaction {
+
+	private static final DateTimeFormatter SQLITE_TIMESTAMP = DateTimeFormatter
+			.ofPattern("uuuu-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
 
 	private final JdbcTemplate jdbcTemplate;
 
@@ -75,12 +83,74 @@ public class DatabaseMaintenanceTransaction {
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public BatchResult purgeExpiredRunItems(long operationId, long afterId, int batchSize, Instant now) {
-		List<Long> ids = jdbcTemplate.queryForList("SELECT id FROM biz_collect_run_item WHERE id > ? AND "
-				+ "((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < datetime('now','-365 days')) "
-				+ "OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' AND created_at < datetime('now','-90 days'))) "
-				+ "ORDER BY id LIMIT " + batchSize, Long.class, afterId);
-		int affected = updateIds("DELETE FROM biz_collect_run_item WHERE id IN (", ids);
+		return purgeByCondition(operationId, "biz_collect_run_item",
+				"((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < ?) "
+						+ "OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' "
+						+ "AND created_at < ?))",
+				List.of(cutoff(now, RuntimeHistoryRetentionPolicy.FAILED_RUN_ITEM_DAYS),
+						cutoff(now, RuntimeHistoryRetentionPolicy.NON_FAILED_RUN_ITEM_DAYS)),
+				afterId, batchSize, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public BatchResult purgeExpiredRunEvents(long operationId, long afterId, int batchSize, Instant now) {
+		return purgeByCondition(operationId, "biz_collect_run_event",
+				"created_at < ?", List.of(cutoff(now, RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)),
+				afterId, batchSize, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public BatchResult purgeExpiredTerminalRuns(long operationId, long afterId, int batchSize, Instant now) {
+		if (!tableExists("biz_collect_run")) return emptyBatch();
+		StringBuilder condition = new StringBuilder("UPPER(COALESCE(state, '')) IN "
+				+ "('COMPLETED','FETCH_FAILED','DB_FAILED','INTERRUPTED','SKIPPED_PAUSED','CANCELLED') "
+				+ "AND created_at < ?");
+		if (tableExists("biz_collect_run_item")) {
+			condition.append(" AND NOT EXISTS (SELECT 1 FROM biz_collect_run_item item "
+					+ "WHERE item.run_id = biz_collect_run.id)");
+		}
+		if (tableExists("biz_collect_run_event")) {
+			condition.append(" AND NOT EXISTS (SELECT 1 FROM biz_collect_run_event event "
+					+ "WHERE event.run_id = biz_collect_run.id)");
+		}
+		return purgeByCondition(operationId, "biz_collect_run", condition.toString(),
+				List.of(cutoff(now, RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)),
+				afterId, batchSize, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public BatchResult purgeExpiredTerminalJobs(long operationId, long afterId, int batchSize, Instant now) {
+		return purgeByCondition(operationId, "biz_job_queue",
+				"UPPER(COALESCE(state, '')) IN ('COMPLETED','FAILED','CANCELLED') "
+						+ "AND created_at < ?",
+				List.of(cutoff(now, RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)),
+				afterId, batchSize, now);
+	}
+
+	private String cutoff(Instant now, int days) {
+		return SQLITE_TIMESTAMP.format(now.minus(days, ChronoUnit.DAYS));
+	}
+
+	private BatchResult purgeByCondition(long operationId, String table, String condition,
+			List<?> conditionParameters, long afterId, int batchSize, Instant now) {
+		if (!tableExists(table)) return emptyBatch();
+		List<Object> parameters = new ArrayList<>();
+		parameters.add(afterId);
+		parameters.addAll(conditionParameters);
+		List<Long> ids = jdbcTemplate.queryForList("SELECT id FROM " + table + " WHERE id > ? AND " + condition
+				+ " ORDER BY id LIMIT " + batchSize, Long.class, parameters.toArray());
+		int affected = updateIds("DELETE FROM " + table + " WHERE id IN (", ids);
 		return recordBatch(operationId, ids, affected, batchSize, now);
+	}
+
+	private BatchResult emptyBatch() {
+		return new BatchResult(0, 0L, true);
+	}
+
+	private boolean tableExists(String name) {
+		Integer count = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", Integer.class, name);
+		return count != null && count > 0;
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
