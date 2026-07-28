@@ -1193,7 +1193,7 @@ git commit -m "build: pin and report f2 runtime version"
 - Modify: `backstage/src/test/java/com/flower/spirit/service/transaction/CollectQueueTransactionTest.java`
 - Modify: `backstage/src/test/java/com/flower/spirit/service/MediaDownloadServiceTest.java`
 
-- [ ] **Step 1: Write the integration test around fake upstream and media gateways**
+- [x] **Step 1: Write the integration test around fake upstream and media gateways**
 
 Use a real temporary SQLite WAL database and fakes for the list fetch, detail refresh, and media download. The test scenario must be:
 
@@ -1216,17 +1216,17 @@ assertThat(mediaRowCount("A1")).isEqualTo(1);
 assertThat(oldPendingItemState()).isEqualTo("PENDING");
 ```
 
-- [ ] **Step 2: Run the integration test and verify it catches incomplete wiring**
+- [x] **Step 2: Run the integration test and verify it catches incomplete wiring**
 
 Run: `mvn -f backstage/pom.xml -Dtest=CollectPipelineIntegrationTest test`
 
 Expected before final wiring: FAIL at the first missing stage transition, retry, or detail link.
 
-- [ ] **Step 3: Complete only the wiring exposed by the integration test**
+- [x] **Step 3: Complete only the wiring exposed by the integration test**
 
 Ensure all writes use existing `DatabaseWriteExecutor` coordination, no external call is inside a transaction, each media work is persisted once, and old rows with null generation remain inert. Do not increase connection pool or worker counts to make the test pass.
 
-- [ ] **Step 4: Run the complete focused suite**
+- [x] **Step 4: Run the complete focused suite**
 
 Run:
 
@@ -1242,6 +1242,13 @@ Run: `mvn -f backstage/pom.xml test`
 
 Expected: BUILD SUCCESS.
 
+Verification note: all 374 discovered tests except the pre-existing
+`SpiritApplicationTests.contextLoads` passed. That test uses the repository's
+read-only production database by default; an isolated empty SQLite database
+then fails because the existing application fixture does not seed `biz_config`.
+The failure is unrelated to the collection pipeline and no production database
+was modified.
+
 - [ ] **Step 6: Commit integration coverage**
 
 ```bash
@@ -1255,7 +1262,7 @@ git commit -m "test: cover collection fetch download pipeline"
 - Create: `docs/runbooks/collect-fetch-download-pipeline-release.md`
 - Modify: `README.md` only if it already links deployment runbooks; otherwise leave it unchanged.
 
-- [ ] **Step 1: Write the release runbook with exact non-destructive checks**
+- [x] **Step 1: Write the release runbook with exact non-destructive checks**
 
 Document these commands and expected results:
 
@@ -1321,17 +1328,17 @@ git commit -m "docs: add collection pipeline release runbook"
 
 ## Final Verification Checklist
 
-- [ ] Run `python -m unittest discover -s backstage/src/test/python -p "test_douyin_incremental.py" -v`; expect all tests PASS.
+- [x] Run `python -m unittest discover -s backstage/src/test/python -p "test_douyin_incremental.py" -v`; expect all tests PASS.
 - [ ] Run `mvn -f backstage/pom.xml test`; expect BUILD SUCCESS.
-- [ ] Run `git diff --check`; expect no output.
-- [ ] Search `rg -n "pip install --no-cache-dir f2($|\\s)" backstage/src/main/docker/buildx`; expect no unpinned install.
-- [ ] Search `rg -n "queue_generation='FETCH_DOWNLOAD_V1'|queue_generation = 'FETCH_DOWNLOAD_V1'" backstage/src/main/java`; verify every download claim/recovery/retry path is generation-gated.
-- [ ] Search `rg -n "fetch_user_post_videos" backstage/src/main/docker/buildx/script/douyin.py`; verify the legacy command remains only for bounded compatibility and the incremental post path uses `DouyinCrawler.fetch_user_post` directly.
+- [x] Run `git diff --check`; expect no output.
+- [x] Search `rg -n "pip install --no-cache-dir f2($|\\s)" backstage/src/main/docker/buildx`; expect no unpinned install.
+- [x] Search `rg -n "queue_generation='FETCH_DOWNLOAD_V1'|queue_generation = 'FETCH_DOWNLOAD_V1'" backstage/src/main/java`; verify every download claim/recovery/retry path is generation-gated.
+- [x] Search `rg -n "fetch_user_post_videos" backstage/src/main/docker/buildx/script/douyin.py`; verify the legacy command remains only for bounded compatibility and the incremental post path uses `DouyinCrawler.fetch_user_post` directly.
 - [ ] Review all `@Transactional` methods touched by this feature; verify none call F2, HTTP, sleep, FFmpeg, or filesystem download operations.
-- [ ] Confirm the implementation does not modify the user's six-hour global collection interval.
-- [ ] Confirm there are still exactly one fetch worker and one download worker by default.
-- [ ] Confirm no PostgreSQL or Redis dependency/configuration was introduced.
-- [ ] Confirm old `PENDING` rows with null `queue_generation` remain unclaimed after startup and smoke testing.
+- [x] Confirm the implementation does not modify the user's six-hour global collection interval.
+- [x] Confirm there are still exactly one fetch worker and one download worker by default.
+- [x] Confirm no PostgreSQL or Redis dependency/configuration was introduced.
+- [x] Confirm old `PENDING` rows with null `queue_generation` remain unclaimed after startup and smoke testing.
 
 ## Spec Coverage Self-Review
 
