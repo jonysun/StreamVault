@@ -15,6 +15,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class DatabaseAuditService {
 
+	private static final int NON_FAILED_RUN_ITEM_DAYS = 90;
+	private static final int FAILED_RUN_ITEM_DAYS = 365;
+	private static final int TERMINAL_HISTORY_DAYS = 90;
+	private static final int DUPLICATE_SAMPLE_LIMIT = 20;
+
 	private final JdbcTemplate jdbcTemplate;
 
 	public DatabaseAuditService(JdbcTemplate jdbcTemplate) {
@@ -29,6 +34,9 @@ public class DatabaseAuditService {
 						+ "SUM(CASE WHEN jsonData = videoinfo THEN 1 ELSE 0 END) AS exactEqualRows, "
 						+ "SUM(CASE WHEN jsonData = videoinfo THEN LENGTH(videoinfo) ELSE 0 END) AS exactDuplicateVideoInfoChars, "
 						+ "SUM(CASE WHEN jsonData IS NOT NULL AND videoinfo IS NOT NULL AND jsonData <> videoinfo THEN 1 ELSE 0 END) AS differentRows, "
+						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') <> '' AND COALESCE(videoinfo, '') = '' THEN 1 ELSE 0 END), 0) AS jsonOnlyRows, "
+						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') = '' AND COALESCE(videoinfo, '') <> '' THEN 1 ELSE 0 END), 0) AS videoInfoOnlyRows, "
+						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') = '' AND COALESCE(videoinfo, '') = '' THEN 1 ELSE 0 END), 0) AS emptyRawRows, "
 						+ "SUM(LENGTH(COALESCE(jsonData, ''))) AS jsonChars, "
 						+ "SUM(LENGTH(COALESCE(videoinfo, ''))) AS videoInfoChars, MAX(id) AS maxId FROM biz_video"));
 		Map<String, Object> graphic = new LinkedHashMap<>(jdbcTemplate.queryForMap(
@@ -39,18 +47,133 @@ public class DatabaseAuditService {
 						+ "MAX(LENGTH(COALESCE(lastfetchsnapshot, ''))) AS fetchMaxChars, "
 						+ "SUM(LENGTH(COALESCE(lastplanitems, ''))) AS planChars, "
 						+ "MAX(LENGTH(COALESCE(lastplanitems, ''))) AS planMaxChars, MAX(id) AS maxId FROM biz_collect_data"));
+		Map<String, Object> workDuplicates = new LinkedHashMap<>();
+		workDuplicates.put("video", duplicateWorks("biz_video", "videoaddr"));
+		workDuplicates.put("graphic", duplicateWorks("biz_graphic_content", "images"));
+		Map<String, Object> normalization = normalizationStats();
+		Map<String, Object> orphans = orphanStats();
+		Map<String, Object> retentionCandidates = retentionCandidates();
 		Map<String, Object> storage = storageStats();
 		Map<String, Object> result = new LinkedHashMap<>();
 		result.put("video", video);
 		result.put("graphic", graphic);
 		result.put("collectSnapshots", snapshots);
 		result.put("differentSamples", differenceSamples(10));
+		result.put("workDuplicates", workDuplicates);
+		result.put("normalization", normalization);
+		result.put("orphans", orphans);
+		result.put("retentionCandidates", retentionCandidates);
 		result.put("storage", storage);
-		result.put("fingerprint", fingerprint(video, graphic, snapshots, storage));
+		result.put("fingerprint", fingerprint(video, graphic, snapshots, workDuplicates, normalization, orphans,
+				retentionCandidates, storage));
 		result.put("notes", List.of(
 				"统计长度为逻辑字符数，不等同于 VACUUM 后的物理字节数",
 				"在线清理只释放 SQLite 可复用页；缩小文件必须停服后执行 VACUUM INTO"));
 		return result;
+	}
+
+	private Map<String, Object> duplicateWorks(String table, String mediaReferenceColumn) {
+		String eligible = "TRIM(COALESCE(platformkey, '')) <> '' AND TRIM(COALESCE(videoid, '')) <> ''";
+		String distinctReferences = "COUNT(DISTINCT CASE WHEN TRIM(COALESCE(" + mediaReferenceColumn
+				+ ", '')) <> '' THEN " + mediaReferenceColumn + " END)";
+		Map<String, Object> result = new LinkedHashMap<>(jdbcTemplate.queryForMap(
+				"SELECT COUNT(*) AS candidateGroups, COALESCE(SUM(rowCount), 0) AS candidateRows, "
+						+ "COALESCE(SUM(CASE WHEN distinctMediaReferences > 1 THEN 1 ELSE 0 END), 0) "
+						+ "AS mediaReferenceConflictGroups FROM (SELECT COUNT(*) AS rowCount, "
+						+ distinctReferences + " AS distinctMediaReferences FROM " + table + " WHERE " + eligible
+						+ " GROUP BY TRIM(platformkey), TRIM(videoid) HAVING COUNT(*) > 1) duplicateGroups"));
+		List<Map<String, Object>> samples = jdbcTemplate.query(
+				"SELECT TRIM(platformkey) AS platformKey, TRIM(videoid) AS workId, COUNT(*) AS rowCount, "
+						+ distinctReferences + " AS distinctMediaReferences FROM " + table + " WHERE " + eligible
+						+ " GROUP BY TRIM(platformkey), TRIM(videoid) HAVING COUNT(*) > 1 "
+						+ "ORDER BY TRIM(platformkey), TRIM(videoid) LIMIT " + DUPLICATE_SAMPLE_LIMIT,
+				(row, index) -> {
+					String platformKey = row.getString("platformKey");
+					String workId = row.getString("workId");
+					Map<String, Object> sample = new LinkedHashMap<>();
+					sample.put("platformKey", platformKey);
+					sample.put("workId", workId);
+					sample.put("rowCount", row.getLong("rowCount"));
+					sample.put("rowIds", jdbcTemplate.queryForList("SELECT id FROM " + table
+							+ " WHERE TRIM(platformkey) = ? AND TRIM(videoid) = ? ORDER BY id", Long.class,
+							platformKey, workId));
+					sample.put("distinctMediaReferences", row.getLong("distinctMediaReferences"));
+					return sample;
+				});
+		result.put("samples", samples);
+		return result;
+	}
+
+	private Map<String, Object> normalizationStats() {
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("videoMissingPlatformKeyRows", count(
+				"SELECT COUNT(*) FROM biz_video WHERE TRIM(COALESCE(platformkey, '')) = ''"));
+		result.put("graphicMissingPlatformKeyRows", count(
+				"SELECT COUNT(*) FROM biz_graphic_content WHERE TRIM(COALESCE(platformkey, '')) = ''"));
+		result.put("authorMissingPlatformKeyRows", countIfTableExists("biz_author_profile",
+				"SELECT COUNT(*) FROM biz_author_profile WHERE TRIM(COALESCE(platformkey, '')) = ''"));
+		return result;
+	}
+
+	private Map<String, Object> orphanStats() {
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("runItemsWithoutRun", orphanCount("biz_collect_run_item", "biz_collect_run", "run_id"));
+		result.put("runEventsWithoutRun", orphanCount("biz_collect_run_event", "biz_collect_run", "run_id"));
+		result.put("authorNameHistoryWithoutProfile",
+				orphanCount("biz_author_name_history", "biz_author_profile", "authorprofileid"));
+		result.put("collectDetailsWithoutTask",
+				orphanCount("biz_collect_data_detail", "biz_collect_data", "dataid"));
+		return result;
+	}
+
+	private Map<String, Object> retentionCandidates() {
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("runItems", countIfTableExists("biz_collect_run_item",
+				"SELECT COUNT(*) FROM biz_collect_run_item WHERE "
+						+ "((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < "
+						+ sqliteCutoff(FAILED_RUN_ITEM_DAYS) + ") OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' "
+						+ "AND created_at < " + sqliteCutoff(NON_FAILED_RUN_ITEM_DAYS) + "))"));
+		result.put("terminalRuns", countIfTableExists("biz_collect_run",
+				"SELECT COUNT(*) FROM biz_collect_run WHERE UPPER(COALESCE(state, '')) IN "
+						+ "('COMPLETED','FETCH_FAILED','DB_FAILED','INTERRUPTED','SKIPPED_PAUSED','CANCELLED') "
+						+ "AND created_at < " + sqliteCutoff(TERMINAL_HISTORY_DAYS)));
+		result.put("runEvents", countIfTableExists("biz_collect_run_event",
+				"SELECT COUNT(*) FROM biz_collect_run_event WHERE created_at < "
+						+ sqliteCutoff(TERMINAL_HISTORY_DAYS)));
+		result.put("terminalJobs", countIfTableExists("biz_job_queue",
+				"SELECT COUNT(*) FROM biz_job_queue WHERE UPPER(COALESCE(state, '')) IN "
+						+ "('COMPLETED','FAILED','CANCELLED') AND created_at < "
+						+ sqliteCutoff(TERMINAL_HISTORY_DAYS)));
+		result.put("nonFailedRunItemDays", (long) NON_FAILED_RUN_ITEM_DAYS);
+		result.put("failedRunItemDays", (long) FAILED_RUN_ITEM_DAYS);
+		result.put("terminalHistoryDays", (long) TERMINAL_HISTORY_DAYS);
+		return result;
+	}
+
+	private String sqliteCutoff(int days) {
+		return "datetime('now','-" + days + " days')";
+	}
+
+	private long orphanCount(String childTable, String parentTable, String foreignKey) {
+		if (!tableExists(childTable)) return 0L;
+		if (!tableExists(parentTable)) return count("SELECT COUNT(*) FROM " + childTable);
+		return count("SELECT COUNT(*) FROM " + childTable + " child LEFT JOIN " + parentTable
+				+ " parent ON parent.id = child." + foreignKey + " WHERE parent.id IS NULL");
+	}
+
+	private long countIfTableExists(String table, String sql) {
+		return tableExists(table) ? count(sql) : 0L;
+	}
+
+	private long count(String sql) {
+		Long count = jdbcTemplate.queryForObject(sql, Long.class);
+		return count == null ? 0L : count;
+	}
+
+	private boolean tableExists(String name) {
+		Integer count = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", Integer.class, name);
+		return count != null && count > 0;
 	}
 
 	private List<Map<String, Object>> differenceSamples(int limit) {
@@ -98,21 +221,44 @@ public class DatabaseAuditService {
 	}
 
 	private String fingerprint(Map<String, Object> video, Map<String, Object> graphic,
-			Map<String, Object> snapshots, Map<String, Object> storage) {
+			Map<String, Object> snapshots, Map<String, Object> workDuplicates, Map<String, Object> normalization,
+			Map<String, Object> orphans, Map<String, Object> retentionCandidates, Map<String, Object> storage) {
 		List<Object> fields = new ArrayList<>();
 		fields.add(video.get("rowsTotal"));
 		fields.add(video.get("maxId"));
 		fields.add(video.get("exactEqualRows"));
 		fields.add(video.get("differentRows"));
+		fields.add(video.get("jsonOnlyRows"));
+		fields.add(video.get("videoInfoOnlyRows"));
+		fields.add(video.get("emptyRawRows"));
 		fields.add(video.get("jsonChars"));
 		fields.add(video.get("videoInfoChars"));
 		fields.add(graphic.get("rowsTotal"));
 		fields.add(graphic.get("maxId"));
 		fields.add(snapshots.get("taskRows"));
 		fields.add(snapshots.get("maxId"));
+		addFields(fields, map(workDuplicates.get("video")), "candidateGroups", "candidateRows",
+				"mediaReferenceConflictGroups");
+		addFields(fields, map(workDuplicates.get("graphic")), "candidateGroups", "candidateRows",
+				"mediaReferenceConflictGroups");
+		addFields(fields, normalization, "videoMissingPlatformKeyRows", "graphicMissingPlatformKeyRows",
+				"authorMissingPlatformKeyRows");
+		addFields(fields, orphans, "runItemsWithoutRun", "runEventsWithoutRun",
+				"authorNameHistoryWithoutProfile", "collectDetailsWithoutTask");
+		addFields(fields, retentionCandidates, "runItems", "terminalRuns", "runEvents", "terminalJobs",
+				"nonFailedRunItemDays", "failedRunItemDays", "terminalHistoryDays");
 		fields.add(storage.get("pageCount"));
 		fields.add(storage.get("freelistPages"));
 		return "sha256:" + sha256(String.join("|", fields.stream().map(String::valueOf).toList()));
+	}
+
+	private void addFields(List<Object> fields, Map<String, Object> source, String... names) {
+		for (String name : names) fields.add(source.get(name));
+	}
+
+	@SuppressWarnings("unchecked")
+	private Map<String, Object> map(Object value) {
+		return (Map<String, Object>) value;
 	}
 
 	private int length(String value) {
