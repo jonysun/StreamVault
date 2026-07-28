@@ -260,7 +260,7 @@ async def paginate(
     mode,
     max_items=0,
 ):
-    watermark_epoch = _validate_config(
+    _validate_config(
         watermark,
         known_boundary,
         max_pages,
@@ -269,12 +269,25 @@ async def paginate(
         max_items,
     )
     observed = []
+    selected = []
     new_ids = []
     cursor = 0
-    known_streak = 0
     empty_pages = 0
     seen_work_ids = set()
     diagnostics = {"pages": [], "lastResponseSummary": None}
+
+    def finish(outcome, pages_fetched, last_cursor):
+        diagnostics["observedCount"] = len(observed)
+        diagnostics["selectedCount"] = len(selected)
+        return envelope(
+            observed if mode == "audit" else selected,
+            new_ids,
+            outcome,
+            pages_fetched,
+            empty_pages,
+            last_cursor,
+            diagnostics,
+        )
 
     for page_number in range(1, max_pages + 1):
         raw = await fetch_page(cursor)
@@ -294,39 +307,15 @@ async def paginate(
         )
 
         if aweme_list is None:
-            return envelope(
-                observed,
-                new_ids,
-                "WORKS_UNAVAILABLE",
-                page_number,
-                empty_pages,
-                next_cursor,
-                diagnostics,
-            )
+            return finish("WORKS_UNAVAILABLE", page_number, next_cursor)
 
         if not aweme_list:
             empty_pages += 1
             if not has_more:
                 outcome = "NO_PUBLIC_WORKS" if not observed else "NO_MORE"
-                return envelope(
-                    observed,
-                    new_ids,
-                    outcome,
-                    page_number,
-                    empty_pages,
-                    next_cursor,
-                    diagnostics,
-                )
+                return finish(outcome, page_number, next_cursor)
             if empty_pages >= empty_page_limit:
-                return envelope(
-                    observed,
-                    new_ids,
-                    "EMPTY_PAGINATION",
-                    page_number,
-                    empty_pages,
-                    next_cursor,
-                    diagnostics,
-                )
+                return finish("EMPTY_PAGINATION", page_number, next_cursor)
             cursor = next_cursor
             continue
 
@@ -342,60 +331,16 @@ async def paginate(
             if work_id:
                 seen_work_ids.add(work_id)
 
-            if known:
-                known_streak += 1
-            else:
-                known_streak = 0
+            if not known:
                 if work_id:
                     new_ids.append(work_id)
+                    selected.append(item)
 
-            if mode == "initial" and max_items > 0 and len(observed) >= max_items:
-                return envelope(
-                    observed,
-                    new_ids,
-                    "INITIAL_LIMIT",
-                    page_number,
-                    empty_pages,
-                    next_cursor,
-                    diagnostics,
-                )
-
-            publish_time = _parse_nonnegative_epoch(item["create_time"])
-            if (
-                mode == "incremental"
-                and known_streak >= known_boundary
-                and watermark_epoch is not None
-                and publish_time is not None
-                and publish_time <= watermark_epoch
-            ):
-                return envelope(
-                    observed,
-                    new_ids,
-                    "KNOWN_BOUNDARY",
-                    page_number,
-                    empty_pages,
-                    next_cursor,
-                    diagnostics,
-                )
+            if mode in ("initial", "incremental") and max_items > 0 and len(selected) >= max_items:
+                return finish("BATCH_LIMIT", page_number, next_cursor)
 
         if not has_more:
-            return envelope(
-                observed,
-                new_ids,
-                "NO_MORE",
-                page_number,
-                empty_pages,
-                next_cursor,
-                diagnostics,
-            )
+            return finish("NO_MORE", page_number, next_cursor)
         cursor = next_cursor
 
-    return envelope(
-        observed,
-        new_ids,
-        "MAX_PAGE_GUARD",
-        max_pages,
-        empty_pages,
-        cursor,
-        diagnostics,
-    )
+    return finish("MAX_PAGE_GUARD", max_pages, cursor)

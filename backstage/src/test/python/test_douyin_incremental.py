@@ -326,68 +326,68 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
 
-    async def test_stops_after_known_streak_crosses_watermark(self):
+    async def test_incremental_batch_combines_new_head_and_historical_unknown_items(self):
+        newest = [work(f"new-{index}", 300 - index) for index in range(5)]
+        known = [work(f"known-{index}", 200 - index) for index in range(20)]
+        historical = [work(f"history-{index}", 100 - index) for index in range(15)]
         fetch_page = fake_fetch(
             [
-                page(
-                    [
-                        work("new-1", 200),
-                        work("known-1", 150),
-                        work("known-2", 140),
-                        work("not-observed", 130),
-                    ],
-                    has_more=1,
-                    cursor=100,
-                )
+                page(newest + known[:15], has_more=1, cursor=100),
+                page(known[15:] + historical, has_more=1, cursor=200),
             ]
         )
 
         result = await paginate(
             fetch_page,
+            known_ids={item["aweme_id"] for item in known},
+            watermark=200,
+            known_boundary=20,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+            max_items=20,
+        )
+
+        self.assertEqual("BATCH_LIMIT", result["outcome"])
+        self.assertEqual(2, result["pagesFetched"])
+        self.assertEqual(
+            [item["aweme_id"] for item in newest + historical],
+            result["newWorkIds"],
+        )
+        self.assertEqual(result["newWorkIds"], [item["aweme_id"] for item in result["items"]])
+        self.assertEqual(40, result["diagnostics"]["observedCount"])
+        self.assertEqual(20, result["diagnostics"]["selectedCount"])
+
+    async def test_incremental_known_prefix_does_not_stop_before_unknown_quota(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page(
+                        [work("known-1", 150), work("known-2", 140)],
+                        has_more=1,
+                        cursor=10,
+                    ),
+                    page(
+                        [work("new-1", 130), work("new-2", 120)],
+                        has_more=1,
+                        cursor=20,
+                    ),
+                ]
+            ),
             known_ids={"known-1", "known-2"},
             watermark=150,
             known_boundary=2,
             max_pages=20,
             empty_page_limit=3,
             mode="incremental",
+            max_items=2,
         )
 
-        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
-        self.assertEqual(["new-1"], result["newWorkIds"])
-        self.assertEqual(
-            ["new-1", "known-1", "known-2"],
-            [item["aweme_id"] for item in result["items"]],
-        )
-        self.assertEqual([False, True, True], [item["knownAtFetch"] for item in result["items"]])
+        self.assertEqual("BATCH_LIMIT", result["outcome"])
+        self.assertEqual(["new-1", "new-2"], result["newWorkIds"])
+        self.assertEqual(["new-1", "new-2"], [item["aweme_id"] for item in result["items"]])
 
-    async def test_new_work_resets_known_streak(self):
-        result = await paginate(
-            fake_fetch(
-                [
-                    page(
-                        [
-                            work("known-1", 150),
-                            work("new-1", 145),
-                            work("known-2", 140),
-                            work("known-3", 130),
-                        ],
-                        has_more=1,
-                        cursor=10,
-                    )
-                ]
-            ),
-            known_ids={"known-1", "known-2", "known-3"},
-            watermark=150,
-            known_boundary=2,
-            max_pages=20,
-            empty_page_limit=3,
-            mode="incremental",
-        )
-
-        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
-        self.assertEqual(4, len(result["items"]))
-
-    async def test_same_page_duplicate_is_known_and_advances_known_streak(self):
+    async def test_same_page_duplicate_does_not_consume_unknown_quota(self):
         result = await paginate(
             fake_fetch(
                 [
@@ -395,7 +395,7 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
                         [
                             work("duplicate", 200),
                             work("duplicate", 100),
-                            work("not-observed", 90),
+                            work("second", 90),
                         ],
                         has_more=1,
                         cursor=10,
@@ -403,49 +403,42 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
                 ]
             ),
             known_ids=set(),
-            watermark=150,
+            watermark=None,
             known_boundary=1,
             max_pages=20,
             empty_page_limit=3,
             mode="incremental",
+            max_items=2,
         )
 
-        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
-        self.assertEqual(["duplicate"], result["newWorkIds"])
-        self.assertEqual(
-            [False, True], [item["knownAtFetch"] for item in result["items"]]
-        )
-        self.assertEqual(
-            ["duplicate", "duplicate"],
-            [item["aweme_id"] for item in result["items"]],
-        )
+        self.assertEqual("BATCH_LIMIT", result["outcome"])
+        self.assertEqual(["duplicate", "second"], result["newWorkIds"])
+        self.assertEqual(["duplicate", "second"], [item["aweme_id"] for item in result["items"]])
 
-    async def test_cross_page_duplicate_is_known_and_advances_known_streak(self):
+    async def test_cross_page_duplicate_does_not_consume_unknown_quota(self):
         result = await paginate(
             fake_fetch(
                 [
                     page([work("duplicate", 200)], has_more=1, cursor=10),
                     page(
-                        [work("duplicate", 100), work("not-observed", 90)],
+                        [work("duplicate", 100), work("second", 90)],
                         has_more=1,
                         cursor=20,
                     ),
                 ]
             ),
             known_ids=set(),
-            watermark=150,
+            watermark=None,
             known_boundary=1,
             max_pages=20,
             empty_page_limit=3,
             mode="incremental",
+            max_items=2,
         )
 
-        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
+        self.assertEqual("BATCH_LIMIT", result["outcome"])
         self.assertEqual(2, result["pagesFetched"])
-        self.assertEqual(["duplicate"], result["newWorkIds"])
-        self.assertEqual(
-            [False, True], [item["knownAtFetch"] for item in result["items"]]
-        )
+        self.assertEqual(["duplicate", "second"], result["newWorkIds"])
 
     async def test_empty_work_ids_are_neither_seen_nor_new(self):
         result = await paginate(
@@ -468,11 +461,10 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("NO_MORE", result["outcome"])
         self.assertEqual([], result["newWorkIds"])
-        self.assertEqual(
-            [False, False], [item["knownAtFetch"] for item in result["items"]]
-        )
+        self.assertEqual([], result["items"])
+        self.assertEqual(2, result["diagnostics"]["observedCount"])
 
-    async def test_known_boundary_requires_watermark_to_be_crossed(self):
+    async def test_incremental_watermark_does_not_stop_historical_backfill(self):
         result = await paginate(
             fake_fetch(
                 [
@@ -481,7 +473,7 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
                         has_more=1,
                         cursor=1,
                     ),
-                    page([work("known-3", 190)], has_more=0, cursor=2),
+                    page([work("known-3", 190), work("historical", 180)], has_more=0, cursor=2),
                 ]
             ),
             known_ids={"known-1", "known-2", "known-3"},
@@ -490,12 +482,14 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
             max_pages=20,
             empty_page_limit=3,
             mode="incremental",
+            max_items=2,
         )
 
-        self.assertEqual("KNOWN_BOUNDARY", result["outcome"])
+        self.assertEqual("NO_MORE", result["outcome"])
         self.assertEqual(2, result["pagesFetched"])
+        self.assertEqual(["historical"], result["newWorkIds"])
 
-    async def test_invalid_publish_times_do_not_satisfy_known_boundary(self):
+    async def test_invalid_publish_times_do_not_block_unknown_selection(self):
         result = await paginate(
             fake_fetch(
                 [
@@ -525,7 +519,8 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("NO_MORE", result["outcome"])
         self.assertEqual(["new-later"], result["newWorkIds"])
-        self.assertEqual(4, len(result["items"]))
+        self.assertEqual(["new-later"], [item["aweme_id"] for item in result["items"]])
+        self.assertEqual(4, result["diagnostics"]["observedCount"])
 
     async def test_initial_mode_respects_max_items_inside_page(self):
         result = await paginate(
@@ -547,7 +542,7 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
             max_items=2,
         )
 
-        self.assertEqual("INITIAL_LIMIT", result["outcome"])
+        self.assertEqual("BATCH_LIMIT", result["outcome"])
         self.assertEqual(["1", "2"], result["newWorkIds"])
         self.assertEqual(["1", "2"], [item["aweme_id"] for item in result["items"]])
 
@@ -828,7 +823,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             result = json.loads(output_file.read_text(encoding="utf-8"))
 
         crawler = crawlers[0]
-        self.assertEqual("INITIAL_LIMIT", result["outcome"])
+        self.assertEqual("BATCH_LIMIT", result["outcome"])
         self.assertEqual([0], crawler.post_cursors)
         self.assertEqual(["MS4-author"], crawler.profile_ids)
         self.assertEqual(20, crawler.post_params[0].count)

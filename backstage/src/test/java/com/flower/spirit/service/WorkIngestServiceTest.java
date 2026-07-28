@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.flower.spirit.database.postgresql.DirectDatabaseWriteExecutor;
 import com.flower.spirit.entity.ProcessHistoryEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.platform.DownloadResult;
@@ -55,7 +57,7 @@ class WorkIngestServiceTest {
 		metadata = metadata();
 		service = new WorkIngestService(new PlatformResolver(), adapterRegistry,
 				new WorkMetadataNormalizer(ZoneId.of("UTC")), mediaDownloadService, persistenceService,
-				postProcessingService, processHistoryService);
+				new DirectDatabaseWriteExecutor(), postProcessingService, processHistoryService);
 		org.mockito.Mockito.lenient().when(persistenceService.findExisting(any())).thenReturn(Optional.empty());
 	}
 
@@ -128,6 +130,33 @@ class WorkIngestServiceTest {
 
 		verify(mediaDownloadService).rollback(download);
 		verify(mediaDownloadService, never()).commit(any());
+	}
+
+	@Test
+	void sqliteBusyDuringPersistenceRetriesWithoutDownloadingAgain() {
+		stubAdapterPipeline();
+		DownloadOutcome download = DownloadOutcome.completed(List.of(new WorkMediaResource(0,
+				WorkMediaResource.Type.VIDEO, null, Path.of("C:/media/work-1/video.mp4"), "mp4", Map.of())),
+				Path.of("C:/media/work-1"));
+		when(mediaDownloadService.download(any(), any(), any())).thenReturn(download);
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(20);
+		PersistenceResult persistence = PersistenceResult.video(true, video);
+		when(persistenceService.persist(any()))
+				.thenThrow(new RuntimeException("SQLITE_BUSY_SNAPSHOT"))
+				.thenReturn(persistence);
+		service = new WorkIngestService(new PlatformResolver(), adapterRegistry,
+				new WorkMetadataNormalizer(ZoneId.of("UTC")), mediaDownloadService, persistenceService,
+				new SqliteWriteRetrier(2, 0, 0, ignored -> { }), postProcessingService, processHistoryService);
+
+		WorkIngestService.IngestResult result = service.ingest("https://youtu.be/work-1",
+				Path.of("C:/media/work-1"), false);
+
+		assertThat(result.status()).isEqualTo(DownloadResult.Status.COMPLETED);
+		verify(mediaDownloadService, times(1)).download(any(), any(), any());
+		verify(persistenceService, times(2)).persist(any());
+		verify(mediaDownloadService).commit(download);
+		verify(mediaDownloadService, never()).rollback(any());
 	}
 
 	@Test
