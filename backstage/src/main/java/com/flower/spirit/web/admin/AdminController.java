@@ -43,8 +43,10 @@ import com.flower.spirit.entity.VideoMixEntity;
 import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.CollectDataDetailService;
 import com.flower.spirit.service.CollectDataService;
+import com.flower.spirit.service.CollectEnqueueResult;
 import com.flower.spirit.service.CollectEnqueueService;
 import com.flower.spirit.service.CollectRunQueryService;
+import com.flower.spirit.service.CollectRunService;
 import com.flower.spirit.service.AnalysisService;
 import com.flower.spirit.service.AdminMediaManagementService;
 import com.flower.spirit.service.AuthorProfileService;
@@ -121,6 +123,9 @@ public class AdminController {
 
 	@Autowired
 	private CollectEnqueueService collectEnqueueService;
+
+	@Autowired
+	private CollectRunService collectRunService;
 
 	@Autowired
 	private RuntimeControlService runtimeControlService;
@@ -707,6 +712,50 @@ public class AdminController {
 		return collectRunQueryService.findEvents(runId, afterSequence, limit);
 	}
 
+	@PostMapping("/collectData/retryItem")
+	public AjaxEntity retryCollectDownloadItem(@RequestParam long id) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "下载项已重新排队", collectRunService.retryDownloadItem(id));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@PostMapping("/collectData/retryFailedItems")
+	public AjaxEntity retryCollectDownloadItems(@RequestParam long runId) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "失败下载项已重新排队",
+					Map.of("requeued", collectRunService.retryFailedDownloads(runId)));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@PostMapping("/collectData/audit")
+	public AjaxEntity auditCollectTask(@RequestParam int taskId) {
+		try {
+			CollectEnqueueResult result = collectEnqueueService.enqueueAudit(taskId);
+			if (result.skippedUnsupported() || result.skippedPaused()) {
+				return new AjaxEntity(Global.ajax_uri_error,
+						result.reason() == null ? "全量审计未能入队" : result.reason(), result);
+			}
+			return new AjaxEntity(Global.ajax_success, "全量审计已排队", result);
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@GetMapping("/collectData/downloadQueue")
+	public AjaxEntity collectDownloadQueue(@RequestParam(required = false) Integer taskId,
+			@RequestParam(defaultValue = "100") int limit) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "下载队列获取成功",
+					collectRunQueryService.downloadQueue(taskId, limit));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
 	@GetMapping("/collect-tasks/{taskId}/latest-items")
 	public Map<String, Object> findLatestCollectItems(@PathVariable int taskId,
 			@RequestParam(defaultValue = "all") String view, @RequestParam(defaultValue = "500") int limit,
@@ -727,7 +776,11 @@ public class AdminController {
 		}
 		try {
 			int taskId = ((Number) preview.get("taskId")).intValue();
-			return new AjaxEntity(Global.ajax_success, "已重新入队", collectEnqueueService.enqueueManual(taskId));
+			CollectEnqueueResult result = collectEnqueueService.enqueueManual(taskId);
+			if (result.skippedUnsupported()) {
+				return new AjaxEntity(Global.ajax_uri_error, result.reason(), result);
+			}
+			return new AjaxEntity(Global.ajax_success, "已重新入队", result);
 		} catch (RuntimeException error) {
 			return new AjaxEntity(Global.ajax_uri_error, "重排队失败: " + error.getMessage(), null);
 		}

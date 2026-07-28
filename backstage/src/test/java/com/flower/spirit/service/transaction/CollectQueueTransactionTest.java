@@ -1,6 +1,7 @@
 package com.flower.spirit.service.transaction;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,7 +32,7 @@ import com.flower.spirit.service.RuntimeJobQueryService;
 class CollectQueueTransactionTest {
 
 	@Test
-	void queueRunItemsAndCompletionArePersistentAndIdempotent() throws Exception {
+	void fetchPlanCompletionLeavesDownloadsQueuedAndPreservesCarriedOut() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
 			createSchema(jdbc);
@@ -56,29 +57,155 @@ class CollectQueueTransactionTest {
 			assertThat((List<?>) dashboard.get("running")).hasSize(1);
 			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
 					now.plusSeconds(3));
-			transaction.storeFetchedItems(claim.runId(), List.of(
+			transaction.storeFetchPlan(claim.runId(), 7, List.of(
 					new CollectRunFetchedItem(1, "douyin", "work-1", "MS4-author", "作者", "作品一",
-							"2026-07-25 10:00:00", "video"),
+							"200", "video", "NEW", "QUEUED"),
 					new CollectRunFetchedItem(2, "douyin", "work-2", "MS4-author", "作者", "作品二",
-							"2026-07-25 09:00:00", "image")), now.plusSeconds(4));
-			transaction.updateItem(claim.runId(), "work-1", "video-success", "COMPLETED", null, null,
-					now.plusSeconds(5));
-			transaction.updateItem(claim.runId(), "work-2", "skip-detail-exists", "SKIPPED", null, null,
-					now.plusSeconds(6));
+							"100", "image", "EXISTING", "SKIPPED_EXISTING")), "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("200", "work-1", 2, 0, "cursor-2"),
+					now.plusSeconds(4));
 			transaction.complete(claim.runId(), claim.jobId(), now.plusSeconds(7));
 
 			assertThat(jdbc.queryForObject("SELECT state FROM biz_collect_run WHERE id = ?", String.class,
 					claim.runId())).isEqualTo("COMPLETED");
-			assertThat(jdbc.queryForObject("SELECT inserted_count FROM biz_collect_run WHERE id = ?", Integer.class,
+			assertThat(jdbc.queryForObject("SELECT planned_count FROM biz_collect_run WHERE id = ?", Integer.class,
 					claim.runId())).isEqualTo(1);
+			assertThat(jdbc.queryForObject("SELECT inserted_count FROM biz_collect_run WHERE id = ?", Integer.class,
+					claim.runId())).isZero();
 			assertThat(jdbc.queryForObject("SELECT skipped_existing_count FROM biz_collect_run WHERE id = ?",
 					Integer.class, claim.runId())).isEqualTo(1);
 			assertThat(jdbc.queryForObject("SELECT count FROM biz_collect_data WHERE id = 7", String.class))
 					.isEqualTo("2");
 			assertThat(jdbc.queryForObject("SELECT carriedout FROM biz_collect_data WHERE id = 7", String.class))
-					.isEqualTo("2");
+					.isEqualTo("8");
+			assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE work_id = 'work-1'",
+					String.class)).isEqualTo("QUEUED");
+			assertThat(jdbc.queryForObject("SELECT queue_generation FROM biz_collect_run_item WHERE work_id = 'work-1'",
+					String.class)).isEqualTo("FETCH_DOWNLOAD_V1");
+			assertThat(jdbc.queryForObject("SELECT queue_generation FROM biz_collect_run_item WHERE work_id = 'work-2'",
+					String.class)).isNull();
+			assertThat(jdbc.queryForObject("SELECT last_seen_work_id FROM biz_collect_data WHERE id = 7", String.class))
+					.isEqualTo("work-1");
+			assertThat(jdbc.queryForObject("SELECT fetch_stop_reason FROM biz_collect_run WHERE id = ?", String.class,
+					claim.runId())).isEqualTo("NO_MORE");
 			assertThat(jdbc.queryForObject("SELECT state FROM biz_job_queue WHERE id = ?", String.class,
 					claim.jobId())).isEqualTo("COMPLETED");
+		}
+	}
+
+	@Test
+	void activeDownloadCandidateIsStoredAsSkippedWithoutGeneration() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-07-25T06:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout) VALUES(7, 'done', '9', '8')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING, now.plusSeconds(2));
+			jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
+					+ "VALUES(99, 7, 'SCHEDULED', 'COMPLETED', ?)", java.sql.Timestamp.from(now));
+			jdbc.update("INSERT INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, decision, process_state, "
+					+ "queue_generation, attempt_count, max_attempts, created_at, updated_at) "
+					+ "VALUES(99, 1, 'douyin', 'same-work', 'NEW', 'RUNNING', 'FETCH_DOWNLOAD_V1', 0, 4, ?, ?)",
+					java.sql.Timestamp.from(now), java.sql.Timestamp.from(now));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(new CollectRunFetchedItem(1, "douyin", "same-work",
+					"author", "name", "title", "100", "video", "NEW", "QUEUED")), "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("100", "same-work", 1, 0, "0"), now.plusSeconds(3));
+
+			assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE run_id = ?",
+					String.class, queued.runId())).isEqualTo("SKIPPED_EXISTING_ACTIVE_DOWNLOAD");
+			assertThat(jdbc.queryForObject("SELECT queue_generation FROM biz_collect_run_item WHERE run_id = ?",
+					String.class, queued.runId())).isNull();
+		}
+	}
+
+	@Test
+	void duplicateObservationsAreBothStoredButOnlyTheFirstIsDownloadable() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-07-25T06:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout) VALUES(7, 'done', '0', '0')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING, now.plusSeconds(2));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(
+					new CollectRunFetchedItem(1, "douyin", "same-work", "author", "name", "first", "200",
+							"video", "NEW", "QUEUED"),
+					new CollectRunFetchedItem(2, "douyin", "same-work", "author", "name", "duplicate", "200",
+							"video", "DUPLICATE_OBSERVATION", "SKIPPED_EXISTING")), "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("200", "same-work", 1, 0, "0"), now.plusSeconds(3));
+
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item WHERE run_id = ?", Integer.class,
+					queued.runId())).isEqualTo(2);
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item WHERE run_id = ? "
+					+ "AND queue_generation = 'FETCH_DOWNLOAD_V1'", Integer.class, queued.runId())).isEqualTo(1);
+			assertThat(jdbc.queryForObject("SELECT decision FROM biz_collect_run_item WHERE run_id = ? AND ordinal = 2",
+					String.class, queued.runId())).isEqualTo("DUPLICATE_OBSERVATION");
+		}
+	}
+
+	@Test
+	void failedPlanInsertRollsBackItemsStateAndWatermark() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-07-25T06:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout) VALUES(7, 'done', '9', '8')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING, now.plusSeconds(2));
+			jdbc.execute("CREATE TRIGGER fail_invalid_plan BEFORE INSERT ON biz_collect_run_item "
+					+ "WHEN NEW.work_id = 'invalid' BEGIN SELECT RAISE(ABORT, 'forced plan failure'); END");
+
+			List<CollectRunFetchedItem> invalidPlan = List.of(
+					new CollectRunFetchedItem(1, "douyin", "valid", null, null, null, "100", "video", "NEW", "QUEUED"),
+					new CollectRunFetchedItem(2, "douyin", "invalid", null, null, null, "90", "video", "NEW", "QUEUED"));
+			assertThatThrownBy(() -> transaction.storeFetchPlan(queued.runId(), 7, invalidPlan, "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("100", "valid", 1, 0, "0"), now.plusSeconds(3)))
+					.isInstanceOf(RuntimeException.class);
+
+			assertThat(jdbc.queryForObject("SELECT state FROM biz_collect_run WHERE id = ?", String.class,
+					queued.runId())).isEqualTo("FETCHING");
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item WHERE run_id = ?", Integer.class,
+					queued.runId())).isZero();
+			assertThat(jdbc.queryForObject("SELECT last_seen_work_id FROM biz_collect_data WHERE id = 7", String.class))
+					.isNull();
+		}
+	}
+
+	@Test
+	void olderObservedWorkDoesNotRegressWatermarkAndWarningIsRecorded() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-07-25T06:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout, last_seen_publish_time, "
+					+ "last_seen_work_id) VALUES(7, 'done', '9', '8', '300', 'newer-work')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.AUDIT, 20, now, 10, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING, now.plusSeconds(2));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(), "MAX_PAGE_GUARD",
+					new CollectRunFetchedItem.FetchWatermark("200", "older-work", 500, 0, "cursor-500"),
+					now.plusSeconds(3));
+
+			assertThat(jdbc.queryForObject("SELECT last_seen_publish_time FROM biz_collect_data WHERE id = 7",
+					String.class)).isEqualTo("300");
+			assertThat(jdbc.queryForObject("SELECT last_seen_work_id FROM biz_collect_data WHERE id = 7",
+					String.class)).isEqualTo("newer-work");
+			assertThat(jdbc.queryForObject("SELECT fetch_warning FROM biz_collect_run WHERE id = ?", String.class,
+					queued.runId())).isEqualTo("MAX_PAGE_GUARD");
+			assertThat(jdbc.queryForObject("SELECT message FROM biz_collect_run_event WHERE run_id = ? "
+					+ "AND event_code = 'FETCH_STOP'", String.class, queued.runId()))
+					.contains("pages=500", "cursor=cursor-500");
 		}
 	}
 
@@ -112,6 +239,33 @@ class CollectQueueTransactionTest {
 			assertThat(transaction.claimNext("test-worker", now.plus(30, ChronoUnit.MINUTES))).isNull();
 			assertThat(transaction.claimNext("test-worker", now.plus(2, ChronoUnit.HOURS)).runId())
 					.isEqualTo(retry.runId());
+		}
+	}
+
+	@Test
+	void auditRetryKeepsAuditTriggerType() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-07-25T08:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus) VALUES(12, 'queued')");
+			CollectEnqueueResult queued = transaction.enqueue(12, CollectTriggerType.AUDIT, 20, now, 10, 3);
+			CollectJobClaim claim = transaction.claimNext("audit-worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+			transaction.failRun(claim.runId(), CollectRunState.FETCHING, CollectRunState.FETCH_FAILED,
+					"UPSTREAM_ERROR", "temporary", "diagnostic", now.plusSeconds(3));
+
+			CollectEnqueueResult retry = transaction.retryOrFailJob(claim, "UPSTREAM_ERROR", "temporary",
+					now.plus(1, ChronoUnit.MINUTES), now.plusSeconds(4));
+
+			assertThat(retry.runId()).isNotEqualTo(queued.runId());
+			assertThat(jdbc.queryForObject("SELECT trigger_type FROM biz_collect_run WHERE id = ?", String.class,
+					retry.runId())).isEqualTo("AUDIT");
+			String payload = jdbc.queryForObject("SELECT payload FROM biz_job_queue WHERE id = ?", String.class,
+					queued.jobId());
+			assertThat(payload).contains("\"triggerType\":\"AUDIT\"");
 		}
 	}
 
@@ -155,20 +309,23 @@ class CollectQueueTransactionTest {
 
 	private void createSchema(JdbcTemplate jdbc) {
 		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, taskstatus TEXT, count TEXT, "
-				+ "carriedout TEXT, endtime TEXT)");
+				+ "carriedout TEXT, endtime TEXT, last_successful_fetch_at TIMESTAMP, last_seen_publish_time TEXT, "
+				+ "last_seen_work_id TEXT)");
 		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY AUTOINCREMENT, collect_task_id INTEGER NOT NULL, "
 				+ "trigger_type TEXT NOT NULL, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
 				+ "planned_count INTEGER, inserted_count INTEGER, skipped_existing_count INTEGER, failed_item_count INTEGER, "
 				+ "started_at DATETIME, heartbeat_at DATETIME, finished_at DATETIME, error_code TEXT, error_message TEXT, "
-				+ "error_detail TEXT, created_at DATETIME NOT NULL)");
+				+ "error_detail TEXT, fetch_stop_reason TEXT, fetch_warning TEXT, created_at DATETIME NOT NULL)");
 		jdbc.execute("CREATE UNIQUE INDEX uq_collect_run_active_task ON biz_collect_run(collect_task_id) "
 				+ "WHERE state IN ('QUEUED','FETCHING','PROCESSING')");
 		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, "
 				+ "ordinal INTEGER NOT NULL, platform_key TEXT NOT NULL, work_id TEXT NOT NULL, author_uid TEXT, "
 				+ "nickname_snapshot TEXT, title_snapshot TEXT, publish_time TEXT, media_type TEXT, decision TEXT NOT NULL, "
-				+ "process_state TEXT NOT NULL, error_code TEXT, error_message TEXT, created_at DATETIME NOT NULL, "
-				+ "updated_at DATETIME NOT NULL)");
-		jdbc.execute("CREATE UNIQUE INDEX uq_collect_run_item_work ON biz_collect_run_item(run_id, platform_key, work_id)");
+				+ "process_state TEXT NOT NULL, error_code TEXT, error_message TEXT, attempt_count INTEGER NOT NULL DEFAULT 0, "
+				+ "max_attempts INTEGER NOT NULL DEFAULT 4, available_at DATETIME, locked_by TEXT, locked_at DATETIME, "
+				+ "started_at DATETIME, finished_at DATETIME, error_detail TEXT, queue_generation TEXT, "
+				+ "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+		jdbc.execute("CREATE INDEX idx_collect_run_item_work ON biz_collect_run_item(run_id, platform_key, work_id)");
 		jdbc.execute("CREATE TABLE biz_collect_run_event (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, "
 				+ "sequence INTEGER NOT NULL, level TEXT NOT NULL, stage TEXT NOT NULL, event_code TEXT NOT NULL, "
 				+ "message TEXT NOT NULL, work_id TEXT, created_at DATETIME NOT NULL)");

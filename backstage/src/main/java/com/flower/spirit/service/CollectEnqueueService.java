@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.entity.CollectDataEntity;
+import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
 
 @Service
@@ -37,10 +38,18 @@ public class CollectEnqueueService {
 		return enqueue(taskId, CollectTriggerType.SCHEDULED, fireTime == null ? Instant.now() : fireTime, 100);
 	}
 
+	public CollectEnqueueResult enqueueAudit(int taskId) {
+		return enqueue(taskId, CollectTriggerType.AUDIT, Instant.now(), 10);
+	}
+
 	private CollectEnqueueResult enqueue(int taskId, CollectTriggerType triggerType, Instant availableAt,
 			int priority) {
 		CollectDataEntity task = collectdDataDao.findById(taskId)
 				.orElseThrow(() -> new IllegalArgumentException("收藏任务不存在: " + taskId));
+		String platformKey = PlatformCatalog.canonicalKey(null, task.getPlatform());
+		if (!"douyin".equals(platformKey)) {
+			return CollectEnqueueResult.unsupported("当前持久化抓取队列仅支持抖音收藏任务");
+		}
 		if ("N".equalsIgnoreCase(task.getTaskenabled())) {
 			return databaseWriteExecutor.execute("collect-enqueue-skipped-disabled", () -> transaction.recordSkipped(taskId, triggerType,
 					requestedLimit(task), "收藏任务已停用", Instant.now()));

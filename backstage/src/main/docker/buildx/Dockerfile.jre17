@@ -22,7 +22,8 @@ RUN apt-get update && \
 # 创建虚拟环境并安装 f2
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir f2
+    /opt/venv/bin/pip install --no-cache-dir f2==0.0.1.7 && \
+    /opt/venv/bin/python3 -c "import importlib.metadata; print('f2=' + importlib.metadata.version('f2'))"
 
 # 添加虚拟环境路径到环境变量中
 ENV PATH="/opt/venv/bin:$PATH"

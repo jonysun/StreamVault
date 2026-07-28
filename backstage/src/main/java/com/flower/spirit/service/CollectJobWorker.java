@@ -7,12 +7,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
@@ -46,11 +48,16 @@ public class CollectJobWorker {
 	});
 
 	public CollectJobWorker(CollectQueueTransaction transaction, CollectRunService collectRunService,
-			CollectDataService collectDataService, DatabaseWriteExecutor databaseWriteExecutor) {
+			CollectDataService collectDataService, DatabaseWriteExecutor databaseWriteExecutor,
+			@Value("${streamvault.collect.fetch-workers:1}") int configuredWorkers) {
 		this.transaction = transaction;
 		this.collectRunService = collectRunService;
 		this.collectDataService = collectDataService;
 		this.databaseWriteExecutor = databaseWriteExecutor;
+		if (configuredWorkers != 1) {
+			logger.warn("[CollectWorker] SQLite release supports one fetch worker; configured={} effective=1",
+					configuredWorkers);
+		}
 	}
 
 	public void processOne() {
@@ -76,7 +83,12 @@ public class CollectJobWorker {
 
 	public void wakeUp() {
 		if (!running.compareAndSet(false, true)) return;
-		workerExecutor.submit(this::runClaimedTick);
+		try {
+			workerExecutor.submit(this::runClaimedTick);
+		} catch (RejectedExecutionException error) {
+			running.set(false);
+			logger.debug("[CollectWorker] wake ignored during shutdown workerId={}", workerId);
+		}
 	}
 
 	public void heartbeatActiveRun() {
@@ -101,7 +113,7 @@ public class CollectJobWorker {
 				return;
 			}
 			collectRunService.start(claim.runId());
-			collectDataService.executeQueuedCollectTask(claim.taskId(), claim.runId());
+			collectDataService.executeQueuedCollectTask(claim.taskId(), claim.runId(), claim.triggerType());
 			collectRunService.complete(claim.runId(), claim.jobId());
 			logger.info("[CollectWorker] complete jobId={} runId={} taskId={}", claim.jobId(), claim.runId(),
 					claim.taskId());

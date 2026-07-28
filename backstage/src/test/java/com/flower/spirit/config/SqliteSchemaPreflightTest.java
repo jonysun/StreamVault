@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.sqlite.SQLiteDataSource;
 
@@ -76,6 +78,62 @@ class SqliteSchemaPreflightTest {
 		assertThatThrownBy(() -> new SqliteSchemaPreflight(jdbcTemplate).verifyIdentitySchemas())
 				.isInstanceOf(IllegalStateException.class)
 				.hasMessageContaining("single id INTEGER PRIMARY KEY");
+	}
+
+	@Test
+	void rejectsExistingPipelineTableWithMissingMigrationColumns() {
+		JdbcTemplate jdbcTemplate = jdbcTemplate("missing-pipeline-columns.db");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT)");
+
+		assertThatThrownBy(() -> new SqliteSchemaPreflight(jdbcTemplate).verifyPipelineSchemas())
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("biz_collect_data")
+				.hasMessageContaining("last_successful_fetch_at")
+				.hasMessageContaining("last_seen_publish_time")
+				.hasMessageContaining("last_seen_work_id");
+	}
+
+	@Test
+	void rejectsMissingRequiredPipelineTableAndNamesIt() {
+		assertThatThrownBy(() -> new SqliteSchemaPreflight(jdbcTemplate("missing-table.db")).verifyPipelineSchemas())
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("biz_collect_data")
+				.hasMessageContaining("missing required collection pipeline table");
+	}
+
+	@Test
+	void rejectsLegacyUniqueRunItemIndexAndAcceptsTheObservationIndex() {
+		JdbcTemplate jdbcTemplate = jdbcTemplate("pipeline-index-migration.db");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, "
+				+ "last_successful_fetch_at TIMESTAMP, last_seen_publish_time TEXT, last_seen_work_id TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, "
+				+ "fetch_stop_reason TEXT, fetch_warning TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER, "
+				+ "platform_key TEXT, work_id TEXT, attempt_count INTEGER, max_attempts INTEGER, available_at TIMESTAMP, "
+				+ "locked_by TEXT, locked_at TIMESTAMP, started_at TIMESTAMP, finished_at TIMESTAMP, "
+				+ "error_detail TEXT, queue_generation TEXT)");
+		jdbcTemplate.execute("CREATE UNIQUE INDEX uq_collect_run_item_work "
+				+ "ON biz_collect_run_item(run_id, platform_key, work_id)");
+		SqliteSchemaPreflight preflight = new SqliteSchemaPreflight(jdbcTemplate);
+
+		assertThatThrownBy(preflight::verifyPipelineSchemas)
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("index migration is incomplete")
+				.hasMessageContaining("uq_collect_run_item_work");
+
+		jdbcTemplate.execute("DROP INDEX uq_collect_run_item_work");
+		jdbcTemplate.execute("CREATE INDEX idx_collect_run_item_work "
+				+ "ON biz_collect_run_item(run_id, platform_key, work_id)");
+		assertThatCode(preflight::verifyPipelineSchemas).doesNotThrowAnyException();
+	}
+
+	@Test
+	void identityAndPipelineListenersRunAtTheirRequiredOrders() throws Exception {
+		Method identityListener = SqliteSchemaPreflight.class.getMethod("verifyIdentitySchemas");
+		Method pipelineListener = SqliteSchemaPreflight.class.getMethod("verifyPipelineSchemas");
+
+		assertThat(identityListener.getAnnotation(Order.class).value()).isEqualTo(10);
+		assertThat(pipelineListener.getAnnotation(Order.class).value()).isEqualTo(180);
 	}
 
 	private JdbcTemplate jdbcTemplate(String filename) {

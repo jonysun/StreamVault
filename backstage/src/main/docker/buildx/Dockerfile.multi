@@ -6,7 +6,8 @@ RUN apk add --no-cache build-base libffi-dev
 
 # 安装 f2 库和 yt-dlp
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir f2
+    pip install --no-cache-dir f2==0.0.1.7 && \
+    python3 -c "import importlib.metadata; print('f2=' + importlib.metadata.version('f2'))"
 
 # 下载 yt-dlp
 ARG BUILD_VERSION=2025.06.30.052234

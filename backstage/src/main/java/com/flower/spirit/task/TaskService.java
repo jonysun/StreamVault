@@ -11,6 +11,7 @@ import com.flower.spirit.service.BiliConfigService;
 import com.flower.spirit.service.AuthorEnrichmentWorker;
 import com.flower.spirit.service.AuthorEnrichmentQueueService;
 import com.flower.spirit.service.CollectJobWorker;
+import com.flower.spirit.service.CollectDownloadWorker;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.FfmpegQueueService;
 import com.flower.spirit.service.HlsTranscodeService;
@@ -43,6 +44,9 @@ public class TaskService {
 
 	@Autowired
 	private CollectJobWorker collectJobWorker;
+
+	@Autowired
+	private CollectDownloadWorker collectDownloadWorker;
 
 	@Autowired
 	private RuntimeControlService runtimeControlService;
@@ -82,11 +86,12 @@ public class TaskService {
 
 	@Scheduled(fixedDelayString = "${streamvault.collect-queue.poll-delay-ms:5000}")
 	public void collectQueueTick() {
-		if (!runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()
-				|| !runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
-			return;
+		if (runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
+			collectJobWorker.wakeUp();
 		}
-		collectJobWorker.wakeUp();
+		if (runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
+			collectDownloadWorker.wakeUp();
+		}
 	}
 
 	@Scheduled(cron = "${streamvault.author-enrichment.reconcile-cron:0 30 3 * * ?}")

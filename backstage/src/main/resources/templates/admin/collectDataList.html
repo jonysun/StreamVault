@@ -835,6 +835,8 @@
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewSnapshot" href="#!" title="最近拉取全量" data-toggle="tooltip">全量列表</a>'
 					+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewPlan" href="#!" title="本轮计划下载" data-toggle="tooltip">计划列表</a>'
 					+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-info viewRuns" href="#!" title="查看持久运行记录" data-toggle="tooltip">运行记录</a>'
+					+(list[i].platform === '抖音' && list[i].originaladdress.startsWith('post')
+						? '<a data-id="'+list[i].id+'" class="btn btn-xs btn-warning startFullAudit" href="#!" title="忽略增量边界并检查全部作品" data-toggle="tooltip">全量审计</a>' : '')
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default viewProcesses" href="#!" title="查看进程" data-toggle="tooltip">查看进程</a>'
 									+'<a data-id="'+list[i].id+'" class="btn btn-xs btn-default deleteProcesses" href="#!" title="删除" data-toggle="tooltip">删除</a>'
 									+(list[i].platform === '哔哩' && !list[i].originaladdress.startsWith('bili-fav-') && !list[i].originaladdress.startsWith('bili-arc-')  && !list[i].originaladdress.startsWith('bili-seaarc-') ? 
@@ -853,6 +855,7 @@
 					viewSnapshot();
 					viewPlan();
 					viewRuns();
+					startFullAudit();
 						laypage({
 							cont: 'pager',
 							pages: record.page.totalPages,
@@ -876,7 +879,7 @@
 
 	function buildCollectRuntimeStatus(item) {
 		var jobState = (item.jobState || '').toString().toUpperCase();
-		var runState = (item.runState || '').toString().toUpperCase();
+		var runState = (item.fetchState || item.runState || '').toString().toUpperCase();
 		var statusText = item.taskstatus || '--';
 		var statusClass = 'text-secondary';
 		if (jobState === 'RUNNING' || runState === 'FETCHING' || runState === 'PROCESSING') {
@@ -913,11 +916,25 @@
 		if (item.heartbeatAt && (runState === 'FETCHING' || runState === 'PROCESSING')) {
 			details.push('心跳 ' + item.heartbeatAt);
 		}
+		var download = '待下载 ' + numberValue(item.downloadQueued)
+			+ ' / 下载中 ' + numberValue(item.downloadRunning)
+			+ ' / 重试 ' + numberValue(item.downloadRetryWait)
+			+ ' / 完成 ' + numberValue(item.downloadCompleted)
+			+ ' / 跳过 ' + numberValue(item.downloadSkipped)
+			+ ' / 失败 ' + numberValue(item.downloadFailed);
+		details.push(download);
+		if (item.latestStopReason) details.push('停止原因 ' + item.latestStopReason);
+		if (item.latestFetchWarning) details.push('抓取提示 ' + item.latestFetchWarning);
 		return {
-			statusText: statusText,
+			statusText: '抓取：' + statusText,
 			statusClass: statusClass,
-			detailHtml: details.length ? '<br/><small class="text-muted">' + details.join(' / ') + '</small>' : ''
+			detailHtml: details.length ? '<br/><small class="text-muted" style="white-space:normal;">' + escapeHtml(details.join(' / ')) + '</small>' : ''
 		};
+	}
+
+	function numberValue(value) {
+		var number = Number(value);
+		return isNaN(number) ? 0 : number;
 	}
 
 	function viewPlan(){
@@ -926,16 +943,57 @@
 		});
 	}
 
+	function startFullAudit(){
+		$('.startFullAudit').click(function(){
+			var taskId = $(this).data('id');
+			layer.confirm('全量审计会忽略增量边界并请求作者的完整作品列表，可能产生较多外部请求。确认继续？', {
+				btn: ['开始审计', '取消']
+			}, function(index){
+				$.post('/admin/api/collectData/audit', {taskId: taskId}, function(response){
+					layer.close(index);
+					if(response && response.resCode === '000001'){
+						layer.msg('全量审计已排队');
+						findList(1);
+					}else{
+						layer.alert(response && response.message ? response.message : '全量审计入队失败');
+					}
+				});
+			});
+		});
+	}
+
 	function showLatestRunItems(taskId, view){
-		$.get('/admin/api/collect-tasks/'+taskId+'/latest-items', {view:view, limit:500}, function(record){
+		var title = view === 'plan' ? '最近一次计划下载列表' : '最近一次全量拉取列表';
+		var containerId = 'collect-latest-items-' + Date.now();
+		layer.open({
+			type:1,
+			title:title,
+			area:['96%','86%'],
+			content:'<div id="'+containerId+'" style="padding:18px;color:#777;">正在加载...</div>'
+		});
+		loadLatestRunItemPage(taskId, view, 0, [], containerId);
+	}
+
+	function loadLatestRunItemPage(taskId, view, afterId, allRows, containerId){
+		if(!$('#'+containerId).length) return;
+		$.get('/admin/api/collect-tasks/'+taskId+'/latest-items', {view:view, limit:200, afterId:afterId}, function(record){
+			if(!$('#'+containerId).length) return;
 			record = record || {};
-			if(record.warningMessage){
-				layer.msg(record.warningMessage);
+			if(record.warningMessage && !allRows.length) layer.msg(record.warningMessage);
+			var pageRows = record.items || [];
+			allRows = allRows.concat(pageRows);
+			$('#'+containerId).html(view === 'plan' ? renderPlanTable(allRows) : renderSnapshotTable(allRows));
+			bindCollectItemRetryActions('#'+containerId);
+			if(!record.hasMore || !pageRows.length) return;
+			var last = pageRows[pageRows.length - 1] || {};
+			var nextAfterId = Number(last.id || last.ordinal || last.index || 0);
+			if(!nextAfterId || nextAfterId <= afterId){
+				layer.msg('列表分页游标未推进，已停止继续加载');
+				return;
 			}
-			var rows = record.items || [];
-			var title = view === 'plan' ? '最近一次计划下载列表' : '最近一次全量拉取列表';
-			var content = view === 'plan' ? renderPlanTable(rows) : renderSnapshotTable(rows);
-			layer.open({type:1,title:title,area:['96%','86%'],content:content});
+			loadLatestRunItemPage(taskId, view, nextAfterId, allRows, containerId);
+		}).fail(function(){
+			$('#'+containerId).html('<div class="alert alert-danger">列表加载失败，请稍后重试。</div>');
 		});
 	}
 
@@ -955,22 +1013,50 @@
 					{title:'计划/新增/跳过/失败', render:function(row){ return cell([row.plannedCount,row.insertedCount,row.skippedExistingCount,row.failedItemCount].join(' / ')); }},
 					{title:'排队时间', render:function(row){ return smallCell(row.queuedAt); }},
 					{title:'错误', render:function(row){ return smallCell([row.errorCode,row.errorMessage].filter(Boolean).join('\n')); }},
-					{title:'操作', render:function(row){ return '<button class="btn btn-xs btn-primary inspectRun" data-run-id="'+escapeHtml(row.runId)+'">明细</button>'; }}
+					{title:'操作', render:function(row){
+						return '<button class="btn btn-xs btn-primary inspectRun" data-run-id="'+escapeHtml(row.runId)+'">明细</button> '
+							+'<button class="btn btn-xs btn-warning retryFailedRun" data-run-id="'+escapeHtml(row.runId)+'">重试失败项</button>';
+					}}
 				];
 				var content = renderTableDialog('任务 '+taskId+' 的持久运行记录', columns, rows);
 				layer.open({type:1,title:'收藏运行记录',area:['96%','86%'],content:content});
 				$('.inspectRun').click(function(){ showRunItems($(this).data('run-id')); });
+				$('.retryFailedRun').click(function(){ retryFailedRun($(this).data('run-id'), this); });
 			});
 		});
 	}
 
 	function showRunItems(runId){
-		$.when(
-			$.get('/admin/api/collect-runs/'+runId+'/items', {decision:'all', limit:500}),
-			$.get('/admin/api/collect-runs/'+runId+'/events', {limit:500})
-		).done(function(itemsResponse, eventsResponse){
-			var rows = itemsResponse[0] || [];
-			var events = eventsResponse[0] || [];
+		var containerId = 'collect-run-items-' + Date.now();
+		layer.open({type:1,title:'运行作品明细',area:['96%','86%'],
+			content:'<div id="'+containerId+'" style="padding:18px;color:#777;">正在加载...</div>'});
+		$.get('/admin/api/collect-runs/'+runId+'/events', {limit:500}, function(events){
+			loadRunItemPage(runId, 0, [], events || [], containerId);
+		}).fail(function(){
+			loadRunItemPage(runId, 0, [], [], containerId);
+		});
+	}
+
+	function loadRunItemPage(runId, afterId, allRows, events, containerId){
+		if(!$('#'+containerId).length) return;
+		$.get('/admin/api/collect-runs/'+runId+'/items', {decision:'all', limit:200, afterId:afterId}, function(pageRows){
+			if(!$('#'+containerId).length) return;
+			pageRows = pageRows || [];
+			allRows = allRows.concat(pageRows);
+			renderRunItems(runId, allRows, events, containerId);
+			if(pageRows.length < 200) return;
+			var nextAfterId = Number((pageRows[pageRows.length - 1] || {}).id || 0);
+			if(!nextAfterId || nextAfterId <= afterId){
+				layer.msg('运行明细分页游标未推进，已停止继续加载');
+				return;
+			}
+			loadRunItemPage(runId, nextAfterId, allRows, events, containerId);
+		}).fail(function(){
+			$('#'+containerId).prepend('<div class="alert alert-danger">运行明细加载中断，请稍后重试。</div>');
+		});
+	}
+
+	function renderRunItems(runId, rows, events, containerId){
 			var columns = [
 				{title:'序号', render:function(row){ return cell(row.ordinal); }},
 				{title:'作品ID', render:function(row){ return codeCell(row.workId); }},
@@ -979,8 +1065,12 @@
 				{title:'标题/摘要', render:function(row){ return longCell(row.titleSnapshot, 260); }},
 				{title:'发布时间', render:function(row){ return cell(row.publishTime); }},
 				{title:'决策', render:function(row){ return badgeCell(row.decision); }},
-				{title:'处理状态', render:function(row){ return cell(row.processState); }},
-				{title:'错误', render:function(row){ return smallCell([row.errorCode,row.errorMessage].filter(Boolean).join('\n')); }}
+				{title:'处理状态', render:function(row){ return badgeCell(row.processState); }},
+				{title:'尝试', render:function(row){ return cell(numberValue(row.attemptCount)+'/'+numberValue(row.maxAttempts)); }},
+				{title:'下次重试', render:function(row){ return smallCell(row.availableAt); }},
+				{title:'错误', render:function(row){ return logCell([row.errorCode,row.errorMessage,row.errorDetail].filter(Boolean).join('\n')); }},
+				{title:'更新时间', render:function(row){ return smallCell(row.updatedAt); }},
+				{title:'操作', render:function(row){ return retryCollectItemButton(row); }}
 			];
 			var eventColumns = [
 				{title:'序号', render:function(row){ return cell(row.sequence); }},
@@ -993,8 +1083,8 @@
 			];
 			var content = renderTableDialog('runId: '+runId+' · 作品明细', columns, rows)
 				+ renderTableDialog('runId: '+runId+' · 过程事件', eventColumns, events);
-			layer.open({type:1,title:'运行作品明细',area:['96%','86%'],content:content});
-		});
+			$('#'+containerId).html(content);
+			bindCollectItemRetryActions('#'+containerId);
 	}
 
 	function showJsonTableDialog(title, text, type){
@@ -1045,13 +1135,63 @@
 			{title:'媒体', render:function(row){ return cell(row.mediaType || row.mediatype || row.stage || ''); }},
 			{title:'决策', render:function(row){ return badgeCell(row.decision); }},
 			{title:'原因', render:function(row){ return longCell(planReason(row), 260); }},
-			{title:'状态', render:function(row){ return cell(row.processState || row.status); }},
-			{title:'错误', render:function(row){ return smallCell([row.errorCode || row.errorcode, row.errorMessage || row.errormsg].filter(Boolean).join('\n')); }},
+			{title:'状态', render:function(row){ return badgeCell(row.processState || row.status); }},
+			{title:'尝试', render:function(row){ return cell(numberValue(row.attemptCount)+'/'+numberValue(row.maxAttempts)); }},
+			{title:'下次重试', render:function(row){ return smallCell(row.availableAt); }},
+			{title:'最后错误', render:function(row){ return logCell([
+				row.errorCode || row.errorcode,
+				row.errorMessage || row.errormsg,
+				row.errorDetail
+			].filter(Boolean).join('\n')); }},
 			{title:'作品ID', render:function(row){ return codeCell(row.workId || row.aweme_id); }},
 			{title:'标题/摘要', render:function(row){ return longCell(row.titleSnapshot || row.title || row.desc, 260); }},
-			{title:'过程日志', render:function(row){ return logCell(combinedProcessLog(row)); }}
+			{title:'更新时间', render:function(row){ return smallCell(row.updatedAt); }},
+			{title:'过程日志', render:function(row){ return logCell(combinedProcessLog(row)); }},
+			{title:'操作', render:function(row){ return retryCollectItemButton(row); }}
 		];
 		return renderTableDialog(meta, columns, rows);
+	}
+
+	function retryCollectItemButton(row){
+		if(!row || String(row.processState || '').toUpperCase() !== 'FAILED' || !row.id) return '';
+		return '<button class="btn btn-xs btn-warning retryCollectItem" data-item-id="'
+			+escapeHtml(row.id)+'">重新下载</button>';
+	}
+
+	function bindCollectItemRetryActions(container){
+		$(container).find('.retryCollectItem').off('click.collectRetry').on('click.collectRetry', function(){
+			var button = this;
+			var itemId = $(button).data('item-id');
+			$(button).prop('disabled', true).text('正在排队...');
+			$.post('/admin/api/collectData/retryItem', {id:itemId}, function(response){
+				if(response && response.resCode === '000001'){
+					$(button).removeClass('btn-warning').addClass('btn-default').text('已排队');
+					layer.msg('下载项已重新排队');
+				}else{
+					$(button).prop('disabled', false).text('重新下载');
+					layer.alert(response && response.message ? response.message : '下载项重试失败');
+				}
+			}).fail(function(){
+				$(button).prop('disabled', false).text('重新下载');
+				layer.alert('下载项重试请求失败');
+			});
+		});
+	}
+
+	function retryFailedRun(runId, button){
+		$(button).prop('disabled', true).text('正在排队...');
+		$.post('/admin/api/collectData/retryFailedItems', {runId:runId}, function(response){
+			$(button).prop('disabled', false).text('重试失败项');
+			if(response && response.resCode === '000001'){
+				var count = response.record && response.record.requeued != null ? response.record.requeued : 0;
+				layer.msg('已重新排队 '+count+' 项');
+			}else{
+				layer.alert(response && response.message ? response.message : '批量重试失败');
+			}
+		}).fail(function(){
+			$(button).prop('disabled', false).text('重试失败项');
+			layer.alert('批量重试请求失败');
+		});
 	}
 
 	function findRunSummary(rows){

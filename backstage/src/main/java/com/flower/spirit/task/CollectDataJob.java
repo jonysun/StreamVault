@@ -58,6 +58,11 @@ public class CollectDataJob implements Job {
 			if (!"Y".equals(collectDataEntity.getMonitoring())) {
 				quartzTaskService.removeTaskSchedule(taskId);
 			}
+			if (result.skippedUnsupported()) {
+				logger.warn("收藏任务未进入持久队列 taskId={} taskName={} platform={} reason={}", taskId,
+						taskName, collectDataEntity.getPlatform(), result.reason());
+				return;
+			}
 			logger.info("收藏任务入队完成 taskId={} taskName={} runId={} jobId={} state={} inserted={}", taskId,
 					taskName, result.runId(), result.jobId(), result.state(), result.inserted());
             

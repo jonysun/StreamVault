@@ -90,7 +90,7 @@ public class WorkIngestService {
 		boolean persisted = false;
 		try {
 			Optional<PersistenceResult> existing = persistenceService.findExisting(metadata);
-			if (existing.isPresent()) {
+			if (existing.isPresent() && !replaceExisting) {
 				processHistoryService.recordPlatformStage(historyId, "DUPLICATE");
 				if (lastWork) processHistoryService.completePlatformProcess(historyId);
 				return IngestResult.duplicate(historyId, metadata, existing.get());

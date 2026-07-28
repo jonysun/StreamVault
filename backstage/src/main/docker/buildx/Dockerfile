@@ -5,7 +5,8 @@ ENV TZ=Asia/Shanghai
 # 在固定版本 Python 环境中安装 f2，避免在 Python 3.14 下触发 pydantic-core 源码编译
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir f2
+    /opt/venv/bin/pip install --no-cache-dir f2==0.0.1.7 && \
+    /opt/venv/bin/python3 -c "import importlib.metadata; print('f2=' + importlib.metadata.version('f2'))"
 
 
 FROM eclipse-temurin:17-jre

@@ -87,6 +87,20 @@ class AdminTemplateScriptSanityTest {
 				"data-platformkey=\"");
 	}
 
+	@Test
+	void collectionPageShowsSplitPipelineStatusAndIncrementalTables() throws IOException {
+		String template = template("collectDataList.html");
+
+		assertThat(template).contains("downloadQueued", "downloadRetryWait", "downloadFailed",
+				"抓取：", "待下载 ", "latestStopReason", "latestFetchWarning");
+		assertThat(template).contains("retryCollectItem", "retryFailedRun", "startFullAudit",
+				"/admin/api/collectData/retryItem", "/admin/api/collectData/retryFailedItems",
+				"/admin/api/collectData/audit");
+		assertThat(template).contains("attemptCount", "availableAt", "errorDetail", "updatedAt",
+				"function loadLatestRunItemPage", "afterId:afterId", "limit:200");
+		assertThat(template).doesNotContain("JSON.stringify(record.items)");
+	}
+
 	private String template(String name) throws IOException {
 		try (var input = getClass().getResourceAsStream("/templates/admin/" + name)) {
 			if (input == null) throw new IOException(name + " template not found");

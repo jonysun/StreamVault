@@ -22,6 +22,13 @@ public class DatabaseInitializationTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void executeAll(List<String> statements) {
+		for (String statement : statements) {
+			jdbcTemplate.execute(statement);
+		}
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void batchUpdate(String sql, List<Object[]> parameters) {
 		jdbcTemplate.batchUpdate(sql, parameters);
 	}
