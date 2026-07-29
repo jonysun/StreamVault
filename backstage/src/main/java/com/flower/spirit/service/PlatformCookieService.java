@@ -1,11 +1,14 @@
 package com.flower.spirit.service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,11 +26,13 @@ public class PlatformCookieService {
 
 	public static final String STRATEGY_ROUND_ROBIN = "round_robin";
 	public static final String STRATEGY_RISK_SHIFT = "risk_shift";
-	private static final long RISK_COOLDOWN_MS = 10 * 60 * 1000L;
+	private static final long COOKIE_RISK_COOLDOWN_MS = 10 * 60 * 1000L;
+	private static final String DOUYIN_PLATFORM_KEY = "douyin";
 	private static final Logger logger = LoggerFactory.getLogger(PlatformCookieService.class);
 
 	private final Map<String, AtomicInteger> cursors = new ConcurrentHashMap<>();
 	private final Map<String, Long> riskUntil = new ConcurrentHashMap<>();
+	private final AtomicLong douyinGlobalRiskStartedAtMs = new AtomicLong(0);
 
 	@Autowired(required = false)
 	private TikTokConfigService tikTokConfigService;
@@ -74,11 +79,14 @@ public class PlatformCookieService {
 	}
 
 	public String selectCookie(String platform, String strategy, String cookiePool, String legacyCookie, String purpose) {
+		String safePlatform = canonicalPlatform(platform);
+		if (DOUYIN_PLATFORM_KEY.equals(safePlatform) && isDouyinGlobalCooldownActive()) {
+			return "";
+		}
 		List<String> cookies = parseCookiePool(cookiePool, legacyCookie);
 		if (cookies.isEmpty()) {
 			return "";
 		}
-		String safePlatform = canonicalPlatform(platform);
 		String safeStrategy = isBlank(strategy) ? STRATEGY_ROUND_ROBIN : strategy.trim();
 		return selectAvailable(safePlatform, safeStrategy, cookies);
 	}
@@ -89,9 +97,17 @@ public class PlatformCookieService {
 		}
 		String safePlatform = canonicalPlatform(platform);
 		long now = System.currentTimeMillis();
+		if (DOUYIN_PLATFORM_KEY.equals(safePlatform)) {
+			douyinGlobalRiskStartedAtMs.accumulateAndGet(now, Math::max);
+			long cooldownMs = douyinRiskCooldownMillis();
+			logger.warn("platform global risk cooldown platform={} reason={} cooldownMs={}", safePlatform, reason,
+					cooldownMs);
+			return;
+		}
 		purgeExpiredRisks(now);
-		riskUntil.put(riskKey(safePlatform, cookie), now + RISK_COOLDOWN_MS);
-		logger.warn("platform cookie risk platform={} reason={} cooldownMs={}", safePlatform, reason, RISK_COOLDOWN_MS);
+		riskUntil.put(riskKey(safePlatform, cookie), now + COOKIE_RISK_COOLDOWN_MS);
+		logger.warn("platform cookie risk platform={} reason={} cooldownMs={}", safePlatform, reason,
+				COOKIE_RISK_COOLDOWN_MS);
 	}
 
 	public void reportSuccess(String platform, String cookie) {
@@ -111,6 +127,13 @@ public class PlatformCookieService {
 		String safePlatform = canonicalPlatform(platform);
 		Map<String, Object> status = new HashMap<>();
 		long now = System.currentTimeMillis();
+		if (DOUYIN_PLATFORM_KEY.equals(safePlatform)) {
+			long remainingMs = douyinGlobalCooldownRemainingMillis(now);
+			status.put("cooling", remainingMs > 0 ? 1 : 0);
+			status.put("cooldownMinutes", douyinRiskCooldownMinutes());
+			status.put("remainingMs", remainingMs);
+			return status;
+		}
 		purgeExpiredRisks(now);
 		int cooling = 0;
 		for (Map.Entry<String, Long> entry : riskUntil.entrySet()) {
@@ -121,6 +144,21 @@ public class PlatformCookieService {
 		status.put("cooling", cooling);
 		status.put("cooldownMinutes", 10);
 		return status;
+	}
+
+	public boolean isDouyinGlobalCooldownActive() {
+		return douyinGlobalCooldownRemainingMillis() > 0;
+	}
+
+	public long douyinGlobalCooldownRemainingMillis() {
+		return douyinGlobalCooldownRemainingMillis(System.currentTimeMillis());
+	}
+
+	public Instant douyinGlobalCooldownRetryAt(Duration safetyBuffer) {
+		long now = System.currentTimeMillis();
+		long deadline = Math.max(now, douyinGlobalCooldownUntilEpochMillis());
+		long bufferMs = safetyBuffer == null ? 0 : Math.max(0, safetyBuffer.toMillis());
+		return Instant.ofEpochMilli(deadline).plusMillis(bufferMs);
 	}
 
 	private String selectAvailable(String platform, String strategy, List<String> cookies) {
@@ -167,6 +205,24 @@ public class PlatformCookieService {
 	private String canonicalPlatform(String platform) {
 		String canonical = PlatformCatalog.canonicalKey(platform, null);
 		return isBlank(canonical) ? "unknown" : canonical;
+	}
+
+	private long douyinGlobalCooldownRemainingMillis(long now) {
+		return Math.max(0, douyinGlobalCooldownUntilEpochMillis() - now);
+	}
+
+	private long douyinGlobalCooldownUntilEpochMillis() {
+		long startedAt = douyinGlobalRiskStartedAtMs.get();
+		return startedAt <= 0 ? 0 : startedAt + douyinRiskCooldownMillis();
+	}
+
+	private long douyinRiskCooldownMillis() {
+		return Duration.ofMinutes(douyinRiskCooldownMinutes()).toMillis();
+	}
+
+	private int douyinRiskCooldownMinutes() {
+		return tikTokConfigService == null ? TikTokConfigService.DEFAULT_RISK_COOLDOWN_MINUTES
+				: tikTokConfigService.getRiskCooldownMinutes();
 	}
 
 	private void purgeExpiredRisks(long now) {

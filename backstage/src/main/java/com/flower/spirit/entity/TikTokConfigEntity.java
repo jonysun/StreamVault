@@ -2,6 +2,7 @@ package com.flower.spirit.entity;
 
 import java.io.Serializable;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -28,6 +29,9 @@ public class TikTokConfigEntity implements Serializable {
 	private String cookiepool;
 
 	private String cookiestrategy;
+
+	@Column(name = "risk_cooldown_minutes")
+	private Integer riskCooldownMinutes;
 	
 	/**
 	 * 解析server
@@ -64,6 +68,14 @@ public class TikTokConfigEntity implements Serializable {
 
 	public void setCookiestrategy(String cookiestrategy) {
 		this.cookiestrategy = cookiestrategy;
+	}
+
+	public Integer getRiskCooldownMinutes() {
+		return riskCooldownMinutes;
+	}
+
+	public void setRiskCooldownMinutes(Integer riskCooldownMinutes) {
+		this.riskCooldownMinutes = riskCooldownMinutes;
 	}
 
 	public String getAnalysisserver() {

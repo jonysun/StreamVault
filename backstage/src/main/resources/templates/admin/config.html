@@ -482,6 +482,10 @@
                                         </select>
                                     </div>
                                     <div class="form-group">
+                                        <label>抖音全局风控冷却（分钟）</label>
+                                        <input type="number" class="form-control tiktokriskcooldownminutes" min="1" max="1440" step="1" th:value="${tiktok.riskCooldownMinutes != null ? tiktok.riskCooldownMinutes : 10}" />
+                                    </div>
+                                    <div class="form-group">
                                         <button class="btn btn-primary saveTikTokConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
                                     </div>
                                 </form>
@@ -1105,6 +1109,7 @@
             option['cookiepool'] = cookiepool;
             option['cookies'] = firstNonEmptyLine(cookiepool);
             option['cookiestrategy'] = $('.tiktokcookiestrategy').val();
+            option['riskCooldownMinutes'] = $('.tiktokriskcooldownminutes').val();
             option['analysisserver'] = analysisserver;
             $.post("/admin/api/updateTikTokConfig",option,function(data,status){
                 if(data.resCode =="000001"){

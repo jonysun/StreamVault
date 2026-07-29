@@ -152,6 +152,12 @@ public class CommandUtil {
 
     public static String f2cmd(String cookie, String aid, String fuc, String uid, String cid, Integer maxc,
             String out) {
+        if (cookie == null || cookie.isBlank()) {
+            LAST_F2_EXIT_CODE.set(-2);
+            LAST_F2_DURATION_MS.set(0L);
+            logger.warn("[F2] skipped func={} because no platform cookie is currently available", fuc);
+            return "";
+        }
 
         logger.info("[F2] start func={} aid={} uid={} cid={} maxc={} out={} cookiePresent={} cookiePreview={}",
                 fuc, aid, uid, cid, maxc, out, cookie != null && !cookie.isBlank(), maskCookie(cookie));

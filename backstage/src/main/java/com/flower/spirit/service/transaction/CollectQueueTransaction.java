@@ -213,6 +213,29 @@ public class CollectQueueTransaction {
 		appendEvent(claim.runId(), "INFO", "QUEUE", "SKIPPED_PAUSED", reason, null, now);
 	}
 
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void deferForCooldown(CollectJobClaim claim, Instant availableAt, String reason, Instant now) {
+		Timestamp timestamp = Timestamp.from(now);
+		int runUpdated = jdbcTemplate.update("UPDATE biz_collect_run SET state = 'QUEUED', finished_at = NULL, "
+				+ "heartbeat_at = ?, error_code = NULL, error_message = NULL, error_detail = NULL "
+				+ "WHERE id = ? AND state IN ('QUEUED','FETCHING')", timestamp, claim.runId());
+		if (runUpdated != 1) {
+			throw new IllegalStateException("Collect run " + claim.runId() + " cannot be deferred for cooldown");
+		}
+		int jobUpdated = jdbcTemplate.update("UPDATE biz_job_queue SET state = 'RETRY_WAIT', available_at = ?, "
+				+ "attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, "
+				+ "locked_by = NULL, locked_at = NULL, last_error_code = 'F2_COOKIE_COOLDOWN', "
+				+ "last_error_message = ?, updated_at = ? WHERE id = ? AND state = 'RUNNING'",
+				Timestamp.from(availableAt), truncate(reason, 2048), timestamp, claim.jobId());
+		if (jobUpdated != 1) {
+			throw new IllegalStateException("Collect job " + claim.jobId() + " was not RUNNING during cooldown deferral");
+		}
+		jdbcTemplate.update("UPDATE biz_collect_data SET taskstatus = ? WHERE id = ?", "风控冷却，等待重试",
+				claim.taskId());
+		appendEvent(claim.runId(), "WARN", "QUEUE", "F2_COOKIE_COOLDOWN",
+				valueOr(reason, "Douyin global cooldown") + "; availableAt=" + availableAt, null, now);
+	}
+
 	@Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
 	public CollectRunState currentState(long runId) {
 		return currentRunState(runId);

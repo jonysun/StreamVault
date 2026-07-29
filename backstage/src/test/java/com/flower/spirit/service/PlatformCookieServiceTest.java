@@ -1,8 +1,14 @@
 package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class PlatformCookieServiceTest {
 
@@ -20,72 +26,85 @@ class PlatformCookieServiceTest {
 	}
 
 	@Test
-	void riskShiftSkipsRiskyCookieDuringCooldown() {
+	void douyinRiskBlocksEveryCookieDuringGlobalCooldown() {
 		PlatformCookieService service = new PlatformCookieService();
 
-		String first = service.selectCookie("抖音", "risk_shift", "a=1\nb=2", "fallback", "fetch");
-		service.reportRisk("抖音", first, "verify");
-		String second = service.selectCookie("抖音", "risk_shift", "a=1\nb=2", "fallback", "fetch");
+		String first = service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch");
+		service.reportRisk("douyin", first, "verify");
+
+		assertThat(first).isEqualTo("a=1");
+		assertThat(service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch"))
+				.isEmpty();
+	}
+
+	@Test
+	void kuaishouStillSkipsOnlyTheRiskyCookie() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		String first = service.selectCookie("kuaishou", "round_robin", "a=1\nb=2", "fallback", "fetch");
+		service.reportRisk("kuaishou", first, "rate-limit");
+		String second = service.selectCookie("kuaishou", "round_robin", "a=1\nb=2", "fallback", "fetch");
 
 		assertThat(first).isEqualTo("a=1");
 		assertThat(second).isEqualTo("b=2");
 	}
 
 	@Test
-	void roundRobinAlsoSkipsRiskyCookieDuringCooldown() {
+	void latestDouyinRiskSignalExtendsTheGlobalCooldown() {
 		PlatformCookieService service = new PlatformCookieService();
+		AtomicLong startedAt = (AtomicLong) ReflectionTestUtils.getField(service,
+				"douyinGlobalRiskStartedAtMs");
 
-		String first = service.selectCookie("抖音", "round_robin", "a=1\nb=2", "fallback", "fetch");
-		service.reportRisk("抖音", first, "rate-limit");
-		String second = service.selectCookie("抖音", "round_robin", "a=1\nb=2", "fallback", "fetch");
+		startedAt.set(System.currentTimeMillis() - 9 * 60 * 1000L);
+		long before = service.douyinGlobalCooldownRemainingMillis();
+		service.reportRisk("douyin", "a=1", "rate-limit");
+		long after = service.douyinGlobalCooldownRemainingMillis();
 
-		assertThat(first).isEqualTo("a=1");
-		assertThat(second).isEqualTo("b=2");
-	}
-
-	@Test
-	void riskReportedWithLegacyDisplayNameIsSharedWithCanonicalPlatformKey() {
-		PlatformCookieService service = new PlatformCookieService();
-
-		String first = service.selectCookie("douyin", "round_robin", "a=1\nb=2", "fallback", "fetch");
-		service.reportRisk("抖音", first, "rate-limit");
-
-		assertThat(service.selectCookie("douyin", "round_robin", "a=1\nb=2", "fallback", "fetch"))
-				.isEqualTo("b=2");
+		assertThat(before).isBetween(1L, 61_000L);
+		assertThat(after).isGreaterThan(9 * 60 * 1000L);
 	}
 
 	@Test
 	void successDoesNotClearRiskCooldown() {
 		PlatformCookieService service = new PlatformCookieService();
 
-		String first = service.selectCookie("抖音", "risk_shift", "a=1\nb=2", "fallback", "fetch");
-		service.reportRisk("抖音", first, "verify");
-		service.reportSuccess("抖音", first);
-		String second = service.selectCookie("抖音", "risk_shift", "a=1\nb=2", "fallback", "fetch");
+		String first = service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch");
+		service.reportRisk("douyin", first, "verify");
+		service.reportSuccess("douyin", first);
 
-		assertThat(second).isEqualTo("b=2");
-	}
-
-	@Test
-	void riskShiftReturnsEmptyWhenAllPooledCookiesAreCooling() {
-		PlatformCookieService service = new PlatformCookieService();
-
-		service.reportRisk("抖音", "a=1", "verify");
-		service.reportRisk("抖音", "b=2", "verify");
-		String selected = service.selectCookie("抖音", "risk_shift", "a=1\nb=2", "fallback", "fetch");
-
-		assertThat(selected).isEmpty();
-	}
-
-	@Test
-	void roundRobinReturnsEmptyWhenAllPooledCookiesAreCooling() {
-		PlatformCookieService service = new PlatformCookieService();
-
-		service.reportRisk("抖音", "a=1", "rate-limit");
-		service.reportRisk("抖音", "b=2", "rate-limit");
-
-		assertThat(service.selectCookie("抖音", "round_robin", "a=1\nb=2", "fallback", "fetch"))
+		assertThat(service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch"))
 				.isEmpty();
+	}
+
+	@Test
+	void activeCooldownUsesTheCurrentConfiguredDuration() {
+		PlatformCookieService service = new PlatformCookieService();
+		TikTokConfigService configService = mock(TikTokConfigService.class);
+		AtomicInteger minutes = new AtomicInteger(10);
+		when(configService.getRiskCooldownMinutes()).thenAnswer(invocation -> minutes.get());
+		ReflectionTestUtils.setField(service, "tikTokConfigService", configService);
+		AtomicLong startedAt = (AtomicLong) ReflectionTestUtils.getField(service,
+				"douyinGlobalRiskStartedAtMs");
+		startedAt.set(System.currentTimeMillis() - 5 * 60 * 1000L);
+
+		assertThat(service.isDouyinGlobalCooldownActive()).isTrue();
+		minutes.set(4);
+		assertThat(service.isDouyinGlobalCooldownActive()).isFalse();
+		minutes.set(20);
+		assertThat(service.isDouyinGlobalCooldownActive()).isTrue();
+	}
+
+	@Test
+	void douyinStatusReportsConfiguredGlobalCooldown() {
+		PlatformCookieService service = new PlatformCookieService();
+		TikTokConfigService configService = mock(TikTokConfigService.class);
+		when(configService.getRiskCooldownMinutes()).thenReturn(25);
+		ReflectionTestUtils.setField(service, "tikTokConfigService", configService);
+		service.reportRisk("douyin", "a=1", "verify");
+
+		assertThat(service.cookieStatus("douyin"))
+				.containsEntry("cooling", 1)
+				.containsEntry("cooldownMinutes", 25);
 	}
 
 	@Test
