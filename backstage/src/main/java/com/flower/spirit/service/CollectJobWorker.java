@@ -189,12 +189,23 @@ public class CollectJobWorker {
 		}
 		try {
 			CollectEnqueueResult retry = collectRunService.retryOrFail(claim, errorCode, message, retryDelaySeconds);
-			logger.error("[CollectWorker] failed jobId={} runId={} taskId={} code={} root={} nextRunId={} nextState={}",
-					claim.jobId(), claim.runId(), claim.taskId(), errorCode, message, retry.runId(), retry.state(), error);
+			if (retry.inserted() && isExpectedDouyinRisk(errorCode)) {
+				logger.warn("[CollectWorker] upstream risk; retry queued jobId={} runId={} taskId={} code={} "
+						+ "root={} nextRunId={} nextState={}", claim.jobId(), claim.runId(), claim.taskId(),
+						errorCode, message, retry.runId(), retry.state());
+			} else {
+				logger.error("[CollectWorker] failed jobId={} runId={} taskId={} code={} root={} nextRunId={} nextState={}",
+						claim.jobId(), claim.runId(), claim.taskId(), errorCode, message, retry.runId(), retry.state(), error);
+			}
 		} catch (RuntimeException queueWriteError) {
 			logger.error("[CollectJobTerminalWrite] failed jobId={} runId={} taskId={} errorCode={} root={}",
 					claim.jobId(), claim.runId(), claim.taskId(), errorCode, message, queueWriteError);
 		}
+	}
+
+	private static boolean isExpectedDouyinRisk(String errorCode) {
+		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
+				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
 	}
 
 	private long retryDelaySeconds(Throwable error) {

@@ -21,6 +21,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+
 class CollectJobWorkerTest {
 
 	@Test
@@ -134,6 +139,45 @@ class CollectJobWorkerTest {
 	void riskRetryUsesRemainingCooldownPlusFiveSecondBuffer() {
 		assertThat(CollectJobWorker.cooldownRetryDelaySeconds(6 * 60 * 1000L + 1))
 				.isEqualTo(366L);
+	}
+
+	@Test
+	void queuedRiskRetryIsWarnWithoutStackTrace() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(3251L, 4997L, 9,
+				CollectTriggerType.RETRY, 2, 3);
+		when(dataService.isCollectTaskEnabled(9)).thenReturn(true);
+		when(runService.currentState(4997L)).thenReturn(CollectRunState.FETCHING);
+		when(runService.retryOrFail(claim, "F2_UPSTREAM_RATE_LIMIT",
+				"Douyin author-work endpoint returned empty responses", 605L))
+				.thenReturn(new CollectEnqueueResult(4998L, 3251L, CollectRunState.QUEUED, true, false));
+		when(cookieService.douyinGlobalCooldownRemainingMillis()).thenReturn(600_000L);
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_UPSTREAM_RATE_LIMIT",
+				"Douyin author-work endpoint returned empty responses"))
+				.when(dataService).executeQueuedCollectTask(9, 4997L, CollectTriggerType.RETRY);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+		Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger(CollectJobWorker.class);
+		ListAppender<ILoggingEvent> events = new ListAppender<>();
+		events.start();
+		logger.addAppender(events);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			assertThat(events.list).anySatisfy(event -> {
+				assertThat(event.getLevel()).isEqualTo(Level.WARN);
+				assertThat(event.getFormattedMessage()).contains("upstream risk; retry queued",
+						"nextRunId=4998", "nextState=QUEUED");
+				assertThat(event.getThrowableProxy()).isNull();
+			});
+			assertThat(events.list).noneMatch(event -> event.getLevel() == Level.ERROR);
+		} finally {
+			logger.detachAppender(events);
+			events.stop();
+			worker.shutdown();
+		}
 	}
 
 	private DatabaseWriteExecutor passthroughWrites() {
