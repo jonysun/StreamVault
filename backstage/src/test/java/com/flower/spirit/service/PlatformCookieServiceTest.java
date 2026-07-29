@@ -32,6 +32,29 @@ class PlatformCookieServiceTest {
 	}
 
 	@Test
+	void roundRobinAlsoSkipsRiskyCookieDuringCooldown() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		String first = service.selectCookie("抖音", "round_robin", "a=1\nb=2", "fallback", "fetch");
+		service.reportRisk("抖音", first, "rate-limit");
+		String second = service.selectCookie("抖音", "round_robin", "a=1\nb=2", "fallback", "fetch");
+
+		assertThat(first).isEqualTo("a=1");
+		assertThat(second).isEqualTo("b=2");
+	}
+
+	@Test
+	void riskReportedWithLegacyDisplayNameIsSharedWithCanonicalPlatformKey() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		String first = service.selectCookie("douyin", "round_robin", "a=1\nb=2", "fallback", "fetch");
+		service.reportRisk("抖音", first, "rate-limit");
+
+		assertThat(service.selectCookie("douyin", "round_robin", "a=1\nb=2", "fallback", "fetch"))
+				.isEqualTo("b=2");
+	}
+
+	@Test
 	void successDoesNotClearRiskCooldown() {
 		PlatformCookieService service = new PlatformCookieService();
 
@@ -52,6 +75,17 @@ class PlatformCookieServiceTest {
 		String selected = service.selectCookie("抖音", "risk_shift", "a=1\nb=2", "fallback", "fetch");
 
 		assertThat(selected).isEmpty();
+	}
+
+	@Test
+	void roundRobinReturnsEmptyWhenAllPooledCookiesAreCooling() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		service.reportRisk("抖音", "a=1", "rate-limit");
+		service.reportRisk("抖音", "b=2", "rate-limit");
+
+		assertThat(service.selectCookie("抖音", "round_robin", "a=1\nb=2", "fallback", "fetch"))
+				.isEmpty();
 	}
 
 	@Test

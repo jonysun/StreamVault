@@ -16,6 +16,7 @@ import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.CookiesConfigDao;
 import com.flower.spirit.entity.CookiesConfigEntity;
 import com.flower.spirit.entity.TikTokConfigEntity;
+import com.flower.spirit.platform.PlatformCatalog;
 
 @Service
 public class PlatformCookieService {
@@ -39,11 +40,18 @@ public class PlatformCookieService {
 		String pool = config == null ? null : config.getCookiepool();
 		String legacy = firstNotBlank(config == null ? null : config.getCookies(), Global.tiktokCookie);
 		String strategy = config == null ? null : config.getCookiestrategy();
-		String cookie = selectCookie("抖音", strategy, pool, legacy, purpose);
+		String cookie = selectCookie(Global.platform.douyin.name(), strategy, pool, legacy, purpose);
 		if (cookie != null && !cookie.trim().isEmpty()) {
 			Global.tiktokCookie = cookie;
 		}
 		return cookie;
+	}
+
+	public boolean hasConfiguredDouyinCookie() {
+		TikTokConfigEntity config = tikTokConfigService == null ? null : tikTokConfigService.getData();
+		String pool = config == null ? null : config.getCookiepool();
+		String legacy = firstNotBlank(config == null ? null : config.getCookies(), Global.tiktokCookie);
+		return !parseCookiePool(pool, legacy).isEmpty();
 	}
 
 	public String currentKuaishouCookie(String purpose) {
@@ -70,24 +78,20 @@ public class PlatformCookieService {
 		if (cookies.isEmpty()) {
 			return "";
 		}
-		String safePlatform = platform == null ? "unknown" : platform;
+		String safePlatform = canonicalPlatform(platform);
 		String safeStrategy = isBlank(strategy) ? STRATEGY_ROUND_ROBIN : strategy.trim();
-		if (STRATEGY_RISK_SHIFT.equals(safeStrategy)) {
-			return selectRiskShift(safePlatform, cookies);
-		}
-		AtomicInteger cursor = cursors.computeIfAbsent(safePlatform + ":" + safeStrategy, key -> new AtomicInteger(0));
-		int index = Math.floorMod(cursor.getAndIncrement(), cookies.size());
-		return cookies.get(index);
+		return selectAvailable(safePlatform, safeStrategy, cookies);
 	}
 
 	public void reportRisk(String platform, String cookie, String reason) {
 		if (isBlank(platform) || isBlank(cookie)) {
 			return;
 		}
+		String safePlatform = canonicalPlatform(platform);
 		long now = System.currentTimeMillis();
 		purgeExpiredRisks(now);
-		riskUntil.put(riskKey(platform, cookie), now + RISK_COOLDOWN_MS);
-		logger.warn("platform cookie risk platform={} reason={} cooldownMs={}", platform, reason, RISK_COOLDOWN_MS);
+		riskUntil.put(riskKey(safePlatform, cookie), now + RISK_COOLDOWN_MS);
+		logger.warn("platform cookie risk platform={} reason={} cooldownMs={}", safePlatform, reason, RISK_COOLDOWN_MS);
 	}
 
 	public void reportSuccess(String platform, String cookie) {
@@ -104,12 +108,13 @@ public class PlatformCookieService {
 	}
 
 	public Map<String, Object> cookieStatus(String platform) {
+		String safePlatform = canonicalPlatform(platform);
 		Map<String, Object> status = new HashMap<>();
 		long now = System.currentTimeMillis();
 		purgeExpiredRisks(now);
 		int cooling = 0;
 		for (Map.Entry<String, Long> entry : riskUntil.entrySet()) {
-			if (entry.getKey().startsWith(platform + ":") && entry.getValue() > now) {
+			if (entry.getKey().startsWith(safePlatform + ":") && entry.getValue() > now) {
 				cooling++;
 			}
 		}
@@ -118,10 +123,10 @@ public class PlatformCookieService {
 		return status;
 	}
 
-	private String selectRiskShift(String platform, List<String> cookies) {
+	private String selectAvailable(String platform, String strategy, List<String> cookies) {
 		long now = System.currentTimeMillis();
 		purgeExpiredRisks(now);
-		AtomicInteger cursor = cursors.computeIfAbsent(platform + ":" + STRATEGY_RISK_SHIFT, key -> new AtomicInteger(0));
+		AtomicInteger cursor = cursors.computeIfAbsent(platform + ":" + strategy, key -> new AtomicInteger(0));
 		int start = Math.floorMod(cursor.getAndIncrement(), cookies.size());
 		long earliestUntil = Long.MAX_VALUE;
 		for (int i = 0; i < cookies.size(); i++) {
@@ -134,7 +139,8 @@ public class PlatformCookieService {
 				earliestUntil = until;
 			}
 		}
-		logger.warn("all platform cookies are cooling platform={} earliestAvailableInMs={}", platform, Math.max(0, earliestUntil - now));
+		logger.warn("all platform cookies are cooling platform={} strategy={} earliestAvailableInMs={}",
+				platform, strategy, Math.max(0, earliestUntil - now));
 		return "";
 	}
 
@@ -156,6 +162,11 @@ public class PlatformCookieService {
 
 	private String riskKey(String platform, String cookie) {
 		return platform + ":" + cookie.hashCode();
+	}
+
+	private String canonicalPlatform(String platform) {
+		String canonical = PlatformCatalog.canonicalKey(platform, null);
+		return isBlank(canonical) ? "unknown" : canonical;
 	}
 
 	private void purgeExpiredRisks(long now) {

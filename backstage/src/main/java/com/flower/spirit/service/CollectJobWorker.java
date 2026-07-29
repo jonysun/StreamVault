@@ -168,14 +168,20 @@ public class CollectJobWorker {
 		}
 	}
 
-	private long retryDelaySeconds(Throwable error) {
+	static long retryDelaySeconds(Throwable error) {
+		if (error instanceof CollectFetchException fetchError) {
+			String errorCode = fetchError.getErrorCode();
+			if ("F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
+					|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode)
+					|| "F2_COOKIE_COOLDOWN".equals(errorCode)) return 3600;
+		}
 		String message = rootMessage(error).toLowerCase(Locale.ROOT);
 		if (message.contains("cookie") || message.contains("风控") || message.contains("risk")
 				|| message.contains("429")) return 3600;
 		return 900;
 	}
 
-	private String rootMessage(Throwable error) {
+	private static String rootMessage(Throwable error) {
 		Throwable root = error;
 		while (root.getCause() != null && root.getCause() != root) root = root.getCause();
 		return root.getMessage() == null || root.getMessage().isBlank()

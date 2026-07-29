@@ -276,7 +276,8 @@ public class CommandUtil {
 
     public static F2CommandResult f2IncrementalFetch(DouyinFetchRequest request,
             Path knownIdsFile, Path outputFile) {
-        String cookie = nullToEmpty(Global.tiktokCookie);
+        String cookie = request.cookie() == null
+                ? nullToEmpty(Global.tiktokCookie) : nullToEmpty(request.cookie());
         List<String> command = buildIncrementalCommand(request, knownIdsFile, outputFile, cookie);
         logger.info("[F2] start func=fetch_douyin_list_incremental uid={} knownIdsFile={} output={} "
                         + "cookiePresent={} cookie=***masked***",

@@ -86,7 +86,8 @@ public class DouyinCookieHealthService {
 		item.put("fetched", fetched);
 		item.put("existingDetailCount", existingDetailCount);
 		if (platformCookieService != null) {
-			platformCookieService.reportRisk("抖音", cookie, "douyin cookie degraded fetch window");
+			platformCookieService.reportRisk(Global.platform.douyin.name(), cookie,
+					"douyin cookie degraded fetch window");
 		}
 		notifyCookieProblem(item);
 	}
@@ -115,7 +116,8 @@ public class DouyinCookieHealthService {
 			item.put("statusText", "疑似过期");
 			item.put("message", "登录态探针返回登录/验证/风控信号");
 			if (platformCookieService != null) {
-				platformCookieService.reportRisk("抖音", cookie, "douyin cookie login probe expired");
+				platformCookieService.reportRisk(Global.platform.douyin.name(), cookie,
+						"douyin cookie login probe expired");
 			}
 			return item;
 		}

@@ -2227,6 +2227,14 @@ public class CollectDataService {
 	}
 
 	private void executeIncrementalPostFetch(CollectDataEntity task, long runId, CollectTriggerType triggerType) {
+		String cookie = platformCookieService.currentDouyinCookie("collect_worker");
+		if (cookie == null || cookie.isBlank()) {
+			if (platformCookieService.hasConfiguredDouyinCookie()) {
+				throw new CollectFetchException("F2_COOKIE_COOLDOWN",
+						"All configured Douyin Cookies are cooling down");
+			}
+			throw new CollectFetchException("COOKIE_MISSING", "抖音 Cookie 为空，无法抓取作品列表");
+		}
 		DouyinFetchMode mode = triggerType == CollectTriggerType.AUDIT
 				? DouyinFetchMode.AUDIT
 				: task.getLastSuccessfulFetchAt() == null ? DouyinFetchMode.INITIAL : DouyinFetchMode.INCREMENTAL;
@@ -2237,8 +2245,17 @@ public class CollectDataService {
 				: effectiveIncrementalMaxPages(knownIds.size(), batchLimit);
 		DouyinFetchRequest request = new DouyinFetchRequest(sourceId(task), knownIds,
 				task.getLastSeenPublishTime(), incrementalKnownBoundary,
-				maxPages, emptyPageLimit, mode, batchLimit);
-		DouyinFetchEnvelope envelope = douyinIncrementalFetchService.fetch(request);
+				maxPages, emptyPageLimit, mode, batchLimit, cookie);
+		DouyinFetchEnvelope envelope;
+		try {
+			envelope = douyinIncrementalFetchService.fetch(request);
+			platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
+		} catch (CollectFetchException error) {
+			if (isDouyinRiskError(error.getErrorCode())) {
+				platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, error.getErrorCode());
+			}
+			throw error;
+		}
 		DouyinFetchEnvelope planningEnvelope = mode == DouyinFetchMode.AUDIT
 				? envelope : selectedEnvelope(envelope, batchLimit);
 		List<CollectRunFetchedItem> plan = buildFetchPlan(task, planningEnvelope, mode);
@@ -2418,10 +2435,11 @@ public class CollectDataService {
 			throw new CollectFetchException("UNSUPPORTED_PERSISTENT_FETCH",
 					"当前持久化抓取流水线仅支持抖音收藏任务");
 		}
-		String cookie = platformCookieService.currentDouyinCookie("collect_worker");
-		if (cookie == null || cookie.isBlank()) {
-			throw new CollectFetchException("COOKIE_MISSING", "抖音 Cookie 为空，无法抓取作品列表");
-		}
+	}
+
+	private boolean isDouyinRiskError(String errorCode) {
+		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
+				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
 	}
 
 	private void assertCollectFetchAllowed() {

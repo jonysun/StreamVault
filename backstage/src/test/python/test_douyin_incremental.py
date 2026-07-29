@@ -827,6 +827,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([0], crawler.post_cursors)
         self.assertEqual(["MS4-author"], crawler.profile_ids)
         self.assertEqual(20, crawler.post_params[0].count)
+        self.assertIs(crawler.bogus_manager, module.XBogusManager)
 
     async def test_deactivated_profile_writes_successful_empty_envelope(self):
         module, crawlers = self._load_command_module(
@@ -1099,10 +1100,12 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, payload["diagnostics"]["lastPage"]["page"])
         self.assertNotIn("raw upstream detail", output)
 
-    async def test_non_verification_page_request_exception_remains_schema_error(self):
+    async def test_page_timeout_is_classified_as_upstream_timeout(self):
         module, _ = self._load_command_module(
             {"status_code": 0, "user": {"nickname": "author"}},
-            [RuntimeError("network timeout with raw detail")],
+            [type("APITimeoutError", (RuntimeError,), {})(
+                "network timeout with raw detail"
+            )],
         )
         args = self._args()
 
@@ -1112,8 +1115,29 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         output = stderr.getvalue()
         payload = self._error_payload(output)
-        self.assertEqual("UPSTREAM_SCHEMA_ERROR", payload["errorCode"])
+        self.assertEqual("F2_UPSTREAM_TIMEOUT", payload["errorCode"])
         self.assertNotIn("network timeout with raw detail", output)
+
+    async def test_empty_response_retry_exhaustion_is_rate_limit(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [type("APIRetryExhaustedError", (RuntimeError,), {})(
+                "raw endpoint detail"
+            )],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        self.assertEqual("F2_UPSTREAM_RATE_LIMIT", payload["errorCode"])
+        self.assertEqual(
+            "APIRetryExhaustedError", payload["diagnostics"]["exceptionType"]
+        )
+        self.assertNotIn("raw endpoint detail", output)
 
     async def test_top_level_special_state_is_deactivated(self):
         module, crawlers = self._load_command_module(
@@ -1374,6 +1398,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             "f2.apps.douyin.handler": types.ModuleType("f2.apps.douyin.handler"),
             "f2.apps.douyin.crawler": types.ModuleType("f2.apps.douyin.crawler"),
             "f2.apps.douyin.model": types.ModuleType("f2.apps.douyin.model"),
+            "f2.apps.douyin.utils": types.ModuleType("f2.apps.douyin.utils"),
             "f2.log": types.ModuleType("f2.log"),
             "f2.log.logger": types.ModuleType("f2.log.logger"),
         }
@@ -1381,6 +1406,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         fake_modules["f2.apps.douyin.crawler"].DouyinCrawler = FakeCrawler
         fake_modules["f2.apps.douyin.model"].UserProfile = FakeUserProfile
         fake_modules["f2.apps.douyin.model"].UserPost = FakeUserPost
+        fake_modules["f2.apps.douyin.utils"].XBogusManager = object()
         fake_modules["f2.log.logger"].logger = types.SimpleNamespace(
             setLevel=lambda *_: None
         )
