@@ -55,4 +55,11 @@ class CollectJobWorkerTest {
 		assertThat(running).isNotNull();
 		assertThat(running.get()).isFalse();
 	}
+
+	@Test
+	void rateLimitUsesOneHourPersistentRetryDelay() {
+		assertThat(CollectJobWorker.retryDelaySeconds(
+				new CollectFetchException("F2_UPSTREAM_RATE_LIMIT", "empty response")))
+				.isEqualTo(3600L);
+	}
 }

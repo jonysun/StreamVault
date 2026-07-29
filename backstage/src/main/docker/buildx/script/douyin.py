@@ -7,6 +7,7 @@ import argparse
 from f2.apps.douyin.handler import DouyinHandler
 from f2.apps.douyin.crawler import DouyinCrawler
 from f2.apps.douyin.model import UserPost, UserProfile
+from f2.apps.douyin.utils import XBogusManager
 from f2.log.logger import logger
 import json
 import math
@@ -75,6 +76,27 @@ class UpstreamCommandSchemaError(FetchCommandError):
             diagnostics,
             exception_type,
         )
+
+
+class UpstreamFetchError(FetchCommandError):
+    pass
+
+
+def _request_error(error, safe_message, diagnostics):
+    exception_type = type(error).__name__
+    lowered_type = exception_type.lower()
+    if "retryexhausted" in lowered_type:
+        return UpstreamFetchError(
+            "F2_UPSTREAM_RATE_LIMIT",
+            "Douyin author-work endpoint returned empty responses",
+            diagnostics,
+            exception_type,
+        )
+    if "timeout" in lowered_type or isinstance(error, TimeoutError):
+        return UpstreamFetchError(
+            "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
+        )
+    return UpstreamCommandSchemaError(safe_message, diagnostics, exception_type)
 
 
 def douyin_kwargs(cookie):
@@ -417,6 +439,8 @@ async def fetch_douyin_list_incremental(
     page_delay_seconds = _configured_page_delay_seconds()
 
     async with DouyinCrawler(douyin_kwargs(cookie)) as crawler:
+        # Scope the known-working signing path to incremental author fetches.
+        crawler.bogus_manager = XBogusManager
         try:
             profile = await crawler.fetch_user_profile(
                 UserProfile(sec_user_id=sec_user_id)
@@ -426,10 +450,8 @@ async def fetch_douyin_list_incremental(
             diagnostics = {"profileStatus": profile_summary}
             if _exception_requires_verification(error, cookie):
                 raise CookieOrVerifyRequired(diagnostics) from None
-            raise UpstreamCommandSchemaError(
-                "Douyin profile request failed",
-                diagnostics,
-                type(error).__name__,
+            raise _request_error(
+                error, "Douyin profile request timed out", diagnostics
             ) from None
         profile_summary = _profile_status_summary(profile, cookie)
         command_diagnostics = {"profileStatus": profile_summary}
@@ -463,10 +485,10 @@ async def fetch_douyin_list_incremental(
                     raise CookieOrVerifyRequired(
                         dict(command_diagnostics)
                     ) from None
-                raise UpstreamCommandSchemaError(
-                    "Douyin page request failed",
+                raise _request_error(
+                    error,
+                    "Douyin author-work page request timed out",
                     dict(command_diagnostics),
-                    type(error).__name__,
                 ) from None
 
             page_summary = _page_status_summary(

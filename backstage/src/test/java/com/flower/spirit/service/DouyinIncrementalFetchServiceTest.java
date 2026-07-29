@@ -59,9 +59,34 @@ class DouyinIncrementalFetchServiceTest {
 				"stream-vault-fetch-error={\"errorCode\":\"F2_COOKIE_OR_VERIFY_REQUIRED\",\"message\":\"login required\"}", 25);
 
 		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.isInstanceOf(CollectFetchException.class)
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_COOKIE_OR_VERIFY_REQUIRED");
+		assertTemporaryFilesDeleted(runner);
+	}
+
+	@Test
+	void malformedStructuredErrorRemainsAProtocolFailure() {
+		FakeRunner runner = new FakeRunner();
+		runner.commandResult = new F2CommandResult(3,
+				"stream-vault-fetch-error={not-json}", 25);
+
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
 				.isInstanceOf(IllegalStateException.class)
-				.hasMessageContaining("F2_COOKIE_OR_VERIFY_REQUIRED")
-				.hasMessageContaining("exitCode=2");
+				.hasMessageContaining("exitCode=3");
+		assertTemporaryFilesDeleted(runner);
+	}
+
+	@Test
+	void processTimeoutIsClassifiedAsUpstreamTimeout() {
+		FakeRunner runner = new FakeRunner();
+		runner.commandResult = new F2CommandResult(-1,
+				"process timeout after 60 seconds", 60_000);
+
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.isInstanceOf(CollectFetchException.class)
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_UPSTREAM_TIMEOUT");
 		assertTemporaryFilesDeleted(runner);
 	}
 

@@ -22,6 +22,7 @@ import com.flower.spirit.utils.CommandUtil.F2CommandResult;
 @Service
 public class DouyinIncrementalFetchService {
 
+	private static final String FETCH_ERROR_PREFIX = "stream-vault-fetch-error=";
 	private static final List<String> REQUIRED_ENVELOPE_KEYS = List.of(
 			"items", "newWorkIds", "outcome", "pagesFetched", "emptyPages",
 			"lastCursor", "diagnostics");
@@ -57,6 +58,14 @@ public class DouyinIncrementalFetchService {
 			}
 			if (commandResult.exitCode() != 0) {
 				String diagnostic = CommandUtil.sanitizeF2Output(commandResult.output());
+				CollectFetchException structured = structuredFetchError(diagnostic);
+				if (structured != null) {
+					throw structured;
+				}
+				if (diagnostic != null && diagnostic.contains("process timeout after ")) {
+					throw new CollectFetchException("F2_UPSTREAM_TIMEOUT",
+							"Douyin incremental fetch process timed out");
+				}
 				throw new IllegalStateException("Douyin incremental fetch failed exitCode="
 						+ commandResult.exitCode() + " output=" + bounded(diagnostic, 2000));
 			}
@@ -70,6 +79,25 @@ public class DouyinIncrementalFetchService {
 			deleteQuietly(outputFile);
 			deleteQuietly(knownIdsFile);
 		}
+	}
+
+	private CollectFetchException structuredFetchError(String output) {
+		if (output == null || output.isBlank()) return null;
+		String[] lines = output.split("\\R");
+		for (int index = lines.length - 1; index >= 0; index--) {
+			String line = lines[index].trim();
+			if (!line.startsWith(FETCH_ERROR_PREFIX)) continue;
+			try {
+				JSONObject payload = JSON.parseObject(line.substring(FETCH_ERROR_PREFIX.length()));
+				String errorCode = bounded(payload.getString("errorCode"), 128);
+				String message = bounded(payload.getString("message"), 1000);
+				if (errorCode == null || errorCode.isBlank() || message == null || message.isBlank()) return null;
+				return new CollectFetchException(errorCode, message);
+			} catch (RuntimeException ignored) {
+				return null;
+			}
+		}
+		return null;
 	}
 
 	private DouyinFetchEnvelope parseResult(String text) {
