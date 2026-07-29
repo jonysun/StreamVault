@@ -101,6 +101,14 @@ class AdminTemplateScriptSanityTest {
 		assertThat(template).doesNotContain("JSON.stringify(record.items)");
 	}
 
+	@Test
+	void douyinConfigContainsGlobalRiskCooldownInputAndSubmissionField() throws IOException {
+		String config = template("config.html");
+
+		assertThat(config).contains("tiktokriskcooldownminutes", "min=\"1\"", "max=\"1440\"",
+				"option['riskCooldownMinutes']", "tiktok.riskCooldownMinutes");
+	}
+
 	private String template(String name) throws IOException {
 		try (var input = getClass().getResourceAsStream("/templates/admin/" + name)) {
 			if (input == null) throw new IOException(name + " template not found");

@@ -38,6 +38,13 @@ public class CollectRunService {
 		});
 	}
 
+	public void deferForCooldown(CollectJobClaim claim, Instant availableAt, String reason) {
+		databaseWriteExecutor.execute("collect-run-defer-cooldown", () -> {
+			transaction.deferForCooldown(claim, availableAt, reason, Instant.now());
+			return null;
+		});
+	}
+
 	public void storeFetchedItems(long runId, List<CollectRunFetchedItem> items) {
 		databaseWriteExecutor.execute("collect-run-store-fetched-items", () -> {
 			transaction.storeFetchedItems(runId, items, Instant.now());

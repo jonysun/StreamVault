@@ -41,6 +41,7 @@ public class DouyinCookieHealthService {
 		int valid = 0;
 		int degraded = 0;
 		int invalid = 0;
+		int cooling = 0;
 		for (int i = 0; i < cookies.size(); i++) {
 			Map<String, Object> item = checkOne(cookies.get(i), i + 1);
 			items.add(item);
@@ -49,6 +50,8 @@ public class DouyinCookieHealthService {
 				valid++;
 			} else if ("DEGRADED".equals(status)) {
 				degraded++;
+			} else if ("COOLDOWN".equals(status)) {
+				cooling++;
 			} else {
 				invalid++;
 			}
@@ -61,6 +64,7 @@ public class DouyinCookieHealthService {
 		result.put("valid", valid);
 		result.put("degraded", degraded);
 		result.put("invalid", invalid);
+		result.put("cooling", cooling);
 		result.put("items", items);
 		return result;
 	}
@@ -105,6 +109,13 @@ public class DouyinCookieHealthService {
 			item.put("status", "INCOMPLETE");
 			item.put("statusText", "不完整");
 			item.put("message", "缺少关键字段: " + String.join(", ", missing));
+			return item;
+		}
+		if (platformCookieService != null && platformCookieService.isDouyinGlobalCooldownActive()) {
+			item.put("status", "COOLDOWN");
+			item.put("statusText", "全局冷却中");
+			item.put("message", "当前处于抖音全局风控冷却期，未发送检测请求");
+			item.put("remainingMs", platformCookieService.douyinGlobalCooldownRemainingMillis());
 			return item;
 		}
 		String output = CommandUtil.f2cmd(cookie, null, "fetch_user_collects", null, null, null, null);

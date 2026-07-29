@@ -23,6 +23,13 @@ import com.flower.spirit.service.DouyinFetchRequest;
 class CommandUtilIncrementalFetchTest {
 
 	@Test
+	void blankCookieSkipsLegacyF2ProcessLaunch() {
+		assertThat(CommandUtil.f2cmd("", "123", "fetch_video", null, null, null, null)).isEmpty();
+		assertThat(CommandUtil.getLastF2ExitCode()).isEqualTo(-2);
+		assertThat(CommandUtil.getLastF2DurationMs()).isZero();
+	}
+
+	@Test
 	void buildsExactSeparateIncrementalArguments() {
 		DouyinFetchRequest request = new DouyinFetchRequest(
 				"MS4-author", Set.of("known-1"), "", 20, 30, 3,

@@ -1,5 +1,6 @@
 package com.flower.spirit.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.UUID;
@@ -32,6 +33,7 @@ public class CollectJobWorker {
 	private final CollectQueueTransaction transaction;
 	private final CollectRunService collectRunService;
 	private final CollectDataService collectDataService;
+	private final PlatformCookieService platformCookieService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final String workerId = "sqlite-collect-" + UUID.randomUUID();
 	private final AtomicBoolean running = new AtomicBoolean(false);
@@ -48,11 +50,13 @@ public class CollectJobWorker {
 	});
 
 	public CollectJobWorker(CollectQueueTransaction transaction, CollectRunService collectRunService,
-			CollectDataService collectDataService, DatabaseWriteExecutor databaseWriteExecutor,
+			CollectDataService collectDataService, PlatformCookieService platformCookieService,
+			DatabaseWriteExecutor databaseWriteExecutor,
 			@Value("${streamvault.collect.fetch-workers:1}") int configuredWorkers) {
 		this.transaction = transaction;
 		this.collectRunService = collectRunService;
 		this.collectDataService = collectDataService;
+		this.platformCookieService = platformCookieService;
 		this.databaseWriteExecutor = databaseWriteExecutor;
 		if (configuredWorkers != 1) {
 			logger.warn("[CollectWorker] SQLite release supports one fetch worker; configured={} effective=1",
@@ -69,6 +73,11 @@ public class CollectJobWorker {
 		ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(this::heartbeatActiveRun,
 				15, 15, TimeUnit.SECONDS);
 		try {
+			if (platformCookieService.isDouyinGlobalCooldownActive()) {
+				logger.debug("[CollectWorker] claim deferred by Douyin global cooldown remainingMs={}",
+						platformCookieService.douyinGlobalCooldownRemainingMillis());
+				return;
+			}
 			CollectJobClaim claim = databaseWriteExecutor.execute("collect-job-claim",
 					() -> transaction.claimNext(workerId, Instant.now()));
 			if (claim != null) process(claim);
@@ -112,12 +121,20 @@ public class CollectJobWorker {
 						claim.runId(), claim.taskId());
 				return;
 			}
+			if (platformCookieService.isDouyinGlobalCooldownActive()) {
+				deferForCooldown(claim, "Douyin global cooldown started after queue claim");
+				return;
+			}
 			collectRunService.start(claim.runId());
 			collectDataService.executeQueuedCollectTask(claim.taskId(), claim.runId(), claim.triggerType());
 			collectRunService.complete(claim.runId(), claim.jobId());
 			logger.info("[CollectWorker] complete jobId={} runId={} taskId={}", claim.jobId(), claim.runId(),
 					claim.taskId());
 		} catch (CollectFetchException error) {
+			if ("F2_COOKIE_COOLDOWN".equals(error.getErrorCode())) {
+				deferForCooldown(claim, rootMessage(error));
+				return;
+			}
 			CollectRunState expected = currentExpectedState(claim.runId(), CollectRunState.FETCHING);
 			recordFailure(claim, expected, expected == CollectRunState.FETCHING ? CollectRunState.FETCH_FAILED
 					: CollectRunState.DB_FAILED, error.getErrorCode(),
@@ -136,6 +153,18 @@ public class CollectJobWorker {
 			recordFailure(claim, currentExpectedState(claim.runId(), CollectRunState.PROCESSING),
 					CollectRunState.DB_FAILED, sqliteBusy ? "SQLITE_BUSY" : "UNEXPECTED",
 					rootMessage(error), error, sqliteBusy ? 30 : 900);
+		}
+	}
+
+	private void deferForCooldown(CollectJobClaim claim, String reason) {
+		Instant availableAt = platformCookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5));
+		try {
+			collectRunService.deferForCooldown(claim, availableAt, reason);
+			logger.warn("[CollectWorker] deferred by Douyin cooldown jobId={} runId={} taskId={} availableAt={}",
+					claim.jobId(), claim.runId(), claim.taskId(), availableAt);
+		} catch (RuntimeException queueWriteError) {
+			logger.error("[CollectCooldownDeferralWrite] failed jobId={} runId={} taskId={}", claim.jobId(),
+					claim.runId(), claim.taskId(), queueWriteError);
 		}
 	}
 
@@ -168,17 +197,24 @@ public class CollectJobWorker {
 		}
 	}
 
-	static long retryDelaySeconds(Throwable error) {
+	private long retryDelaySeconds(Throwable error) {
 		if (error instanceof CollectFetchException fetchError) {
 			String errorCode = fetchError.getErrorCode();
 			if ("F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
-					|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode)
-					|| "F2_COOKIE_COOLDOWN".equals(errorCode)) return 3600;
+					|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode)) {
+				return cooldownRetryDelaySeconds(platformCookieService.douyinGlobalCooldownRemainingMillis());
+			}
 		}
 		String message = rootMessage(error).toLowerCase(Locale.ROOT);
-		if (message.contains("cookie") || message.contains("风控") || message.contains("risk")
-				|| message.contains("429")) return 3600;
+		if ((message.contains("cookie") || message.contains("风控") || message.contains("risk")
+				|| message.contains("429")) && platformCookieService.isDouyinGlobalCooldownActive()) {
+			return cooldownRetryDelaySeconds(platformCookieService.douyinGlobalCooldownRemainingMillis());
+		}
 		return 900;
+	}
+
+	static long cooldownRetryDelaySeconds(long remainingMillis) {
+		return Math.max(5, (Math.max(0, remainingMillis) + 999) / 1000 + 5);
 	}
 
 	private static String rootMessage(Throwable error) {

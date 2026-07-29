@@ -32,6 +32,41 @@ import com.flower.spirit.service.RuntimeJobQueryService;
 class CollectQueueTransactionTest {
 
 	@Test
+	void cooldownDeferralReturnsClaimAttemptAndKeepsTheSameRunQueued() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-07-29T08:00:00Z");
+			Instant availableAt = now.plusSeconds(605);
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus) VALUES(7, 'queued')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			jdbc.update("UPDATE biz_job_queue SET attempt_count = 2 WHERE id = ?", queued.jobId());
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			assertThat(claim.attemptCount()).isEqualTo(3);
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+
+			transaction.deferForCooldown(claim, availableAt, "global cooldown", now.plusSeconds(3));
+
+			assertThat(jdbc.queryForMap("SELECT state, attempt_count, available_at, locked_by, locked_at "
+					+ "FROM biz_job_queue WHERE id = ?", claim.jobId()))
+					.containsEntry("state", "RETRY_WAIT")
+					.containsEntry("attempt_count", 2)
+					.containsEntry("locked_by", null)
+					.containsEntry("locked_at", null);
+			assertThat(jdbc.queryForObject("SELECT state FROM biz_collect_run WHERE id = ?", String.class,
+					claim.runId())).isEqualTo("QUEUED");
+			assertThat(jdbc.queryForObject("SELECT level FROM biz_collect_run_event WHERE run_id = ? "
+					+ "AND event_code = 'F2_COOKIE_COOLDOWN'", String.class, claim.runId())).isEqualTo("WARN");
+			assertThat(transaction.claimNext("worker", availableAt.minusSeconds(1))).isNull();
+			CollectJobClaim retried = transaction.claimNext("worker", availableAt);
+			assertThat(retried.runId()).isEqualTo(claim.runId());
+			assertThat(retried.attemptCount()).isEqualTo(3);
+		}
+	}
+
+	@Test
 	void fetchPlanCompletionLeavesDownloadsQueuedAndPreservesCarriedOut() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
