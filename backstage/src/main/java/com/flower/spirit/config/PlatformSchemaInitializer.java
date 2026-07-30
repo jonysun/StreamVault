@@ -7,17 +7,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
+import com.flower.spirit.database.DatabaseSchemaInspector;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.service.transaction.DatabaseInitializationTransaction;
 
@@ -31,12 +32,21 @@ public class PlatformSchemaInitializer {
 	private final JdbcTemplate jdbcTemplate;
 	private final DatabaseInitializationTransaction transaction;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
+	private final DatabaseSchemaInspector schemaInspector;
 
+	@Autowired
 	public PlatformSchemaInitializer(JdbcTemplate jdbcTemplate, DatabaseInitializationTransaction transaction,
-			DatabaseWriteExecutor databaseWriteExecutor) {
+			DatabaseWriteExecutor databaseWriteExecutor, DatabaseSchemaInspector schemaInspector) {
 		this.jdbcTemplate = jdbcTemplate;
 		this.transaction = transaction;
 		this.databaseWriteExecutor = databaseWriteExecutor;
+		this.schemaInspector = schemaInspector;
+	}
+
+	public PlatformSchemaInitializer(JdbcTemplate jdbcTemplate, DatabaseInitializationTransaction transaction,
+			DatabaseWriteExecutor databaseWriteExecutor) {
+		this(jdbcTemplate, transaction, databaseWriteExecutor,
+				new DatabaseSchemaInspector(jdbcTemplate.getDataSource()));
 	}
 
 	@Order(100)
@@ -75,9 +85,7 @@ public class PlatformSchemaInitializer {
 
 	private Set<String> tableColumns(String table) {
 		try {
-			return jdbcTemplate.queryForList("PRAGMA table_info(" + table + ")").stream()
-					.map(row -> String.valueOf(row.get("name")).toLowerCase())
-					.collect(Collectors.toSet());
+			return schemaInspector.columns(table);
 		} catch (Exception e) {
 			logger.warn("Failed to inspect table schema: {}", table, e);
 			return new java.util.HashSet<>();

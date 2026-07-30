@@ -30,19 +30,20 @@ public class AuthorEnrichmentTransaction {
 	public AuthorEnrichmentEnqueueResult enqueue(String platformKey, String authorUid, int priority,
 			boolean promote, Instant now) {
 		Timestamp timestamp = Timestamp.from(now);
-		int inserted = jdbcTemplate.update("INSERT OR IGNORE INTO biz_author_enrichment_job "
+		int inserted = jdbcTemplate.update("INSERT INTO biz_author_enrichment_job "
 				+ "(platform_key, author_uid, state, priority, attempt_count, next_attempt_at, created_at, updated_at) "
 				+ "SELECT ?, ?, 'QUEUED', ?, 0, ?, ?, ? WHERE NOT EXISTS ("
 				+ "SELECT 1 FROM biz_author_enrichment_job WHERE platform_key = ? AND author_uid = ? "
-				+ "AND state IN (" + ACTIVE_STATES + "))",
+				+ "AND state IN (" + ACTIVE_STATES + ")) ON CONFLICT DO NOTHING",
 				platformKey, authorUid, priority, timestamp, timestamp, timestamp, platformKey, authorUid);
 		boolean promoted = false;
 		if (promote && inserted == 0) {
-			promoted = jdbcTemplate.update("UPDATE biz_author_enrichment_job SET priority = MIN(priority, ?), "
+			promoted = jdbcTemplate.update("UPDATE biz_author_enrichment_job SET priority = "
+					+ "CASE WHEN priority < ? THEN priority ELSE ? END, "
 					+ "state = CASE WHEN state = 'RUNNING' THEN state ELSE 'QUEUED' END, "
 					+ "next_attempt_at = CASE WHEN state = 'RUNNING' THEN next_attempt_at ELSE ? END, updated_at = ? "
 					+ "WHERE platform_key = ? AND author_uid = ? AND state IN (" + ACTIVE_STATES + ")",
-					priority, timestamp, timestamp, platformKey, authorUid) > 0;
+					priority, priority, timestamp, timestamp, platformKey, authorUid) > 0;
 		}
 		boolean promotionApplied = promoted;
 		List<AuthorEnrichmentEnqueueResult> rows = jdbcTemplate.query(

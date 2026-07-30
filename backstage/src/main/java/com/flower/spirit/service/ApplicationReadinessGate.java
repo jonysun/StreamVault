@@ -7,22 +7,33 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.database.sqlite.SqliteRuntimeVerifier;
+import com.flower.spirit.database.DatabaseSchemaInspector;
 
 @Service
 public class ApplicationReadinessGate {
 
     private static final Logger logger = LoggerFactory.getLogger(ApplicationReadinessGate.class);
     private final Optional<SqliteRuntimeVerifier> sqliteRuntimeVerifier;
+    private final DatabaseSchemaInspector schemaInspector;
     private final AtomicReference<Snapshot> snapshot = new AtomicReference<>(
             new Snapshot(State.STARTING, "Application initialization is incomplete", Instant.now()));
 
+    @Autowired
+    public ApplicationReadinessGate(Optional<SqliteRuntimeVerifier> sqliteRuntimeVerifier,
+            DatabaseSchemaInspector schemaInspector) {
+        this.sqliteRuntimeVerifier = sqliteRuntimeVerifier;
+        this.schemaInspector = schemaInspector;
+    }
+
     public ApplicationReadinessGate(Optional<SqliteRuntimeVerifier> sqliteRuntimeVerifier) {
         this.sqliteRuntimeVerifier = sqliteRuntimeVerifier;
+        this.schemaInspector = null;
     }
 
     @Order(1000)
@@ -31,12 +42,27 @@ public class ApplicationReadinessGate {
         transition(State.CHECKING_DATABASE, "Database readiness check is running");
         try {
             sqliteRuntimeVerifier.ifPresent(SqliteRuntimeVerifier::verify);
+            if (sqliteRuntimeVerifier.isEmpty()) {
+                verifyPortableSchema();
+            }
             transition(State.READY, "Application and database are ready");
             logger.info("[Readiness] state=READY");
         } catch (RuntimeException error) {
             String reason = rootMessage(error);
             transition(State.BLOCKED, reason);
             logger.error("[Readiness] state=BLOCKED reason={}", reason, error);
+        }
+    }
+
+    private void verifyPortableSchema() {
+        if (schemaInspector == null) {
+            return;
+        }
+        for (String table : java.util.List.of("biz_video", "biz_runtime_control", "biz_collect_run",
+                "biz_collect_run_item", "biz_job_queue")) {
+            if (schemaInspector.columns(table).isEmpty()) {
+                throw new IllegalStateException("Database schema is missing required table: " + table);
+            }
         }
     }
 

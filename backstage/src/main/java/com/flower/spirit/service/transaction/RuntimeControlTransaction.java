@@ -32,8 +32,9 @@ public class RuntimeControlTransaction {
 	public Map<String, RuntimeControlValue> initializeAndLoad(Instant now) {
 		Timestamp timestamp = Timestamp.from(now);
 		for (String key : KEYS) {
-			jdbcTemplate.update("INSERT OR IGNORE INTO biz_runtime_control "
-					+ "(control_key, enabled, updated_at, updated_by, reason) VALUES (?, 0, ?, 'system', 'initial')",
+			jdbcTemplate.update("INSERT INTO biz_runtime_control "
+					+ "(control_key, enabled, updated_at, updated_by, reason) VALUES (?, 0, ?, 'system', 'initial') "
+					+ "ON CONFLICT(control_key) DO NOTHING",
 					key, timestamp);
 		}
 		return loadInCurrentTransaction();
