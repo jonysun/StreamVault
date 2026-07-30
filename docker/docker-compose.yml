@@ -2,15 +2,50 @@ version: "3.8"
 
 services:
   stream-vault:
-    image: qingfeng2336/stream-vault
-    container_name: stream-vault
+    image: ${STREAMVAULT_IMAGE:-jonysun/stream-vault:v5.7.1}
+    container_name: my-stream-vault
     ports:
       # 端口默认为20803 如果需要 请自定义修改28083
-      - "28083:28081"
+      - "28088:28081"
     volumes:
       # 默认为docker-compose相对目录  如果有需要自行修改 其他更高级的扩展目录 参考wiki
-      - "./stream/app:/app"
-      - "./stream/tmp:/tmp"
+      - "./app:/app"
+      - "./tmp:/tmp"
+      - "/home/admin_sun/Video/Downloads/stream_vault:/app/resources"
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      STREAMVAULT_DB_URL: ${STREAMVAULT_DB_URL:-jdbc:postgresql://postgres:5432/streamvault}
+      STREAMVAULT_DB_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      STREAMVAULT_DB_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+    networks:
+      - default
+      - stream-vault-internal
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: stream-vault-postgres
+    profiles: ["postgresql"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${STREAMVAULT_DB_NAME:-streamvault}
+      POSTGRES_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      POSTGRES_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+      TZ: Asia/Shanghai
+    volumes:
+      - stream-vault-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - stream-vault-internal
+
+networks:
+  stream-vault-internal:
+    internal: true
+
+volumes:
+  stream-vault-postgres-data:

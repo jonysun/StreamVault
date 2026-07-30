@@ -33,10 +33,13 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	
 	public String platform;
 	
+	@Column(length = 2000)
 	private String title;
 	
+	@Lob
 	private String content;
 	
+	@Lob
 	private String images;
 	
 	private String markroute;

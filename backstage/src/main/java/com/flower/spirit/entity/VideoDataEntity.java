@@ -43,6 +43,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	 */
 	public String originaladdress;
 	
+	@Column(length = 2000)
 	private String videoname;
 	
 	private String videoauthor;
@@ -60,6 +61,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	@Lob
 	private String jsonData;
 	
+	@Column(length = 2000)
 	private String videodesc;
 	
 	private String videoprivacy;  //视频是否隐私模式  隐私模式 则不会直接显示 图片
@@ -76,6 +78,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	
 	private Date createtime;
 
+	@Lob
 	@Column(name = "videoinfo", insertable = false, updatable = false)
 	private String videoinfo;
 

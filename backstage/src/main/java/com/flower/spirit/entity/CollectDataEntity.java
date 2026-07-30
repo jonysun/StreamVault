@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
@@ -69,8 +70,10 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	
 	private String taskcron;
 
+	@Lob
 	private String lastfetchsnapshot; // 最近一次全量拉取列表快照(JSON)
 
+	@Lob
 	private String lastplanitems; // 最近一次计划下载列表(JSON)
 
 	private String lastfetchtime; // 最近一次拉取时间

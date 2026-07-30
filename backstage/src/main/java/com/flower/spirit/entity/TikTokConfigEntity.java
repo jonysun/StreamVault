@@ -7,6 +7,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 
@@ -24,8 +25,10 @@ public class TikTokConfigEntity implements Serializable {
 	@TableGenerator(name = "biz_tiktok_config", allocationSize = 1, table = "seq_common", pkColumnName = "seq_id", valueColumnName = "seq_count")
     private Integer id;
 	
+	@Lob
 	private String cookies;
 
+	@Lob
 	private String cookiepool;
 
 	private String cookiestrategy;
