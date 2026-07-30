@@ -115,7 +115,7 @@ public class CollectPipelineSchemaInitializer {
 				"locked_at TIMESTAMP",
 				"started_at TIMESTAMP",
 				"finished_at TIMESTAMP",
-				"error_detail CLOB",
+				"error_detail TEXT",
 				"queue_generation VARCHAR(32)"));
 		return Map.copyOf(definitions);
 	}

@@ -7,7 +7,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
@@ -36,10 +35,10 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	@Column(length = 2000)
 	private String title;
 	
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String content;
 	
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String images;
 	
 	private String markroute;
@@ -56,7 +55,7 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	private String uniqueid;
 
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String jsonData;
 	
 	private String tags;
@@ -76,7 +75,7 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	@Column(length = 512)
 	private String authorhomepage;
 
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String metadataoverrides;
 
 	private Date metadataeditedat;

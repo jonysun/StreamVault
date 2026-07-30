@@ -6,7 +6,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
@@ -41,10 +40,10 @@ public class CollectDataDetailEntity extends DataEntity<CollectDataDetailEntity>
 
 	private String mediatype;
 
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String detailjson;
 
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String processlog;
 
 	private String errorcode;

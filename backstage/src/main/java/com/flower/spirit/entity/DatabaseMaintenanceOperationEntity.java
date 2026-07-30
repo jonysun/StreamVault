@@ -8,7 +8,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 @Entity
@@ -24,8 +23,7 @@ public class DatabaseMaintenanceOperationEntity implements Serializable {
 	private String previewTokenHash;
 	@Column(name = "db_fingerprint", nullable = false, length = 80)
 	private String dbFingerprint;
-	@Lob
-	@Column(nullable = false)
+	@Column(nullable = false, columnDefinition = "TEXT")
 	private String operations;
 	@Column(nullable = false, length = 32)
 	private String status;

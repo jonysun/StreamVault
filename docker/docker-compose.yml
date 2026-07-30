@@ -26,7 +26,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: stream-vault-postgres
-    profiles: ["postgresql"]
+    profiles: ["postgresql", "migration"]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${STREAMVAULT_DB_NAME:-streamvault}
@@ -40,6 +40,54 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+    networks:
+      - stream-vault-internal
+
+  schema-migrate:
+    image: ${STREAMVAULT_IMAGE:-jonysun/stream-vault:v5.7.1}
+    profiles: ["migration"]
+    restart: "no"
+    entrypoint: ["java", "-XX:+UseContainerSupport", "-jar", "/app.jar"]
+    command:
+      - "--spring.profiles.active=docker,postgresql"
+      - "--spring.main.web-application-type=none"
+      - "--spring.task.scheduling.enabled=false"
+      - "--spring.quartz.auto-startup=false"
+      - "--streamvault.schema-only=true"
+    environment:
+      STREAMVAULT_DB_URL: ${STREAMVAULT_DB_URL:-jdbc:postgresql://postgres:5432/streamvault}
+      STREAMVAULT_DB_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      STREAMVAULT_DB_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stream-vault-internal
+
+  data-migrate:
+    image: ${STREAMVAULT_IMAGE:-jonysun/stream-vault:v5.7.1}
+    profiles: ["migration"]
+    restart: "no"
+    entrypoint: ["/opt/venv/bin/python3", "/home/app/script/sqlite_to_postgresql.py"]
+    command:
+      - "--mode"
+      - "${STREAMVAULT_MIGRATION_MODE:-dry-run}"
+      - "--source"
+      - "/app/db/spirit.db"
+      - "--batch-size"
+      - "${STREAMVAULT_MIGRATION_BATCH_SIZE:-500}"
+    environment:
+      STREAMVAULT_PG_HOST: postgres
+      STREAMVAULT_PG_PORT: 5432
+      STREAMVAULT_DB_NAME: ${STREAMVAULT_DB_NAME:-streamvault}
+      STREAMVAULT_DB_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      STREAMVAULT_DB_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+      STREAMVAULT_MIGRATION_CONFIRM: ${STREAMVAULT_MIGRATION_CONFIRM:-}
+    volumes:
+      - "./app:/app:ro"
+    depends_on:
+      schema-migrate:
+        condition: service_completed_successfully
     networks:
       - stream-vault-internal
 

@@ -145,8 +145,8 @@ public class PlatformSchemaInitializer {
 				"platformkey varchar(64)",
 				"contenttype varchar(32)",
 				"authorhomepage varchar(512)",
-				"metadataoverrides clob",
-				"metadataeditedat datetime",
+				"metadataoverrides TEXT",
+				"metadataeditedat TIMESTAMP",
 				"metadataeditedby varchar(255)");
 		definitions.put("biz_video", workColumns);
 		List<String> graphicColumns = new ArrayList<>(workColumns);
