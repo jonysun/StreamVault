@@ -1,19 +1,20 @@
 package com.flower.spirit.config;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import com.flower.spirit.utils.CommandUtil;
+import com.flower.spirit.process.ControlledProcessExecutor;
 
 @Component
 public class F2RuntimeVersionLogger {
@@ -39,6 +40,7 @@ public class F2RuntimeVersionLogger {
 		this.scriptPath = scriptPath;
 	}
 
+	@Order(900)
 	@EventListener(ApplicationReadyEvent.class)
 	public void onApplicationReady() {
 		inspectAndLog();
@@ -86,15 +88,9 @@ public class F2RuntimeVersionLogger {
 	}
 
 	private static CommandResult runCommand(Path pythonPath, String expression) throws IOException, InterruptedException {
-		Process process = new ProcessBuilder(pythonPath.toString(), "-c", expression)
-				.redirectErrorStream(true).start();
-		boolean finished = process.waitFor(10, TimeUnit.SECONDS);
-		if (!finished) {
-			process.destroyForcibly();
-			return new CommandResult(124, "version lookup timed out");
-		}
-		return new CommandResult(process.exitValue(),
-				new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+		ControlledProcessExecutor.Result result = new ControlledProcessExecutor().execute(
+				List.of(pythonPath.toString(), "-c", expression), Duration.ofSeconds(10), "f2-version", 4096);
+		return new CommandResult(result.timedOut() ? 124 : result.exitCode(), result.diagnosticOutput());
 	}
 
 	@FunctionalInterface

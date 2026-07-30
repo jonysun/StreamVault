@@ -67,6 +67,7 @@ import com.flower.spirit.service.MediaFeedService;
 import com.flower.spirit.service.Mp4FaststartMaintenanceService;
 import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.service.RuntimeControlService;
+import com.flower.spirit.service.ApplicationReadinessGate;
 import com.flower.spirit.service.RuntimeControlSnapshot;
 import com.flower.spirit.service.RuntimeJobQueryService;
 import com.flower.spirit.service.SystemService;
@@ -129,6 +130,9 @@ public class AdminController {
 
 	@Autowired
 	private RuntimeControlService runtimeControlService;
+
+	@Autowired
+	private ApplicationReadinessGate applicationReadinessGate;
 
 	@Autowired
 	private RuntimeJobQueryService runtimeJobQueryService;
@@ -822,7 +826,9 @@ public class AdminController {
 	@GetMapping("/database-runtime")
 	public AjaxEntity databaseRuntime() {
 		SqliteRuntimeVerifier sqlite = sqliteRuntimeVerifierProvider.getIfAvailable();
-		Object status = sqlite == null ? Map.of("databaseKind", "postgresql") : sqlite.snapshot();
+		Map<String, Object> status = new HashMap<>();
+		status.put("database", sqlite == null ? Map.of("databaseKind", "postgresql") : sqlite.snapshot());
+		status.put("readiness", applicationReadinessGate.snapshot());
 		return new AjaxEntity(Global.ajax_success, "获取数据库运行状态成功", status);
 	}
 

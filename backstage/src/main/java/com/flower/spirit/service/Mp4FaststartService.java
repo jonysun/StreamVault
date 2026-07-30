@@ -1,12 +1,12 @@
 package com.flower.spirit.service;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -17,11 +17,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.platform.WorkMediaResource;
+import com.flower.spirit.process.ControlledProcessExecutor;
 
 @Service
 public class Mp4FaststartService {
 
 	private static final Logger logger = LoggerFactory.getLogger(Mp4FaststartService.class);
+	private static final Duration FFMPEG_TIMEOUT = Duration.ofHours(2);
+	private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
 	@Value("${streamvault.media.faststart.enabled:true}")
 	private boolean enabled;
@@ -135,18 +138,21 @@ public class Mp4FaststartService {
 	}
 
 	protected int executeFaststartCommand(Path source, Path output) throws IOException {
-		Process process = new ProcessBuilder("ffmpeg", "-y", "-i", source.toString(), "-c", "copy",
-				"-movflags", "+faststart", output.toString()).redirectErrorStream(true).start();
-		try (var processOutput = process.getInputStream()) {
-			processOutput.transferTo(OutputStream.nullOutputStream());
-		}
 		try {
-			return process.waitFor();
+			ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(
+					List.of("ffmpeg", "-y", "-i", source.toString(), "-c", "copy",
+							"-movflags", "+faststart", output.toString()),
+					FFMPEG_TIMEOUT, "ffmpeg-faststart");
+			if (result.timedOut()) {
+				throw new IOException("ffmpeg faststart timeout after " + FFMPEG_TIMEOUT.toHours() + " hours");
+			}
+			if (result.exitCode() != 0) {
+				logger.warn("[Faststart] ffmpeg failed exitCode={}", result.exitCode());
+			}
+			return result.exitCode();
 		} catch (InterruptedException error) {
 			Thread.currentThread().interrupt();
 			throw new IOException("ffmpeg faststart interrupted", error);
-		} finally {
-			process.destroy();
 		}
 	}
 

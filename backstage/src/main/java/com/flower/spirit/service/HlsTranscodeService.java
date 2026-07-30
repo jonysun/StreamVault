@@ -2,12 +2,12 @@ package com.flower.spirit.service;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalTime;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -35,6 +35,7 @@ import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.entity.VideoDataEntity;
+import com.flower.spirit.process.ControlledProcessExecutor;
 
 import jakarta.annotation.PreDestroy;
 
@@ -47,9 +48,14 @@ public class HlsTranscodeService {
 	private static final int MAX_QUEUE_SIZE = 1000;
 	private static final int FFMPEG_THREADS = 2;
 	private static final AtomicInteger WORKER_SEQUENCE = new AtomicInteger(1);
+	private static final Duration FFMPEG_TIMEOUT = Duration.ofHours(6);
+	private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
 	@Autowired
 	private VideoDataDao videoDataDao;
+
+	@Autowired(required = false)
+	private ApplicationReadinessGate readinessGate;
 
 	private final Object stateLock = new Object();
 	private final Deque<Integer> queue = new ArrayDeque<>();
@@ -160,6 +166,9 @@ public class HlsTranscodeService {
 	}
 
 	public void processQueueTick(boolean forceRun) {
+		if (readinessGate != null && !readinessGate.isReady()) {
+			return;
+		}
 		if (!Global.hlsEnable) {
 			return;
 		}
@@ -443,18 +452,27 @@ public class HlsTranscodeService {
 	}
 
 	protected int executeTranscodeCommand(List<String> command) throws IOException {
-		Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-		try (var output = process.getInputStream()) {
-			output.transferTo(OutputStream.nullOutputStream());
-		}
 		try {
-			return process.waitFor();
+			ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, FFMPEG_TIMEOUT,
+					"ffmpeg-hls");
+			if (result.timedOut()) {
+				throw new IOException("ffmpeg HLS timeout after " + FFMPEG_TIMEOUT.toHours() + " hours");
+			}
+			if (result.exitCode() != 0) {
+				logger.warn("[HLS] ffmpeg failed exitCode={} stderrPreview={}", result.exitCode(),
+						boundedDiagnostic(result.stderr()));
+			}
+			return result.exitCode();
 		} catch (InterruptedException error) {
 			Thread.currentThread().interrupt();
 			throw new IOException("ffmpeg interrupted", error);
-		} finally {
-			process.destroy();
 		}
+	}
+
+	private String boundedDiagnostic(String value) {
+		if (value == null || value.isBlank()) return "";
+		String normalized = value.replaceAll("[\\r\\n]+", " ").trim();
+		return normalized.length() <= 1000 ? normalized : normalized.substring(0, 1000) + "...";
 	}
 
 	private void validateHlsOutput(Path playlist, Path directory) throws IOException {

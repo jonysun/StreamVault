@@ -16,12 +16,16 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.time.Duration;
+
+import com.flower.spirit.process.ControlledProcessExecutor;
 
 public class M3U8Downloader {
     private static final Pattern URL_PATTERN = Pattern.compile("(http|https)://[^\\s<>\"']+");
     private static final int THREAD_POOL_SIZE = 10;
     private static final int MAX_RETRIES = 3;
     private static final int TIMEOUT = 30000; // 30秒超时
+    private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
     /**
      * 下载并合并M3U8视频和音频
@@ -161,22 +165,13 @@ public class M3U8Downloader {
      */
     private void mergeVideoAudio(String videoPath, String audioPath, String outputPath) throws Exception {
         // 使用ffmpeg合并视频和音频
-        ProcessBuilder pb = new ProcessBuilder(
-                "ffmpeg", "-i", videoPath,
-                "-i", audioPath,
-                "-c:v", "copy",
-                "-c:a", "aac",
-                outputPath);
-        pb.redirectErrorStream(true);
-        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-
-        Process process = pb.start();
-        if (!process.waitFor(30, TimeUnit.MINUTES)) {
-            process.destroyForcibly();
-            process.waitFor();
+        ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(List.of(
+                "ffmpeg", "-i", videoPath, "-i", audioPath, "-c:v", "copy", "-c:a", "aac", outputPath),
+                Duration.ofMinutes(30), "ffmpeg-m3u8-merge");
+        if (result.timedOut()) {
             throw new RuntimeException("FFmpeg merge timed out");
         }
-        int exitCode = process.exitValue();
+        int exitCode = result.exitCode();
 
         if (exitCode != 0) {
             throw new RuntimeException("FFmpeg merge failed with exit code: " + exitCode);

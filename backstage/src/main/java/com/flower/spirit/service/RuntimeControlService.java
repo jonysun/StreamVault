@@ -22,6 +22,7 @@ public class RuntimeControlService {
 	private final RuntimeControlTransaction transaction;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private volatile Map<String, RuntimeControlValue> values = Map.of();
+	private volatile boolean initialized;
 
 	public RuntimeControlService(RuntimeControlTransaction transaction, DatabaseWriteExecutor databaseWriteExecutor) {
 		this.transaction = transaction;
@@ -34,6 +35,7 @@ public class RuntimeControlService {
 		values = databaseWriteExecutor.execute("runtime-control-initialize",
 				() -> transaction.initializeAndLoad(Instant.now()));
 		applyToLegacyGlobals(values);
+		initialized = true;
 		logger.info("[RuntimeControl] loaded all={} collect={} download={} hls={}",
 				enabled(RuntimeControlTransaction.PAUSE_ALL), enabled(RuntimeControlTransaction.PAUSE_COLLECT),
 				enabled(RuntimeControlTransaction.PAUSE_DOWNLOAD), enabled(RuntimeControlTransaction.PAUSE_HLS));
@@ -50,6 +52,9 @@ public class RuntimeControlService {
 	}
 
 	public PauseDecision mayRun(TaskCategory category) {
+		if (!initialized) {
+			return PauseDecision.paused("runtime-control.starting", "Runtime control is not loaded");
+		}
 		if (enabled(RuntimeControlTransaction.PAUSE_ALL)) {
 			return PauseDecision.paused(RuntimeControlTransaction.PAUSE_ALL,
 					reason(RuntimeControlTransaction.PAUSE_ALL));
@@ -69,6 +74,10 @@ public class RuntimeControlService {
 		boolean hls = enabled(RuntimeControlTransaction.PAUSE_HLS);
 		return new RuntimeControlSnapshot(all, collect, download, hls, all || collect, all || download,
 				all || hls, Map.copyOf(values));
+	}
+
+	public boolean isInitialized() {
+		return initialized;
 	}
 
 	private boolean enabled(String key) {

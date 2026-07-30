@@ -8,6 +8,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.flower.spirit.service.BiliConfigService;
+import com.flower.spirit.service.ApplicationReadinessGate;
 import com.flower.spirit.service.AuthorEnrichmentWorker;
 import com.flower.spirit.service.AuthorEnrichmentQueueService;
 import com.flower.spirit.service.CollectJobWorker;
@@ -50,10 +51,14 @@ public class TaskService {
 
 	@Autowired
 	private RuntimeControlService runtimeControlService;
+
+	@Autowired(required = false)
+	private ApplicationReadinessGate readinessGate;
 	
 	
 	@Scheduled(fixedDelay = 1000*5)
 	public void taskCheckStatus() {
+		if (!applicationReady()) return;
 		if (!runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
 			return;
 		}
@@ -62,6 +67,7 @@ public class TaskService {
 	
 	@Scheduled(fixedDelay = 1000*5)
 	public void taskMergeTasks() {
+		if (!applicationReady()) return;
 		if (!runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
 			return;
 		}
@@ -70,6 +76,7 @@ public class TaskService {
 
 	@Scheduled(fixedDelay = 1000*8)
 	public void hlsQueueTick() {
+		if (!applicationReady()) return;
 		if (!runtimeControlService.mayRun(TaskCategory.HLS_TRANSCODE).allowed()) {
 			return;
 		}
@@ -78,6 +85,7 @@ public class TaskService {
 
 	@Scheduled(fixedDelayString = "${streamvault.author-enrichment.poll-delay-ms:15000}")
 	public void authorEnrichmentTick() {
+		if (!applicationReady()) return;
 		if (!runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
 			return;
 		}
@@ -86,6 +94,7 @@ public class TaskService {
 
 	@Scheduled(fixedDelayString = "${streamvault.collect-queue.poll-delay-ms:5000}")
 	public void collectQueueTick() {
+		if (!applicationReady()) return;
 		if (runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
 			collectJobWorker.wakeUp();
 		}
@@ -96,6 +105,7 @@ public class TaskService {
 
 	@Scheduled(cron = "${streamvault.author-enrichment.reconcile-cron:0 30 3 * * ?}")
 	public void reconcileMissingAuthorEnrichmentJobs() {
+		if (!applicationReady()) return;
 		if (!runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
 			return;
 		}
@@ -111,6 +121,7 @@ public class TaskService {
 	
 	@Scheduled(cron = "0 0 9 * * ?")
 	public void isNeedRefreshAndUpdate() {
+		if (!applicationReady()) return;
 		try {
 			if (runtimeControlService.mayRun(TaskCategory.COLLECT_FETCH).allowed()) {
 				biliConfigService.isNeedRefreshAndUpdate();
@@ -123,6 +134,10 @@ public class TaskService {
 		} catch (Exception e) {
 			logger.error("[TaskService] cookies check task failed", e);
 		}
+	}
+
+	private boolean applicationReady() {
+		return readinessGate == null || readinessGate.isReady();
 	}
 
 }

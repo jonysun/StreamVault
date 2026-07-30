@@ -8,6 +8,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.Date;
+import java.time.Duration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.data.domain.Page;
@@ -28,12 +29,14 @@ import com.flower.spirit.dao.VideoMixSegmentDao;
 import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.common.AjaxEntity;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.process.ControlledProcessExecutor;
 import jakarta.annotation.PreDestroy;
 
 @Service
 public class VideoMixService {
 
 	private static final int MIX_QUEUE_CAPACITY = 20;
+	private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 	private ExecutorService ffmpeg = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
 			new ArrayBlockingQueue<>(MIX_QUEUE_CAPACITY));
 
@@ -264,27 +267,12 @@ public class VideoMixService {
 	}
 
 	private int runFfmpegCommand(String command, long timeout, TimeUnit unit) throws Exception {
-		ProcessBuilder processBuilder;
-		if (System.getProperty("os.name").toLowerCase().contains("win")) {
-			processBuilder = new ProcessBuilder("cmd.exe", "/c", command);
-		} else {
-			processBuilder = new ProcessBuilder("/bin/sh", "-c", command);
-		}
-		processBuilder.redirectErrorStream(true);
-		processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-		Process process = processBuilder.start();
-		try {
-			if (!process.waitFor(timeout, unit)) {
-				process.destroyForcibly();
-				process.waitFor();
-				throw new RuntimeException("FFmpeg执行超时");
-			}
-			return process.exitValue();
-		} finally {
-			if (process.isAlive()) {
-				process.destroyForcibly();
-			}
-		}
+		List<String> processCommand = System.getProperty("os.name").toLowerCase().contains("win")
+				? List.of("cmd.exe", "/c", command) : List.of("/bin/sh", "-c", command);
+		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(processCommand,
+				Duration.ofMillis(unit.toMillis(timeout)), "ffmpeg-video-mix");
+		if (result.timedOut()) throw new RuntimeException("FFmpeg执行超时");
+		return result.exitCode();
 	}
 
 	@PreDestroy

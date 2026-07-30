@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -25,6 +26,7 @@ import com.flower.spirit.platform.WorkMediaResource;
 import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.platform.WorkParseRequest;
+import com.flower.spirit.process.ControlledProcessExecutor;
 import com.flower.spirit.utils.BiliUtil;
 import com.flower.spirit.utils.HttpUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
@@ -33,6 +35,8 @@ import com.flower.spirit.utils.EmbyMetadataGenerator;
 public class BilibiliPlatformAdapter implements PlatformWorkAdapter {
 
 	private static final String BILIBILI_ORIGIN = "https://www.bilibili.com";
+	private static final Duration FFMPEG_TIMEOUT = Duration.ofHours(2);
+	private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
 	private final PlatformResolver resolver;
 	private final Gateway gateway;
@@ -388,12 +392,12 @@ public class BilibiliPlatformAdapter implements PlatformWorkAdapter {
 			@Override
 			public Path merge(Path video, Path audio, Path destination) throws IOException, InterruptedException {
 				Files.createDirectories(destination.toAbsolutePath().normalize().getParent());
-				Process process = new ProcessBuilder("ffmpeg", "-y", "-i", video.toString(), "-i", audio.toString(),
-						"-c:v", "copy", "-c:a", "copy", "-f", "mp4", destination.toString())
-						.redirectOutput(ProcessBuilder.Redirect.DISCARD)
-						.redirectError(ProcessBuilder.Redirect.DISCARD)
-						.start();
-				int exitCode = process.waitFor();
+				ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(
+						List.of("ffmpeg", "-y", "-i", video.toString(), "-i", audio.toString(),
+								"-c:v", "copy", "-c:a", "copy", "-f", "mp4", destination.toString()),
+						FFMPEG_TIMEOUT, "ffmpeg-bilibili-dash");
+				int exitCode = result.exitCode();
+				if (result.timedOut()) throw new IOException("ffmpeg timed out merging Bilibili DASH streams");
 				if (exitCode != 0 || !Files.isRegularFile(destination) || Files.size(destination) <= 0) {
 					throw new IOException("ffmpeg failed to merge Bilibili DASH streams");
 				}
@@ -410,11 +414,12 @@ public class BilibiliPlatformAdapter implements PlatformWorkAdapter {
 									.replace('\\', '/').replace("'", "'\\''") + "'")
 							.toList();
 					Files.write(manifest, lines);
-					Process process = new ProcessBuilder("ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i",
-							manifest.toString(), "-c", "copy", destination.toString())
-							.redirectOutput(ProcessBuilder.Redirect.DISCARD)
-							.redirectError(ProcessBuilder.Redirect.DISCARD).start();
-					int exitCode = process.waitFor();
+					ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(
+							List.of("ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i",
+									manifest.toString(), "-c", "copy", destination.toString()),
+							FFMPEG_TIMEOUT, "ffmpeg-bilibili-concat");
+					int exitCode = result.exitCode();
+					if (result.timedOut()) throw new IOException("ffmpeg timed out concatenating Bilibili segments");
 					if (exitCode != 0 || !Files.isRegularFile(destination) || Files.size(destination) <= 0) {
 						throw new IOException("ffmpeg failed to concatenate Bilibili DURL segments");
 					}
