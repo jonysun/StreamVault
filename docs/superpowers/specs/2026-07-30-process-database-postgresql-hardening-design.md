@@ -13,7 +13,7 @@
 4. 定时 worker 可以在 `ApplicationReadyEvent` 初始化器完成前领取任务，持久化暂停状态可能在启动窗口内被绕过。
 5. PostgreSQL 条件实现已经存在，但运行 SQL、schema initializer、驱动和 profile 尚未形成可启动的 PostgreSQL 路径。
 6. 并发入队、run event 序号和收藏明细唯一性仍依赖 SQLite 单写语义。
-7. 同步到开发项目的 SQLite 副本在 `biz_collect_run` 上报告 B-tree 行号乱序和多个索引条目数错误。该结果必须在生产原库的一致性快照上复核，不能直接对生产库执行自动修复。
+7. 较早同步到开发项目的 SQLite 副本曾在 `biz_collect_run` 上报告 B-tree 行号乱序和多个索引条目数错误；2026-07-30 13:01 再次同步的 2.38 GB 副本已没有 WAL/SHM，完整 `PRAGMA integrity_check` 返回 `ok`。前一次结果按复制不一致处理，但正式迁移仍必须在生产停机后重新复核，不能用开发副本的结果替代生产校验。
 
 本设计把即时可靠性修复、SQLite 数据保护、PostgreSQL 运行基础设施和正式迁移拆成可独立提交、验证和回滚的阶段。
 
@@ -25,9 +25,38 @@
 - PostgreSQL 首版保持与现有 JPA 实体和业务表兼容的 schema，不在首次迁移时规范化媒体宽表。
 - 媒体表规范化、JSONB 改造和多应用实例属于 PostgreSQL 稳定后的独立工程。
 - 数据清理必须先报告、后确认、再执行；应用启动不得静默删除或重建生产数据。
-- Douyin 实际上游风控失败继续消耗一次尝试并触发进程级全局冷却；冷却期间未发送请求的任务只延后且不消耗尝试。
+- Douyin 实际上游风控失败继续消耗当前 run 的一次尝试并触发进程级全局冷却；冷却期间未发送请求的任务只延后且不消耗尝试。已启用的作者任务在 run 达到上限后仍按现有调度创建后续 retry run，因此不会因单个 run 失败永久停止增量抓取。
 
 本设计覆盖 `2026-07-28-sqlite-media-identity-postgresql-migration-design.md` 中“首次 PostgreSQL 迁移同时规范化媒体表”的安排。其 SQLite identity、审计、预览清理和冷备份原则继续有效。Douyin 冷却以 `2026-07-29-douyin-global-cooldown-design.md` 为准。
+
+### 2.1 开发副本与生产端操作边界
+
+| 操作 | 开发目录同步副本 | 生产端停机快照 | 生产原库 |
+| --- | --- | --- | --- |
+| 日志、schema、行数、重复、孤儿、状态只读审计 | 执行 | 执行 | 只在维护窗口只读执行 |
+| 迁移器开发、dry-run、性能基线、恢复演练 | 执行 | 最终演练必须使用 | 不执行 |
+| `REINDEX`、重建、去重、冗余字段清理、`VACUUM` | 只对另建候选副本执行 | 只对另建候选副本执行 | 禁止 |
+| 正式 PostgreSQL `load` | 禁止作为权威源 | 唯一允许的权威源 | 先生成快照，不直接读取在线原库 |
+| 正式切换、回滚、容器配置和凭据 | 不执行 | 在生产端执行 | 在生产端执行 |
+
+开发目录中的 `db/spirit.db` 是证据和演练输入，不是生产权威源。正式迁移、最终瘦身和上线都在生产端维护窗口内完成；开发目录只提前验证相同工具、相同 schema 和相同校验规则。
+
+### 2.2 当前同步副本基线
+
+2026-07-30 只读审计得到以下基线，正式迁移报告必须用停机快照重新生成，不能硬编码这些数字：
+
+- `biz_video=18,992`，`biz_graphic_content=6,833`，作品业务键重复组均为 0。
+- `biz_collect_run=5,138`：`COMPLETED=2,941`、`DB_FAILED=1,097`、`FETCH_FAILED=945`、`QUEUED=148`、`INTERRUPTED=7`。
+- `biz_collect_run_item` 中 `PENDING=2,870`、`FAILED=408`、`COMPLETED=4,569`；待处理状态不是清理候选，必须完整迁移。
+- `biz_job_queue` 中 `QUEUED=20`、`RETRY_WAIT=128`；run、item、event 和明细孤儿数均为 0，已检查的重复组均为 0。
+- `biz_video.jsonData = biz_video.videoinfo` 的精确重复行有 13,174 条，逻辑字符数 762,175,487。该项是可验证的瘦身候选，不在源 SQLite 上原位删除。
+- 当前完整 `PRAGMA quick_check` 和 `PRAGMA integrity_check` 均为 `ok`；这只证明当前同步文件可读，不证明正式停机时的生产快照已经通过门槛。
+
+### 2.3 同步日志基线
+
+同步日志中 74 条 ERROR 由 73 条 `F2_UPSTREAM_RATE_LIMIT` 和 1 条 `UPSTREAM_SCHEMA_ERROR` 组成，没有新的数据库异常或下载进程超时证据。另有两次 `open-in-view` 和两次静态资源尾斜杠启动告警、一次 Bilibili Cookie 为空告警及少量未登录/`favicon.ico` 告警。
+
+限流从 00:09 持续到 12:58，约每 10 分钟触发一次，说明结构化错误和全局冷却已经生效，但也说明上游凭据或风控环境未恢复。单次 `UPSTREAM_SCHEMA_ERROR` 必须在 C1 中保留有限 F2 stderr 摘要和响应 schema 版本，避免把 profile 非零退出误判为数据库错误。`spring.jpa.open-in-view=false` 和资源目录规范化纳入 C3 配置清理；Bilibili Cookie 为空仅在启用 Bilibili 任务时阻断上线。
 
 ## 3. 非目标
 
@@ -181,6 +210,8 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 
 迁移器按主键稳定分页，保留兼容表的原 ID，并在导入后把 PostgreSQL sequence 调整到 `MAX(id)+1`。未知枚举、无法读取页面、重复业务键、孤儿引用或字段转换失败都会停止阶段并写入有限报告，不能跳过。
 
+瘦身不单独改写生产 SQLite。C5 在导入 PostgreSQL 候选库时只允许执行已经版本化且可逆验证的转换。首批仅处理 `biz_video.jsonData` 与 `videoinfo` 字节级完全相同的冗余副本：应用兼容代码和迁移测试证明读取语义不变后，目标 PostgreSQL 的冗余列置空；不相同、任一为空或无法解析的行保持原样。报告记录候选行数、源/目标逻辑字节数和字段 hash，不记录正文。物理空间回收由 PostgreSQL 新库天然完成，不对 SQLite 原库运行 `VACUUM`。
+
 最终校验至少包括：
 
 - 每张表源/目标行数及允许的去重差异。
@@ -205,21 +236,50 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 
 若 C5 在 2026-07-31 前合并，最早正式切换日期为 2026-08-05。任何失败都会顺延，不压缩验证时间。
 
-### 12.2 切换步骤
+### 12.2 正式切换前置门槛
 
-1. 在前端暂停全部后台任务并记录状态。
-2. 等待当前事务和外部进程结束，停止应用容器。
-3. 保存 SQLite、WAL、SHM 和 hash，生成最终一致性快照。
-4. 创建空 PostgreSQL 数据库并运行 Flyway。
-5. 执行最终 `load` 和 `verify`。
-6. 使用 PostgreSQL profile 启动单实例，保持后台任务暂停。
-7. 验证登录、首页、作者、Feed、播放、收藏任务、运行详情、数据库审计和小规模手工任务。
-8. 恢复调度并观察错误率、锁等待、连接池和队列积压。
-9. SQLite 原始快照只读保留至少 30 天。
+以下条件必须在维护窗口前全部满足，任何一项失败都推迟上线：
 
-### 12.3 回滚
+1. C1-C5 已合并、打包并固定镜像 digest，SQLite 生产已稳定运行 C1-C3 至少一个完整调度周期。
+2. 同一版本迁移器已对最近生产一致性快照完成两次独立 dry-run；第二次迁移和回滚演练均无未分类差异。
+3. PostgreSQL 容器有独立持久 volume、健康检查、容量预警、备份与一次恢复验证；密码不写入仓库和日志。
+4. 已保存 SQLite 与 PostgreSQL 的表行数、业务键、活跃队列、抽样 hash、查询计划和性能基线。
+5. 已确认抖音风控状态；风控未恢复不阻止数据库迁移，但上线后收藏调度继续保持暂停，不能用数据库切换掩盖上游问题。
+6. 已确认回滚负责人、维护窗口、停机公告、生产磁盘余量至少能同时容纳原 SQLite、不可变快照、PostgreSQL 数据与备份。
 
-若最终校验失败，PostgreSQL 应用不得启动。若切换后出现核心功能回归：立即暂停任务、停止 PostgreSQL 应用、保存 PostgreSQL 变更审计并恢复切换前 SQLite 快照。初次切换不自动反向同步，切换期间新增数据生成业务键补录报告。
+### 12.3 生产一致性快照
+
+1. 在管理端开启 `pause.all`、`pause.collect`、`pause.download` 和 `pause.hls`，导出 runtime control、活跃 run/job/item 统计和当前外部进程列表。
+2. 等待正在执行的 F2、yt-dlp 和 ffmpeg 正常结束；超过 C1 超时上限的进程由受控执行器终止并记录，不能直接进入复制阶段。
+3. 停止应用容器，确认没有应用进程持有 SQLite 文件，也没有第二个应用容器。
+4. 在生产端创建带时间戳的只读归档目录，原样保存 `.db` 以及当时实际存在的 `-wal`、`-shm`；缺失的伴随文件记录为“not present”，不能伪造空文件。
+5. 对归档中的每个文件生成 SHA-256、长度、mtime、应用镜像 digest 和迁移器版本清单。归档随后只读，不再参与任何修复或瘦身。
+6. C2 `snapshot` 工具从归档生成新的候选快照。候选执行完整 `integrity_check`、schema 指纹、关键表行数和业务键审计，全部通过才成为 C5 正式源。
+
+如果完整性失败：停止正式切换。仅索引条目数错误可在候选副本上 `REINDEX` 后全量复检；任何 table B-tree、rowid 顺序、缺页或不可读页错误都不能只靠 `REINDEX`，必须优先从可靠备份恢复，或逐表导出到全新 SQLite 候选库。重建候选需要通过完整性、行数、业务键、孤儿、活跃队列和抽样 hash 的全部校验后，再重新做两次 PostgreSQL 演练。原始归档始终保留。
+
+### 12.4 分钟级正式切换 runbook
+
+下面以 120 分钟窗口为基线；数据量或校验耗时更长时直接延长，不跳过步骤：
+
+| 时间 | 位置 | 操作与门槛 |
+| --- | --- | --- |
+| `T-30` 至 `T0` | 生产 | 公告维护；确认镜像 digest、PostgreSQL 备份、磁盘、凭据和回滚包；记录四个 pause 状态。 |
+| `T0` 至 `T+10` | 生产 | 暂停全部后台任务，等待 worker/外部进程排空，停止应用容器并确认单实例已退出。 |
+| `T+10` 至 `T+25` | 生产 | 归档 SQLite/WAL/SHM，生成 hash 清单和一致性候选快照；完整性失败立即宣布回滚，不启动旧/新应用写入。 |
+| `T+25` 至 `T+35` | 生产 | 启动空 PostgreSQL 容器，验证版本、locale/timezone、volume、healthcheck，运行 Flyway；目标库非空或版本不符即停止。 |
+| `T+35` 至 `T+75` | 生产 | C5 `load` 按主键分批导入，应用已批准的精确冗余清理，校准全部 sequence；任一批次错误停止且不跳行。 |
+| `T+75` 至 `T+90` | 生产 | C5 `verify` 对账表行数、业务键、活跃状态、孤儿、固定及随机样本 hash、冗余转换报告和 sequence。零未分类差异才继续。 |
+| `T+90` 至 `T+100` | 生产 | 以 PostgreSQL profile 启动固定 digest 的单应用容器，readiness 通过前所有 worker fail-closed，四个 pause 保持开启。 |
+| `T+100` 至 `T+110` | 生产 | 只读 smoke：登录、首页、作者、Feed、作品详情/播放、收藏任务列表、run 详情、数据库状态；执行一组可回滚的小写入测试。 |
+| `T+110` 至 `T+120` | 生产 | 先解除 `pause.all` 但保持 collect/download/hls 暂停，确认普通写入；随后按 download、hls、collect 顺序逐项恢复并观察。抖音仍被风控时保持 collect 暂停。 |
+| `T+120` 后 | 生产 | 连续观察 2 小时，再观察 24 小时和 7 天；SQLite 归档只读保留至少 30 天，PostgreSQL 每日备份并验证。 |
+
+恢复调度后先保持一个抓取 worker 和一个下载 worker。观察指标包括 ERROR/WARN 结构化错误码、队列 oldest age、claim 重复、锁等待、deadlock/serialization failure、连接池饱和、慢查询、数据库/volume 增长、外部进程数和僵尸进程。PostgreSQL 稳定 7 天后才单独评估增加 worker；媒体表规范化和 JSONB 改造另开工程。
+
+### 12.5 回滚
+
+`T+100` 前失败时 PostgreSQL 应用不得启动，清理或隔离失败目标库后直接用原 SQLite 配置恢复旧镜像。`T+100` 后出现核心功能回归时，立即开启四个 pause、停止 PostgreSQL 应用并保存 PostgreSQL 备份与变更审计；然后以切换前 SQLite 快照和旧镜像恢复。初次切换不自动反向同步，PostgreSQL 启动后产生的新作品、收藏明细和配置变更按业务键生成补录报告，由人工确认后补入 SQLite；因此 smoke 阶段只允许少量可追踪写入。回滚完成后重新执行队列状态和媒体业务键核对，不能在同一窗口再次强行切换。
 
 ## 13. 错误与日志级别
 
@@ -235,6 +295,7 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 ### C1
 
 - F2、yt-dlp 和 ffmpeg 正常退出、非零退出、超时、中断、输出上限和进程树清理测试。
+- F2 profile 非零退出保留脱敏且有界的 stderr/schema 摘要，并稳定映射为结构化错误码。
 - 初始化完成前所有 worker 均不能 claim。
 - 现有 Douyin 增量错误协议和全局冷却测试保持通过。
 
@@ -249,6 +310,7 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 - 并发重复入队返回同一 active run。
 - event sequence 并发唯一且连续。
 - 明细重复报告和冲突阻断测试。
+- `open-in-view` 已显式关闭，资源目录配置不再产生启动告警。
 
 ### C4
 
@@ -260,6 +322,8 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 ### C5
 
 - dry-run、重复执行、故障中断、sequence 校准和校验失败测试。
+- `QUEUED`、`RETRY_WAIT`、`PENDING`、attempt、available time 和 runtime control 在迁移前后逐项一致。
+- 精确重复 `jsonData` 清理前后作品读取、详情、播放、编辑和再次抓取回归通过；非精确重复行零改写。
 - Java 和 Python 全套测试通过。
 - 两次生产快照迁移演练报告无未分类差异。
 
