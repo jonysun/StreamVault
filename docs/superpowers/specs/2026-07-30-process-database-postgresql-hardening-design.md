@@ -199,6 +199,66 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 
 初次切换保持一个抓取 worker 和一个下载 worker。`SKIP LOCKED` 的并发正确性由测试覆盖，但生产 worker 数只在 PostgreSQL 稳定观察后独立调整。
 
+### 10.1 生产使用同一 Docker Compose
+
+生产不单独 `docker run` 一个临时 PostgreSQL 容器，而是在现有 Compose 中增加 PostgreSQL 服务，与 `stream-vault` 使用同一默认网络。现有应用挂载保持不变：
+
+```yaml
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stream-vault-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - stream-vault-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [stream-vault]
+
+  stream-vault:
+    image: ${STREAMVAULT_IMAGE:-jonysun/stream-vault:v5.7.1}
+    container_name: my-stream-vault
+    restart: unless-stopped
+    ports:
+      - "28088:28081"
+    volumes:
+      - "./app:/app"
+      - "./tmp:/tmp"
+      - "/home/admin_sun/Video/Downloads/stream_vault:/app/resources"
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      STREAMVAULT_DATABASE_KIND: ${STREAMVAULT_DATABASE_KIND:-sqlite}
+      STREAMVAULT_DB_URL: ${STREAMVAULT_DB_URL:-jdbc:postgresql://postgres:5432/streamvault}
+      STREAMVAULT_DB_USERNAME: ${POSTGRES_USER:?set POSTGRES_USER}
+      STREAMVAULT_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [stream-vault]
+
+volumes:
+  stream-vault-postgres-data:
+
+networks:
+  stream-vault:
+    driver: bridge
+```
+
+上面是目标结构，不是立即覆盖生产的文件。C4 实施时会将环境变量名称与 `application-postgresql.properties` 固定一致，并加入 `SPRING_PROFILES_ACTIVE=docker,postgresql` 的正式 `.env` 示例。PostgreSQL 不发布宿主机端口，只允许同一 Compose 网络访问；`stream-vault` 仍保留 `/app/db/spirit.db` 挂载，以便回滚到 SQLite，但 PostgreSQL profile 不得读取它。
+
+迁移命令使用同一 Compose 的显式 one-shot `migration` profile（或等价的 `docker compose run --rm`），只在应用停止、PostgreSQL healthcheck 通过且目标库为空时执行 `audit/dry-run/load/verify`。默认 `docker compose up -d` 不运行迁移器，也不允许应用在 `load/verify` 前切换到 PostgreSQL；正式启动前必须通过 C5 的 readiness marker 和数据校验。
+
 ## 11. C5：迁移器
 
 迁移器是显式运行的独立命令，支持：
@@ -242,7 +302,7 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 
 1. C1-C5 已合并、打包并固定镜像 digest，SQLite 生产已稳定运行 C1-C3 至少一个完整调度周期。
 2. 同一版本迁移器已对最近生产一致性快照完成两次独立 dry-run；第二次迁移和回滚演练均无未分类差异。
-3. PostgreSQL 容器有独立持久 volume、健康检查、容量预警、备份与一次恢复验证；密码不写入仓库和日志。
+3. PostgreSQL 已加入生产现有的同一 Docker Compose，并配置独立持久 volume、内部网络、健康检查、容量预警、备份与一次恢复验证；密码只通过生产 `.env`/secret 注入，不写入仓库和日志。
 4. 已保存 SQLite 与 PostgreSQL 的表行数、业务键、活跃队列、抽样 hash、查询计划和性能基线。
 5. 已确认抖音风控状态；风控未恢复不阻止数据库迁移，但上线后收藏调度继续保持暂停，不能用数据库切换掩盖上游问题。
 6. 已确认回滚负责人、维护窗口、停机公告、生产磁盘余量至少能同时容纳原 SQLite、不可变快照、PostgreSQL 数据与备份。
@@ -267,10 +327,10 @@ PostgreSQL 使用 `spring.jpa.hibernate.ddl-auto=validate`。V001 创建与现�
 | `T-30` 至 `T0` | 生产 | 公告维护；确认镜像 digest、PostgreSQL 备份、磁盘、凭据和回滚包；记录四个 pause 状态。 |
 | `T0` 至 `T+10` | 生产 | 暂停全部后台任务，等待 worker/外部进程排空，停止应用容器并确认单实例已退出。 |
 | `T+10` 至 `T+25` | 生产 | 归档 SQLite/WAL/SHM，生成 hash 清单和一致性候选快照；完整性失败立即宣布回滚，不启动旧/新应用写入。 |
-| `T+25` 至 `T+35` | 生产 | 启动空 PostgreSQL 容器，验证版本、locale/timezone、volume、healthcheck，运行 Flyway；目标库非空或版本不符即停止。 |
+| `T+25` 至 `T+35` | 生产 | 通过同一份 Compose 只启动空 `postgres` 服务，验证版本、locale/timezone、volume、内部网络和 healthcheck，再由 one-shot migration profile 运行 Flyway；目标库非空或版本不符即停止。 |
 | `T+35` 至 `T+75` | 生产 | C5 `load` 按主键分批导入，应用已批准的精确冗余清理，校准全部 sequence；任一批次错误停止且不跳行。 |
 | `T+75` 至 `T+90` | 生产 | C5 `verify` 对账表行数、业务键、活跃状态、孤儿、固定及随机样本 hash、冗余转换报告和 sequence。零未分类差异才继续。 |
-| `T+90` 至 `T+100` | 生产 | 以 PostgreSQL profile 启动固定 digest 的单应用容器，readiness 通过前所有 worker fail-closed，四个 pause 保持开启。 |
+| `T+90` 至 `T+100` | 生产 | 更新同一 Compose 的生产 `.env`，以 `docker,postgresql` profile 启动固定 digest 的单应用容器；readiness 通过前所有 worker fail-closed，四个 pause 保持开启。 |
 | `T+100` 至 `T+110` | 生产 | 只读 smoke：登录、首页、作者、Feed、作品详情/播放、收藏任务列表、run 详情、数据库状态；执行一组可回滚的小写入测试。 |
 | `T+110` 至 `T+120` | 生产 | 先解除 `pause.all` 但保持 collect/download/hls 暂停，确认普通写入；随后按 download、hls、collect 顺序逐项恢复并观察。抖音仍被风控时保持 collect 暂停。 |
 | `T+120` 后 | 生产 | 连续观察 2 小时，再观察 24 小时和 7 天；SQLite 归档只读保留至少 30 天，PostgreSQL 每日备份并验证。 |
