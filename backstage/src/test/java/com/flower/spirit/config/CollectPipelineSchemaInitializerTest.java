@@ -53,7 +53,7 @@ class CollectPipelineSchemaInitializerTest {
 				"locked_at", "TIMESTAMP",
 				"started_at", "TIMESTAMP",
 				"finished_at", "TIMESTAMP",
-				"error_detail", "CLOB",
+				"error_detail", "TEXT",
 				"queue_generation", "VARCHAR(32)"));
 
 		Map<String, Object> attemptCount = columnInfo(jdbcTemplate, "biz_collect_run_item").get("attempt_count");
