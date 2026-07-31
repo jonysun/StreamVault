@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Properties;
 
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +21,25 @@ class PostgresqlDeploymentContractTest {
                 .contains("\"psycopg[binary]\"")
                 .contains("ENV SPRING_PROFILES_ACTIVE=docker")
                 .doesNotContain("--spring.profiles.active=docker");
+    }
+
+    @Test
+    void postgresqlProfileOverridesSqliteConnectionInitializer() throws Exception {
+        Properties docker = new Properties();
+        try (var input = Files.newInputStream(
+                Path.of("src", "main", "resources", "application-docker.properties"))) {
+            docker.load(input);
+        }
+        Properties postgresql = new Properties();
+        try (var input = Files.newInputStream(
+                Path.of("src", "main", "resources", "application-postgresql.properties"))) {
+            postgresql.load(input);
+        }
+
+        String property = "spring.datasource.hikari.connection-init-sql";
+        assertThat(docker.getProperty(property)).startsWith("PRAGMA");
+        assertThat(postgresql).containsKey(property);
+        assertThat(postgresql.getProperty(property)).isEqualTo("SELECT 1");
     }
 
     @Test
