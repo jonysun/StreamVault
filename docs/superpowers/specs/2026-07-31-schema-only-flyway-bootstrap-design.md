@@ -18,7 +18,7 @@
 
 ### 启动分流
 
-`SpiritApplication.main` 在调用现有 `initData()` 和完整 Spring Boot 启动之前识别 schema-only 参数。识别为真时，启动一个仅包含 `@Configuration` 与 `@EnableAutoConfiguration` 的内部配置源，并将 Web 类型设为 `NONE`。
+`SpiritApplication.main` 在调用现有 `initData()` 和完整 Spring Boot 启动之前识别 schema-only 参数。识别为真时，启动一个仅包含 `@Configuration`，并通过 `@ImportAutoConfiguration` 明确导入 DataSource 与 Flyway 的内部配置源，同时将 Web 类型设为 `NONE`。
 
 该最小配置不启用组件扫描、JPA Repository 扫描、实体扫描或调度，因此不会创建 `AppConfig`、Quartz、控制器、队列 Worker、恢复服务及业务监听器。Spring Boot 的 DataSource 和 Flyway 自动配置仍会根据 `docker,postgresql` profiles 与 Compose 中的数据库参数执行。
 
