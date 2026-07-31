@@ -4,9 +4,13 @@ import java.io.File;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.data.web.config.EnableSpringDataWebSupport;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -24,6 +28,10 @@ import com.flower.spirit.utils.FileUtil;
 public class SpiritApplication {
 
 	public static void main(String[] args) {
+		if (isSchemaOnly(args)) {
+			runSchemaOnly(args);
+			return;
+		}
 		SpiritApplication.initData();
 		boolean backfillOnly = false;
 		for (String arg : args) {
@@ -55,6 +63,31 @@ public class SpiritApplication {
 				return;
 			}
 		}
+	}
+
+	static boolean isSchemaOnly(String[] args) {
+		for (String arg : args) {
+			if ("--streamvault.schema-only=true".equalsIgnoreCase(arg)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static void runSchemaOnly(String[] args) {
+		SpringApplication application = new SpringApplication(SchemaOnlyConfiguration.class);
+		application.setWebApplicationType(WebApplicationType.NONE);
+		try (ConfigurableApplicationContext ignored = application.run(args)) {
+			// DataSource and Flyway initialization complete during context startup.
+		}
+	}
+
+	@Configuration(proxyBeanMethods = false)
+	@ImportAutoConfiguration({
+			DataSourceAutoConfiguration.class,
+			FlywayAutoConfiguration.class
+	})
+	static class SchemaOnlyConfiguration {
 	}
 
 	
