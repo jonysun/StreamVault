@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 
@@ -30,6 +31,7 @@ public class CollectDataDetailEntity extends DataEntity<CollectDataDetailEntity>
 	
 	private String videoid;
 	
+	@Column(length = 2000)
 	private String videoname;
 	
 	private String originaladdress;
@@ -38,8 +40,10 @@ public class CollectDataDetailEntity extends DataEntity<CollectDataDetailEntity>
 
 	private String mediatype;
 
+	@Column(columnDefinition = "TEXT")
 	private String detailjson;
 
+	@Column(columnDefinition = "TEXT")
 	private String processlog;
 
 	private String errorcode;

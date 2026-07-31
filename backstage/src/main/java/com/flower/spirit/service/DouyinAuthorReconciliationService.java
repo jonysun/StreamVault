@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -39,17 +41,26 @@ public class DouyinAuthorReconciliationService {
 	private final AuthorProfileDao authorProfileDao;
 	private final AuthorProfileService authorProfileService;
 	private final JdbcTemplate jdbcTemplate;
+	private final boolean sqlite;
 	private final AtomicBoolean running = new AtomicBoolean(false);
 	private final ExecutorService executor = Executors.newSingleThreadExecutor(new ReconcileThreadFactory());
 	private volatile ReconcileStatus status = ReconcileStatus.idle();
 
+	@Autowired
 	public DouyinAuthorReconciliationService(VideoDataDao videoDataDao, GraphicContentDao graphicContentDao,
-			AuthorProfileDao authorProfileDao, AuthorProfileService authorProfileService, JdbcTemplate jdbcTemplate) {
+			AuthorProfileDao authorProfileDao, AuthorProfileService authorProfileService, JdbcTemplate jdbcTemplate,
+			@Value("${streamvault.database.kind:sqlite}") String databaseKind) {
 		this.videoDataDao = videoDataDao;
 		this.graphicContentDao = graphicContentDao;
 		this.authorProfileDao = authorProfileDao;
 		this.authorProfileService = authorProfileService;
 		this.jdbcTemplate = jdbcTemplate;
+		this.sqlite = !"postgresql".equalsIgnoreCase(databaseKind);
+	}
+
+	DouyinAuthorReconciliationService(VideoDataDao videoDataDao, GraphicContentDao graphicContentDao,
+			AuthorProfileDao authorProfileDao, AuthorProfileService authorProfileService, JdbcTemplate jdbcTemplate) {
+		this(videoDataDao, graphicContentDao, authorProfileDao, authorProfileService, jdbcTemplate, "sqlite");
 	}
 
 	public AjaxEntity preview() {
@@ -103,6 +114,10 @@ public class DouyinAuthorReconciliationService {
 	}
 
 	private String databaseIntegrity() {
+		if (!sqlite) {
+			Integer result = jdbcTemplate.queryForObject("SELECT 1", Integer.class);
+			return result != null && result == 1 ? "ok" : "PostgreSQL connectivity check returned no result";
+		}
 		List<String> rows = jdbcTemplate.queryForList("PRAGMA quick_check(1)", String.class);
 		return rows == null || rows.isEmpty() ? "未返回检查结果" : rows.get(0);
 	}

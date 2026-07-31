@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.process.ControlledProcessExecutor;
 import com.flower.spirit.service.DouyinFetchRequest;
 
 public class CommandUtil {
@@ -38,6 +39,10 @@ public class CommandUtil {
     private static final long INCREMENTAL_MAX_TIMEOUT_SECONDS = 15 * 60;
     private static final long PROCESS_STOP_WAIT_SECONDS = 2;
     private static final long OUTPUT_READER_JOIN_MILLIS = 2000;
+    private static final long LEGACY_F2_TIMEOUT_SECONDS = 15 * 60;
+    private static final int STRUCTURED_OUTPUT_LIMIT = 16 * 1024 * 1024;
+    private static final int DIAGNOSTIC_OUTPUT_LIMIT = 128 * 1024;
+    private static final ControlledProcessExecutor CONTROLLED_PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
     /**
      * 执行命令并输出结果到控制台
@@ -231,24 +236,22 @@ public class CommandUtil {
     }
 
     private static String runCommandList(List<String> cmdList, boolean suppressOutputPreview) {
-        StringBuilder output = new StringBuilder();
-        Process process = null;
         long startMs = System.currentTimeMillis();
         try {
             logger.info("[F2] process launch");
-            ProcessBuilder pb = new ProcessBuilder(cmdList);
-            pb.redirectErrorStream(true);
-            process = pb.start();
-
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), "UTF-8"))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                }
+            ControlledProcessExecutor.Result result = CONTROLLED_PROCESS_EXECUTOR.execute(cmdList,
+                    java.time.Duration.ofSeconds(LEGACY_F2_TIMEOUT_SECONDS), "legacy-f2",
+                    STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
+            String output = result.stdout();
+            int exitCode = result.exitCode();
+            if (result.timedOut()) {
+                output = output + "\nprocess timeout after " + LEGACY_F2_TIMEOUT_SECONDS + " seconds";
+                logger.error("[F2] process timeout operation=legacy-f2 durationMs={}",
+                        result.duration().toMillis());
             }
-
-            int exitCode = process.waitFor();
+            if (exitCode != 0 && !result.stderr().isBlank()) {
+                output = output + "\n" + result.stderr();
+            }
             LAST_F2_EXIT_CODE.set(exitCode);
             LAST_F2_DURATION_MS.set(System.currentTimeMillis() - startMs);
             logger.info("[F2] process finished exitCode={} outputLength={}", exitCode, output.length());
@@ -257,27 +260,25 @@ public class CommandUtil {
             } else if (suppressOutputPreview) {
                 logger.info("[F2] output preview suppressed for signed media metadata");
             } else {
-                String preview = previewOutput(output.toString());
+                String preview = previewOutput(output);
                 logger.info("[F2] output preview={}", preview);
                 if (exitCode != 0) {
                     logger.error("[F2] process failed exitCode={} output={}", exitCode, preview);
                     if (Global.f2logfullonerror) {
-                        logger.error("[F2][FAIL][OUTPUT_BEGIN]\n{}\n[F2][FAIL][OUTPUT_END]", maskSensitiveOutput(output.toString()));
+                        logger.error("[F2][FAIL][OUTPUT_BEGIN]\n{}\n[F2][FAIL][OUTPUT_END]", maskSensitiveOutput(output));
                     }
                 }
             }
-
-        } catch (IOException | InterruptedException e) {
-            logger.error("命令执行异常：" + e.getMessage(), e);
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-        } finally {
-            if (process != null) {
-                process.destroy();
-            }
+            return output.trim();
+        } catch (IOException e) {
+            logger.error("[F2] process execution failed type={}", e.getClass().getSimpleName(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("[F2] process execution interrupted");
         }
-        return output.toString().trim();
+        LAST_F2_EXIT_CODE.set(-1);
+        LAST_F2_DURATION_MS.set(System.currentTimeMillis() - startMs);
+        return "";
     }
 
     public static F2CommandResult f2IncrementalFetch(DouyinFetchRequest request,

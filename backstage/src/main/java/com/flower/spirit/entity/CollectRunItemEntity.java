@@ -63,7 +63,7 @@ public class CollectRunItemEntity implements Serializable {
 	private Date startedAt;
 	@Column(name = "finished_at")
 	private Date finishedAt;
-	@Column(name = "error_detail", columnDefinition = "CLOB")
+	@Column(name = "error_detail", columnDefinition = "TEXT")
 	private String errorDetail;
 	@Column(name = "queue_generation", length = 32)
 	private String queueGeneration;

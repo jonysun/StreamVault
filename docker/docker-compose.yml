@@ -2,15 +2,97 @@ version: "3.8"
 
 services:
   stream-vault:
-    image: qingfeng2336/stream-vault
-    container_name: stream-vault
+    image: ${STREAMVAULT_IMAGE:-jonysun/stream-vault:v5.7.1}
+    container_name: my-stream-vault
     ports:
       # 端口默认为20803 如果需要 请自定义修改28083
-      - "28083:28081"
+      - "28088:28081"
     volumes:
       # 默认为docker-compose相对目录  如果有需要自行修改 其他更高级的扩展目录 参考wiki
-      - "./stream/app:/app"
-      - "./stream/tmp:/tmp"
+      - "./app:/app"
+      - "./tmp:/tmp"
+      - "/home/admin_sun/Video/Downloads/stream_vault:/app/resources"
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      STREAMVAULT_DB_URL: ${STREAMVAULT_DB_URL:-jdbc:postgresql://postgres:5432/streamvault}
+      STREAMVAULT_DB_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      STREAMVAULT_DB_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+    networks:
+      - default
+      - stream-vault-internal
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgresql", "migration"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${STREAMVAULT_DB_NAME:-streamvault}
+      POSTGRES_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      POSTGRES_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+      TZ: Asia/Shanghai
+    volumes:
+      - stream-vault-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - stream-vault-internal
+
+  schema-migrate:
+    image: ${STREAMVAULT_IMAGE:-jonysun/stream-vault:v5.7.1}
+    profiles: ["migration"]
+    restart: "no"
+    entrypoint: ["java", "-XX:+UseContainerSupport", "-jar", "/app.jar"]
+    command:
+      - "--spring.profiles.active=docker,postgresql"
+      - "--spring.main.web-application-type=none"
+      - "--spring.task.scheduling.enabled=false"
+      - "--spring.quartz.auto-startup=false"
+      - "--streamvault.schema-only=true"
+    environment:
+      STREAMVAULT_DB_URL: ${STREAMVAULT_DB_URL:-jdbc:postgresql://postgres:5432/streamvault}
+      STREAMVAULT_DB_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      STREAMVAULT_DB_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stream-vault-internal
+
+  data-migrate:
+    image: ${STREAMVAULT_IMAGE:-jonysun/stream-vault:v5.7.1}
+    profiles: ["migration"]
+    restart: "no"
+    entrypoint: ["/opt/venv/bin/python3", "/home/app/script/sqlite_to_postgresql.py"]
+    command:
+      - "--mode"
+      - "${STREAMVAULT_MIGRATION_MODE:-dry-run}"
+      - "--source"
+      - "/app/db/spirit.db"
+      - "--batch-size"
+      - "${STREAMVAULT_MIGRATION_BATCH_SIZE:-500}"
+    environment:
+      STREAMVAULT_PG_HOST: postgres
+      STREAMVAULT_PG_PORT: 5432
+      STREAMVAULT_DB_NAME: ${STREAMVAULT_DB_NAME:-streamvault}
+      STREAMVAULT_DB_USER: ${STREAMVAULT_DB_USER:-streamvault}
+      STREAMVAULT_DB_PASSWORD: ${STREAMVAULT_DB_PASSWORD:-}
+      STREAMVAULT_MIGRATION_CONFIRM: ${STREAMVAULT_MIGRATION_CONFIRM:-}
+    volumes:
+      - "./app:/app:ro"
+    depends_on:
+      schema-migrate:
+        condition: service_completed_successfully
+    networks:
+      - stream-vault-internal
+
+networks:
+  stream-vault-internal:
+    internal: true
+
+volumes:
+  stream-vault-postgres-data:

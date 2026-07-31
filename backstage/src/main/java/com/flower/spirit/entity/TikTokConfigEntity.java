@@ -24,8 +24,10 @@ public class TikTokConfigEntity implements Serializable {
 	@TableGenerator(name = "biz_tiktok_config", allocationSize = 1, table = "seq_common", pkColumnName = "seq_id", valueColumnName = "seq_count")
     private Integer id;
 	
+	@Column(columnDefinition = "TEXT")
 	private String cookies;
 
+	@Column(columnDefinition = "TEXT")
 	private String cookiepool;
 
 	private String cookiestrategy;

@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 
@@ -35,6 +36,7 @@ public class ProcessHistoryEntity  extends DataEntity<ProcessHistoryEntity> impl
 	
 	private String status;
 
+	@Column(columnDefinition = "TEXT")
 	private String tasklog;
 	
 	private String createtime;

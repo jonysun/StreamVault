@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
@@ -30,6 +31,8 @@ public class AuthorEnrichmentWorker {
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final int maxAttempts;
 	private final AtomicBoolean running = new AtomicBoolean(false);
+	@Autowired(required = false)
+	private ApplicationReadinessGate readinessGate;
 
 	public AuthorEnrichmentWorker(AuthorEnrichmentTransaction transaction, AuthorProfileDao authorProfileDao,
 			AuthorProfileService authorProfileService, DouyinProfileGateway douyinProfileGateway,
@@ -44,6 +47,7 @@ public class AuthorEnrichmentWorker {
 	}
 
 	public void processOne() {
+		if (readinessGate != null && !readinessGate.isReady()) return;
 		if (!running.compareAndSet(false, true)) {
 			return;
 		}

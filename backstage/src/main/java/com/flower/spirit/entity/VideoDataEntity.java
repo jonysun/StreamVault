@@ -7,7 +7,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
@@ -43,6 +42,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	 */
 	public String originaladdress;
 	
+	@Column(length = 2000)
 	private String videoname;
 	
 	private String videoauthor;
@@ -57,9 +57,10 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	private String uniqueid;
 
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String jsonData;
 	
+	@Column(length = 2000)
 	private String videodesc;
 	
 	private String videoprivacy;  //视频是否隐私模式  隐私模式 则不会直接显示 图片
@@ -76,7 +77,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	
 	private Date createtime;
 
-	@Column(name = "videoinfo", insertable = false, updatable = false)
+	@Column(name = "videoinfo", insertable = false, updatable = false, columnDefinition = "TEXT")
 	private String videoinfo;
 
 	private String publishtime;
@@ -94,7 +95,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	@Column(length = 512)
 	private String authorhomepage;
 
-	@Lob
+	@Column(columnDefinition = "TEXT")
 	private String metadataoverrides;
 
 	private Date metadataeditedat;

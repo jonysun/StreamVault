@@ -61,6 +61,18 @@ class RuntimeControlServiceTest {
 		assertThat(service.mayRun(TaskCategory.COLLECT_FETCH).controlKey()).isEqualTo("pause.all");
 	}
 
+	@Test
+	void blocksWorkersUntilPersistentControlsAreLoaded() {
+		RuntimeControlTransaction transaction = mock(RuntimeControlTransaction.class);
+		RuntimeControlService service = new RuntimeControlService(transaction, new SqliteWriteRetrier(1, 0, 0));
+
+		PauseDecision decision = service.mayRun(TaskCategory.COLLECT_FETCH);
+
+		assertThat(decision.allowed()).isFalse();
+		assertThat(decision.controlKey()).isEqualTo("runtime-control.starting");
+		assertThat(service.isInitialized()).isFalse();
+	}
+
 	private Map<String, RuntimeControlValue> values(boolean pauseAll, boolean pauseCollect,
 			boolean pauseDownload, boolean pauseHls) {
 		Map<String, RuntimeControlValue> result = new LinkedHashMap<>();

@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
@@ -26,6 +27,8 @@ public class CollectDownloadWorker {
 	private final CollectDownloadService downloadService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final RuntimeControlService runtimeControlService;
+	@Autowired(required = false)
+	private ApplicationReadinessGate readinessGate;
 	private final int batchSize;
 	private final int lockTimeoutMinutes;
 	private final String workerId = "sqlite-collect-download-" + UUID.randomUUID();
@@ -54,6 +57,7 @@ public class CollectDownloadWorker {
 	}
 
 	public void wakeUp() {
+		if (!applicationReady()) return;
 		if (!running.compareAndSet(false, true)) return;
 		try {
 			workerExecutor.submit(() -> {
@@ -126,7 +130,14 @@ public class CollectDownloadWorker {
 	}
 
 	private PauseDecision downloadDecision() {
+		if (!applicationReady()) {
+			return PauseDecision.paused("application.readiness", "Application is not ready");
+		}
 		return runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD);
+	}
+
+	private boolean applicationReady() {
+		return readinessGate == null || readinessGate.isReady();
 	}
 
 	private String rootMessage(Throwable error) {

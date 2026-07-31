@@ -1,10 +1,13 @@
 package com.flower.spirit.utils;
 
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
+import java.util.List;
 
 import com.flower.spirit.config.Global;
+import com.flower.spirit.process.ControlledProcessExecutor;
 
 public class EncoderUtil {
+	private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
     public static void checkAndSetEncoder() {
         try {
@@ -43,31 +46,17 @@ public class EncoderUtil {
     }
 
     private static boolean isHardwareAcceleratedEncoderSupported(String encoderName) {
-        Process process = null;
         try {
             // 执行 ffmpeg 命令来检查是否支持硬件加速编码器
-            ProcessBuilder processBuilder = new ProcessBuilder("/bin/sh", "-c", buildFFmpegCommand(encoderName));
-            if (System.getProperty("os.name").toLowerCase().contains("win")) {
-                processBuilder = new ProcessBuilder("cmd.exe", "/c", buildFFmpegCommand(encoderName));
-            }
-            processBuilder.redirectErrorStream(true);
-            processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-            process = processBuilder.start();
-
-            if (!process.waitFor(30, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                process.waitFor();
-                return false;
-            }
-
-            return process.exitValue() == 0;
+            List<String> command = System.getProperty("os.name").toLowerCase().contains("win")
+                    ? List.of("cmd.exe", "/c", buildFFmpegCommand(encoderName))
+                    : List.of("/bin/sh", "-c", buildFFmpegCommand(encoderName));
+            ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, Duration.ofSeconds(30),
+                    "ffmpeg-encoder-probe", 4096);
+            return result.successful();
         } catch (Exception e) {
             e.printStackTrace();
             return false;
-        } finally {
-            if (process != null && process.isAlive()) {
-                process.destroyForcibly();
-            }
         }
     }
 

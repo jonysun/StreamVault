@@ -19,17 +19,19 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.flower.spirit.service.RuntimeHistoryRetentionPolicy;
+import com.flower.spirit.database.DatabaseSchemaInspector;
 
 @Service
 public class DatabaseMaintenanceTransaction {
-
 	private static final DateTimeFormatter SQLITE_TIMESTAMP = DateTimeFormatter
 			.ofPattern("uuuu-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
 
 	private final JdbcTemplate jdbcTemplate;
+	private final DatabaseSchemaInspector schemaInspector;
 
 	public DatabaseMaintenanceTransaction(JdbcTemplate jdbcTemplate) {
 		this.jdbcTemplate = jdbcTemplate;
+		this.schemaInspector = new DatabaseSchemaInspector(jdbcTemplate.getDataSource());
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -127,8 +129,18 @@ public class DatabaseMaintenanceTransaction {
 				afterId, batchSize, now);
 	}
 
-	private String cutoff(Instant now, int days) {
-		return SQLITE_TIMESTAMP.format(now.minus(days, ChronoUnit.DAYS));
+	private Object cutoff(Instant now, int days) {
+		Instant value = now.minus(days, ChronoUnit.DAYS);
+		return isSqlite() ? SQLITE_TIMESTAMP.format(value) : Timestamp.from(value);
+	}
+
+	private boolean isSqlite() {
+		try (java.sql.Connection connection = jdbcTemplate.getDataSource().getConnection()) {
+			return connection.getMetaData().getDatabaseProductName().toLowerCase(java.util.Locale.ROOT)
+					.contains("sqlite");
+		} catch (Exception error) {
+			return true;
+		}
 	}
 
 	private BatchResult purgeByCondition(long operationId, String table, String condition,
@@ -148,9 +160,7 @@ public class DatabaseMaintenanceTransaction {
 	}
 
 	private boolean tableExists(String name) {
-		Integer count = jdbcTemplate.queryForObject(
-				"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", Integer.class, name);
-		return count != null && count > 0;
+		return !schemaInspector.columns(name).isEmpty();
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)

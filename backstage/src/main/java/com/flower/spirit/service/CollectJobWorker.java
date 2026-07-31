@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
@@ -35,6 +36,8 @@ public class CollectJobWorker {
 	private final CollectDataService collectDataService;
 	private final PlatformCookieService platformCookieService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
+	@Autowired(required = false)
+	private ApplicationReadinessGate readinessGate;
 	private final String workerId = "sqlite-collect-" + UUID.randomUUID();
 	private final AtomicBoolean running = new AtomicBoolean(false);
 	private final AtomicLong activeRunId = new AtomicLong(0);
@@ -65,6 +68,7 @@ public class CollectJobWorker {
 	}
 
 	public void processOne() {
+		if (!applicationReady()) return;
 		if (!running.compareAndSet(false, true)) return;
 		runClaimedTick();
 	}
@@ -73,6 +77,7 @@ public class CollectJobWorker {
 		ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(this::heartbeatActiveRun,
 				15, 15, TimeUnit.SECONDS);
 		try {
+			if (!applicationReady()) return;
 			if (platformCookieService.isDouyinGlobalCooldownActive()) {
 				logger.debug("[CollectWorker] claim deferred by Douyin global cooldown remainingMs={}",
 						platformCookieService.douyinGlobalCooldownRemainingMillis());
@@ -91,6 +96,7 @@ public class CollectJobWorker {
 	}
 
 	public void wakeUp() {
+		if (!applicationReady()) return;
 		if (!running.compareAndSet(false, true)) return;
 		try {
 			workerExecutor.submit(this::runClaimedTick);
@@ -98,6 +104,10 @@ public class CollectJobWorker {
 			running.set(false);
 			logger.debug("[CollectWorker] wake ignored during shutdown workerId={}", workerId);
 		}
+	}
+
+	private boolean applicationReady() {
+		return readinessGate == null || readinessGate.isReady();
 	}
 
 	public void heartbeatActiveRun() {

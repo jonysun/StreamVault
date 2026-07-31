@@ -4,11 +4,12 @@ ENV TZ=Asia/Shanghai
 
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir f2
+    /opt/venv/bin/pip install --no-cache-dir f2 "psycopg[binary]"
 
 FROM eclipse-temurin:17-jre
 
 ENV TZ=Asia/Shanghai
+ENV SPRING_PROFILES_ACTIVE=docker
 ARG YT_DLP_VERSION=2026.03.17
 ARG YT_DLP_DOWNLOAD_BASE=https://github.com/yt-dlp/yt-dlp/releases
 
@@ -45,4 +46,4 @@ RUN mkdir -p /app/resources
 
 COPY backstage/target/StreamVault-0.0.1-SNAPSHOT.jar /app.jar
 
-ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-Djava.security.egd=file:/dev/./urandom", "-jar", "/app.jar", "--spring.profiles.active=docker"]
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-Djava.security.egd=file:/dev/./urandom", "-jar", "/app.jar"]

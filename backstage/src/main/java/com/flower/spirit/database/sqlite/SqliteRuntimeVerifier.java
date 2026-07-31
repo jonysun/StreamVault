@@ -3,9 +3,7 @@ package com.flower.spirit.database.sqlite;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.EnvironmentAware;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -38,8 +36,12 @@ public class SqliteRuntimeVerifier implements EnvironmentAware {
 		this.environment = environment;
 	}
 
-	@EventListener(ApplicationReadyEvent.class)
 	public void verify() {
+		java.util.List<String> integrity = jdbcTemplate.query("PRAGMA quick_check(1)",
+				(resultSet, rowNumber) -> resultSet.getString(1));
+		if (integrity.size() != 1 || !"ok".equalsIgnoreCase(integrity.get(0))) {
+			throw new IllegalStateException("SQLite quick_check failed: " + String.join("; ", integrity));
+		}
 		String journalMode = value("PRAGMA journal_mode", String.class, "unknown");
 		int busyTimeoutMs = value("PRAGMA busy_timeout", Integer.class, 0);
 		boolean foreignKeys = value("PRAGMA foreign_keys", Integer.class, 0) != 0;

@@ -2,25 +2,37 @@ package com.flower.spirit.service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.flower.spirit.database.DatabaseSchemaInspector;
+
 @Service
 public class DatabaseAuditService {
 
 	private static final int DUPLICATE_SAMPLE_LIMIT = 20;
+	private static final DateTimeFormatter SQLITE_TIMESTAMP = DateTimeFormatter
+			.ofPattern("uuuu-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
 
 	private final JdbcTemplate jdbcTemplate;
+	private final DatabaseSchemaInspector schemaInspector;
 
 	public DatabaseAuditService(JdbcTemplate jdbcTemplate) {
 		this.jdbcTemplate = jdbcTemplate;
+		this.schemaInspector = new DatabaseSchemaInspector(jdbcTemplate.getDataSource());
 	}
 
 	public Map<String, Object> audit() {
@@ -63,9 +75,11 @@ public class DatabaseAuditService {
 		result.put("storage", storage);
 		result.put("fingerprint", fingerprint(video, graphic, snapshots, workDuplicates, normalization, orphans,
 				retentionCandidates, storage));
-		result.put("notes", List.of(
-				"统计长度为逻辑字符数，不等同于 VACUUM 后的物理字节数",
-				"在线清理只释放 SQLite 可复用页；缩小文件必须停服后执行 VACUUM INTO"));
+		result.put("notes", isSqlite()
+				? List.of("统计长度为逻辑字符数，不等同于 VACUUM 后的物理字节数",
+						"在线清理只释放 SQLite 可复用页；缩小文件必须停服后执行 VACUUM INTO")
+				: List.of("统计长度为逻辑字符数，不等同于 PostgreSQL 物理存储字节数",
+						"PostgreSQL 空间回收由 autovacuum 和数据库维护策略管理"));
 		return result;
 	}
 
@@ -125,31 +139,33 @@ public class DatabaseAuditService {
 
 	private Map<String, Object> retentionCandidates() {
 		Map<String, Object> result = new LinkedHashMap<>();
+		Instant now = Instant.now();
 		result.put("runItems", countIfTableExists("biz_collect_run_item",
 				"SELECT COUNT(*) FROM biz_collect_run_item WHERE "
-						+ "((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < "
-						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.FAILED_RUN_ITEM_DAYS)
-						+ ") OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' AND created_at < "
-						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.NON_FAILED_RUN_ITEM_DAYS) + "))"));
+						+ "((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < ?) "
+						+ "OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' AND created_at < ?))",
+				cutoff(now, RuntimeHistoryRetentionPolicy.FAILED_RUN_ITEM_DAYS),
+				cutoff(now, RuntimeHistoryRetentionPolicy.NON_FAILED_RUN_ITEM_DAYS)));
 		result.put("terminalRuns", countIfTableExists("biz_collect_run",
 				"SELECT COUNT(*) FROM biz_collect_run WHERE UPPER(COALESCE(state, '')) IN "
 						+ "('COMPLETED','FETCH_FAILED','DB_FAILED','INTERRUPTED','SKIPPED_PAUSED','CANCELLED') "
-						+ "AND created_at < " + sqliteCutoff(RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
+						+ "AND created_at < ?", cutoff(now, RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
 		result.put("runEvents", countIfTableExists("biz_collect_run_event",
-				"SELECT COUNT(*) FROM biz_collect_run_event WHERE created_at < "
-						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
+				"SELECT COUNT(*) FROM biz_collect_run_event WHERE created_at < ?",
+				cutoff(now, RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
 		result.put("terminalJobs", countIfTableExists("biz_job_queue",
 				"SELECT COUNT(*) FROM biz_job_queue WHERE UPPER(COALESCE(state, '')) IN "
-						+ "('COMPLETED','FAILED','CANCELLED') AND created_at < "
-						+ sqliteCutoff(RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
+						+ "('COMPLETED','FAILED','CANCELLED') AND created_at < ?",
+				cutoff(now, RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS)));
 		result.put("nonFailedRunItemDays", (long) RuntimeHistoryRetentionPolicy.NON_FAILED_RUN_ITEM_DAYS);
 		result.put("failedRunItemDays", (long) RuntimeHistoryRetentionPolicy.FAILED_RUN_ITEM_DAYS);
 		result.put("terminalHistoryDays", (long) RuntimeHistoryRetentionPolicy.TERMINAL_HISTORY_DAYS);
 		return result;
 	}
 
-	private String sqliteCutoff(int days) {
-		return "datetime('now','-" + days + " days')";
+	private Object cutoff(Instant now, int days) {
+		Instant value = now.minus(days, ChronoUnit.DAYS);
+		return isSqlite() ? SQLITE_TIMESTAMP.format(value) : Timestamp.from(value);
 	}
 
 	private long orphanCount(String childTable, String parentTable, String foreignKey) {
@@ -159,8 +175,10 @@ public class DatabaseAuditService {
 				+ " parent ON parent.id = child." + foreignKey + " WHERE parent.id IS NULL");
 	}
 
-	private long countIfTableExists(String table, String sql) {
-		return tableExists(table) ? count(sql) : 0L;
+	private long countIfTableExists(String table, String sql, Object... parameters) {
+		if (!tableExists(table)) return 0L;
+		Long value = jdbcTemplate.queryForObject(sql, Long.class, parameters);
+		return value == null ? 0L : value;
 	}
 
 	private long count(String sql) {
@@ -169,9 +187,7 @@ public class DatabaseAuditService {
 	}
 
 	private boolean tableExists(String name) {
-		Integer count = jdbcTemplate.queryForObject(
-				"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", Integer.class, name);
-		return count != null && count > 0;
+		return !schemaInspector.columns(name).isEmpty();
 	}
 
 	private List<Map<String, Object>> differenceSamples(int limit) {
@@ -192,6 +208,13 @@ public class DatabaseAuditService {
 
 	private Map<String, Object> storageStats() {
 		Map<String, Object> result = new LinkedHashMap<>();
+		if (!isSqlite()) {
+			Long bytes = jdbcTemplate.queryForObject("SELECT pg_database_size(current_database())", Long.class);
+			result.put("databaseBytes", bytes == null ? 0L : bytes);
+			result.put("dbstatAvailable", false);
+			result.put("objects", List.of());
+			return result;
+		}
 		long pageSize = pragmaLong("page_size");
 		long pageCount = pragmaLong("page_count");
 		long freePages = pragmaLong("freelist_count");
@@ -211,6 +234,14 @@ public class DatabaseAuditService {
 			result.put("objects", List.of());
 		}
 		return result;
+	}
+
+	private boolean isSqlite() {
+		try (java.sql.Connection connection = jdbcTemplate.getDataSource().getConnection()) {
+			return connection.getMetaData().getDatabaseProductName().toLowerCase(Locale.ROOT).contains("sqlite");
+		} catch (Exception error) {
+			return true;
+		}
 	}
 
 	private long pragmaLong(String name) {

@@ -69,8 +69,10 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	
 	private String taskcron;
 
+	@Column(columnDefinition = "TEXT")
 	private String lastfetchsnapshot; // 最近一次全量拉取列表快照(JSON)
 
+	@Column(columnDefinition = "TEXT")
 	private String lastplanitems; // 最近一次计划下载列表(JSON)
 
 	private String lastfetchtime; // 最近一次拉取时间

@@ -1,19 +1,17 @@
 package com.flower.spirit.utils;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.process.ControlledProcessExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,6 +19,11 @@ public class YtDlpUtil {
 
 	private static final Logger logger = LoggerFactory.getLogger(YtDlpUtil.class);
 	private static final String DOWNLOADED_FILE_PREFIX = "__STREAMVAULT_FILE__";
+	private static final Duration METADATA_TIMEOUT = Duration.ofMinutes(2);
+	private static final Duration DOWNLOAD_TIMEOUT = Duration.ofHours(2);
+	private static final int STRUCTURED_OUTPUT_LIMIT = 16 * 1024 * 1024;
+	private static final int DIAGNOSTIC_OUTPUT_LIMIT = 128 * 1024;
+	private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
 	public static String execSingleMetadata(String url, String platform) throws IOException, InterruptedException {
 		validateUrl(url);
@@ -78,29 +81,22 @@ public class YtDlpUtil {
 
 	private static String runCommand(List<String> command, String operation)
 			throws IOException, InterruptedException {
-		Process process = new ProcessBuilder(command).start();
-		Thread stderrReader = new Thread(() -> drainStream(process.getErrorStream()),
-				"yt-dlp-stderr-" + System.currentTimeMillis());
-		stderrReader.setDaemon(true);
-		stderrReader.start();
-		String stdout;
-		try (InputStream input = process.getInputStream()) {
-			stdout = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+		Duration timeout = operation.contains("download") ? DOWNLOAD_TIMEOUT : METADATA_TIMEOUT;
+		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, timeout,
+				"yt-dlp-" + operation, STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
+		if (!result.successful()) {
+			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
+			logger.warn("yt-dlp operation failed operation={} reason={} stderrPreview={}", operation, reason,
+					preview(result.stderr()));
+			throw new IOException("yt-dlp " + operation + " failed: " + reason);
 		}
-		int exitCode = process.waitFor();
-		stderrReader.join();
-		if (exitCode != 0) {
-			throw new IOException("yt-dlp " + operation + " failed with exit code " + exitCode);
-		}
-		return stdout;
+		return result.stdout();
 	}
 
-	private static void drainStream(InputStream stream) {
-		try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-			while (reader.readLine() != null) { }
-		} catch (IOException e) {
-			logger.debug("Failed to read yt-dlp stderr", e);
-		}
+	private static String preview(String output) {
+		if (output == null || output.isBlank()) return "";
+		String normalized = output.replaceAll("[\\r\\n]+", " ").trim();
+		return normalized.length() <= 1000 ? normalized : normalized.substring(0, 1000) + "...";
 	}
 
 	private static void addNetworkConfig(List<String> command) {
@@ -165,54 +161,15 @@ public class YtDlpUtil {
 			command.add(Global.useragent);
 		}
 		logger.info("执行yt-dlp下载命令: {}", String.join(" ", command));
-		ProcessBuilder processBuilder = new ProcessBuilder(command);
-		processBuilder.redirectErrorStream(true);
-		Process process = processBuilder.start();
-		StringBuilder stringBuilder = new StringBuilder();
-		Thread progressThread = null;
-		try (BufferedReader reader = new BufferedReader(
-				new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-			progressThread = new Thread(() -> {
-				try {
-					while (!Thread.currentThread().isInterrupted()) {
-						Thread.sleep(5000);
-						logger.info("yt-dlp 下载进行中...");
-					}
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-				}
-			});
-			progressThread.setName("yt-dlp-progress-" + System.currentTimeMillis());
-			progressThread.setDaemon(true);
-			progressThread.start();
-
-			String line;
-			while ((line = reader.readLine()) != null) {
-				if (line.contains("[download]") && line.contains("%")) {
-					logger.info("yt-dlp 下载进度: {}", line.trim());
-				} else if (line.startsWith("{")) {
-					stringBuilder.append(line).append("\n");
-				} else if (line.contains("[Merger]") || line.contains("[VideoConvertor]")) {
-					logger.info("yt-dlp 处理: {}", line.trim());
-				} else if (line.contains("ERROR") || line.contains("error")) {
-					logger.error("yt-dlp 错误: {}", line.trim());
-				}
-			}
-		} finally {
-			if (progressThread != null) {
-				progressThread.interrupt();
-			}
+		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, DOWNLOAD_TIMEOUT,
+				"yt-dlp-download", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
+		String completeString = result.stdout();
+		if (!result.successful()) {
+			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
+			logger.error("yt-dlp执行失败 reason={} stderrPreview={}", reason, preview(result.stderr()));
+			throw new RuntimeException("yt-dlp执行失败: " + reason);
 		}
-
-		int exitCode = process.waitFor();
-		String completeString = stringBuilder.toString();
-
-		if (exitCode != 0) {
-			logger.error("yt-dlp执行失败，退出码: {}, 输出: {}", exitCode, completeString);
-			throw new RuntimeException("yt-dlp执行失败，退出码: " + exitCode);
-		}
-
-		logger.info("yt-dlp执行成功，退出码: {}", exitCode);
+		logger.info("yt-dlp执行成功，退出码: {}", result.exitCode());
 		return completeString;
 	}
 
@@ -278,20 +235,7 @@ public class YtDlpUtil {
 		command.add("--print-json");
 		command.add("--skip-download");
 		command.add(url);
-		ProcessBuilder processBuilder = new ProcessBuilder(command);
-		Process process = processBuilder.start();
-		InputStream inputStream = process.getInputStream();
-		BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-		StringBuilder stringBuilder = new StringBuilder();
-		String line;
-		while ((line = reader.readLine()) != null) {
-			stringBuilder.append(line);
-			;
-		}
-		int exitCode = process.waitFor();
-		System.out.println("Command executed with exit code: " + exitCode);
-		String completeString = stringBuilder.toString();
-		return completeString;
+		return runCommand(command, "metadata");
 	}
 
 	public static String getPlatform(String url) {
@@ -300,7 +244,6 @@ public class YtDlpUtil {
 	        return null;
 	    }
 
-	    Process process = null;
 	    try {
 	        List<String> command = new ArrayList<>();
 	        command.add("yt-dlp");
@@ -318,26 +261,11 @@ public class YtDlpUtil {
 	            command.add(Global.useragent);
 	        }
 	        command.add(url);
-	        ProcessBuilder processBuilder = new ProcessBuilder(command);
-	        processBuilder.redirectErrorStream(false);
-	        process = processBuilder.start();
-	        String stdout;
-	        try (BufferedReader reader = new BufferedReader(
-	                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-	            stdout = reader.readLine();
-	        }
-	        String stderr;
-	        try (BufferedReader reader = new BufferedReader(
-	                new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
-	            StringBuilder sb = new StringBuilder();
-	            String line;
-	            while ((line = reader.readLine()) != null) {
-	                sb.append(line).append("\n");
-	            }
-	            stderr = sb.toString();
-	        }
-
-	        int exitCode = process.waitFor();
+	        ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, METADATA_TIMEOUT,
+	                "yt-dlp-platform", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
+	        String stdout = result.stdout().lines().findFirst().orElse(null);
+	        String stderr = result.stderr();
+	        int exitCode = result.exitCode();
 
 	        // 情况1: stdout 有 extractor（成功）
 	        if (stdout != null && !stdout.trim().isEmpty()) {
@@ -359,13 +287,13 @@ public class YtDlpUtil {
 	        logger.warn("无法识别平台，exitCode={}, stdout={}, stderr={}", exitCode, stdout, stderr);
 	        return null;
 
+	    } catch (InterruptedException e) {
+	        Thread.currentThread().interrupt();
+	        logger.error("获取平台信息被中断");
+	        return null;
 	    } catch (Exception e) {
 	        logger.error("获取平台信息失败: {}", e.getMessage(), e);
 	        return null;
-	    } finally {
-	        if (process != null) {
-	            process.destroyForcibly();
-	        }
 	    }
 	}
 
@@ -406,43 +334,13 @@ public class YtDlpUtil {
 		command.add(url);
 		
 		logger.info("执行 yt-dlp 命令: {}", String.join(" ", command));
-
-		ProcessBuilder processBuilder = new ProcessBuilder(command);
-		Process process = processBuilder.start();
-
-		Thread stderrThread = new Thread(() -> {
-			try (BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-				String errLine;
-				while ((errLine = errReader.readLine()) != null) {
-					logger.warn("yt-dlp stderr: " + errLine);
-				}
-			} catch (IOException e) {
-				logger.error("yt-dlp 错误输出失败", e);
-			}
-		});
-		stderrThread.setName("yt-dlp-stderr-reader");
-		stderrThread.start();
-
-		StringBuilder stringBuilder = new StringBuilder();
-		try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				stringBuilder.append(line).append("\n");
-			}
-		} finally {
-			process.waitFor();
-			stderrThread.join();
-			process.destroy();
+		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, METADATA_TIMEOUT,
+				"yt-dlp-video-json", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
+		if (!result.successful()) {
+			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
+			logger.warn("yt-dlp JSON metadata failed reason={} stderrPreview={}", reason, preview(result.stderr()));
 		}
-
-		String completeString = stringBuilder.toString();
-		if (process.exitValue() != 0) {
-			logger.error("yt-dlp 执行失败 (exitCode: {}): {}", process.exitValue(), completeString);
-//			throw new IOException("yt-dlp 执行失败 (exitCode: " + process.exitValue() + "): " + completeString);
-		} else {
-			logger.info("yt-dlp executed with exit code: {}, 输出长度: {}", process.exitValue(), completeString.length());
-		}
-		return completeString;
+		return result.stdout();
 	}
 
 	/**
@@ -513,42 +411,14 @@ public class YtDlpUtil {
 		command.add(url);
 		
 		logger.info("执行 yt-dlp 音频命令: {}", String.join(" ", command));
-
-		ProcessBuilder processBuilder = new ProcessBuilder(command);
-		Process process = processBuilder.start();
-
-		Thread stderrThread = new Thread(() -> {
-			try (BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-				String errLine;
-				while ((errLine = errReader.readLine()) != null) {
-					logger.warn("yt-dlp stderr: " + errLine);
-				}
-			} catch (IOException e) {
-				logger.error("yt-dlp 错误输出失败", e);
-			}
-		});
-		stderrThread.setName("yt-dlp-audio-stderr-reader");
-		stderrThread.start();
-
-		StringBuilder stringBuilder = new StringBuilder();
-		try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				stringBuilder.append(line).append("\n");
-			}
-		} finally {
-			process.waitFor();
-			stderrThread.join();
-			process.destroy();
+		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, METADATA_TIMEOUT,
+				"yt-dlp-audio-json", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
+		if (!result.successful()) {
+			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
+			logger.error("yt-dlp 音频执行失败 reason={} stderrPreview={}", reason, preview(result.stderr()));
+			throw new IOException("yt-dlp 音频执行失败: " + reason);
 		}
-
-		String completeString = stringBuilder.toString();
-		if (process.exitValue() != 0) {
-			logger.error("yt-dlp 音频执行失败 (exitCode: {}): {}", process.exitValue(), completeString);
-			throw new IOException("yt-dlp 音频执行失败 (exitCode: " + process.exitValue() + "): " + completeString);
-		} else {
-			logger.info("yt-dlp 音频执行成功, 输出长度: {}", completeString.length());
-		}
-		return completeString;
+		logger.info("yt-dlp 音频执行成功, 输出长度: {}", result.stdout().length());
+		return result.stdout();
 	}
 }
