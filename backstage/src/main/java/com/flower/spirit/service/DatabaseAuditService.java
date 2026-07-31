@@ -75,9 +75,11 @@ public class DatabaseAuditService {
 		result.put("storage", storage);
 		result.put("fingerprint", fingerprint(video, graphic, snapshots, workDuplicates, normalization, orphans,
 				retentionCandidates, storage));
-		result.put("notes", List.of(
-				"统计长度为逻辑字符数，不等同于 VACUUM 后的物理字节数",
-				"在线清理只释放 SQLite 可复用页；缩小文件必须停服后执行 VACUUM INTO"));
+		result.put("notes", isSqlite()
+				? List.of("统计长度为逻辑字符数，不等同于 VACUUM 后的物理字节数",
+						"在线清理只释放 SQLite 可复用页；缩小文件必须停服后执行 VACUUM INTO")
+				: List.of("统计长度为逻辑字符数，不等同于 PostgreSQL 物理存储字节数",
+						"PostgreSQL 空间回收由 autovacuum 和数据库维护策略管理"));
 		return result;
 	}
 

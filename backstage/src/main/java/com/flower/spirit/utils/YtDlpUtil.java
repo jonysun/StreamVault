@@ -21,6 +21,7 @@ public class YtDlpUtil {
 	private static final String DOWNLOADED_FILE_PREFIX = "__STREAMVAULT_FILE__";
 	private static final Duration METADATA_TIMEOUT = Duration.ofMinutes(2);
 	private static final Duration DOWNLOAD_TIMEOUT = Duration.ofHours(2);
+	private static final int STRUCTURED_OUTPUT_LIMIT = 16 * 1024 * 1024;
 	private static final int DIAGNOSTIC_OUTPUT_LIMIT = 128 * 1024;
 	private static final ControlledProcessExecutor PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
@@ -82,7 +83,7 @@ public class YtDlpUtil {
 			throws IOException, InterruptedException {
 		Duration timeout = operation.contains("download") ? DOWNLOAD_TIMEOUT : METADATA_TIMEOUT;
 		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, timeout,
-				"yt-dlp-" + operation, DIAGNOSTIC_OUTPUT_LIMIT);
+				"yt-dlp-" + operation, STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
 		if (!result.successful()) {
 			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
 			logger.warn("yt-dlp operation failed operation={} reason={} stderrPreview={}", operation, reason,
@@ -161,7 +162,7 @@ public class YtDlpUtil {
 		}
 		logger.info("执行yt-dlp下载命令: {}", String.join(" ", command));
 		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, DOWNLOAD_TIMEOUT,
-				"yt-dlp-download", DIAGNOSTIC_OUTPUT_LIMIT);
+				"yt-dlp-download", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
 		String completeString = result.stdout();
 		if (!result.successful()) {
 			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
@@ -261,7 +262,7 @@ public class YtDlpUtil {
 	        }
 	        command.add(url);
 	        ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, METADATA_TIMEOUT,
-	                "yt-dlp-platform", DIAGNOSTIC_OUTPUT_LIMIT);
+	                "yt-dlp-platform", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
 	        String stdout = result.stdout().lines().findFirst().orElse(null);
 	        String stderr = result.stderr();
 	        int exitCode = result.exitCode();
@@ -334,7 +335,7 @@ public class YtDlpUtil {
 		
 		logger.info("执行 yt-dlp 命令: {}", String.join(" ", command));
 		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, METADATA_TIMEOUT,
-				"yt-dlp-video-json", DIAGNOSTIC_OUTPUT_LIMIT);
+				"yt-dlp-video-json", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
 		if (!result.successful()) {
 			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
 			logger.warn("yt-dlp JSON metadata failed reason={} stderrPreview={}", reason, preview(result.stderr()));
@@ -411,7 +412,7 @@ public class YtDlpUtil {
 		
 		logger.info("执行 yt-dlp 音频命令: {}", String.join(" ", command));
 		ControlledProcessExecutor.Result result = PROCESS_EXECUTOR.execute(command, METADATA_TIMEOUT,
-				"yt-dlp-audio-json", DIAGNOSTIC_OUTPUT_LIMIT);
+				"yt-dlp-audio-json", STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
 		if (!result.successful()) {
 			String reason = result.timedOut() ? "timeout" : "exit code " + result.exitCode();
 			logger.error("yt-dlp 音频执行失败 reason={} stderrPreview={}", reason, preview(result.stderr()));

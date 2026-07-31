@@ -9,11 +9,13 @@ import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 
 @Service
+@ConditionalOnProperty(name = "streamvault.database.kind", havingValue = "sqlite", matchIfMissing = true)
 public class DatabaseFinalizerService {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseFinalizerService.class);

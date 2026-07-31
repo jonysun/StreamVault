@@ -8,10 +8,13 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 ALLOWED_PREFILL = {"biz_runtime_control"}
+SQLITE_TIMEZONE = ZoneInfo(os.getenv("STREAMVAULT_SQLITE_TIMEZONE", "Asia/Shanghai"))
 
 
 def source_connection(path: Path) -> sqlite3.Connection:
@@ -106,22 +109,46 @@ def source_columns(source, table: str) -> tuple[list[str], str]:
     return columns, primary
 
 
-def target_columns(target, table: str) -> list[str]:
+def target_column_specs(target, table: str) -> list[tuple[str, str]]:
     with target.cursor() as cursor:
         cursor.execute(
-            "SELECT column_name FROM information_schema.columns "
+            "SELECT column_name, data_type FROM information_schema.columns "
             "WHERE table_schema='public' AND table_name=%s ORDER BY ordinal_position", (table,)
         )
-        return [row[0] for row in cursor.fetchall()]
+        return [(row[0], row[1]) for row in cursor.fetchall()]
+
+
+def normalize_target_value(value, data_type: str):
+    if value is None or not data_type.startswith("timestamp"):
+        return value
+    if isinstance(value, (int, float)):
+        seconds = value / 1000 if abs(value) >= 100_000_000_000 else value
+        return datetime.fromtimestamp(seconds, SQLITE_TIMEZONE).replace(tzinfo=None)
+    if isinstance(value, str):
+        stripped = value.strip()
+        try:
+            numeric = float(stripped)
+        except ValueError:
+            parsed = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(SQLITE_TIMEZONE).replace(tzinfo=None)
+            return parsed
+        return normalize_target_value(numeric, data_type)
+    raise ValueError(f"unsupported timestamp value type: {type(value).__name__}")
 
 
 def load_table(source, target, table: str, batch_size: int) -> int:
     from psycopg import sql
     available, primary = source_columns(source, table)
     source_by_lower = {name.lower(): name for name in available}
-    columns = [name for name in target_columns(target, table) if name.lower() in source_by_lower]
+    target_specs = target_column_specs(target, table)
+    columns = [name for name, _ in target_specs if name.lower() in source_by_lower]
+    target_types = {name: data_type for name, data_type in target_specs}
     source_names = [source_by_lower[name.lower()] for name in columns]
     primary_source = source_by_lower[primary.lower()]
+    primary_target = next((name for name in columns if name.lower() == primary.lower()), None)
+    if primary_target is None:
+        raise RuntimeError(f"target table is missing source primary key {primary}: {table}")
     last_key = None
     inserted = 0
     with target.cursor() as cursor:
@@ -143,13 +170,23 @@ def load_table(source, target, table: str, batch_size: int) -> int:
                 rows = source.execute(query, (last_key, batch_size)).fetchall()
             if not rows:
                 break
-            values = [list(row) for row in rows]
+            values = []
+            for row in rows:
+                converted = []
+                for index, column in enumerate(columns):
+                    try:
+                        converted.append(normalize_target_value(row[index], target_types[column]))
+                    except (OverflowError, OSError, ValueError) as error:
+                        raise RuntimeError(
+                            f"cannot convert {table}.{column} to {target_types[column]}"
+                        ) from error
+                values.append(converted)
             if table == "biz_video":
                 slim_video_values(columns, values)
             cursor.executemany(statement, values)
             last_key = rows[-1][source_names.index(primary_source)]
             inserted += len(rows)
-        reset_identity(cursor, table)
+        reset_identity(cursor, table, primary_target)
     target.commit()
     return inserted
 
@@ -164,13 +201,14 @@ def slim_video_values(columns: list[str], values: list[list]) -> None:
             row[legacy_index] = None
 
 
-def reset_identity(cursor, table: str) -> None:
-    cursor.execute("SELECT pg_get_serial_sequence(%s, 'id')", (table,))
+def reset_identity(cursor, table: str, primary: str) -> None:
+    cursor.execute("SELECT pg_get_serial_sequence(%s, %s)", (table, primary))
     sequence = cursor.fetchone()[0]
     if not sequence:
         return
     from psycopg import sql
-    cursor.execute(sql.SQL("SELECT COALESCE(MAX(id), 0) FROM {}").format(sql.Identifier(table)))
+    cursor.execute(sql.SQL("SELECT COALESCE(MAX({}), 0) FROM {}").format(
+        sql.Identifier(primary), sql.Identifier(table)))
     maximum = int(cursor.fetchone()[0])
     cursor.execute("SELECT setval(%s, %s, %s)", (sequence, max(1, maximum), maximum > 0))
 

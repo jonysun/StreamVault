@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 
 class ControlledProcessExecutorTest {
 
@@ -34,6 +35,22 @@ class ControlledProcessExecutorTest {
 
         assertTrue(result.timedOut());
         assertEquals(-1, result.exitCode());
+    }
+
+    @Test
+    void terminatesDescendantsWhenParentTimesOut() throws Exception {
+        Assumptions.assumeFalse(isWindows());
+        ControlledProcessExecutor.Result result = executor.execute(
+                List.of("sh", "-c", "sleep 30 & child=$!; echo $child; wait $child"),
+                Duration.ofMillis(200), "descendant-deadline-test");
+
+        long childPid = Long.parseLong(result.stdout().trim());
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        while (ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false)
+                && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(ProcessHandle.of(childPid).map(handle -> !handle.isAlive()).orElse(true));
     }
 
     private boolean isWindows() {

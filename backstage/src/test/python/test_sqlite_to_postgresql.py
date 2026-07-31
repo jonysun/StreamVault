@@ -2,6 +2,7 @@ import importlib.util
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 
@@ -31,6 +32,38 @@ class SqliteToPostgresqlTest(unittest.TestCase):
                     readonly.execute("INSERT INTO sample(id) VALUES (1)")
             finally:
                 readonly.close()
+
+    def test_identity_lookup_uses_actual_primary_key(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, statement, parameters):
+                self.calls.append((statement, parameters))
+
+            def fetchone(self):
+                return (None,)
+
+        cursor = Cursor()
+        MIGRATION.reset_identity(cursor, "biz_runtime_control", "control_key")
+        self.assertEqual(
+            cursor.calls,
+            [("SELECT pg_get_serial_sequence(%s, %s)",
+              ("biz_runtime_control", "control_key"))],
+        )
+
+    def test_millisecond_timestamp_uses_sqlite_timezone(self):
+        converted = MIGRATION.normalize_target_value(
+            1704067200000, "timestamp without time zone")
+        self.assertEqual(converted, datetime(2024, 1, 1, 8, 0, 0))
+
+    def test_iso_timestamp_is_parsed_before_insert(self):
+        converted = MIGRATION.normalize_target_value(
+            "2024-01-01T00:00:00Z", "timestamp without time zone")
+        self.assertEqual(converted, datetime(2024, 1, 1, 8, 0, 0))
+
+    def test_non_timestamp_value_is_unchanged(self):
+        self.assertEqual(MIGRATION.normalize_target_value(123, "integer"), 123)
 
 
 if __name__ == "__main__":

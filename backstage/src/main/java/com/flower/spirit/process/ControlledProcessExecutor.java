@@ -1,9 +1,9 @@
 package com.flower.spirit.process;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -31,16 +31,20 @@ public class ControlledProcessExecutor {
 
     public Result execute(List<String> command, Duration timeout, String operation, int outputLimit)
             throws IOException, InterruptedException {
+        return execute(command, timeout, operation, outputLimit, outputLimit);
+    }
+
+    public Result execute(List<String> command, Duration timeout, String operation,
+            int stdoutLimit, int stderrLimit) throws IOException, InterruptedException {
         if (command == null || command.isEmpty()) {
             throw new IllegalArgumentException("command must not be empty");
         }
         if (timeout == null || timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("timeout must be positive");
         }
-        int boundedLimit = Math.max(1024, outputLimit);
         Process process = new ProcessBuilder(command).redirectErrorStream(false).start();
-        BoundedOutput stdout = new BoundedOutput(boundedLimit);
-        BoundedOutput stderr = new BoundedOutput(boundedLimit);
+        BoundedOutput stdout = new BoundedOutput(Math.max(1024, stdoutLimit));
+        BoundedOutput stderr = new BoundedOutput(Math.max(1024, stderrLimit));
         AtomicBoolean readerFailed = new AtomicBoolean();
         Thread stdoutReader = startReader(process.getInputStream(), stdout, readerFailed, operation, "stdout");
         Thread stderrReader = startReader(process.getErrorStream(), stderr, readerFailed, operation, "stderr");
@@ -74,10 +78,11 @@ public class ControlledProcessExecutor {
     private Thread startReader(InputStream stream, BoundedOutput output, AtomicBoolean failed,
             String operation, String streamName) {
         Thread reader = new Thread(() -> {
-            try (BufferedReader lines = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = lines.readLine()) != null) {
-                    output.append(line).append('\n');
+            try (Reader input = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+                char[] buffer = new char[8192];
+                int count;
+                while ((count = input.read(buffer)) >= 0) {
+                    output.append(buffer, count);
                 }
             } catch (IOException error) {
                 failed.set(true);
@@ -106,40 +111,26 @@ public class ControlledProcessExecutor {
         if (process == null) {
             return;
         }
-        try {
-            process.destroy();
-            if (!process.waitFor(GRACEFUL_STOP_SECONDS, TimeUnit.SECONDS)) {
-                destroyTree(process, operation, true);
-            } else {
-                destroyTree(process, operation, false);
-            }
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            destroyTree(process, operation, true);
-        }
-    }
-
-    private void destroyTree(Process process, String operation, boolean forcibly) {
         List<ProcessHandle> descendants = new ArrayList<>(process.toHandle().descendants().toList());
         Collections.reverse(descendants);
-        for (ProcessHandle descendant : descendants) {
-            if (descendant.isAlive()) {
-                if (forcibly) {
-                    descendant.destroyForcibly();
-                } else {
-                    descendant.destroy();
-                }
+        descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy);
+        try {
+            process.destroy();
+            process.waitFor(GRACEFUL_STOP_SECONDS, TimeUnit.SECONDS);
+            boolean force = process.isAlive() || descendants.stream().anyMatch(ProcessHandle::isAlive);
+            if (force) {
+                descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
+                if (process.isAlive()) process.destroyForcibly();
             }
+            logger.warn("[Process] terminated operation={} descendants={} forcibly={}", operation,
+                    descendants.size(), force);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
+            if (process.isAlive()) process.destroyForcibly();
+            logger.warn("[Process] terminated operation={} descendants={} forcibly=true", operation,
+                    descendants.size());
         }
-        if (process.isAlive()) {
-            if (forcibly) {
-                process.destroyForcibly();
-            } else {
-                process.destroy();
-            }
-        }
-        logger.warn("[Process] terminated operation={} descendants={} forcibly={}", operation,
-                descendants.size(), forcibly);
     }
 
     public record Result(int exitCode, boolean timedOut, String stdout, String stderr,
@@ -162,26 +153,16 @@ public class ControlledProcessExecutor {
             this.limit = limit;
         }
 
-        private synchronized BoundedOutput append(String text) {
+        private synchronized void append(char[] buffer, int count) {
             if (value.length() >= limit) {
                 truncated = true;
-                return this;
+                return;
             }
             int remaining = limit - value.length();
-            value.append(text, 0, Math.min(remaining, text.length()));
-            if (text.length() > remaining) {
+            value.append(buffer, 0, Math.min(remaining, count));
+            if (count > remaining) {
                 truncated = true;
             }
-            return this;
-        }
-
-        private synchronized BoundedOutput append(char character) {
-            if (value.length() < limit) {
-                value.append(character);
-            } else {
-                truncated = true;
-            }
-            return this;
         }
 
         private synchronized String text() {

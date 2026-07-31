@@ -81,6 +81,26 @@ class DouyinAuthorReconciliationServiceTest {
 	}
 
 	@Test
+	void postgresqlPreviewUsesPortableConnectivityCheck() {
+		service.shutdown();
+		service = new DouyinAuthorReconciliationService(videoDataDao, graphicContentDao, authorProfileDao,
+				authorProfileService, jdbcTemplate, "postgresql");
+		when(jdbcTemplate.queryForObject("SELECT 1", Integer.class)).thenReturn(1);
+		when(videoDataDao.countByVideoplatformIn(anyList())).thenReturn(1L);
+		when(graphicContentDao.countByPlatformIn(anyList())).thenReturn(1L);
+		when(videoDataDao.countDouyinAuthorRepairCandidates(anyList())).thenReturn(0L);
+		when(graphicContentDao.countDouyinAuthorRepairCandidates(anyList())).thenReturn(0L);
+		when(authorProfileDao.countDouyinProfiles(anyList())).thenReturn(1L);
+		when(authorProfileDao.countLegacyDouyinProfiles(anyList())).thenReturn(0L);
+
+		AjaxEntity response = service.preview();
+
+		assertThat(response.getResCode()).isEqualTo("000001");
+		assertThat(((DouyinAuthorReconciliationService.ReconcilePreview) response.getRecord())
+				.databaseIntegrity()).isEqualTo("ok");
+	}
+
+	@Test
 	void repairUsesStableIdPagesAndCompletes() throws Exception {
 		stubHealthyPreview();
 		VideoDataEntity video = new VideoDataEntity();

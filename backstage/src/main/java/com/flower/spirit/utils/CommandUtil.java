@@ -40,6 +40,8 @@ public class CommandUtil {
     private static final long PROCESS_STOP_WAIT_SECONDS = 2;
     private static final long OUTPUT_READER_JOIN_MILLIS = 2000;
     private static final long LEGACY_F2_TIMEOUT_SECONDS = 15 * 60;
+    private static final int STRUCTURED_OUTPUT_LIMIT = 16 * 1024 * 1024;
+    private static final int DIAGNOSTIC_OUTPUT_LIMIT = 128 * 1024;
     private static final ControlledProcessExecutor CONTROLLED_PROCESS_EXECUTOR = new ControlledProcessExecutor();
 
     /**
@@ -238,13 +240,17 @@ public class CommandUtil {
         try {
             logger.info("[F2] process launch");
             ControlledProcessExecutor.Result result = CONTROLLED_PROCESS_EXECUTOR.execute(cmdList,
-                    java.time.Duration.ofSeconds(LEGACY_F2_TIMEOUT_SECONDS), "legacy-f2", 128 * 1024);
-            String output = result.diagnosticOutput();
+                    java.time.Duration.ofSeconds(LEGACY_F2_TIMEOUT_SECONDS), "legacy-f2",
+                    STRUCTURED_OUTPUT_LIMIT, DIAGNOSTIC_OUTPUT_LIMIT);
+            String output = result.stdout();
             int exitCode = result.exitCode();
             if (result.timedOut()) {
                 output = output + "\nprocess timeout after " + LEGACY_F2_TIMEOUT_SECONDS + " seconds";
                 logger.error("[F2] process timeout operation=legacy-f2 durationMs={}",
                         result.duration().toMillis());
+            }
+            if (exitCode != 0 && !result.stderr().isBlank()) {
+                output = output + "\n" + result.stderr();
             }
             LAST_F2_EXIT_CODE.set(exitCode);
             LAST_F2_DURATION_MS.set(System.currentTimeMillis() - startMs);
