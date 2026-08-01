@@ -8,7 +8,6 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Column;
 import jakarta.persistence.Table;
-import jakarta.persistence.TableGenerator;
 
 import com.flower.spirit.common.DataEntity;
 
@@ -23,8 +22,7 @@ public class CollectDataDetailEntity extends DataEntity<CollectDataDetailEntity>
 	
 	
 	@Id
-	@GeneratedValue(strategy = GenerationType.TABLE,generator="biz_collect_data_detail")
-	@TableGenerator(name = "biz_collect_data_detail", allocationSize = 1, table = "seq_common", pkColumnName = "seq_id", valueColumnName = "seq_count")
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 	
 	private Integer dataid;

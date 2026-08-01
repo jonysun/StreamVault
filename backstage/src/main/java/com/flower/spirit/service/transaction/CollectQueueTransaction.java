@@ -160,15 +160,18 @@ public class CollectQueueTransaction {
 		CollectRunFetchedItem.FetchWatermark safeWatermark = watermark == null
 				? new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, "") : watermark;
 		String incomingPublishTime = blankToNull(safeWatermark.publishTime());
+		int hasIncomingPublishTime = incomingPublishTime == null ? 0 : 1;
 		jdbcTemplate.update("UPDATE biz_collect_data SET last_successful_fetch_at = ?, "
-				+ "last_seen_publish_time = CASE WHEN ? IS NOT NULL AND (last_seen_publish_time IS NULL "
-				+ "OR CAST(? AS INTEGER) >= CAST(last_seen_publish_time AS INTEGER)) THEN ? "
+				+ "last_seen_publish_time = CASE WHEN ? = 1 "
+				+ "AND (NULLIF(TRIM(last_seen_publish_time), '') IS NULL "
+				+ "OR CAST(? AS INTEGER) >= CAST(NULLIF(TRIM(last_seen_publish_time), '') AS INTEGER)) THEN ? "
 				+ "ELSE last_seen_publish_time END, "
-				+ "last_seen_work_id = CASE WHEN ? IS NOT NULL AND (last_seen_publish_time IS NULL "
-				+ "OR CAST(? AS INTEGER) >= CAST(last_seen_publish_time AS INTEGER)) THEN ? "
+				+ "last_seen_work_id = CASE WHEN ? = 1 "
+				+ "AND (NULLIF(TRIM(last_seen_publish_time), '') IS NULL "
+				+ "OR CAST(? AS INTEGER) >= CAST(NULLIF(TRIM(last_seen_publish_time), '') AS INTEGER)) THEN ? "
 				+ "ELSE last_seen_work_id END WHERE id = ?", timestamp,
-				incomingPublishTime, incomingPublishTime, incomingPublishTime,
-				incomingPublishTime, incomingPublishTime, blankToNull(safeWatermark.workId()), taskId);
+				hasIncomingPublishTime, incomingPublishTime, incomingPublishTime,
+				hasIncomingPublishTime, incomingPublishTime, blankToNull(safeWatermark.workId()), taskId);
 		jdbcTemplate.update("UPDATE biz_collect_run SET fetched_count = ?, fetch_stop_reason = ?, fetch_warning = ?, "
 				+ "heartbeat_at = ? WHERE id = ? AND state = 'PROCESSING'", observedCount, stopReason,
 				warningFor(stopReason), timestamp, runId);

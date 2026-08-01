@@ -22,6 +22,8 @@ class SqliteSchemaPreflightTest {
 		jdbcTemplate.execute("CREATE TABLE biz_author_profile (id INTEGER NOT NULL PRIMARY KEY, authoruid TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_author_name_history (id INTEGER NOT NULL PRIMARY KEY, displayname TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_author_enrichment_job (id INTEGER NOT NULL PRIMARY KEY, state TEXT)");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_data_detail "
+				+ "(id INTEGER NOT NULL PRIMARY KEY, dataid INTEGER, videoid TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_database_maintenance_operation "
 				+ "(id INTEGER NOT NULL PRIMARY KEY, status TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_video (id INTEGER NOT NULL PRIMARY KEY, videoid TEXT)");
@@ -39,6 +41,7 @@ class SqliteSchemaPreflightTest {
 		jdbcTemplate.update("INSERT INTO biz_author_name_history(displayname) VALUES('first')");
 		jdbcTemplate.update("INSERT INTO biz_author_name_history(displayname) VALUES('second')");
 		jdbcTemplate.update("INSERT INTO biz_author_enrichment_job(state) VALUES('QUEUED')");
+		jdbcTemplate.update("INSERT INTO biz_collect_data_detail(dataid, videoid) VALUES(1, 'work-1')");
 		jdbcTemplate.update("INSERT INTO biz_database_maintenance_operation(status) VALUES('RUNNING')");
 		jdbcTemplate.update("INSERT INTO biz_video(videoid) VALUES('video-1')");
 		jdbcTemplate.update("INSERT INTO biz_graphic_content(videoid) VALUES('graphic-1')");
@@ -54,6 +57,7 @@ class SqliteSchemaPreflightTest {
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT seq_count FROM seq_common WHERE seq_id = 'biz_graphic_content'", Integer.class)).isEqualTo(202);
 		assertThat(jdbcTemplate.queryForObject("SELECT id FROM biz_author_enrichment_job", Integer.class)).isEqualTo(1);
+		assertThat(jdbcTemplate.queryForObject("SELECT id FROM biz_collect_data_detail", Integer.class)).isEqualTo(1);
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT id FROM biz_database_maintenance_operation", Integer.class)).isEqualTo(1);
 		assertThat(jdbcTemplate.queryForObject("SELECT id FROM biz_video", Integer.class)).isEqualTo(1);
@@ -95,6 +99,21 @@ class SqliteSchemaPreflightTest {
 				.hasMessageContaining("no automatic table rebuild");
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT type FROM pragma_table_info('biz_video') WHERE name = 'id'", String.class))
+				.isEqualTo("BIGINT");
+	}
+
+	@Test
+	void rejectsIncompatibleExistingCollectDetailIdentityWithoutChangingSchema() {
+		JdbcTemplate jdbcTemplate = jdbcTemplate("wrong-collect-detail-type.db");
+		jdbcTemplate.execute("CREATE TABLE biz_collect_data_detail (id BIGINT PRIMARY KEY, dataid INTEGER)");
+		SqliteSchemaPreflight preflight = new SqliteSchemaPreflight(jdbcTemplate);
+
+		assertThatThrownBy(preflight::verifyIdentitySchemas)
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("biz_collect_data_detail")
+				.hasMessageContaining("single id INTEGER PRIMARY KEY");
+		assertThat(jdbcTemplate.queryForObject(
+				"SELECT type FROM pragma_table_info('biz_collect_data_detail') WHERE name = 'id'", String.class))
 				.isEqualTo("BIGINT");
 	}
 
