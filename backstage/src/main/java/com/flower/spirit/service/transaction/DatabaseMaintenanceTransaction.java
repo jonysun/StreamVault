@@ -55,9 +55,7 @@ public class DatabaseMaintenanceTransaction {
 			statement.setTimestamp(8, timestamp);
 			return statement;
 		}, keys);
-		Number key = keys.getKey();
-		if (key == null) throw new IllegalStateException("No database maintenance operation ID returned");
-		return key.longValue();
+		return GeneratedIdExtractor.requireId(keys, "database maintenance operation");
 	}
 
 	@Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
