@@ -376,7 +376,7 @@ public class CollectQueueTransaction {
 			statement.setTimestamp(5, Timestamp.from(now));
 			return statement;
 		}, keys);
-		return requiredKey(keys, "collect run");
+		return GeneratedIdExtractor.requireId(keys, "collect run");
 	}
 
 	private long insertJob(String dedupeKey, String payload, Instant availableAt, int priority, int maxAttempts) {
@@ -397,7 +397,7 @@ public class CollectQueueTransaction {
 			statement.setTimestamp(8, timestamp);
 			return statement;
 		}, keys);
-		return requiredKey(keys, "collect job");
+		return GeneratedIdExtractor.requireId(keys, "collect job");
 	}
 
 	private void transitionInCurrentTransaction(long runId, CollectRunState expected, CollectRunState next,
@@ -457,12 +457,6 @@ public class CollectQueueTransaction {
 		payload.put("runId", runId);
 		payload.put("triggerType", triggerType.name());
 		return payload;
-	}
-
-	private long requiredKey(KeyHolder keys, String type) {
-		Number key = keys.getKey();
-		if (key == null) throw new IllegalStateException("No generated ID returned for " + type);
-		return key.longValue();
 	}
 
 	private String dedupeKey(int taskId) {
