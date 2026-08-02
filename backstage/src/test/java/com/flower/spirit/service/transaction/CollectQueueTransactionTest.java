@@ -247,6 +247,56 @@ class CollectQueueTransactionTest {
 	}
 
 	@Test
+	void blankStoredWatermarkAdvancesToNewestObservedWork() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-02T06:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout, last_seen_publish_time, "
+					+ "last_seen_work_id) VALUES(7, 'done', '9', '8', '', 'old-work')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 10, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING, now.plusSeconds(2));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(), "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("500", "new-work", 1, 0, "0"),
+					now.plusSeconds(3));
+
+			assertThat(jdbc.queryForObject("SELECT last_seen_publish_time FROM biz_collect_data WHERE id = 7",
+					String.class)).isEqualTo("500");
+			assertThat(jdbc.queryForObject("SELECT last_seen_work_id FROM biz_collect_data WHERE id = 7",
+					String.class)).isEqualTo("new-work");
+		}
+	}
+
+	@Test
+	void emptyIncomingWatermarkDoesNotOverwriteExistingWatermark() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-02T07:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout, last_seen_publish_time, "
+					+ "last_seen_work_id) VALUES(7, 'done', '9', '8', '300', 'known-work')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 10, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING, now.plusSeconds(2));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(), "EMPTY_PAGINATION",
+					new CollectRunFetchedItem.FetchWatermark("", "ignored-work", 1, 1, "0"),
+					now.plusSeconds(3));
+
+			assertThat(jdbc.queryForObject("SELECT last_seen_publish_time FROM biz_collect_data WHERE id = 7",
+					String.class)).isEqualTo("300");
+			assertThat(jdbc.queryForObject("SELECT last_seen_work_id FROM biz_collect_data WHERE id = 7",
+					String.class)).isEqualTo("known-work");
+			assertThat(jdbc.queryForObject("SELECT last_successful_fetch_at FROM biz_collect_data WHERE id = 7",
+					String.class)).isNotBlank();
+		}
+	}
+
+	@Test
 	void failedRunPreservesSuccessfulSummaryAndRetryUsesANewRun() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);

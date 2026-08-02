@@ -26,6 +26,7 @@ public class SqliteSchemaPreflight {
 			"biz_author_profile",
 			"biz_author_name_history",
 			"biz_author_enrichment_job",
+			"biz_collect_data_detail",
 			"biz_collect_run",
 			"biz_collect_run_item",
 			"biz_collect_run_event",
