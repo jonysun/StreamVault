@@ -11,6 +11,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -29,12 +30,13 @@ class CollectDownloadWorkerTest {
 		CollectDownloadService downloadService = mock(CollectDownloadService.class);
 		DatabaseWriteExecutor writes = passThroughWrites();
 		RuntimeControlService runtime = mock(RuntimeControlService.class);
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		CollectDownloadClaim first = claim(1, "work-1");
 		CollectDownloadClaim second = claim(2, "work-2");
 		when(runtime.mayRun(TaskCategory.MEDIA_DOWNLOAD)).thenReturn(PauseDecision.permit());
 		when(transaction.claimNext(anyString(), any())).thenReturn(first, second, null);
 		doThrow(new IllegalStateException("terminal state write failed")).when(downloadService).process(first);
-		CollectDownloadWorker worker = new CollectDownloadWorker(transaction, downloadService, writes, runtime,
+		CollectDownloadWorker worker = new CollectDownloadWorker(transaction, downloadService, writes, runtime, cookies,
 				10, 30, 1);
 
 		try {
@@ -54,10 +56,11 @@ class CollectDownloadWorkerTest {
 		CollectDownloadTransaction transaction = mock(CollectDownloadTransaction.class);
 		CollectDownloadService downloadService = mock(CollectDownloadService.class);
 		RuntimeControlService runtime = mock(RuntimeControlService.class);
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		when(runtime.mayRun(TaskCategory.MEDIA_DOWNLOAD))
 				.thenReturn(PauseDecision.paused("pause.download", "maintenance"));
 		CollectDownloadWorker worker = new CollectDownloadWorker(transaction, downloadService, passThroughWrites(),
-				runtime, 10, 30, 1);
+				runtime, cookies, 10, 30, 1);
 
 		try {
 			worker.processAvailable();
@@ -73,10 +76,11 @@ class CollectDownloadWorkerTest {
 		CollectDownloadTransaction transaction = mock(CollectDownloadTransaction.class);
 		CollectDownloadService downloadService = mock(CollectDownloadService.class);
 		RuntimeControlService runtime = mock(RuntimeControlService.class);
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		when(runtime.mayRun(TaskCategory.MEDIA_DOWNLOAD)).thenReturn(PauseDecision.permit());
 		when(transaction.claimNext(anyString(), any())).thenReturn(null);
 		CollectDownloadWorker worker = new CollectDownloadWorker(transaction, downloadService, passThroughWrites(),
-				runtime, 10, 30, 1);
+				runtime, cookies, 10, 30, 1);
 
 		try {
 			worker.processAvailable();
@@ -92,12 +96,13 @@ class CollectDownloadWorkerTest {
 		CollectDownloadTransaction transaction = mock(CollectDownloadTransaction.class);
 		CollectDownloadService downloadService = mock(CollectDownloadService.class);
 		RuntimeControlService runtime = mock(RuntimeControlService.class);
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		CollectDownloadClaim claim = claim(1, "work-1");
 		when(runtime.mayRun(TaskCategory.MEDIA_DOWNLOAD)).thenReturn(PauseDecision.permit(),
 				PauseDecision.permit(), PauseDecision.paused("pause.download", "maintenance"));
 		when(transaction.claimNext(anyString(), any())).thenReturn(claim);
 		CollectDownloadWorker worker = new CollectDownloadWorker(transaction, downloadService, passThroughWrites(),
-				runtime, 10, 30, 1);
+				runtime, cookies, 10, 30, 1);
 
 		try {
 			worker.processAvailable();
@@ -110,10 +115,55 @@ class CollectDownloadWorkerTest {
 	}
 
 	@Test
+	void globalCooldownStopsBeforeRecoveryOrClaim() {
+		CollectDownloadTransaction transaction = mock(CollectDownloadTransaction.class);
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		RuntimeControlService runtime = mock(RuntimeControlService.class);
+		when(runtime.mayRun(TaskCategory.MEDIA_DOWNLOAD)).thenReturn(PauseDecision.permit());
+		when(cookies.isDouyinGlobalCooldownActive()).thenReturn(true);
+		CollectDownloadWorker worker = new CollectDownloadWorker(transaction, mock(CollectDownloadService.class),
+				passThroughWrites(), runtime, cookies, 10, 30, 1);
+
+		try {
+			worker.processAvailable();
+			verify(transaction, never()).recoverStale(any(), any());
+			verify(transaction, never()).claimNext(anyString(), any());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void cooldownAfterClaimDefersWithoutDownloading() {
+		CollectDownloadTransaction transaction = mock(CollectDownloadTransaction.class);
+		CollectDownloadService downloadService = mock(CollectDownloadService.class);
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		RuntimeControlService runtime = mock(RuntimeControlService.class);
+		CollectDownloadClaim claim = claim(1, "work-1");
+		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
+		when(runtime.mayRun(TaskCategory.MEDIA_DOWNLOAD)).thenReturn(PauseDecision.permit());
+		when(cookies.isDouyinGlobalCooldownActive()).thenReturn(false, false, true);
+		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		when(transaction.claimNext(anyString(), any())).thenReturn(claim);
+		CollectDownloadWorker worker = new CollectDownloadWorker(transaction, downloadService, passThroughWrites(),
+				runtime, cookies, 10, 30, 1);
+
+		try {
+			worker.processAvailable();
+			verify(transaction).deferForCooldown(org.mockito.ArgumentMatchers.eq(claim),
+					org.mockito.ArgumentMatchers.eq(retryAt),
+					org.mockito.ArgumentMatchers.contains("cooldown"), any());
+			verify(downloadService, never()).process(any());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
 	void rejectedWakeDuringShutdownResetsRunningGuard() {
 		CollectDownloadWorker worker = new CollectDownloadWorker(mock(CollectDownloadTransaction.class),
 				mock(CollectDownloadService.class), passThroughWrites(), mock(RuntimeControlService.class),
-				10, 30, 1);
+				mock(PlatformCookieService.class), 10, 30, 1);
 		worker.shutdown();
 
 		worker.wakeUp();

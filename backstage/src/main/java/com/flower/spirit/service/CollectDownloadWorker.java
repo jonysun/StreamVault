@@ -1,5 +1,6 @@
 package com.flower.spirit.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -27,6 +28,7 @@ public class CollectDownloadWorker {
 	private final CollectDownloadService downloadService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final RuntimeControlService runtimeControlService;
+	private final PlatformCookieService platformCookieService;
 	@Autowired(required = false)
 	private ApplicationReadinessGate readinessGate;
 	private final int batchSize;
@@ -41,6 +43,7 @@ public class CollectDownloadWorker {
 
 	public CollectDownloadWorker(CollectDownloadTransaction transaction, CollectDownloadService downloadService,
 			DatabaseWriteExecutor databaseWriteExecutor, RuntimeControlService runtimeControlService,
+			PlatformCookieService platformCookieService,
 			@Value("${streamvault.collect.download-batch-size:10}") int batchSize,
 			@Value("${streamvault.collect.download-lock-timeout-minutes:30}") int lockTimeoutMinutes,
 			@Value("${streamvault.collect.download-workers:1}") int configuredWorkers) {
@@ -48,6 +51,7 @@ public class CollectDownloadWorker {
 		this.downloadService = downloadService;
 		this.databaseWriteExecutor = databaseWriteExecutor;
 		this.runtimeControlService = runtimeControlService;
+		this.platformCookieService = platformCookieService;
 		this.batchSize = Math.max(1, Math.min(batchSize, 100));
 		this.lockTimeoutMinutes = Math.max(1, lockTimeoutMinutes);
 		if (configuredWorkers != 1) {
@@ -77,15 +81,21 @@ public class CollectDownloadWorker {
 
 	public void processAvailable() {
 		if (!downloadDecision().allowed()) return;
+		if (platformCookieService.isDouyinGlobalCooldownActive()) return;
 		recoverStale();
 		for (int processed = 0; processed < batchSize; processed++) {
 			if (!downloadDecision().allowed()) return;
+			if (platformCookieService.isDouyinGlobalCooldownActive()) return;
 			CollectDownloadClaim claim = databaseWriteExecutor.execute("collect-download-claim",
 					() -> transaction.claimNext(workerId, Instant.now()));
 			if (claim == null) return;
 			PauseDecision afterClaim = downloadDecision();
 			if (!afterClaim.allowed()) {
 				deferPausedClaim(claim, afterClaim);
+				return;
+			}
+			if (platformCookieService.isDouyinGlobalCooldownActive()) {
+				deferCooldownClaim(claim);
 				return;
 			}
 			try {
@@ -134,6 +144,17 @@ public class CollectDownloadWorker {
 			return PauseDecision.paused("application.readiness", "Application is not ready");
 		}
 		return runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD);
+	}
+
+	private void deferCooldownClaim(CollectDownloadClaim claim) {
+		Instant availableAt = platformCookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5));
+		databaseWriteExecutor.execute("collect-download-defer-cooldown", () -> {
+			transaction.deferForCooldown(claim, availableAt,
+					"Douyin global cooldown started after download claim", Instant.now());
+			return null;
+		});
+		logger.warn("[CollectDownloadWorker] deferred by Douyin cooldown itemId={} runId={} workId={} availableAt={}",
+				claim.id(), claim.runId(), claim.workId(), availableAt);
 	}
 
 	private boolean applicationReady() {

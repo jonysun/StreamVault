@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.platform.DownloadResult;
+import com.flower.spirit.platform.DouyinGlobalCooldownException;
 import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.service.WorkIngestService.IngestResult;
@@ -50,6 +51,9 @@ public class CollectDownloadService {
 			Function<WorkMetadata, Path> directory = metadata -> outputDirectory(claim, metadata);
 			result = workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null);
 			validateResult(claim, result);
+		} catch (DouyinGlobalCooldownException cooldown) {
+			deferForCooldown(claim, cooldown, now);
+			return;
 		} catch (RuntimeException error) {
 			recordFailure(claim, classify(error), error, now);
 			return;
@@ -72,6 +76,15 @@ public class CollectDownloadService {
 					? classify(error) : new CollectDownloadException("DB_WRITE_FAILED", true, root, error);
 			recordFailure(claim, classified, error, now);
 		}
+	}
+
+	private void deferForCooldown(CollectDownloadClaim claim, DouyinGlobalCooldownException cooldown, Instant now) {
+		databaseWriteExecutor.execute("collect-download-douyin-cooldown", () -> {
+			transaction.deferForCooldown(claim, cooldown.retryAt(), cooldown.getMessage(), now);
+			return null;
+		});
+		logger.warn("[CollectDownload] deferred by Douyin cooldown itemId={} runId={} workId={} availableAt={}",
+				claim.id(), claim.runId(), claim.workId(), cooldown.retryAt());
 	}
 
 	private boolean shouldReplaceExisting(CollectDownloadClaim claim) {

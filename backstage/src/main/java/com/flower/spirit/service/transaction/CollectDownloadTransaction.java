@@ -129,6 +129,19 @@ public class CollectDownloadTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void deferForCooldown(CollectDownloadClaim claim, Instant availableAt, String reason, Instant now) {
+		Timestamp timestamp = Timestamp.from(now);
+		int updated = jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'RETRY_WAIT', "
+				+ "attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, "
+				+ "available_at = ?, locked_by = NULL, locked_at = NULL, finished_at = NULL, "
+				+ "error_code = 'DOUYIN_GLOBAL_COOLDOWN', error_message = ?, error_detail = NULL, updated_at = ? "
+				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'RUNNING' AND locked_by = ?",
+				Timestamp.from(availableAt), truncate(reason, 2048), timestamp, claim.id(), QUEUE_GENERATION,
+				claim.lockToken());
+		requireTransition(updated, claim.id(), "RETRY_WAIT");
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void complete(CollectDownloadClaim claim, IngestResult result, Instant now) {
 		Timestamp timestamp = Timestamp.from(now);
 		WorkMetadata metadata = result.metadata();
