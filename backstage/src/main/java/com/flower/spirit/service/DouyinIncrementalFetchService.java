@@ -92,12 +92,24 @@ public class DouyinIncrementalFetchService {
 				String errorCode = bounded(payload.getString("errorCode"), 128);
 				String message = bounded(payload.getString("message"), 1000);
 				if (errorCode == null || errorCode.isBlank() || message == null || message.isBlank()) return null;
-				return new CollectFetchException(errorCode, message);
+				return new CollectFetchException(errorCode, structuredMessage(message, payload));
 			} catch (RuntimeException ignored) {
 				return null;
 			}
 		}
 		return null;
+	}
+
+	private String structuredMessage(String message, JSONObject payload) {
+		Object diagnostics = payload.get("diagnostics");
+		if (!(diagnostics instanceof JSONObject object) || object.isEmpty()) {
+			return message;
+		}
+		String diagnosticText = bounded(JSON.toJSONString(object), 1000);
+		if (diagnosticText.isBlank()) {
+			return message;
+		}
+		return message + " diagnostics=" + diagnosticText;
 	}
 
 	private DouyinFetchEnvelope parseResult(String text) {

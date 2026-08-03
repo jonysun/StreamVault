@@ -110,25 +110,28 @@ public class CollectRunQueryService {
 
 	public List<Map<String, Object>> findRuns(int taskId, int limit, long afterId) {
 		int safeLimit = Math.min(Math.max(limit, 1), 100);
-		return jdbcTemplate.queryForList("SELECT id AS runId, collect_task_id AS taskId, trigger_type AS triggerType, "
-				+ "state, requested_limit AS requestedLimit, fetched_count AS fetchedCount, "
-				+ "planned_count AS plannedCount, inserted_count AS insertedCount, "
-				+ "skipped_existing_count AS skippedExistingCount, failed_item_count AS failedItemCount, "
-				+ "created_at AS queuedAt, started_at AS startedAt, heartbeat_at AS heartbeatAt, "
-				+ "finished_at AS finishedAt, error_code AS errorCode, error_message AS errorMessage "
+		return jdbcTemplate.queryForList("SELECT id AS \"runId\", collect_task_id AS \"taskId\", "
+				+ "trigger_type AS \"triggerType\", state, requested_limit AS \"requestedLimit\", "
+				+ "fetched_count AS \"fetchedCount\", planned_count AS \"plannedCount\", "
+				+ "inserted_count AS \"insertedCount\", skipped_existing_count AS \"skippedExistingCount\", "
+				+ "failed_item_count AS \"failedItemCount\", created_at AS \"queuedAt\", "
+				+ "started_at AS \"startedAt\", heartbeat_at AS \"heartbeatAt\", "
+				+ "finished_at AS \"finishedAt\", error_code AS \"errorCode\", error_message AS \"errorMessage\" "
 				+ "FROM biz_collect_run WHERE collect_task_id = ? AND (? = 0 OR id < ?) "
 				+ "ORDER BY id DESC LIMIT " + safeLimit, taskId, afterId, afterId).stream()
 				.map(this::withStateLabel).toList();
 	}
 
 	public Map<String, Object> findRun(long runId) {
-		List<Map<String, Object>> rows = jdbcTemplate.queryForList("SELECT r.id AS runId, r.collect_task_id AS taskId, "
-				+ "t.taskname AS taskName, r.trigger_type AS triggerType, r.state, r.requested_limit AS requestedLimit, "
-				+ "r.fetched_count AS fetchedCount, r.planned_count AS plannedCount, r.inserted_count AS insertedCount, "
-				+ "r.skipped_existing_count AS skippedExistingCount, r.failed_item_count AS failedItemCount, "
-				+ "r.created_at AS queuedAt, r.started_at AS startedAt, r.heartbeat_at AS heartbeatAt, "
-				+ "r.finished_at AS finishedAt, r.error_code AS errorCode, r.error_message AS errorMessage, "
-				+ "r.error_detail AS errorDetail FROM biz_collect_run r "
+		List<Map<String, Object>> rows = jdbcTemplate.queryForList("SELECT r.id AS \"runId\", "
+				+ "r.collect_task_id AS \"taskId\", t.taskname AS \"taskName\", "
+				+ "r.trigger_type AS \"triggerType\", r.state, r.requested_limit AS \"requestedLimit\", "
+				+ "r.fetched_count AS \"fetchedCount\", r.planned_count AS \"plannedCount\", "
+				+ "r.inserted_count AS \"insertedCount\", r.skipped_existing_count AS \"skippedExistingCount\", "
+				+ "r.failed_item_count AS \"failedItemCount\", r.created_at AS \"queuedAt\", "
+				+ "r.started_at AS \"startedAt\", r.heartbeat_at AS \"heartbeatAt\", "
+				+ "r.finished_at AS \"finishedAt\", r.error_code AS \"errorCode\", "
+				+ "r.error_message AS \"errorMessage\", r.error_detail AS \"errorDetail\" FROM biz_collect_run r "
 				+ "LEFT JOIN biz_collect_data t ON t.id = r.collect_task_id WHERE r.id = ?", runId);
 		if (rows.isEmpty()) return Map.of();
 		Map<String, Object> result = withStateLabel(rows.get(0));
@@ -142,13 +145,16 @@ public class CollectRunQueryService {
 
 	public List<Map<String, Object>> findItems(long runId, String decision, int limit, long afterId) {
 		int safeLimit = Math.min(Math.max(limit, 1), 500);
-		String sql = "SELECT id, ordinal, platform_key AS platformKey, work_id AS workId, author_uid AS authorUid, "
-				+ "nickname_snapshot AS nicknameSnapshot, title_snapshot AS titleSnapshot, publish_time AS publishTime, "
-				+ "media_type AS mediaType, decision, process_state AS processState, error_code AS errorCode, "
-				+ "error_message AS errorMessage, error_detail AS errorDetail, attempt_count AS attemptCount, "
-				+ "max_attempts AS maxAttempts, available_at AS availableAt, locked_by AS lockedBy, "
-				+ "locked_at AS lockedAt, started_at AS startedAt, finished_at AS finishedAt, "
-				+ "queue_generation AS queueGeneration, created_at AS createdAt, updated_at AS updatedAt "
+		String sql = "SELECT id, ordinal, platform_key AS \"platformKey\", work_id AS \"workId\", "
+				+ "author_uid AS \"authorUid\", nickname_snapshot AS \"nicknameSnapshot\", "
+				+ "title_snapshot AS \"titleSnapshot\", publish_time AS \"publishTime\", "
+				+ "media_type AS \"mediaType\", decision, process_state AS \"processState\", "
+				+ "error_code AS \"errorCode\", error_message AS \"errorMessage\", "
+				+ "error_detail AS \"errorDetail\", attempt_count AS \"attemptCount\", "
+				+ "max_attempts AS \"maxAttempts\", available_at AS \"availableAt\", "
+				+ "locked_by AS \"lockedBy\", locked_at AS \"lockedAt\", started_at AS \"startedAt\", "
+				+ "finished_at AS \"finishedAt\", queue_generation AS \"queueGeneration\", "
+				+ "created_at AS \"createdAt\", updated_at AS \"updatedAt\" "
 				+ "FROM biz_collect_run_item WHERE run_id = ? AND id > ?";
 		boolean plan = "plan".equalsIgnoreCase(decision);
 		if (plan) sql += " AND (UPPER(decision) = 'NEW' OR UPPER(decision) LIKE '%RETRY%' "
@@ -165,7 +171,6 @@ public class CollectRunQueryService {
 		Timestamp now = Timestamp.from(Instant.now());
 		String taskFilter = taskId == null ? "" : " AND r.collect_task_id = ?";
 		Object[] taskArgs = taskId == null ? new Object[0] : new Object[] { taskId };
-		Object[] eligibleArgs = taskId == null ? new Object[] { now } : new Object[] { now, taskId };
 		List<Map<String, Object>> countRows = jdbcTemplate.queryForList(
 				"SELECT i.process_state AS processState, COUNT(*) AS itemCount FROM biz_collect_run_item i "
 						+ "JOIN biz_collect_run r ON r.id = i.run_id WHERE i.queue_generation = 'FETCH_DOWNLOAD_V1'"
@@ -176,32 +181,54 @@ public class CollectRunQueryService {
 			Object count = row.get("itemCount");
 			counts.put(String.valueOf(row.get("processState")), count instanceof Number n ? n.longValue() : 0L);
 		}
-		String itemsSql = "SELECT i.id AS itemId, i.run_id AS runId, r.collect_task_id AS taskId, "
-				+ "t.taskname AS taskName, i.work_id AS workId, i.media_type AS mediaType, i.decision, "
-				+ "i.process_state AS processState, i.attempt_count AS attemptCount, i.max_attempts AS maxAttempts, "
-				+ "i.available_at AS availableAt, i.locked_by AS lockedBy, i.locked_at AS lockedAt, "
-				+ "i.error_code AS errorCode, i.error_message AS errorMessage, i.created_at AS createdAt "
+		String select = "SELECT i.id AS \"itemId\", i.run_id AS \"runId\", "
+				+ "r.collect_task_id AS \"taskId\", t.taskname AS \"taskName\", i.work_id AS \"workId\", "
+				+ "i.media_type AS \"mediaType\", i.decision, i.process_state AS \"processState\", "
+				+ "i.attempt_count AS \"attemptCount\", i.max_attempts AS \"maxAttempts\", "
+				+ "i.available_at AS \"availableAt\", i.locked_by AS \"lockedBy\", "
+				+ "i.locked_at AS \"lockedAt\", i.started_at AS \"startedAt\", "
+				+ "i.error_code AS \"errorCode\", i.error_message AS \"errorMessage\", "
+				+ "i.created_at AS \"createdAt\", "
+				+ "CASE WHEN i.available_at IS NULL OR i.available_at <= ? THEN 1 ELSE 0 END AS claimable "
 				+ "FROM biz_collect_run_item i JOIN biz_collect_run r ON r.id = i.run_id "
-				+ "LEFT JOIN biz_collect_data t ON t.id = r.collect_task_id "
-				+ "WHERE i.queue_generation = 'FETCH_DOWNLOAD_V1' "
-				+ "AND i.process_state IN ('QUEUED','RETRY_WAIT') "
-				+ "AND i.attempt_count < i.max_attempts "
-				+ "AND (i.available_at IS NULL OR i.available_at <= ?)" + taskFilter
-				+ " ORDER BY CASE WHEN i.decision LIKE 'MANUAL_RETRY%' THEN 0 ELSE 1 END, "
-				+ "i.ordinal ASC, i.available_at ASC, i.created_at ASC, i.id ASC LIMIT " + safeLimit;
-		List<Map<String, Object>> items = jdbcTemplate.queryForList(itemsSql, eligibleArgs);
+				+ "LEFT JOIN biz_collect_data t ON t.id = r.collect_task_id ";
+		String activeSql = select + "WHERE i.queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND i.process_state = 'RUNNING'" + taskFilter
+				+ " ORDER BY i.started_at ASC, i.id ASC LIMIT " + safeLimit;
+		Object[] activeArgs = taskId == null ? new Object[] { now } : new Object[] { now, taskId };
+		List<Map<String, Object>> runningItems = jdbcTemplate.queryForList(activeSql, activeArgs);
+		String waitingSql = select + "WHERE i.queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND i.process_state IN ('QUEUED','RETRY_WAIT') AND i.attempt_count < i.max_attempts" + taskFilter
+				+ " ORDER BY CASE WHEN i.available_at IS NULL OR i.available_at <= ? THEN 0 ELSE 1 END, "
+				+ "CASE WHEN i.decision LIKE 'MANUAL_RETRY%' THEN 0 ELSE 1 END, i.ordinal ASC, "
+				+ "i.available_at ASC, i.created_at ASC, i.id ASC LIMIT " + safeLimit;
+		Object[] waitingArgs = taskId == null ? new Object[] { now, now } : new Object[] { now, taskId, now };
+		List<Map<String, Object>> waitingItems = jdbcTemplate.queryForList(waitingSql, waitingArgs);
+		for (int index = 0; index < waitingItems.size(); index++) {
+			Map<String, Object> item = waitingItems.get(index);
+			item.put("queuePosition", index + 1);
+			item.put("claimable", numberValue(item.get("claimable")) == 1L);
+		}
+		List<Map<String, Object>> items = waitingItems.stream()
+				.filter(item -> Boolean.TRUE.equals(item.get("claimable"))).toList();
 		Map<String, Object> result = new LinkedHashMap<>();
 		result.put("counts", counts);
+		result.put("runningItems", runningItems);
+		result.put("waitingItems", waitingItems);
 		result.put("items", items);
 		result.put("oldestQueuedAt", scalarTime("SELECT MIN(i.created_at) FROM biz_collect_run_item i "
 				+ "JOIN biz_collect_run r ON r.id=i.run_id WHERE i.queue_generation='FETCH_DOWNLOAD_V1' "
 				+ "AND i.process_state IN ('QUEUED','RETRY_WAIT') "
 				+ "AND i.attempt_count < i.max_attempts "
-				+ "AND (i.available_at IS NULL OR i.available_at <= ?)" + taskFilter, eligibleArgs));
+				+ "AND (i.available_at IS NULL OR i.available_at <= ?)" + taskFilter, activeArgs));
 		result.put("nextRetryAt", scalarTime("SELECT MIN(i.available_at) FROM biz_collect_run_item i "
 				+ "JOIN biz_collect_run r ON r.id=i.run_id WHERE i.queue_generation='FETCH_DOWNLOAD_V1' "
 				+ "AND i.process_state='RETRY_WAIT' AND i.attempt_count < i.max_attempts" + taskFilter, taskArgs));
 		return result;
+	}
+
+	private long numberValue(Object value) {
+		return value instanceof Number number ? number.longValue() : 0L;
 	}
 
 	private Object scalarTime(String sql, Object[] args) {
@@ -275,8 +302,9 @@ public class CollectRunQueryService {
 
 	public List<Map<String, Object>> findEvents(long runId, int afterSequence, int limit) {
 		int safeLimit = Math.min(Math.max(limit, 1), 500);
-		return jdbcTemplate.queryForList("SELECT sequence, level, stage, event_code AS eventCode, message, work_id AS workId, "
-				+ "created_at AS createdAt FROM biz_collect_run_event WHERE run_id = ? AND sequence > ? "
+		return jdbcTemplate.queryForList("SELECT sequence, level, stage, event_code AS \"eventCode\", message, "
+				+ "work_id AS \"workId\", created_at AS \"createdAt\" "
+				+ "FROM biz_collect_run_event WHERE run_id = ? AND sequence > ? "
 				+ "ORDER BY sequence ASC LIMIT " + safeLimit, runId, afterSequence);
 	}
 

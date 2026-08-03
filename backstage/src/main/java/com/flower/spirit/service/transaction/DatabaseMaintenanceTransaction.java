@@ -198,10 +198,10 @@ public class DatabaseMaintenanceTransaction {
 	}
 
 	private String selectSql() {
-		return "SELECT id AS operationId, db_fingerprint AS dbFingerprint, operations, status, "
-				+ "current_operation AS currentOperation, last_processed_id AS lastProcessedId, "
-				+ "processed_rows AS processedRows, estimated_rows AS estimatedRows, batch_size AS batchSize, "
-				+ "error_message AS errorMessage, created_at AS createdAt, updated_at AS updatedAt "
+		return "SELECT id AS \"operationId\", db_fingerprint AS \"dbFingerprint\", operations, status, "
+				+ "current_operation AS \"currentOperation\", last_processed_id AS \"lastProcessedId\", "
+				+ "processed_rows AS \"processedRows\", estimated_rows AS \"estimatedRows\", batch_size AS \"batchSize\", "
+				+ "error_message AS \"errorMessage\", created_at AS \"createdAt\", updated_at AS \"updatedAt\" "
 				+ "FROM biz_database_maintenance_operation";
 	}
 

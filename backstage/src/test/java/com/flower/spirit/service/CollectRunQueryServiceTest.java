@@ -104,6 +104,10 @@ class CollectRunQueryServiceTest {
 		assertThat((Map<String, Long>) queue.get("counts")).containsEntry("QUEUED", 1L)
 				.containsEntry("RUNNING", 1L).containsEntry("RETRY_WAIT", 3L)
 				.doesNotContainKey("COMPLETED");
+		assertThat((List<Map<String, Object>>) queue.get("runningItems"))
+				.extracting(item -> item.get("workId")).containsExactly("running");
+		assertThat((List<Map<String, Object>>) queue.get("waitingItems"))
+				.extracting(item -> item.get("workId")).containsExactly("manual", "normal", "future");
 		assertThat((List<Map<String, Object>>) queue.get("items"))
 				.extracting(item -> item.get("workId")).containsExactly("manual", "normal");
 		assertThat(queue.get("oldestQueuedAt")).isNotNull();

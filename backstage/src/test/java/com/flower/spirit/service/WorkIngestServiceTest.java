@@ -76,6 +76,8 @@ class WorkIngestServiceTest {
 	@Test
 	void completedIngestPersistsAndRunsPostProcessingOnce() {
 		stubAdapterPipeline();
+		PlatformWorkAdapter.OperationScope scope = org.mockito.Mockito.mock(PlatformWorkAdapter.OperationScope.class);
+		when(adapter.openOperationScope("work_ingest")).thenReturn(scope);
 		ProcessHistoryEntity history = new ProcessHistoryEntity();
 		history.setId(10);
 		when(processHistoryService.beginPlatformProcess(anyString(), anyString(), anyString())).thenReturn(history);
@@ -96,6 +98,7 @@ class WorkIngestServiceTest {
 		verify(postProcessingService).complete(any(), any(WorkMetadata.class), any(PersistenceResult.class), eq(true));
 		verify(processHistoryService).recordPlatformStage(10, "PERSISTING");
 		verify(processHistoryService).recordPlatformStage(10, "POST_PROCESSING");
+		verify(scope).close();
 	}
 
 	@Test
@@ -119,6 +122,8 @@ class WorkIngestServiceTest {
 	@Test
 	void persistenceFailureRollsBackPromotedMedia() {
 		stubAdapterPipeline();
+		PlatformWorkAdapter.OperationScope scope = org.mockito.Mockito.mock(PlatformWorkAdapter.OperationScope.class);
+		when(adapter.openOperationScope("work_ingest")).thenReturn(scope);
 		DownloadOutcome download = DownloadOutcome.completed(List.of(new WorkMediaResource(0,
 				WorkMediaResource.Type.VIDEO, null, Path.of("C:/media/work-1/video.mp4"), "mp4", Map.of())),
 				Path.of("C:/media/work-1"));
@@ -130,6 +135,7 @@ class WorkIngestServiceTest {
 
 		verify(mediaDownloadService).rollback(download);
 		verify(mediaDownloadService, never()).commit(any());
+		verify(scope).close();
 	}
 
 	@Test

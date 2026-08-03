@@ -32,6 +32,7 @@ public class PlatformCookieService {
 
 	private final Map<String, AtomicInteger> cursors = new ConcurrentHashMap<>();
 	private final Map<String, Long> riskUntil = new ConcurrentHashMap<>();
+	private final Map<String, Long> successAt = new ConcurrentHashMap<>();
 	private final AtomicLong douyinGlobalRiskStartedAtMs = new AtomicLong(0);
 
 	@Autowired(required = false)
@@ -98,6 +99,7 @@ public class PlatformCookieService {
 		String safePlatform = canonicalPlatform(platform);
 		long now = System.currentTimeMillis();
 		if (DOUYIN_PLATFORM_KEY.equals(safePlatform)) {
+			successAt.remove(riskKey(safePlatform, cookie));
 			douyinGlobalRiskStartedAtMs.accumulateAndGet(now, Math::max);
 			long cooldownMs = douyinRiskCooldownMillis();
 			logger.warn("platform global risk cooldown platform={} reason={} cooldownMs={}", safePlatform, reason,
@@ -105,13 +107,22 @@ public class PlatformCookieService {
 			return;
 		}
 		purgeExpiredRisks(now);
+		successAt.remove(riskKey(safePlatform, cookie));
 		riskUntil.put(riskKey(safePlatform, cookie), now + COOKIE_RISK_COOLDOWN_MS);
 		logger.warn("platform cookie risk platform={} reason={} cooldownMs={}", safePlatform, reason,
 				COOKIE_RISK_COOLDOWN_MS);
 	}
 
 	public void reportSuccess(String platform, String cookie) {
-		// A successful in-flight request must not cancel a newer risk cooldown.
+		if (isBlank(platform) || isBlank(cookie)) return;
+		successAt.put(riskKey(canonicalPlatform(platform), cookie), System.currentTimeMillis());
+		// Recording evidence must not cancel a newer risk cooldown.
+	}
+
+	public boolean hasRecentSuccess(String platform, String cookie, Duration maxAge) {
+		if (isBlank(platform) || isBlank(cookie) || maxAge == null || maxAge.isNegative()) return false;
+		Long timestamp = successAt.get(riskKey(canonicalPlatform(platform), cookie));
+		return timestamp != null && System.currentTimeMillis() - timestamp <= maxAge.toMillis();
 	}
 
 	public boolean isRiskSignal(String text) {

@@ -981,6 +981,7 @@
         var lower = (status || 'unknown').toLowerCase();
         if(lower === 'valid') return 'cookie-status-valid';
         if(lower === 'degraded') return 'cookie-status-degraded';
+		if(lower === 'indeterminate') return 'cookie-status-degraded';
         if(lower === 'expired') return 'cookie-status-expired';
         if(lower === 'incomplete') return 'cookie-status-incomplete';
         if(lower === 'error') return 'cookie-status-error';

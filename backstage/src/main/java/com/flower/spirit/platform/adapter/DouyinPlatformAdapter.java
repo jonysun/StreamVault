@@ -35,6 +35,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	private final PlatformResolver resolver;
 	private final PlatformCookieService cookieService;
 	private final Gateway gateway;
+	private final ThreadLocal<String> operationCookie = new ThreadLocal<>();
 
 	@Autowired
 	public DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService) {
@@ -60,6 +61,15 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	}
 
 	@Override
+	public OperationScope openOperationScope(String purpose) {
+		String previous = operationCookie.get();
+		if (previous != null && !previous.isBlank()) return OperationScope.NOOP;
+		String cookie = requireCookie(purpose == null || purpose.isBlank() ? "work_operation" : purpose);
+		operationCookie.set(cookie);
+		return operationCookie::remove;
+	}
+
+	@Override
 	public WorkMetadata parse(WorkParseRequest request) {
 		String cookie = requireCookie("single_work_parse");
 		try {
@@ -73,7 +83,10 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			cookieService.reportSuccess("抖音", cookie);
 			return metadata;
 		} catch (IOException e) {
-			reportRisk(cookie, e.getMessage(), "parse request failed");
+			if (reportRisk(cookie, e.getMessage(), "parse request failed")) {
+				throw new DouyinGlobalCooldownException("Douyin authentication or risk control rejected parsing",
+						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+			}
 			throw new WorkMetadataValidationException("Douyin parsing failed", e);
 		} catch (WorkMetadataValidationException e) {
 			reportRisk(cookie, e.getMessage(), "parse response rejected");
@@ -110,7 +123,12 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 					Path local = gateway.download(coverSource, cover, cookie);
 					downloaded.add(new WorkMediaResource(coverSource.getOrder(), WorkMediaResource.Type.IMAGE,
 							metadata.getCoverUrl(), local, "jpg", coverSource.getRequestHeaders()));
-				} catch (IOException ignored) {
+				} catch (IOException error) {
+					if (reportRisk(cookie, error.getMessage(), "cover download request failed")) {
+						throw new DouyinGlobalCooldownException(
+								"Douyin authentication or risk control rejected cover download",
+								cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+					}
 				}
 			}
 			if (downloaded.isEmpty()) {
@@ -119,7 +137,10 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			cookieService.reportSuccess("抖音", cookie);
 			return DownloadResult.completed(downloaded);
 		} catch (IOException e) {
-			reportRisk(cookie, e.getMessage(), "download request failed");
+			if (reportRisk(cookie, e.getMessage(), "download request failed")) {
+				throw new DouyinGlobalCooldownException("Douyin authentication or risk control rejected download",
+						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+			}
 			throw new WorkMetadataValidationException("Douyin download failed", e);
 		}
 	}
@@ -245,6 +266,8 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	}
 
 	private String requireCookie(String purpose) {
+		String leased = operationCookie.get();
+		if (leased != null && !leased.isBlank()) return leased;
 		if (!cookieService.hasConfiguredDouyinCookie()) {
 			throw new WorkMetadataValidationException("Douyin cookie is not configured");
 		}
@@ -259,10 +282,12 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		return cookie;
 	}
 
-	private void reportRisk(String cookie, String signal, String fallback) {
+	private boolean reportRisk(String cookie, String signal, String fallback) {
 		if (cookieService.isRiskSignal(signal)) {
 			cookieService.reportRisk("抖音", cookie, fallback);
+			return true;
 		}
+		return false;
 	}
 
 	private String extension(WorkMediaResource source) {

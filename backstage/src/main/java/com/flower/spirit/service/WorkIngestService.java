@@ -49,7 +49,9 @@ public class WorkIngestService {
 	public WorkMetadata preview(String input) {
 		PlatformResolver.Resolution resolution = resolver.resolveRequired(input);
 		PlatformWorkAdapter adapter = adapterRegistry.requireByPlatformKey(resolution.platform().getKey());
-		return normalizer.normalize(adapter.parse(new WorkParseRequest(input, resolution.url(), true)));
+		try (PlatformWorkAdapter.OperationScope ignored = adapter.openOperationScope("work_preview")) {
+			return normalizer.normalize(adapter.parse(new WorkParseRequest(input, resolution.url(), true)));
+		}
 	}
 
 	public IngestResult ingest(String input, Path outputDirectory, boolean replaceExisting) {
@@ -67,18 +69,20 @@ public class WorkIngestService {
 		try {
 			PlatformResolver.Resolution resolution = resolver.resolveRequired(input);
 			PlatformWorkAdapter adapter = adapterRegistry.requireByPlatformKey(resolution.platform().getKey());
-			stage = "PARSING";
-			processHistoryService.recordPlatformStage(historyId, stage);
-			List<WorkMetadata> works = adapter.parseAll(new WorkParseRequest(input, resolution.url(), false)).stream()
-					.map(normalizer::normalize).toList();
-			if (works.isEmpty()) throw new IllegalArgumentException("adapter returned no works");
-			stage = "INGESTING";
-			IngestResult result = null;
-			for (int i = 0; i < works.size(); i++) {
-				result = ingestParsed(adapter, works.get(i), outputDirectoryResolver, replaceExisting, historyId,
-						i == works.size() - 1);
+			try (PlatformWorkAdapter.OperationScope ignored = adapter.openOperationScope("work_ingest")) {
+				stage = "PARSING";
+				processHistoryService.recordPlatformStage(historyId, stage);
+				List<WorkMetadata> works = adapter.parseAll(new WorkParseRequest(input, resolution.url(), false)).stream()
+						.map(normalizer::normalize).toList();
+				if (works.isEmpty()) throw new IllegalArgumentException("adapter returned no works");
+				stage = "INGESTING";
+				IngestResult result = null;
+				for (int i = 0; i < works.size(); i++) {
+					result = ingestParsed(adapter, works.get(i), outputDirectoryResolver, replaceExisting, historyId,
+							i == works.size() - 1);
+				}
+				return result;
 			}
-			return result;
 		} catch (RuntimeException e) {
 			processHistoryService.failPlatformProcess(historyId, stage, e.getMessage());
 			throw e;

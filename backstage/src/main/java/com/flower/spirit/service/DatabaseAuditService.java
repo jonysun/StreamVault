@@ -37,25 +37,25 @@ public class DatabaseAuditService {
 
 	public Map<String, Object> audit() {
 		Map<String, Object> video = new LinkedHashMap<>(jdbcTemplate.queryForMap(
-				"SELECT COUNT(*) AS rowsTotal, "
-						+ "SUM(CASE WHEN jsonData IS NOT NULL AND jsonData <> '' THEN 1 ELSE 0 END) AS jsonRows, "
-						+ "SUM(CASE WHEN videoinfo IS NOT NULL AND videoinfo <> '' THEN 1 ELSE 0 END) AS videoInfoRows, "
-						+ "SUM(CASE WHEN jsonData = videoinfo THEN 1 ELSE 0 END) AS exactEqualRows, "
-						+ "SUM(CASE WHEN jsonData = videoinfo THEN LENGTH(videoinfo) ELSE 0 END) AS exactDuplicateVideoInfoChars, "
-						+ "SUM(CASE WHEN jsonData IS NOT NULL AND videoinfo IS NOT NULL AND jsonData <> videoinfo THEN 1 ELSE 0 END) AS differentRows, "
-						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') <> '' AND COALESCE(videoinfo, '') = '' THEN 1 ELSE 0 END), 0) AS jsonOnlyRows, "
-						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') = '' AND COALESCE(videoinfo, '') <> '' THEN 1 ELSE 0 END), 0) AS videoInfoOnlyRows, "
-						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') = '' AND COALESCE(videoinfo, '') = '' THEN 1 ELSE 0 END), 0) AS emptyRawRows, "
-						+ "SUM(LENGTH(COALESCE(jsonData, ''))) AS jsonChars, "
-						+ "SUM(LENGTH(COALESCE(videoinfo, ''))) AS videoInfoChars, MAX(id) AS maxId FROM biz_video"));
+				"SELECT COUNT(*) AS \"rowsTotal\", "
+						+ "SUM(CASE WHEN jsonData IS NOT NULL AND jsonData <> '' THEN 1 ELSE 0 END) AS \"jsonRows\", "
+						+ "SUM(CASE WHEN videoinfo IS NOT NULL AND videoinfo <> '' THEN 1 ELSE 0 END) AS \"videoInfoRows\", "
+						+ "SUM(CASE WHEN jsonData = videoinfo THEN 1 ELSE 0 END) AS \"exactEqualRows\", "
+						+ "SUM(CASE WHEN jsonData = videoinfo THEN LENGTH(videoinfo) ELSE 0 END) AS \"exactDuplicateVideoInfoChars\", "
+						+ "SUM(CASE WHEN jsonData IS NOT NULL AND videoinfo IS NOT NULL AND jsonData <> videoinfo THEN 1 ELSE 0 END) AS \"differentRows\", "
+						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') <> '' AND COALESCE(videoinfo, '') = '' THEN 1 ELSE 0 END), 0) AS \"jsonOnlyRows\", "
+						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') = '' AND COALESCE(videoinfo, '') <> '' THEN 1 ELSE 0 END), 0) AS \"videoInfoOnlyRows\", "
+						+ "COALESCE(SUM(CASE WHEN COALESCE(jsonData, '') = '' AND COALESCE(videoinfo, '') = '' THEN 1 ELSE 0 END), 0) AS \"emptyRawRows\", "
+						+ "SUM(LENGTH(COALESCE(jsonData, ''))) AS \"jsonChars\", "
+						+ "SUM(LENGTH(COALESCE(videoinfo, ''))) AS \"videoInfoChars\", MAX(id) AS \"maxId\" FROM biz_video"));
 		Map<String, Object> graphic = new LinkedHashMap<>(jdbcTemplate.queryForMap(
-				"SELECT COUNT(*) AS rowsTotal, SUM(LENGTH(COALESCE(jsonData, ''))) AS jsonChars, "
-						+ "MAX(LENGTH(COALESCE(jsonData, ''))) AS maxJsonChars, MAX(id) AS maxId FROM biz_graphic_content"));
+				"SELECT COUNT(*) AS \"rowsTotal\", SUM(LENGTH(COALESCE(jsonData, ''))) AS \"jsonChars\", "
+						+ "MAX(LENGTH(COALESCE(jsonData, ''))) AS \"maxJsonChars\", MAX(id) AS \"maxId\" FROM biz_graphic_content"));
 		Map<String, Object> snapshots = new LinkedHashMap<>(jdbcTemplate.queryForMap(
-				"SELECT COUNT(*) AS taskRows, SUM(LENGTH(COALESCE(lastfetchsnapshot, ''))) AS fetchChars, "
-						+ "MAX(LENGTH(COALESCE(lastfetchsnapshot, ''))) AS fetchMaxChars, "
-						+ "SUM(LENGTH(COALESCE(lastplanitems, ''))) AS planChars, "
-						+ "MAX(LENGTH(COALESCE(lastplanitems, ''))) AS planMaxChars, MAX(id) AS maxId FROM biz_collect_data"));
+				"SELECT COUNT(*) AS \"taskRows\", SUM(LENGTH(COALESCE(lastfetchsnapshot, ''))) AS \"fetchChars\", "
+						+ "MAX(LENGTH(COALESCE(lastfetchsnapshot, ''))) AS \"fetchMaxChars\", "
+						+ "SUM(LENGTH(COALESCE(lastplanitems, ''))) AS \"planChars\", "
+						+ "MAX(LENGTH(COALESCE(lastplanitems, ''))) AS \"planMaxChars\", MAX(id) AS \"maxId\" FROM biz_collect_data"));
 		Map<String, Object> workDuplicates = new LinkedHashMap<>();
 		workDuplicates.put("video", duplicateWorks("biz_video", "videoaddr"));
 		workDuplicates.put("graphic", duplicateWorks("biz_graphic_content", "images"));
@@ -88,14 +88,14 @@ public class DatabaseAuditService {
 		String distinctReferences = "COUNT(DISTINCT CASE WHEN TRIM(COALESCE(" + mediaReferenceColumn
 				+ ", '')) <> '' THEN " + mediaReferenceColumn + " END)";
 		Map<String, Object> result = new LinkedHashMap<>(jdbcTemplate.queryForMap(
-				"SELECT COUNT(*) AS candidateGroups, COALESCE(SUM(rowCount), 0) AS candidateRows, "
-						+ "COALESCE(SUM(CASE WHEN distinctMediaReferences > 1 THEN 1 ELSE 0 END), 0) "
-						+ "AS mediaReferenceConflictGroups FROM (SELECT COUNT(*) AS rowCount, "
-						+ distinctReferences + " AS distinctMediaReferences FROM " + table + " WHERE " + eligible
+				"SELECT COUNT(*) AS \"candidateGroups\", COALESCE(SUM(\"rowCount\"), 0) AS \"candidateRows\", "
+						+ "COALESCE(SUM(CASE WHEN \"distinctMediaReferences\" > 1 THEN 1 ELSE 0 END), 0) "
+						+ "AS \"mediaReferenceConflictGroups\" FROM (SELECT COUNT(*) AS \"rowCount\", "
+						+ distinctReferences + " AS \"distinctMediaReferences\" FROM " + table + " WHERE " + eligible
 						+ " GROUP BY TRIM(platformkey), TRIM(videoid) HAVING COUNT(*) > 1) duplicateGroups"));
 		List<Map<String, Object>> samples = jdbcTemplate.query(
-				"SELECT TRIM(platformkey) AS platformKey, TRIM(videoid) AS workId, COUNT(*) AS rowCount, "
-						+ distinctReferences + " AS distinctMediaReferences FROM " + table + " WHERE " + eligible
+				"SELECT TRIM(platformkey) AS \"platformKey\", TRIM(videoid) AS \"workId\", COUNT(*) AS \"rowCount\", "
+						+ distinctReferences + " AS \"distinctMediaReferences\" FROM " + table + " WHERE " + eligible
 						+ " GROUP BY TRIM(platformkey), TRIM(videoid) HAVING COUNT(*) > 1 "
 						+ "ORDER BY TRIM(platformkey), TRIM(videoid) LIMIT " + DUPLICATE_SAMPLE_LIMIT,
 				(row, index) -> {
