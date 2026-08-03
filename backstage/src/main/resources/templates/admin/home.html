@@ -269,6 +269,92 @@
             font-size: 0.85rem;
         }
 
+        .runtime-pipeline {
+            margin-top: 18px;
+            padding-top: 16px;
+            border-top: 1px solid var(--gray-200);
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px;
+        }
+
+        .runtime-pipeline-section {
+            min-width: 0;
+        }
+
+        .runtime-pipeline-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+            color: var(--gray-900);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .runtime-pipeline-list {
+            display: grid;
+            gap: 6px;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
+        .runtime-pipeline-row {
+            min-width: 0;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .runtime-pipeline-row:last-child {
+            border-bottom: 0;
+        }
+
+        .runtime-row-title,
+        .runtime-row-meta {
+            overflow-wrap: anywhere;
+        }
+
+        .runtime-row-title {
+            color: var(--gray-900);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .runtime-row-meta {
+            margin-top: 3px;
+            color: var(--gray-600);
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+        .runtime-progress-track {
+            height: 5px;
+            margin-top: 7px;
+            overflow: hidden;
+            border-radius: 3px;
+            background: var(--gray-200);
+        }
+
+        .runtime-progress-value {
+            height: 100%;
+            background: var(--success-color);
+        }
+
+        .runtime-stale {
+            opacity: 0.68;
+        }
+
+        @media (max-width: 1100px) {
+            .runtime-pipeline {
+                grid-template-columns: 1fr;
+            }
+
+            .runtime-pipeline-list {
+                max-height: 240px;
+            }
+        }
+
         .platform-item {
             display: flex;
             justify-content: space-between;
@@ -836,6 +922,7 @@
                                         <i class="mdi mdi-pause-circle-outline"></i>
                                     </div>
                                     <h3 class="platform-title">后台任务控制</h3>
+                                    <span class="badge badge-warning" id="taskStatusStale" style="display:none; margin-left:auto;">数据可能已过期</span>
                                 </div>
                                 <div class="task-control-actions" id="taskControlActions">
                                     <button type="button" class="btn btn-outline-danger task-toggle-btn" data-scope="all"><i class="mdi mdi-pause-octagon-outline"></i><span>暂停全部</span></button>
@@ -845,6 +932,37 @@
                                 </div>
                                 <div class="task-status-grid" id="taskStatusGrid">
                                     <div class="task-status-block">正在加载后台任务状态...</div>
+                                </div>
+                                <div class="runtime-pipeline">
+                                    <section class="runtime-pipeline-section">
+                                        <div class="runtime-pipeline-heading">
+                                            <span><i class="mdi mdi-chart-timeline-variant"></i> 收藏任务下载进度</span>
+                                        </div>
+                                        <div class="runtime-pipeline-list" id="downloadTaskProgress">
+                                            <div class="runtime-row-meta">暂无活动下载任务</div>
+                                        </div>
+                                    </section>
+                                    <section class="runtime-pipeline-section">
+                                        <div class="runtime-pipeline-heading">
+                                            <span><i class="mdi mdi-download-circle-outline"></i> 正在下载</span>
+                                            <span class="badge badge-info" id="activeDownloadCount">0</span>
+                                        </div>
+                                        <div class="runtime-pipeline-list" id="activeDownloadList">
+                                            <div class="runtime-row-meta">当前没有正在下载的作品</div>
+                                        </div>
+                                    </section>
+                                    <section class="runtime-pipeline-section">
+                                        <div class="runtime-pipeline-heading">
+                                            <span><i class="mdi mdi-format-list-numbered"></i> 待下载队列</span>
+                                            <span>
+                                                <span class="badge badge-warning" id="downloadQueueStale" style="display:none;">数据可能已过期</span>
+                                                <span class="badge badge-secondary" id="waitingDownloadCount">0</span>
+                                            </span>
+                                        </div>
+                                        <div class="runtime-pipeline-list" id="waitingDownloadList">
+                                            <div class="runtime-row-meta">队列为空</div>
+                                        </div>
+                                    </section>
                                 </div>
                             </div>
                         </div>
@@ -1167,6 +1285,7 @@
             }
 			loadAuthorStats();
 			loadTaskControlState();
+			loadDownloadQueueState();
 			
             // 分阶段更新主要指标，创建更好的视觉效果
               const metrics = [
@@ -1212,6 +1331,7 @@
 
 		let taskControlState = {};
 		let taskControlPollTimer = null;
+		let downloadQueuePollTimer = null;
 
 		function loadTaskControlState() {
 			$.ajax({
@@ -1222,11 +1342,18 @@
 				success: function(response) {
 					if (response && response.resCode === '000001' && response.record) {
 						renderTaskControlState(response.record);
+						$('#taskStatusGrid').removeClass('runtime-stale');
+						$('#taskStatusStale').hide();
 						$('#taskControlContainer').fadeIn(400);
 					}
 				},
 				error: function(xhr, status, error) {
-					$('#taskStatusGrid').html('<div class="task-status-block">后台任务状态加载失败：' + escapeRecentlyHtml(error || status || '') + '</div>');
+					if ($('#taskStatusGrid').children().length) {
+						$('#taskStatusGrid').addClass('runtime-stale');
+						$('#taskStatusStale').show();
+					} else {
+						$('#taskStatusGrid').html('<div class="task-status-block">后台任务状态加载失败：' + escapeRecentlyHtml(error || status || '') + '</div>');
+					}
 					$('#taskControlContainer').fadeIn(400);
 				},
 				complete: function() {
@@ -1238,6 +1365,35 @@
 		function scheduleTaskControlPoll() {
 			if (taskControlPollTimer) clearTimeout(taskControlPollTimer);
 			taskControlPollTimer = setTimeout(loadTaskControlState, document.hidden ? 15000 : 3000);
+		}
+
+		function loadDownloadQueueState() {
+			$.ajax({
+				url: '/admin/api/collectData/downloadQueue',
+				type: 'GET',
+				dataType: 'json',
+				data: {limit: 20},
+				cache: false,
+				success: function(response) {
+					if (response && response.resCode === '000001' && response.record) {
+						renderDownloadQueueState(response.record);
+						$('#activeDownloadList, #waitingDownloadList').removeClass('runtime-stale');
+						$('#downloadQueueStale').hide();
+					}
+				},
+				error: function() {
+					$('#activeDownloadList, #waitingDownloadList').addClass('runtime-stale');
+					$('#downloadQueueStale').show();
+				},
+				complete: function() {
+					scheduleDownloadQueuePoll();
+				}
+			});
+		}
+
+		function scheduleDownloadQueuePoll() {
+			if (downloadQueuePollTimer) clearTimeout(downloadQueuePollTimer);
+			downloadQueuePollTimer = setTimeout(loadDownloadQueueState, document.hidden ? 20000 : 5000);
 		}
 
 		function renderTaskControlState(data) {
@@ -1257,6 +1413,7 @@
 			const quartz = collect.quartz || {};
 			const hls = data.hls || {};
 			const jobs = data.jobs || {};
+			renderDownloadTaskProgress(jobs.downloadTasks || []);
 			let html = '';
 			html += taskStatusBlock('下载任务', 'mdi-download', !!control.effectiveDownloadPaused, [
 				'国内池：运行 ' + numberText(domestic.activeCount) + ' / 队列 ' + numberText(domestic.queueSize),
@@ -1284,6 +1441,68 @@
 			$('#taskStatusGrid').html(html);
 		}
 
+		function renderDownloadTaskProgress(items) {
+			if (!Array.isArray(items) || items.length === 0) {
+				$('#downloadTaskProgress').html('<div class="runtime-row-meta">暂无活动下载任务</div>');
+				return;
+			}
+			let html = '';
+			items.forEach(function(item) {
+				const planned = Math.max(numberValue(item.plannedCount), 0);
+				const completed = Math.max(numberValue(item.completedCount), 0);
+				const percent = planned > 0 ? Math.min(100, Math.round(completed * 100 / planned)) : 0;
+				html += '<div class="runtime-pipeline-row">';
+				html += '<div class="runtime-row-title">' + escapeRecentlyHtml(item.taskName || ('收藏任务 #' + numberText(item.taskId))) + '</div>';
+				html += '<div class="runtime-row-meta">Run #' + numberText(item.runId)
+					+ ' · 完成 ' + completed + '/' + planned
+					+ ' · 下载中 ' + numberText(item.runningCount)
+					+ ' · 排队 ' + numberText(item.queuedCount)
+					+ ' · 重试 ' + numberText(item.retryWaitCount)
+					+ ' · 失败 ' + numberText(item.failedCount) + '</div>';
+				html += '<div class="runtime-progress-track"><div class="runtime-progress-value" style="width:' + percent + '%"></div></div>';
+				html += '</div>';
+			});
+			$('#downloadTaskProgress').html(html);
+		}
+
+		function renderDownloadQueueState(data) {
+			data = data || {};
+			const runningItems = Array.isArray(data.runningItems) ? data.runningItems : [];
+			const waitingItems = Array.isArray(data.waitingItems) ? data.waitingItems : [];
+			const counts = data.counts || {};
+			$('#activeDownloadCount').text(runningItems.length);
+			$('#waitingDownloadCount').text(numberValue(counts.QUEUED) + numberValue(counts.RETRY_WAIT));
+			$('#activeDownloadList').html(renderDownloadRows(runningItems, true,
+				'当前没有正在下载的作品'));
+			$('#waitingDownloadList').html(renderDownloadRows(waitingItems, false, '队列为空'));
+		}
+
+		function renderDownloadRows(items, running, emptyText) {
+			if (!items.length) return '<div class="runtime-row-meta">' + escapeRecentlyHtml(emptyText) + '</div>';
+			return items.map(function(item) {
+				let title = item.taskName || ('收藏任务 #' + numberText(item.taskId));
+				title += ' · 作品 ' + (item.workId || '--');
+				let meta = 'Run #' + numberText(item.runId)
+					+ ' · 尝试 ' + numberText(item.attemptCount) + '/' + numberText(item.maxAttempts);
+				if (running) {
+					meta += ' · 开始 ' + runtimeTimeText(item.startedAt || item.lockedAt);
+				} else {
+					meta = '#' + numberText(item.queuePosition) + ' · ' + (item.processState || 'QUEUED') + ' · ' + meta;
+					if (item.processState === 'RETRY_WAIT') meta += ' · 下次 ' + runtimeTimeText(item.availableAt);
+					else if (!item.claimable) meta += ' · 可执行 ' + runtimeTimeText(item.availableAt);
+				}
+				return '<div class="runtime-pipeline-row"><div class="runtime-row-title">'
+					+ escapeRecentlyHtml(title) + '</div><div class="runtime-row-meta">'
+					+ escapeRecentlyHtml(meta) + '</div></div>';
+			}).join('');
+		}
+
+		function runtimeTimeText(value) {
+			if (!value) return '--';
+			const date = new Date(value);
+			return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+		}
+
 		function updateTaskControlButton(scope, active, pausedText, resumeText) {
 			const btn = $('#taskControlActions .task-toggle-btn[data-scope="' + scope + '"]');
 			btn.toggleClass('active', active);
@@ -1303,6 +1522,11 @@
 
 		function numberText(value) {
 			return value == null ? '0' : String(value);
+		}
+
+		function numberValue(value) {
+			const parsed = Number(value);
+			return Number.isFinite(parsed) ? parsed : 0;
 		}
 
 		function idsText(value) {
@@ -1497,7 +1721,10 @@
             // 页面可见性变化时的处理
             document.addEventListener('visibilitychange', function() {
 				if (taskControlPollTimer) clearTimeout(taskControlPollTimer);
-				if (!document.hidden) loadTaskControlState();
+				if (!document.hidden) {
+					loadTaskControlState();
+					loadDownloadQueueState();
+				}
 				else scheduleTaskControlPoll();
                 if (!document.hidden && enableAutoRefresh) {
                     // 页面重新可见时刷新数据

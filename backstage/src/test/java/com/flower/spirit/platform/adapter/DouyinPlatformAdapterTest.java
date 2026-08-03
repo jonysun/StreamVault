@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -98,6 +100,29 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void operationScopeReusesOneCookieForParseAndEveryDownloadRequest() throws Exception {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("work_ingest")).thenReturn("leased-cookie");
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("rotated-parse-cookie");
+		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("rotated-download-cookie");
+		FakeGateway gateway = new FakeGateway(resource("mixed.json"),
+				"https://www.douyin.com/note/7300000000000000004");
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+
+		try (PlatformWorkAdapter.OperationScope ignored = adapter.openOperationScope("work_ingest")) {
+			WorkMetadata metadata = adapter.parse(new WorkParseRequest("input",
+					"https://www.douyin.com/note/7300000000000000004", false));
+			adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
+		}
+
+		assertThat(gateway.cookies).isNotEmpty().containsOnly("leased-cookie");
+		verify(cookies).currentDouyinCookie("work_ingest");
+		verify(cookies, never()).currentDouyinCookie("single_work_parse");
+		verify(cookies, never()).currentDouyinCookie("single_work_download");
+	}
+
+	@Test
 	void reportsRiskAndRejectsMissingCookieOrMalformedWorks() throws Exception {
 		PlatformCookieService noCookie = mock(PlatformCookieService.class);
 		when(noCookie.currentDouyinCookie("single_work_parse")).thenReturn("");
@@ -138,6 +163,32 @@ class DouyinPlatformAdapterTest {
 				.isEqualTo(retryAt);
 	}
 
+	@Test
+	void explicitAuthenticationFailureDuringDownloadRaisesCooldownSignal() throws Exception {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
+		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
+		when(cookies.isRiskSignal("HTTP 403")).thenReturn(true);
+		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		FakeGateway gateway = new FakeGateway(resource("video.json"),
+				"https://www.douyin.com/video/7300000000000000001") {
+			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
+				throw new IOException("HTTP 403");
+			}
+		};
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+		WorkMetadata metadata = adapter.parse(new WorkParseRequest("input",
+				"https://www.douyin.com/video/7300000000000000001", false));
+
+		assertThatThrownBy(() -> adapter.download(metadata, new WorkDownloadRequest(tempDir, false)))
+				.isInstanceOf(DouyinGlobalCooldownException.class)
+				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
+				.isEqualTo(retryAt);
+		verify(cookies).reportRisk("抖音", "cookie-value", "download request failed");
+	}
+
 	private WorkMetadata parseFixture(String fixture, String id, String path) throws Exception {
 		TestContext context = context(resource(fixture), "https://www.douyin.com" + path + id);
 		return context.adapter.parse(new WorkParseRequest("input", "https://www.douyin.com" + path + id, true));
@@ -169,6 +220,7 @@ class DouyinPlatformAdapterTest {
 		private int fetchCalls;
 		private int downloadCalls;
 		private String lastCookie;
+		private final List<String> cookies = new ArrayList<>();
 
 		private FakeGateway(String raw, String resolvedUrl) {
 			this.raw = raw;
@@ -179,11 +231,13 @@ class DouyinPlatformAdapterTest {
 		@Override public String fetch(String workId, String cookie) {
 			fetchCalls++;
 			lastCookie = cookie;
+			cookies.add(cookie);
 			return raw;
 		}
 		@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
 			downloadCalls++;
 			lastCookie = cookie;
+			cookies.add(cookie);
 			Files.createDirectories(destination.getParent());
 			return Files.writeString(destination, source.getType().name());
 		}

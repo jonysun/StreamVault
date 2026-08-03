@@ -11,6 +11,14 @@ import com.flower.spirit.platform.WorkParseRequest;
 
 public interface PlatformWorkAdapter {
 
+	@FunctionalInterface
+	interface OperationScope extends AutoCloseable {
+		OperationScope NOOP = () -> { };
+
+		@Override
+		void close();
+	}
+
 	String platformKey();
 
 	boolean supports(String input);
@@ -19,6 +27,10 @@ public interface PlatformWorkAdapter {
 
 	default List<WorkMetadata> parseAll(WorkParseRequest request) {
 		return List.of(parse(request));
+	}
+
+	default OperationScope openOperationScope(String purpose) {
+		return OperationScope.NOOP;
 	}
 
 	DownloadResult download(WorkMetadata metadata, WorkDownloadRequest request);

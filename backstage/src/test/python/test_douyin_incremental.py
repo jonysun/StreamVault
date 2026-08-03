@@ -798,6 +798,51 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.module_path = SCRIPT_DIR / "douyin.py"
 
+    async def test_cookie_probe_treats_null_collection_list_as_indeterminate(self):
+        module, _ = self._load_command_module(
+            {}, [], [{"status_code": 0, "collects_list": None}]
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            await module.fetch_user_collects("sessionid=secret")
+
+        payload = self._probe_payload(stdout.getvalue())
+        self.assertEqual("INDETERMINATE", payload["probeStatus"])
+        self.assertEqual("NULL", payload["listState"])
+        self.assertEqual(0, payload["collectCount"])
+        self.assertEqual("UPSTREAM_SCHEMA", payload["errorCategory"])
+        self.assertNotIn("Traceback", stdout.getvalue())
+
+    async def test_cookie_probe_accepts_an_empty_collection_array(self):
+        module, _ = self._load_command_module(
+            {}, [], [{"status_code": 0, "collects_list": []}]
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            await module.fetch_user_collects("sessionid=secret")
+
+        payload = self._probe_payload(stdout.getvalue())
+        self.assertEqual("VALID", payload["probeStatus"])
+        self.assertEqual("ARRAY", payload["listState"])
+        self.assertEqual(0, payload["collectCount"])
+        self.assertEqual("NONE", payload["errorCategory"])
+
+    async def test_cookie_probe_converts_login_exception_to_structured_expiration(self):
+        module, _ = self._load_command_module(
+            {}, [], [RuntimeError("login required")]
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            await module.fetch_user_collects("sessionid=secret")
+
+        payload = self._probe_payload(stdout.getvalue())
+        self.assertEqual("EXPIRED", payload["probeStatus"])
+        self.assertEqual("AUTHENTICATION", payload["errorCategory"])
+        self.assertNotIn("Traceback", stdout.getvalue())
+
     async def test_uses_profile_precheck_and_direct_page_requests(self):
         profile = {"status_code": 0, "user": {"nickname": "author"}}
         pages = [{
@@ -1349,8 +1394,14 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         line = next(line for line in output.splitlines() if line.startswith(prefix))
         return json.loads(line[len(prefix):])
 
-    def _load_command_module(self, profile_response, post_responses):
+    def _probe_payload(self, output):
+        start = "stream-vault-start-cookie-probe"
+        end = "stream-vault-end-cookie-probe"
+        return json.loads(output.split(start, 1)[1].split(end, 1)[0].strip())
+
+    def _load_command_module(self, profile_response, post_responses, collect_responses=None):
         crawler_instances = []
+        collect_responses = list(collect_responses or [])
 
         class FakeUserProfile:
             def __init__(self, sec_user_id):
@@ -1391,6 +1442,23 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
                     raise response
                 return response
 
+        class FakeRawResult:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def _to_raw(self):
+                return self.raw
+
+        class FakeHandler:
+            def __init__(self, kwargs):
+                self.kwargs = kwargs
+
+            async def fetch_user_collects(self, **_):
+                for response in collect_responses:
+                    if isinstance(response, Exception):
+                        raise response
+                    yield FakeRawResult(response)
+
         fake_modules = {
             "f2": types.ModuleType("f2"),
             "f2.apps": types.ModuleType("f2.apps"),
@@ -1402,7 +1470,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             "f2.log": types.ModuleType("f2.log"),
             "f2.log.logger": types.ModuleType("f2.log.logger"),
         }
-        fake_modules["f2.apps.douyin.handler"].DouyinHandler = object
+        fake_modules["f2.apps.douyin.handler"].DouyinHandler = FakeHandler
         fake_modules["f2.apps.douyin.crawler"].DouyinCrawler = FakeCrawler
         fake_modules["f2.apps.douyin.model"].UserProfile = FakeUserProfile
         fake_modules["f2.apps.douyin.model"].UserPost = FakeUserPost

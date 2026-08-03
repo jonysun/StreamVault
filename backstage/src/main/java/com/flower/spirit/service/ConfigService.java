@@ -43,7 +43,8 @@ public class ConfigService {
 
 	public ConfigEntity getData() {
 		List<ConfigEntity> list =  configDao.findAll();
-		ConfigEntity cfg = list.get(0);
+		boolean create = list.isEmpty();
+		ConfigEntity cfg = create ? new ConfigEntity() : list.get(0);
 		if (cfg.getF2logfullonerror() == null || cfg.getF2logfullonerror().trim().isEmpty()) {
 			cfg.setF2logfullonerror("1");
 		}
@@ -116,13 +117,13 @@ public class ConfigService {
 		if (cfg.getHlssegmentseconds() == null || cfg.getHlssegmentseconds().trim().isEmpty()) {
 			cfg.setHlssegmentseconds("4");
 		}
-		return cfg;
+		return create ? configDao.save(cfg) : cfg;
 	}
 
 	public AjaxEntity saveConfig(ConfigEntity configEntity) {
 		
 		List<ConfigEntity> list =  configDao.findAll();
-		ConfigEntity configData = list.get(0);
+		ConfigEntity configData = list.isEmpty() ? new ConfigEntity() : list.get(0);
 		BeanUtil.copyPropertiesIgnoreCase(configEntity,configData);
 		configDao.save(configData);
 		Global.apptoken =configEntity.getApptoken();

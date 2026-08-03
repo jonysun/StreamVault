@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -74,6 +75,16 @@ class PlatformCookieServiceTest {
 
 		assertThat(service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch"))
 				.isEmpty();
+	}
+
+	@Test
+	void successIsRecordedAsRecentEvidenceWithoutClearingCooldown() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		service.reportSuccess("douyin", "a=1");
+
+		assertThat(service.hasRecentSuccess("douyin", "a=1", Duration.ofMinutes(15))).isTrue();
+		assertThat(service.hasRecentSuccess("douyin", "b=2", Duration.ofMinutes(15))).isFalse();
 	}
 
 	@Test

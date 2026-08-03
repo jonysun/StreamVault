@@ -109,6 +109,14 @@ class AdminTemplateScriptSanityTest {
 				"option['riskCooldownMinutes']", "tiktok.riskCooldownMinutes");
 	}
 
+	@Test
+	void homeShowsTaskProgressAndIndividualDownloadQueues() throws IOException {
+		String home = template("home.html");
+
+		assertThat(home).contains("downloadTaskProgress", "activeDownloadList", "waitingDownloadList",
+				"loadDownloadQueueState", "runningItems", "waitingItems", "downloadTasks");
+	}
+
 	private String template(String name) throws IOException {
 		try (var input = getClass().getResourceAsStream("/templates/admin/" + name)) {
 			if (input == null) throw new IOException(name + " template not found");

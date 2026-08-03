@@ -759,19 +759,83 @@ async def fetch_user_collects(cookie: str):
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     all_collects = []
-    async for collection_list in handler.fetch_user_collects(
-        max_cursor=0,
-        page_counts=10,
-        max_counts=40,
-    ):
-        raw_data = collection_list._to_raw()
-        if 'collects_list' in raw_data:
-            for collect in raw_data['collects_list']:
+    probe = {
+        "probeStatus": "INDETERMINATE",
+        "upstreamStatus": "",
+        "listState": "NO_RESPONSE",
+        "collectCount": 0,
+        "errorCategory": "UPSTREAM_EMPTY",
+    }
+    try:
+        async for collection_list in handler.fetch_user_collects(
+            max_cursor=0,
+            page_counts=10,
+            max_counts=40,
+        ):
+            raw_data = collection_list._to_raw()
+            if not isinstance(raw_data, dict):
+                probe.update(listState="INVALID", errorCategory="UPSTREAM_SCHEMA")
+                break
+            upstream_status = raw_data.get("status_code")
+            probe["upstreamStatus"] = "" if upstream_status is None else str(upstream_status)
+            if upstream_status not in (None, 0, "0"):
+                message = str(raw_data.get("status_msg") or raw_data.get("message") or "")
+                status, category = _classify_cookie_probe_error(message)
+                probe.update(probeStatus=status, listState="UNAVAILABLE", errorCategory=category)
+                break
+            if "collects_list" not in raw_data:
+                probe.update(listState="MISSING", errorCategory="UPSTREAM_SCHEMA")
+                break
+            collects = raw_data.get("collects_list")
+            if collects is None:
+                probe.update(listState="NULL", errorCategory="UPSTREAM_SCHEMA")
+                break
+            if not isinstance(collects, list):
+                probe.update(listState="INVALID", errorCategory="UPSTREAM_SCHEMA")
+                break
+            malformed = False
+            for collect in collects:
+                if not isinstance(collect, dict):
+                    malformed = True
+                    break
+                collects_id = collect.get("collects_id")
+                collects_name = collect.get("collects_name")
+                if collects_id is None or collects_name is None:
+                    malformed = True
+                    break
                 all_collects.append({
-                    "collects_id": collect['collects_id'],
-                    "collects_name": collect['collects_name']
+                    "collects_id": collects_id,
+                    "collects_name": collects_name,
                 })
+            if malformed:
+                probe.update(listState="INVALID", errorCategory="UPSTREAM_SCHEMA")
+                break
+            probe.update(
+                probeStatus="VALID",
+                listState="ARRAY",
+                collectCount=len(all_collects),
+                errorCategory="NONE",
+            )
+    except Exception as error:
+        status, category = _classify_cookie_probe_error(str(error))
+        probe.update(probeStatus=status, listState="UNAVAILABLE", errorCategory=category)
+    print(
+        "stream-vault-start-cookie-probe",
+        json.dumps(probe, ensure_ascii=False),
+        "stream-vault-end-cookie-probe",
+    )
     print("stream-vault-start-collects",json.dumps(all_collects, ensure_ascii=False),"stream-vault-end-collects")
+
+
+def _classify_cookie_probe_error(message: str):
+    normalized = (message or "").lower()
+    if any(signal in normalized for signal in ("login", "verify", "401", "403", "unauthorized")):
+        return "EXPIRED", "AUTHENTICATION"
+    if "risk" in normalized or "captcha" in normalized:
+        return "EXPIRED", "RISK_CONTROL"
+    if any(signal in normalized for signal in ("timeout", "timed out", "connection", "network")):
+        return "INDETERMINATE", "NETWORK"
+    return "INDETERMINATE", "UPSTREAM_ERROR"
 
 # 获取收藏夹下的视频
 async def fetch_user_collects_videos(cookie: str, cid: str, maxc:str, output_file: str):
