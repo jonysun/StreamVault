@@ -21,17 +21,27 @@ final class HttpMediaDownloader {
 	static Path download(String url, Path destination, String cookie, Map<String, String> headers) throws IOException {
 		Path target = destination.toAbsolutePath().normalize();
 		Files.createDirectories(target.getParent());
-		Request.Builder request = new Request.Builder().url(url);
-		if (headers != null) headers.forEach(request::header);
-		if (cookie != null && !cookie.trim().isEmpty()) request.header("Cookie", cookie);
-		try (Response response = CLIENT.newCall(request.build()).execute()) {
-			if (!response.isSuccessful() || response.body() == null) {
-				throw new IOException("media request failed with HTTP " + response.code());
+		Response response = execute(url, cookie, headers, true);
+		if (response.code() == 431 && cookie != null && !cookie.trim().isEmpty()) {
+			response.close();
+			response = execute(url, cookie, headers, false);
+		}
+		try (Response finalResponse = response) {
+			if (!finalResponse.isSuccessful() || finalResponse.body() == null) {
+				throw new IOException("media request failed with HTTP " + finalResponse.code());
 			}
-			try (InputStream input = response.body().byteStream()) {
+			try (InputStream input = finalResponse.body().byteStream()) {
 				Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
 			}
 		}
 		return target;
+	}
+
+	private static Response execute(String url, String cookie, Map<String, String> headers,
+			boolean includeCookie) throws IOException {
+		Request.Builder request = new Request.Builder().url(url);
+		if (headers != null) headers.forEach(request::header);
+		if (includeCookie && cookie != null && !cookie.trim().isEmpty()) request.header("Cookie", cookie);
+		return CLIENT.newCall(request.build()).execute();
 	}
 }

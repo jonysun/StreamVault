@@ -2,6 +2,7 @@ package com.flower.spirit.platform.adapter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -11,11 +12,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.flower.spirit.platform.DownloadResult;
+import com.flower.spirit.platform.DouyinGlobalCooldownException;
 import com.flower.spirit.platform.PlatformResolver;
 import com.flower.spirit.platform.WorkContentType;
 import com.flower.spirit.platform.WorkDownloadRequest;
@@ -105,6 +108,7 @@ class DouyinPlatformAdapterTest {
 				.isInstanceOf(WorkMetadataValidationException.class).hasMessageContaining("cookie");
 
 		PlatformCookieService risky = mock(PlatformCookieService.class);
+		when(risky.hasConfiguredDouyinCookie()).thenReturn(true);
 		when(risky.currentDouyinCookie("single_work_parse")).thenReturn("risky-cookie");
 		when(risky.isRiskSignal("Douyin returned no metadata")).thenReturn(true);
 		DouyinPlatformAdapter riskyAdapter = new DouyinPlatformAdapter(new PlatformResolver(), risky,
@@ -116,6 +120,24 @@ class DouyinPlatformAdapterTest {
 		verify(noCookie, never()).reportSuccess("抖音", "");
 	}
 
+	@Test
+	void configuredCookieDuringGlobalCooldownRaisesDedicatedSignal() {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("");
+		when(cookies.isDouyinGlobalCooldownActive()).thenReturn(true);
+		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies,
+				new FakeGateway("{}", "https://www.douyin.com/video/1"));
+
+		assertThatThrownBy(() -> adapter.parse(new WorkParseRequest("input",
+				"https://www.douyin.com/video/1", true)))
+				.isInstanceOf(DouyinGlobalCooldownException.class)
+				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
+				.isEqualTo(retryAt);
+	}
+
 	private WorkMetadata parseFixture(String fixture, String id, String path) throws Exception {
 		TestContext context = context(resource(fixture), "https://www.douyin.com" + path + id);
 		return context.adapter.parse(new WorkParseRequest("input", "https://www.douyin.com" + path + id, true));
@@ -123,6 +145,7 @@ class DouyinPlatformAdapterTest {
 
 	private TestContext context(String raw, String resolvedUrl) {
 		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
 		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
 		FakeGateway gateway = new FakeGateway(raw, resolvedUrl);

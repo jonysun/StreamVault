@@ -27,6 +27,7 @@ import org.springframework.dao.TransientDataAccessResourceException;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.platform.DownloadResult;
+import com.flower.spirit.platform.DouyinGlobalCooldownException;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.WorkContentType;
 import com.flower.spirit.platform.WorkMetadata;
@@ -104,6 +105,19 @@ class CollectDownloadServiceTest {
 
 		verify(transaction).retryOrFail(eq(claim), eq("NETWORK_IO"),
 				org.mockito.ArgumentMatchers.contains("unexpected end of stream"), anyString(), eq(NOW));
+		verify(transaction, never()).fail(any(), anyString(), anyString(), anyString(), any());
+	}
+
+	@Test
+	void cooldownDuringIngestDefersWithoutConsumingRetryBudget() {
+		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+				.thenThrow(new DouyinGlobalCooldownException("Douyin global cooldown is active", retryAt));
+
+		service.process(claim, NOW);
+
+		verify(transaction).deferForCooldown(claim, retryAt, "Douyin global cooldown is active", NOW);
+		verify(transaction, never()).retryOrFail(any(), anyString(), anyString(), anyString(), any());
 		verify(transaction, never()).fail(any(), anyString(), anyString(), anyString(), any());
 	}
 

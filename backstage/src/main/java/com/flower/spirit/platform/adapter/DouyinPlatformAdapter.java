@@ -2,6 +2,7 @@ package com.flower.spirit.platform.adapter;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,7 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.platform.DownloadResult;
+import com.flower.spirit.platform.DouyinGlobalCooldownException;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformResolver;
 import com.flower.spirit.platform.WorkContentType;
@@ -243,8 +245,15 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	}
 
 	private String requireCookie(String purpose) {
+		if (!cookieService.hasConfiguredDouyinCookie()) {
+			throw new WorkMetadataValidationException("Douyin cookie is not configured");
+		}
 		String cookie = cookieService.currentDouyinCookie(purpose);
 		if (cookie == null || cookie.trim().isEmpty()) {
+			if (cookieService.isDouyinGlobalCooldownActive()) {
+				throw new DouyinGlobalCooldownException("Douyin global cooldown is active",
+						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+			}
 			throw new WorkMetadataValidationException("Douyin cookie is not configured");
 		}
 		return cookie;

@@ -295,6 +295,30 @@ class CollectDownloadTransactionTest {
 		}
 	}
 
+	@Test
+	void cooldownAfterClaimReturnsItemUntilDeadlineWithoutConsumingAttempt() throws Exception {
+		try (AnnotationConfigApplicationContext context = context(databasePath())) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			insertTaskAndRun(jdbc, 10, 100, "author");
+			insertItem(jdbc, 1, 100, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 2, 4, NOW, "work");
+			CollectDownloadClaim claim = new CollectDownloadClaim(1, 100, 10, "author", "douyin", "work",
+					"video", "NEW", 1, 2, 4, "worker");
+			Instant availableAt = NOW.plusSeconds(605);
+
+			context.getBean(CollectDownloadTransaction.class).deferForCooldown(claim, availableAt,
+					"global cooldown", NOW.plusSeconds(1));
+
+			assertThat(row(jdbc, 1)).containsEntry("process_state", "RETRY_WAIT")
+					.containsEntry("attempt_count", 1)
+					.containsEntry("error_code", "DOUYIN_GLOBAL_COOLDOWN")
+					.containsEntry("error_message", "global cooldown");
+			assertThat(((Number) row(jdbc, 1).get("available_at")).longValue())
+					.isEqualTo(availableAt.toEpochMilli());
+			assertThat(row(jdbc, 1).get("locked_by")).isNull();
+		}
+	}
+
 	private void claim(CollectDownloadTransaction transaction, String worker, CountDownLatch start,
 			List<CollectDownloadClaim> claims, List<Throwable> failures) {
 		try {
