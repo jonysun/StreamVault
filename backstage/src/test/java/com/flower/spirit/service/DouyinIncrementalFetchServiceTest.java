@@ -66,6 +66,26 @@ class DouyinIncrementalFetchServiceTest {
 	}
 
 	@Test
+	void appendsStructuredDiagnosticsToFetchErrorMessage() {
+		FakeRunner runner = new FakeRunner();
+		runner.commandResult = new F2CommandResult(3,
+				"stream-vault-fetch-error={\"errorCode\":\"UPSTREAM_SCHEMA_ERROR\","
+						+ "\"message\":\"Douyin profile returned a nonzero status\","
+						+ "\"diagnostics\":{\"profileStatus\":{\"statusCode\":2090,"
+						+ "\"statusText\":\"upstream denied\","
+						+ "\"topLevelKeys\":[\"status_code\",\"user\"]},"
+						+ "\"exceptionType\":\"UpstreamSchemaError\"}}", 25);
+
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("Douyin profile returned a nonzero status")
+				.hasMessageContaining("diagnostics=")
+				.hasMessageContaining("\"statusCode\":2090")
+				.hasMessageContaining("upstream denied");
+		assertTemporaryFilesDeleted(runner);
+	}
+
+	@Test
 	void malformedStructuredErrorRemainsAProtocolFailure() {
 		FakeRunner runner = new FakeRunner();
 		runner.commandResult = new F2CommandResult(3,
