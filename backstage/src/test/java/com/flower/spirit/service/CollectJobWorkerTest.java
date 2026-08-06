@@ -180,6 +180,61 @@ class CollectJobWorkerTest {
 		}
 	}
 
+	@Test
+	void invalidAuthorIdFailsJobWithoutRetryOrCooldown() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(4100L, 6200L, 98,
+				CollectTriggerType.SCHEDULED, 1, 3);
+		when(dataService.isCollectTaskEnabled(98)).thenReturn(true);
+		when(runService.currentState(6200L)).thenReturn(CollectRunState.FETCHING);
+		org.mockito.Mockito.doThrow(new CollectFetchException("INVALID_AUTHOR_ID",
+				"Douyin author identifier is invalid; update the task source"))
+				.when(dataService).executeQueuedCollectTask(98, 6200L, CollectTriggerType.SCHEDULED);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).failJob(claim, "INVALID_AUTHOR_ID",
+					"Douyin author identifier is invalid; update the task source");
+			verify(runService, never()).retryOrFail(any(), anyString(), anyString(), anyLong());
+			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void upstreamUnavailableUsesOrdinaryRetryWithoutCooldown() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(4200L, 6300L, 12,
+				CollectTriggerType.RETRY, 2, 3);
+		when(dataService.isCollectTaskEnabled(12)).thenReturn(true);
+		when(runService.currentState(6300L)).thenReturn(CollectRunState.FETCHING);
+		when(runService.retryOrFail(claim, "F2_UPSTREAM_UNAVAILABLE",
+				"Douyin author-work endpoint did not provide a usable response", 900L))
+				.thenReturn(new CollectEnqueueResult(6301L, 4200L, CollectRunState.QUEUED, true, false));
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_UPSTREAM_UNAVAILABLE",
+				"Douyin author-work endpoint did not provide a usable response"))
+				.when(dataService).executeQueuedCollectTask(12, 6300L, CollectTriggerType.RETRY);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).retryOrFail(claim, "F2_UPSTREAM_UNAVAILABLE",
+					"Douyin author-work endpoint did not provide a usable response", 900L);
+			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
+			verify(runService, never()).failJob(any(), anyString(), anyString());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
 	private DatabaseWriteExecutor passthroughWrites() {
 		DatabaseWriteExecutor writes = mock(DatabaseWriteExecutor.class);
 		when(writes.execute(anyString(), org.mockito.ArgumentMatchers.<Supplier<Object>>any()))

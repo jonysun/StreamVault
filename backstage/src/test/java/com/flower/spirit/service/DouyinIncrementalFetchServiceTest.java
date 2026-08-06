@@ -92,8 +92,21 @@ class DouyinIncrementalFetchServiceTest {
 				"stream-vault-fetch-error={not-json}", 25);
 
 		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
-				.isInstanceOf(IllegalStateException.class)
-				.hasMessageContaining("exitCode=3");
+				.isInstanceOf(CollectFetchException.class)
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_PROTOCOL_ERROR");
+		assertTemporaryFilesDeleted(runner);
+	}
+
+	@Test
+	void missingStructuredErrorIsAnApplicationProtocolFailure() {
+		FakeRunner runner = new FakeRunner();
+		runner.commandResult = new F2CommandResult(3, "plain process output", 25);
+
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.isInstanceOf(CollectFetchException.class)
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_PROTOCOL_ERROR");
 		assertTemporaryFilesDeleted(runner);
 	}
 
@@ -116,9 +129,11 @@ class DouyinIncrementalFetchServiceTest {
 		runner.resultJson = "not-json-with-cookie=sessionid=secret";
 
 		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
-				.isInstanceOf(IllegalStateException.class)
+				.isInstanceOf(CollectFetchException.class)
 				.hasMessageContaining("Malformed Douyin fetch result")
-				.hasMessageNotContaining("secret");
+				.hasMessageNotContaining("secret")
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_PROTOCOL_ERROR");
 		assertTemporaryFilesDeleted(runner);
 	}
 
@@ -128,9 +143,11 @@ class DouyinIncrementalFetchServiceTest {
 		runner.resultJson = "{\"items\":[],\"newWorkIds\":[],\"outcome\":\"NO_MORE\"}";
 
 		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
-				.isInstanceOf(IllegalStateException.class)
+				.isInstanceOf(CollectFetchException.class)
 				.hasMessageContaining("missing required keys")
-				.hasMessageContaining("pagesFetched");
+				.hasMessageContaining("pagesFetched")
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_PROTOCOL_ERROR");
 		assertTemporaryFilesDeleted(runner);
 	}
 
@@ -143,8 +160,10 @@ class DouyinIncrementalFetchServiceTest {
 				""";
 
 		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
-				.isInstanceOf(IllegalStateException.class)
-				.hasMessageContaining("items must be an array");
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("items must be an array")
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_PROTOCOL_ERROR");
 		assertTemporaryFilesDeleted(runner);
 	}
 
@@ -157,8 +176,10 @@ class DouyinIncrementalFetchServiceTest {
 				""";
 
 		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
-				.isInstanceOf(IllegalStateException.class)
-				.hasMessageContaining("unsupported outcome: MYSTERY");
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("unsupported outcome: MYSTERY")
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_PROTOCOL_ERROR");
 		assertTemporaryFilesDeleted(runner);
 	}
 
@@ -168,8 +189,10 @@ class DouyinIncrementalFetchServiceTest {
 		runner.failure = new IllegalStateException("launch failed");
 
 		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
-				.isInstanceOf(IllegalStateException.class)
-				.hasMessage("launch failed");
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("launch failed")
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_PROTOCOL_ERROR");
 		assertTemporaryFilesDeleted(runner);
 	}
 

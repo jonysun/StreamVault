@@ -67,6 +67,31 @@ class CollectQueueTransactionTest {
 	}
 
 	@Test
+	void terminalFetchFailureMarksJobFailedWithoutCreatingRetryRun() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-07T08:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus) VALUES(98, 'queued')");
+			CollectEnqueueResult queued = transaction.enqueue(98, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+
+			transaction.failJob(claim, "INVALID_AUTHOR_ID", "invalid author", now.plusSeconds(3));
+
+			assertThat(jdbc.queryForMap("SELECT state, locked_by, locked_at, last_error_code "
+					+ "FROM biz_job_queue WHERE id = ?", queued.jobId()))
+					.containsEntry("state", "FAILED")
+					.containsEntry("locked_by", null)
+					.containsEntry("locked_at", null)
+					.containsEntry("last_error_code", "INVALID_AUTHOR_ID");
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_run", Integer.class)).isEqualTo(1);
+		}
+	}
+
+	@Test
 	void fetchPlanCompletionLeavesDownloadsQueuedAndPreservesCarriedOut() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
