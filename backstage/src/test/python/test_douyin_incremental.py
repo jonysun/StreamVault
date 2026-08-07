@@ -1517,6 +1517,50 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("F2_UPSTREAM_RATE_LIMIT", payload["errorCode"])
         self.assertTrue(payload["diagnostics"]["cooldownApplied"])
 
+    def test_request_evidence_classifies_empty_http_429_as_rate_limit(self):
+        module, _ = self._load_command_module({}, [])
+
+        error = module._request_error(
+            RuntimeError("retry exhausted"),
+            "request failed",
+            {"lastRequest": {"statusCode": 429, "errorKind": "EMPTY_RESPONSE"}},
+        )
+
+        self.assertEqual("F2_UPSTREAM_RATE_LIMIT", error.error_code)
+
+    def test_request_evidence_classifies_empty_http_200_as_unavailable(self):
+        module, _ = self._load_command_module({}, [])
+
+        error = module._request_error(
+            RuntimeError("retry exhausted"),
+            "request failed",
+            {"lastRequest": {"statusCode": 200, "errorKind": "EMPTY_RESPONSE"}},
+        )
+
+        self.assertEqual("F2_UPSTREAM_UNAVAILABLE", error.error_code)
+
+    def test_request_evidence_classifies_transport_timeout(self):
+        module, _ = self._load_command_module({}, [])
+
+        error = module._request_error(
+            RuntimeError("request failed"),
+            "request failed",
+            {"lastRequest": {"errorKind": "TIMEOUT"}},
+        )
+
+        self.assertEqual("F2_UPSTREAM_TIMEOUT", error.error_code)
+
+    def test_request_evidence_classifies_http_401_as_cookie_failure(self):
+        module, _ = self._load_command_module({}, [])
+
+        error = module._request_error(
+            RuntimeError("request failed"),
+            "request failed",
+            {"lastRequest": {"statusCode": 401, "errorKind": "HTTP_STATUS"}},
+        )
+
+        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", error.error_code)
+
     async def test_invalid_author_id_is_not_schema_error(self):
         module, _ = self._load_command_module(
             {"status_code": 2, "status_msg": "UserId不合法", "user": {"nickname": "author"}},

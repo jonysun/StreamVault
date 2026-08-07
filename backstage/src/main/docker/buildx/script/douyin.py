@@ -96,9 +96,128 @@ class UpstreamFetchError(FetchCommandError):
     pass
 
 
+class UpstreamRequestEvidenceError(RuntimeError):
+    """F2-compatible request failure that keeps the last HTTP evidence."""
+
+    def __init__(self, message, request_evidence):
+        super().__init__(message)
+        self.request_evidence = request_evidence or {}
+
+
+def _request_evidence(response=None, *, attempt=0, error_kind="", error=None):
+    content = b""
+    if response is not None:
+        try:
+            content = response.content or b""
+        except Exception:
+            content = b""
+    headers = getattr(response, "headers", {}) or {}
+    status_code = getattr(response, "status_code", None)
+    return {
+        "attempt": int(attempt) + 1,
+        "responseType": type(response).__name__ if response is not None else "NoneType",
+        "statusCode": status_code,
+        "bodyLength": len(content),
+        "bodyEmpty": not bool(content.strip()),
+        "contentType": _bounded_status_text(headers.get("content-type", "")),
+        "errorKind": error_kind or None,
+        "exceptionType": type(error).__name__ if error is not None else None,
+    }
+
+
+class InstrumentedDouyinCrawler(DouyinCrawler):
+    """Preserve response evidence lost by F2's generic GET helper."""
+
+    def __init__(self, kwargs):
+        super().__init__(kwargs)
+        self.last_request_evidence = None
+
+    async def _fetch_get_json(self, endpoint):
+        # F2 drops the status code when an empty response exhausts retries. Keep
+        # the same retry count while retaining status/body/transport evidence.
+        import httpx
+
+        for attempt in range(self._max_retries):
+            try:
+                response = await self.aclient.get(endpoint, follow_redirects=True)
+                evidence = _request_evidence(response, attempt=attempt)
+                self.last_request_evidence = evidence
+                content = response.content or b""
+                if not content.strip():
+                    evidence["errorKind"] = "EMPTY_RESPONSE"
+                    evidence["exceptionType"] = "APIRetryExhaustedError"
+                    if attempt == self._max_retries - 1:
+                        raise UpstreamRequestEvidenceError(
+                            "Douyin endpoint returned an empty response after retries",
+                            evidence,
+                        )
+                    await asyncio.sleep(self._timeout)
+                    continue
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as error:
+                    evidence["errorKind"] = "HTTP_STATUS"
+                    evidence["exceptionType"] = type(error).__name__
+                    raise UpstreamRequestEvidenceError(
+                        "Douyin endpoint returned HTTP status "
+                        + str(response.status_code),
+                        evidence,
+                    ) from error
+                try:
+                    return response.json()
+                except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                    evidence["errorKind"] = "INVALID_JSON"
+                    evidence["exceptionType"] = type(error).__name__
+                    raise UpstreamRequestEvidenceError(
+                        "Douyin endpoint returned invalid JSON", evidence
+                    ) from error
+            except UpstreamRequestEvidenceError:
+                raise
+            except httpx.TimeoutException as error:
+                evidence = _request_evidence(
+                    attempt=attempt, error_kind="TIMEOUT", error=error
+                )
+                self.last_request_evidence = evidence
+                raise UpstreamRequestEvidenceError(
+                    "Douyin endpoint request timed out", evidence
+                ) from error
+            except httpx.ProxyError as error:
+                evidence = _request_evidence(
+                    attempt=attempt, error_kind="NETWORK_ERROR", error=error
+                )
+                self.last_request_evidence = evidence
+                raise UpstreamRequestEvidenceError(
+                    "Douyin endpoint proxy connection failed", evidence
+                ) from error
+            except httpx.NetworkError as error:
+                evidence = _request_evidence(
+                    attempt=attempt, error_kind="NETWORK_ERROR", error=error
+                )
+                self.last_request_evidence = evidence
+                raise UpstreamRequestEvidenceError(
+                    "Douyin endpoint network connection failed", evidence
+                ) from error
+            except httpx.RequestError as error:
+                evidence = _request_evidence(
+                    attempt=attempt, error_kind="NETWORK_ERROR", error=error
+                )
+                self.last_request_evidence = evidence
+                raise UpstreamRequestEvidenceError(
+                    "Douyin endpoint request failed", evidence
+                ) from error
+
+        raise UpstreamRequestEvidenceError(
+            "Douyin endpoint request exhausted without a response",
+            self.last_request_evidence,
+        )
+
+
 def _request_error(error, safe_message, diagnostics):
-    exception_type = type(error).__name__
-    lowered_type = exception_type.lower()
+    request_evidence = (diagnostics or {}).get("lastRequest", {})
+    if not isinstance(request_evidence, dict):
+        request_evidence = {}
+    exception_type = request_evidence.get("exceptionType") or type(error).__name__
+    lowered_type = str(exception_type).lower()
     raw_evidence = " ".join(
         value
         for value in (
@@ -108,6 +227,30 @@ def _request_error(error, safe_message, diagnostics):
         if value
     ).lower()
     evidence = raw_evidence
+    status_code = request_evidence.get("statusCode")
+    error_kind = request_evidence.get("errorKind")
+    if status_code in (403, 429, "403", "429"):
+        return UpstreamFetchError(
+            "F2_UPSTREAM_RATE_LIMIT", safe_message, diagnostics, exception_type
+        )
+    if status_code in (401, "401"):
+        return CookieOrVerifyRequired(diagnostics)
+    if error_kind == "TIMEOUT" or status_code in (408, "408"):
+        return UpstreamFetchError(
+            "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
+        )
+    if error_kind == "NETWORK_ERROR" or status_code in (503, "503"):
+        return UpstreamFetchError(
+            "F2_UPSTREAM_UNAVAILABLE", safe_message, diagnostics, exception_type
+        )
+    if error_kind == "EMPTY_RESPONSE":
+        return UpstreamFetchError(
+            "F2_UPSTREAM_UNAVAILABLE",
+            "Douyin author-work endpoint returned an empty response",
+            diagnostics,
+            exception_type,
+        )
+
     explicit_risk = any(
         marker in evidence
         for marker in ("http 403", "http 429", "status 403", "status 429")
@@ -523,7 +666,7 @@ async def fetch_douyin_list_incremental(
     known_ids = set(known_ids_value)
     page_delay_seconds = _configured_page_delay_seconds()
 
-    async with DouyinCrawler(douyin_kwargs(cookie)) as crawler:
+    async with InstrumentedDouyinCrawler(douyin_kwargs(cookie)) as crawler:
         # Scope the known-working signing path to incremental author fetches.
         crawler.bogus_manager = XBogusManager
         try:
@@ -532,6 +675,8 @@ async def fetch_douyin_list_incremental(
             )
         except Exception as error:
             profile_summary = _profile_status_summary(None, cookie)
+            if crawler.last_request_evidence:
+                profile_summary["lastRequest"] = crawler.last_request_evidence
             diagnostics = {"profileStatus": profile_summary}
             if _exception_requires_verification(error, cookie):
                 raise CookieOrVerifyRequired(diagnostics) from None
@@ -539,6 +684,8 @@ async def fetch_douyin_list_incremental(
                 error, "Douyin profile request failed", diagnostics
             ) from None
         profile_summary = _profile_status_summary(profile, cookie)
+        if crawler.last_request_evidence:
+            profile_summary["lastRequest"] = crawler.last_request_evidence
         command_diagnostics = {"profileStatus": profile_summary}
         profile_state = _validate_profile(profile, command_diagnostics, cookie)
         if profile_state in ("ACCOUNT_DEACTIVATED", "ACCOUNT_BANNED"):
@@ -569,6 +716,8 @@ async def fetch_douyin_list_incremental(
                 page_summary = _page_status_summary(
                     None, page_number, cursor, cookie
                 )
+                if crawler.last_request_evidence:
+                    page_summary["lastRequest"] = crawler.last_request_evidence
                 command_diagnostics["lastPage"] = page_summary
                 if _exception_requires_verification(error, cookie):
                     raise CookieOrVerifyRequired(
@@ -583,6 +732,8 @@ async def fetch_douyin_list_incremental(
             page_summary = _page_status_summary(
                 response, page_number, cursor, cookie
             )
+            if crawler.last_request_evidence:
+                page_summary["lastRequest"] = crawler.last_request_evidence
             command_diagnostics["lastPage"] = page_summary
             if _response_requires_verification(response, cookie):
                 raise CookieOrVerifyRequired(dict(command_diagnostics))
