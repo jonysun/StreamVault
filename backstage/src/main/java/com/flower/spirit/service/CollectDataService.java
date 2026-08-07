@@ -2501,8 +2501,9 @@ public class CollectDataService {
 		}
 	}
 
-	private boolean isDouyinRiskError(String errorCode) {
+	static boolean isDouyinRiskError(String errorCode) {
 		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
+				|| "F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
 	}
 

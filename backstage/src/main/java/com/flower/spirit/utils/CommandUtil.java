@@ -353,7 +353,7 @@ public class CommandUtil {
         } catch (InterruptedException e) {
             interrupted = true;
             appendProcessDiagnostic(output, "process interrupted");
-            logger.error("[F2] incremental process interrupted");
+            logger.info("[F2] incremental process interrupted; cancellation requested");
         } finally {
             if (process != null && !completed) {
                 interrupted |= stopIncrementalProcess(process, output, interrupted);

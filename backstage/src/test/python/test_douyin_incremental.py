@@ -1523,21 +1523,67 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         error = module._request_error(
             RuntimeError("retry exhausted"),
             "request failed",
-            {"lastRequest": {"statusCode": 429, "errorKind": "EMPTY_RESPONSE"}},
+            {
+                "lastPage": {
+                    "lastRequest": {
+                        "statusCode": 429,
+                        "errorKind": "EMPTY_RESPONSE",
+                    }
+                }
+            },
         )
 
         self.assertEqual("F2_UPSTREAM_RATE_LIMIT", error.error_code)
 
-    def test_request_evidence_classifies_empty_http_200_as_unavailable(self):
+    def test_request_evidence_classifies_empty_http_200_as_soft_block(self):
         module, _ = self._load_command_module({}, [])
 
         error = module._request_error(
             RuntimeError("retry exhausted"),
             "request failed",
-            {"lastRequest": {"statusCode": 200, "errorKind": "EMPTY_RESPONSE"}},
+            {
+                "lastPage": {
+                    "lastRequest": {
+                        "statusCode": 200,
+                        "errorKind": "EMPTY_RESPONSE",
+                    }
+                }
+            },
         )
 
-        self.assertEqual("F2_UPSTREAM_UNAVAILABLE", error.error_code)
+        self.assertEqual("F2_UPSTREAM_SOFT_BLOCK", error.error_code)
+
+    async def test_empty_http_response_uses_one_confirmation_retry(self):
+        module, _ = self._load_command_module({}, [])
+
+        class EmptyResponse:
+            content = b""
+            headers = {"content-type": "application/json"}
+            status_code = 200
+
+        class EmptyClient:
+            def __init__(self):
+                self.calls = 0
+
+            async def get(self, *_args, **_kwargs):
+                self.calls += 1
+                return EmptyResponse()
+
+        crawler = object.__new__(module.InstrumentedDouyinCrawler)
+        crawler._max_retries = 5
+        crawler._timeout = 0
+        crawler.aclient = EmptyClient()
+        crawler.last_request_evidence = None
+
+        with mock.patch.dict(sys.modules, {"httpx": types.ModuleType("httpx")}):
+            with self.assertRaises(module.UpstreamRequestEvidenceError) as raised:
+                await crawler._fetch_get_json("https://example.test/author-works")
+
+        self.assertEqual(2, crawler.aclient.calls)
+        self.assertEqual(2, raised.exception.request_evidence["attempt"])
+        self.assertEqual(
+            "EMPTY_RESPONSE", raised.exception.request_evidence["errorKind"]
+        )
 
     def test_request_evidence_classifies_transport_timeout(self):
         module, _ = self._load_command_module({}, [])
@@ -1545,7 +1591,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         error = module._request_error(
             RuntimeError("request failed"),
             "request failed",
-            {"lastRequest": {"errorKind": "TIMEOUT"}},
+            {"lastPage": {"lastRequest": {"errorKind": "TIMEOUT"}}},
         )
 
         self.assertEqual("F2_UPSTREAM_TIMEOUT", error.error_code)
@@ -1556,7 +1602,14 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         error = module._request_error(
             RuntimeError("request failed"),
             "request failed",
-            {"lastRequest": {"statusCode": 401, "errorKind": "HTTP_STATUS"}},
+            {
+                "profileStatus": {
+                    "lastRequest": {
+                        "statusCode": 401,
+                        "errorKind": "HTTP_STATUS",
+                    }
+                }
+            },
         )
 
         self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", error.error_code)

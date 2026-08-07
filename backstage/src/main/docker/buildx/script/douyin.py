@@ -128,6 +128,8 @@ def _request_evidence(response=None, *, attempt=0, error_kind="", error=None):
 class InstrumentedDouyinCrawler(DouyinCrawler):
     """Preserve response evidence lost by F2's generic GET helper."""
 
+    EMPTY_RESPONSE_CONFIRMATION_ATTEMPTS = 2
+
     def __init__(self, kwargs):
         super().__init__(kwargs)
         self.last_request_evidence = None
@@ -146,9 +148,13 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
                 if not content.strip():
                     evidence["errorKind"] = "EMPTY_RESPONSE"
                     evidence["exceptionType"] = "APIRetryExhaustedError"
-                    if attempt == self._max_retries - 1:
+                    empty_attempt_limit = min(
+                        self._max_retries,
+                        self.EMPTY_RESPONSE_CONFIRMATION_ATTEMPTS,
+                    )
+                    if attempt >= empty_attempt_limit - 1:
                         raise UpstreamRequestEvidenceError(
-                            "Douyin endpoint returned an empty response after retries",
+                            "Douyin endpoint returned repeated empty responses",
                             evidence,
                         )
                     await asyncio.sleep(self._timeout)
@@ -212,10 +218,22 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
         )
 
 
+def _last_request_evidence(diagnostics):
+    if not isinstance(diagnostics, dict):
+        return {}
+    candidates = [diagnostics.get("lastRequest")]
+    for section_name in ("lastPage", "profileStatus"):
+        section = diagnostics.get(section_name)
+        if isinstance(section, dict):
+            candidates.append(section.get("lastRequest"))
+    return next(
+        (candidate for candidate in candidates if isinstance(candidate, dict)),
+        {},
+    )
+
+
 def _request_error(error, safe_message, diagnostics):
-    request_evidence = (diagnostics or {}).get("lastRequest", {})
-    if not isinstance(request_evidence, dict):
-        request_evidence = {}
+    request_evidence = _last_request_evidence(diagnostics)
     exception_type = request_evidence.get("exceptionType") or type(error).__name__
     lowered_type = str(exception_type).lower()
     raw_evidence = " ".join(
@@ -245,8 +263,8 @@ def _request_error(error, safe_message, diagnostics):
         )
     if error_kind == "EMPTY_RESPONSE":
         return UpstreamFetchError(
-            "F2_UPSTREAM_UNAVAILABLE",
-            "Douyin author-work endpoint returned an empty response",
+            "F2_UPSTREAM_SOFT_BLOCK",
+            "Douyin author-work endpoint repeatedly returned an empty HTTP response",
             diagnostics,
             exception_type,
         )
