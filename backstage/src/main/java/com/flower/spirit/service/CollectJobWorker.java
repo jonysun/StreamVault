@@ -197,15 +197,30 @@ public class CollectJobWorker {
 					errorCode, message, terminalWriteError);
 			return;
 		}
+		if (isNonRetryable(errorCode)) {
+			try {
+				collectRunService.failJob(claim, errorCode, message);
+				logger.error("[CollectWorker] terminal failure jobId={} runId={} taskId={} code={} "
+						+ "faultDomain={} retryable=false cooldownApplied=false root={}", claim.jobId(), claim.runId(),
+						claim.taskId(), errorCode, faultDomain(errorCode), message);
+			} catch (RuntimeException queueWriteError) {
+				logger.error("[CollectJobTerminalWrite] failed jobId={} runId={} taskId={} errorCode={} root={}",
+						claim.jobId(), claim.runId(), claim.taskId(), errorCode, message, queueWriteError);
+			}
+			return;
+		}
 		try {
 			CollectEnqueueResult retry = collectRunService.retryOrFail(claim, errorCode, message, retryDelaySeconds);
 			if (retry.inserted() && isExpectedDouyinRisk(errorCode)) {
 				logger.warn("[CollectWorker] upstream risk; retry queued jobId={} runId={} taskId={} code={} "
-						+ "root={} nextRunId={} nextState={}", claim.jobId(), claim.runId(), claim.taskId(),
-						errorCode, message, retry.runId(), retry.state());
+						+ "faultDomain={} retryable=true cooldownApplied=true root={} nextRunId={} nextState={}",
+						claim.jobId(), claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), message,
+						retry.runId(), retry.state());
 			} else {
-				logger.error("[CollectWorker] failed jobId={} runId={} taskId={} code={} root={} nextRunId={} nextState={}",
-						claim.jobId(), claim.runId(), claim.taskId(), errorCode, message, retry.runId(), retry.state(), error);
+				logger.error("[CollectWorker] failed jobId={} runId={} taskId={} code={} faultDomain={} "
+						+ "retryable=true cooldownApplied=false root={} nextRunId={} nextState={}", claim.jobId(),
+						claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), message, retry.runId(),
+						retry.state(), error);
 			}
 		} catch (RuntimeException queueWriteError) {
 			logger.error("[CollectJobTerminalWrite] failed jobId={} runId={} taskId={} errorCode={} root={}",
@@ -216,6 +231,16 @@ public class CollectJobWorker {
 	private static boolean isExpectedDouyinRisk(String errorCode) {
 		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
+	}
+
+	private static boolean isNonRetryable(String errorCode) {
+		return "INVALID_AUTHOR_ID".equals(errorCode) || "F2_PROTOCOL_ERROR".equals(errorCode);
+	}
+
+	private static String faultDomain(String errorCode) {
+		if ("INVALID_AUTHOR_ID".equals(errorCode)) return "TASK_CONFIGURATION";
+		if ("F2_PROTOCOL_ERROR".equals(errorCode)) return "APPLICATION";
+		return "REMOTE_API";
 	}
 
 	private long retryDelaySeconds(Throwable error) {

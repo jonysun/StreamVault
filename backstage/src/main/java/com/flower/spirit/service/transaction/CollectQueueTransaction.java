@@ -323,6 +323,18 @@ public class CollectQueueTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void failJob(CollectJobClaim claim, String errorCode, String message, Instant now) {
+		int updated = jdbcTemplate.update("UPDATE biz_job_queue SET state = 'FAILED', locked_by = NULL, "
+				+ "locked_at = NULL, last_error_code = ?, last_error_message = ?, updated_at = ? "
+				+ "WHERE id = ? AND state = 'RUNNING'", errorCode, truncate(message, 2048),
+				Timestamp.from(now), claim.jobId());
+		if (updated != 1) {
+			throw new IllegalStateException("Collect job " + claim.jobId() + " was not RUNNING during terminal failure");
+		}
+		appendEvent(claim.runId(), "ERROR", "FETCH_FAILED", errorCode, valueOr(message, errorCode), null, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public int recoverStale(Instant staleBefore, Instant now) {
 		List<JobRow> staleJobs = jdbcTemplate.query("SELECT id, payload, attempt_count, max_attempts "
 				+ "FROM biz_job_queue WHERE job_type = ? AND state = 'RUNNING' AND (locked_at IS NULL OR locked_at < ?)",

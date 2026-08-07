@@ -66,13 +66,19 @@ public class DouyinIncrementalFetchService {
 					throw new CollectFetchException("F2_UPSTREAM_TIMEOUT",
 							"Douyin incremental fetch process timed out");
 				}
-				throw new IllegalStateException("Douyin incremental fetch failed exitCode="
-						+ commandResult.exitCode() + " output=" + bounded(diagnostic, 2000));
+				throw new CollectFetchException("F2_PROTOCOL_ERROR",
+						"Douyin fetch command exited without a valid structured error exitCode="
+								+ commandResult.exitCode() + " output=" + bounded(diagnostic, 2000));
 			}
 			if (!Files.exists(outputFile) || Files.size(outputFile) == 0) {
 				throw new IllegalStateException("Douyin incremental fetch produced no result file content");
 			}
 			return parseResult(Files.readString(outputFile, StandardCharsets.UTF_8));
+		} catch (CollectFetchException e) {
+			throw e;
+		} catch (IllegalStateException e) {
+			throw new CollectFetchException("F2_PROTOCOL_ERROR",
+					"Douyin incremental fetch application protocol failed: " + bounded(e.getMessage(), 1000), e);
 		} catch (IOException e) {
 			throw new IllegalStateException("Douyin incremental fetch file protocol failed: " + e.getMessage(), e);
 		} finally {
@@ -94,7 +100,8 @@ public class DouyinIncrementalFetchService {
 				if (errorCode == null || errorCode.isBlank() || message == null || message.isBlank()) return null;
 				return new CollectFetchException(errorCode, structuredMessage(message, payload));
 			} catch (RuntimeException ignored) {
-				return null;
+				return new CollectFetchException("F2_PROTOCOL_ERROR",
+						"Douyin fetch command emitted malformed structured error");
 			}
 		}
 		return null;

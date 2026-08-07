@@ -68,6 +68,15 @@ class CookieOrVerifyRequired(FetchCommandError):
         )
 
 
+class InvalidAuthorIdError(FetchCommandError):
+    def __init__(self, diagnostics):
+        super().__init__(
+            "INVALID_AUTHOR_ID",
+            "Douyin author identifier is invalid; update the task source",
+            diagnostics,
+        )
+
+
 class UpstreamCommandSchemaError(FetchCommandError):
     def __init__(self, safe_message, diagnostics, exception_type="UpstreamSchemaError"):
         super().__init__(
@@ -85,16 +94,64 @@ class UpstreamFetchError(FetchCommandError):
 def _request_error(error, safe_message, diagnostics):
     exception_type = type(error).__name__
     lowered_type = exception_type.lower()
-    if "retryexhausted" in lowered_type:
+    raw_evidence = " ".join(
+        value
+        for value in (
+            json.dumps(diagnostics or {}, ensure_ascii=False, sort_keys=True),
+            str(error),
+        )
+        if value
+    ).lower()
+    evidence = (raw_evidence + " " + safe_message).lower()
+    explicit_risk = any(
+        marker in evidence
+        for marker in ("http 403", "http 429", "status 403", "status 429")
+    )
+    explicit_risk = explicit_risk or bool(
+        re.search(r"(?:statuscode|status_code)\D{0,8}(?:403|429)", evidence)
+    )
+    explicit_risk = explicit_risk or any(
+        marker in evidence
+        for marker in ("too many requests", "rate limit", "rate_limit", "risk control")
+    )
+    if explicit_risk:
         return UpstreamFetchError(
             "F2_UPSTREAM_RATE_LIMIT",
-            "Douyin author-work endpoint returned empty responses",
+            safe_message,
             diagnostics,
             exception_type,
         )
-    if "timeout" in lowered_type or isinstance(error, TimeoutError):
+    is_retry_exhausted = "retryexhausted" in lowered_type
+    if (
+        "timeout" in lowered_type
+        or isinstance(error, TimeoutError)
+        or any(marker in raw_evidence for marker in ("timeout", "timed out", "time out"))
+        or (not is_retry_exhausted and any(
+            marker in evidence for marker in ("timeout", "timed out", "time out")
+        ))
+    ):
         return UpstreamFetchError(
             "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
+        )
+    if (
+        is_retry_exhausted
+        or "nonetype" in lowered_type
+        or any(
+            marker in evidence
+            for marker in (
+                "empty response",
+                "empty responses",
+                "connection",
+                "network",
+                "unavailable",
+            )
+        )
+    ):
+        return UpstreamFetchError(
+            "F2_UPSTREAM_UNAVAILABLE",
+            "Douyin author-work endpoint did not provide a usable response",
+            diagnostics,
+            exception_type,
         )
     return UpstreamCommandSchemaError(safe_message, diagnostics, exception_type)
 
@@ -377,6 +434,24 @@ def _has_explicit_success_status(response):
     return status_code == "0"
 
 
+def _is_invalid_author_profile(response, cookie=""):
+    if not isinstance(response, dict) or not _has_nonzero_status(response):
+        return False
+    status_text = _status_text(response, cookie).lower()
+    return any(
+        marker in status_text
+        for marker in (
+            "userid不合法",
+            "user id不合法",
+            "invalid userid",
+            "invalid user id",
+            "invalid sec_user_id",
+            "sec_user_id invalid",
+            "user id is invalid",
+        )
+    )
+
+
 def _validate_profile(profile, diagnostics, cookie=""):
     if not isinstance(profile, dict):
         raise UpstreamCommandSchemaError(
@@ -394,6 +469,8 @@ def _validate_profile(profile, diagnostics, cookie=""):
             return "ACCOUNT_DEACTIVATED"
     if any(marker in status_text for marker in _DEACTIVATED_MARKERS):
         return "ACCOUNT_DEACTIVATED"
+    if _is_invalid_author_profile(profile, cookie):
+        raise InvalidAuthorIdError(diagnostics)
     if not isinstance(user, dict):
         raise UpstreamCommandSchemaError(
             "Douyin profile schema validation failed", diagnostics
@@ -537,12 +614,27 @@ async def fetch_douyin_list_incremental(
 
 
 def _emit_fetch_error(error, cookie):
+    fault_domain = (
+        "APPLICATION"
+        if error.error_code == "F2_PROTOCOL_ERROR"
+        else "TASK_CONFIGURATION"
+        if error.error_code == "INVALID_AUTHOR_ID"
+        else "REMOTE_API"
+    )
+    retryable = error.error_code not in ("INVALID_AUTHOR_ID", "F2_PROTOCOL_ERROR")
+    cooldown_applied = error.error_code in (
+        "F2_UPSTREAM_RATE_LIMIT",
+        "F2_COOKIE_OR_VERIFY_REQUIRED",
+    )
     payload = {
         "errorCode": error.error_code,
         "message": error.safe_message,
         "diagnostics": {
             **error.diagnostics,
             "exceptionType": error.exception_type,
+            "faultDomain": fault_domain,
+            "retryable": retryable,
+            "cooldownApplied": cooldown_applied,
         },
     }
     rendered = json.dumps(payload, ensure_ascii=False)
@@ -572,8 +664,11 @@ async def run_incremental_command(args):
         exit_code = 2 if error.error_code == "F2_COOKIE_OR_VERIFY_REQUIRED" else 3
         raise SystemExit(exit_code) from None
     except Exception as error:
-        wrapped = UpstreamCommandSchemaError(
-            "Douyin command failed", {}, type(error).__name__
+        wrapped = FetchCommandError(
+            "F2_PROTOCOL_ERROR",
+            "Douyin fetch command failed before producing a valid result",
+            {},
+            type(error).__name__,
         )
         _emit_fetch_error(wrapped, args.cookie)
         raise SystemExit(3) from None

@@ -1163,7 +1163,25 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("F2_UPSTREAM_TIMEOUT", payload["errorCode"])
         self.assertNotIn("network timeout with raw detail", output)
 
-    async def test_empty_response_retry_exhaustion_is_rate_limit(self):
+    async def test_api_response_timeout_message_is_classified_as_upstream_timeout(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [type("APIResponseError", (RuntimeError,), {})(
+                "page request timed out; raw upstream detail"
+            )],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        self.assertEqual("F2_UPSTREAM_TIMEOUT", payload["errorCode"])
+        self.assertNotIn("raw upstream detail", output)
+
+    async def test_empty_response_retry_exhaustion_is_upstream_unavailable(self):
         module, _ = self._load_command_module(
             {"status_code": 0, "user": {"nickname": "author"}},
             [type("APIRetryExhaustedError", (RuntimeError,), {})(
@@ -1178,11 +1196,44 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         output = stderr.getvalue()
         payload = self._error_payload(output)
-        self.assertEqual("F2_UPSTREAM_RATE_LIMIT", payload["errorCode"])
+        self.assertEqual("F2_UPSTREAM_UNAVAILABLE", payload["errorCode"])
         self.assertEqual(
             "APIRetryExhaustedError", payload["diagnostics"]["exceptionType"]
         )
         self.assertNotIn("raw endpoint detail", output)
+
+    async def test_explicit_http_429_retry_exhaustion_is_rate_limit(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [type("APIRetryExhaustedError", (RuntimeError,), {})(
+                "HTTP 429 Too Many Requests"
+            )],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("F2_UPSTREAM_RATE_LIMIT", payload["errorCode"])
+        self.assertTrue(payload["diagnostics"]["cooldownApplied"])
+
+    async def test_invalid_author_id_is_not_schema_error(self):
+        module, _ = self._load_command_module(
+            {"status_code": 2, "status_msg": "UserId不合法", "user": {"nickname": "author"}},
+            [],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("INVALID_AUTHOR_ID", payload["errorCode"])
+        self.assertEqual("TASK_CONFIGURATION", payload["diagnostics"]["faultDomain"])
+        self.assertFalse(payload["diagnostics"]["retryable"])
 
     async def test_top_level_special_state_is_deactivated(self):
         module, crawlers = self._load_command_module(

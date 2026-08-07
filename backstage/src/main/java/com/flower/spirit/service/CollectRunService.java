@@ -101,6 +101,13 @@ public class CollectRunService {
 				now.plusSeconds(Math.max(1, delaySeconds)), now));
 	}
 
+	public void failJob(CollectJobClaim claim, String errorCode, String message) {
+		databaseWriteExecutor.execute("collect-job-fail", () -> {
+			transaction.failJob(claim, errorCode, message, Instant.now());
+			return null;
+		});
+	}
+
 	public Map<String, Object> retryDownloadItem(long itemId) {
 		boolean updated = databaseWriteExecutor.execute("collect-download-manual-retry",
 				() -> downloadTransaction.manualRetry(itemId, Instant.now()));
