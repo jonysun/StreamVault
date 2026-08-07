@@ -27,7 +27,7 @@ public class DouyinIncrementalFetchService {
 			"items", "newWorkIds", "outcome", "pagesFetched", "emptyPages",
 			"lastCursor", "diagnostics");
 	private static final Set<String> SUCCESSFUL_OUTCOMES = Set.of(
-			"NO_PUBLIC_WORKS", "ACCOUNT_DEACTIVATED", "WORKS_UNAVAILABLE",
+			"NO_PUBLIC_WORKS", "ACCOUNT_DEACTIVATED", "ACCOUNT_BANNED", "WORKS_UNAVAILABLE",
 			"EMPTY_PAGINATION", "KNOWN_BOUNDARY", "INITIAL_LIMIT", "BATCH_LIMIT", "NO_MORE",
 			"MAX_PAGE_GUARD");
 
@@ -153,6 +153,17 @@ public class DouyinIncrementalFetchService {
 		if (!(rawDiagnostics instanceof JSONObject diagnostics)) {
 			throw new IllegalStateException("Douyin fetch envelope key diagnostics must be an object");
 		}
+		int backfillCleanPasses = object.containsKey("backfillCleanPasses")
+				? requireInteger(object, "backfillCleanPasses") : 0;
+		if (backfillCleanPasses > 2) {
+			throw new IllegalStateException(
+					"Douyin fetch envelope key backfillCleanPasses must be between 0 and 2");
+		}
+		boolean backfillComplete = object.containsKey("backfillComplete")
+				&& requireBoolean(object, "backfillComplete");
+		boolean backfillVerifying = object.containsKey("backfillVerifying")
+				&& requireBoolean(object, "backfillVerifying");
+		validateBackfillState(backfillComplete, backfillVerifying, backfillCleanPasses);
 		return new DouyinFetchEnvelope(
 				immutableItems(items),
 				immutableIds(newWorkIds),
@@ -160,6 +171,10 @@ public class DouyinIncrementalFetchService {
 				requireInteger(object, "pagesFetched"),
 				requireInteger(object, "emptyPages"),
 				lastCursor,
+				object.containsKey("backfillCursor") ? requireString(object, "backfillCursor") : "0",
+				backfillComplete,
+				backfillVerifying,
+				backfillCleanPasses,
 				diagnostics);
 	}
 
@@ -232,6 +247,22 @@ public class DouyinIncrementalFetchService {
 		return (int) result;
 	}
 
+	private boolean requireBoolean(JSONObject object, String key) {
+		Object value = object.get(key);
+		if (!(value instanceof Boolean result)) {
+			throw new IllegalStateException("Douyin fetch envelope key " + key + " must be a boolean");
+		}
+		return result;
+	}
+
+	private void validateBackfillState(boolean complete, boolean verifying, int cleanPasses) {
+		if ((complete && (verifying || cleanPasses != 2))
+				|| (verifying && cleanPasses >= 2)
+				|| (!complete && !verifying && cleanPasses != 0)) {
+			throw new IllegalStateException("Douyin fetch envelope contains inconsistent backfill state");
+		}
+	}
+
 	private void validateRequest(DouyinFetchRequest request) {
 		Objects.requireNonNull(request, "request");
 		if (request.secUserId() == null || request.secUserId().isBlank()) {
@@ -239,8 +270,16 @@ public class DouyinIncrementalFetchService {
 		}
 		Objects.requireNonNull(request.mode(), "mode");
 		if (request.knownBoundary() <= 0 || request.maxPages() <= 0
-				|| request.emptyPageLimit() <= 0 || request.maxItems() < 0) {
+				|| request.emptyPageLimit() <= 0 || request.maxItems() < 0
+				|| request.backfillCleanPasses() < 0 || request.backfillCleanPasses() > 2) {
 			throw new IllegalArgumentException("Douyin fetch limits are invalid");
+		}
+		if ((request.backfillComplete()
+				&& (request.backfillVerifying() || request.backfillCleanPasses() != 2))
+				|| (request.backfillVerifying() && request.backfillCleanPasses() >= 2)
+				|| (!request.backfillComplete() && !request.backfillVerifying()
+						&& request.backfillCleanPasses() != 0)) {
+			throw new IllegalArgumentException("Douyin fetch backfill state is inconsistent");
 		}
 	}
 

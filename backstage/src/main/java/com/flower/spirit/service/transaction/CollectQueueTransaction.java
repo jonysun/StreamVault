@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.service.CollectEnqueueResult;
+import com.flower.spirit.service.CollectBackfillProgress;
 import com.flower.spirit.service.CollectJobClaim;
 import com.flower.spirit.service.CollectRunFetchedItem;
 import com.flower.spirit.service.CollectRunState;
@@ -117,18 +118,25 @@ public class CollectQueueTransaction {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void storeFetchedItems(long runId, List<CollectRunFetchedItem> items, Instant now) {
 		storeFetchPlan(runId, taskId(runId), items, items.size(), "LEGACY_FETCH",
-				new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, ""), now);
+				new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, ""), null, now);
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, String stopReason,
 			CollectRunFetchedItem.FetchWatermark watermark, Instant now) {
-		storeFetchPlan(runId, taskId, items, items.size(), stopReason, watermark, now);
+		storeFetchPlan(runId, taskId, items, items.size(), stopReason, watermark, null, now);
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, int observedCount,
 			String stopReason, CollectRunFetchedItem.FetchWatermark watermark, Instant now) {
+		storeFetchPlan(runId, taskId, items, observedCount, stopReason, watermark, null, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, int observedCount,
+			String stopReason, CollectRunFetchedItem.FetchWatermark watermark,
+			CollectBackfillProgress backfillProgress, Instant now) {
 		if (observedCount < 0) {
 			throw new IllegalArgumentException("observedCount must be nonnegative");
 		}
@@ -172,6 +180,20 @@ public class CollectQueueTransaction {
 				+ "ELSE last_seen_work_id END WHERE id = ?", timestamp,
 				hasIncomingPublishTime, incomingPublishTime, incomingPublishTime,
 				hasIncomingPublishTime, incomingPublishTime, blankToNull(safeWatermark.workId()), taskId);
+		if (backfillProgress != null) {
+			jdbcTemplate.update("UPDATE biz_collect_data SET backfill_cursor = ?, backfill_complete = ?, "
+					+ "backfill_source_id = ?, backfill_verifying = ?, backfill_clean_passes = ?, "
+					+ "backfill_verified_at = ? WHERE id = ?", blankToNull(backfillProgress.cursor()),
+					backfillProgress.complete() ? 1 : 0, blankToNull(backfillProgress.sourceId()),
+					backfillProgress.verifying() ? 1 : 0, backfillProgress.cleanPasses(),
+					backfillProgress.verifiedAt() == null ? null : Timestamp.from(backfillProgress.verifiedAt()), taskId);
+		}
+		String remoteAccountState = remoteAccountState(stopReason);
+		if (remoteAccountState != null) {
+			jdbcTemplate.update("UPDATE biz_collect_data SET taskenabled = 'N', taskstatus = ?, "
+					+ "remote_account_state = ?, remote_account_reason = ?, remote_account_detected_at = ? WHERE id = ?",
+					accountTaskStatus(stopReason), remoteAccountState, stopReason, timestamp, taskId);
+		}
 		jdbcTemplate.update("UPDATE biz_collect_run SET fetched_count = ?, fetch_stop_reason = ?, fetch_warning = ?, "
 				+ "heartbeat_at = ? WHERE id = ? AND state = 'PROCESSING'", observedCount, stopReason,
 				warningFor(stopReason), timestamp, runId);
@@ -265,7 +287,10 @@ public class CollectQueueTransaction {
 			throw new IllegalCollectRunTransitionException(runId, CollectRunState.PROCESSING, CollectRunState.COMPLETED);
 		}
 		Integer taskId = taskId(runId);
-		String taskStatus = "抓取完成，下载排队 " + counts.planned();
+		String stopReason = jdbcTemplate.queryForObject(
+				"SELECT fetch_stop_reason FROM biz_collect_run WHERE id = ?", String.class, runId);
+		String taskStatus = accountTaskStatus(stopReason);
+		if (taskStatus == null) taskStatus = "抓取完成，下载排队 " + counts.planned();
 		jdbcTemplate.update("UPDATE biz_collect_data SET taskstatus = ?, count = ?, endtime = ? WHERE id = ?",
 				taskStatus, String.valueOf(counts.fetched()), timestamp.toString(), taskId);
 		jdbcTemplate.update("UPDATE biz_job_queue SET state = 'COMPLETED', locked_by = NULL, locked_at = NULL, "
@@ -451,8 +476,24 @@ public class CollectQueueTransaction {
 	private String warningFor(String stopReason) {
 		if (stopReason == null) return null;
 		return switch (stopReason) {
-		case "NO_PUBLIC_WORKS", "ACCOUNT_DEACTIVATED", "WORKS_UNAVAILABLE", "EMPTY_PAGINATION",
+		case "NO_PUBLIC_WORKS", "ACCOUNT_DEACTIVATED", "ACCOUNT_BANNED", "WORKS_UNAVAILABLE", "EMPTY_PAGINATION",
 				"MAX_PAGE_GUARD" -> stopReason;
+		default -> null;
+		};
+	}
+
+	private String remoteAccountState(String stopReason) {
+		return switch (valueOr(stopReason, "")) {
+		case "ACCOUNT_DEACTIVATED" -> "DEACTIVATED";
+		case "ACCOUNT_BANNED" -> "BANNED";
+		default -> null;
+		};
+	}
+
+	private String accountTaskStatus(String stopReason) {
+		return switch (valueOr(stopReason, "")) {
+		case "ACCOUNT_DEACTIVATED" -> "已删号";
+		case "ACCOUNT_BANNED" -> "已封禁";
 		default -> null;
 		};
 	}

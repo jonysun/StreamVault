@@ -38,10 +38,19 @@ class CollectPipelineSchemaInitializerTest {
 		initializer.initialize();
 		initializer.initialize();
 
-		assertColumns(jdbcTemplate, "biz_collect_data", Map.of(
-				"last_successful_fetch_at", "TIMESTAMP",
-				"last_seen_publish_time", "VARCHAR(64)",
-				"last_seen_work_id", "VARCHAR(255)"));
+		assertColumns(jdbcTemplate, "biz_collect_data", Map.ofEntries(
+				Map.entry("last_successful_fetch_at", "TIMESTAMP"),
+				Map.entry("last_seen_publish_time", "VARCHAR(64)"),
+				Map.entry("last_seen_work_id", "VARCHAR(255)"),
+				Map.entry("backfill_cursor", "VARCHAR(64)"),
+				Map.entry("backfill_complete", "INTEGER"),
+				Map.entry("backfill_source_id", "VARCHAR(255)"),
+				Map.entry("backfill_verifying", "INTEGER"),
+				Map.entry("backfill_clean_passes", "INTEGER"),
+				Map.entry("backfill_verified_at", "TIMESTAMP"),
+				Map.entry("remote_account_state", "VARCHAR(32)"),
+				Map.entry("remote_account_reason", "VARCHAR(255)"),
+				Map.entry("remote_account_detected_at", "TIMESTAMP")));
 		assertColumns(jdbcTemplate, "biz_collect_run", Map.of(
 				"fetch_stop_reason", "VARCHAR(64)",
 				"fetch_warning", "VARCHAR(255)"));

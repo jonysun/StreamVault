@@ -307,6 +307,10 @@ public class CommandUtil {
                 "--empty_page_limit", String.valueOf(request.emptyPageLimit()),
                 "--mode", request.mode().name().toLowerCase(Locale.ROOT),
                 "--max_items", String.valueOf(request.maxItems()),
+                "--backfill_cursor", nullToEmpty(request.backfillCursor()),
+                "--backfill_complete", request.backfillComplete() ? "1" : "0",
+                "--backfill_verifying", request.backfillVerifying() ? "1" : "0",
+                "--backfill_clean_passes", String.valueOf(request.backfillCleanPasses()),
                 "--output", outputFile.toString());
     }
 

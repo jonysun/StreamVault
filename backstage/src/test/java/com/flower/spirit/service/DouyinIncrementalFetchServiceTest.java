@@ -31,6 +31,7 @@ class DouyinIncrementalFetchServiceTest {
 		assertThat(result.newWorkIds()).containsExactly("1");
 		assertThat(result.items()).singleElement().satisfies(item ->
 				assertThat(item.getString("desc")).isEqualTo("中文"));
+		assertThat(result.backfillCursor()).isEqualTo("0");
 		assertThat(runner.knownIdsJson).contains("old-1", "作品-2");
 		assertTemporaryFilesDeleted(runner);
 	}
@@ -63,6 +64,55 @@ class DouyinIncrementalFetchServiceTest {
 				.extracting(error -> ((CollectFetchException) error).getErrorCode())
 				.isEqualTo("F2_COOKIE_OR_VERIFY_REQUIRED");
 		assertTemporaryFilesDeleted(runner);
+	}
+
+	@Test
+	void parsesBackfillProgressFields() {
+		FakeRunner runner = new FakeRunner();
+		runner.resultJson = """
+				{"items":[],"newWorkIds":[],"outcome":"NO_MORE","pagesFetched":3,
+				 "emptyPages":0,"lastCursor":"90","backfillCursor":"80",
+				 "backfillComplete":false,"backfillVerifying":true,"backfillCleanPasses":1,
+				 "diagnostics":{}}
+				""";
+
+		DouyinFetchEnvelope result = new DouyinIncrementalFetchService(runner).fetch(request(Set.of()));
+
+		assertThat(result.backfillCursor()).isEqualTo("80");
+		assertThat(result.backfillComplete()).isFalse();
+		assertThat(result.backfillVerifying()).isTrue();
+		assertThat(result.backfillCleanPasses()).isEqualTo(1);
+	}
+
+	@Test
+	void rejectsInvalidBackfillProgressTypesAndRange() {
+		FakeRunner runner = new FakeRunner();
+		runner.resultJson = """
+				{"items":[],"newWorkIds":[],"outcome":"NO_MORE","pagesFetched":1,
+				 "emptyPages":0,"lastCursor":"0","backfillCursor":"0",
+				 "backfillComplete":"false","backfillVerifying":false,"backfillCleanPasses":0,
+				 "diagnostics":{}}
+				""";
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.hasMessageContaining("backfillComplete must be a boolean");
+
+		runner.resultJson = """
+				{"items":[],"newWorkIds":[],"outcome":"NO_MORE","pagesFetched":1,
+				 "emptyPages":0,"lastCursor":"0","backfillCursor":"0",
+				 "backfillComplete":false,"backfillVerifying":false,"backfillCleanPasses":3,
+				 "diagnostics":{}}
+				""";
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.hasMessageContaining("backfillCleanPasses must be between 0 and 2");
+
+		runner.resultJson = """
+				{"items":[],"newWorkIds":[],"outcome":"NO_MORE","pagesFetched":1,
+				 "emptyPages":0,"lastCursor":"0","backfillCursor":"0",
+				 "backfillComplete":true,"backfillVerifying":true,"backfillCleanPasses":2,
+				 "diagnostics":{}}
+				""";
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.hasMessageContaining("inconsistent backfill state");
 	}
 
 	@Test

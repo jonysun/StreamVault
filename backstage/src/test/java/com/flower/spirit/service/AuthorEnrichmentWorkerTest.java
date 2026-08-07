@@ -27,6 +27,7 @@ class AuthorEnrichmentWorkerTest {
 		JSONObject profileUser = new JSONObject();
 		profileUser.put("sec_uid", "MS4-author");
 		when(fixture.gateway.fetchProfileUser("MS4-author")).thenReturn(profileUser);
+		when(fixture.transaction.isAuthorPermanentlyUnavailable("douyin", "MS4-author")).thenReturn(false);
 		AuthorProfileEntity profile = new AuthorProfileEntity();
 		profile.setId(12);
 		when(fixture.authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc(
@@ -46,11 +47,26 @@ class AuthorEnrichmentWorkerTest {
 		JSONObject profileUser = new JSONObject();
 		profileUser.put("sec_uid", "MS4-other");
 		when(fixture.gateway.fetchProfileUser("MS4-expected")).thenReturn(profileUser);
+		when(fixture.transaction.isAuthorPermanentlyUnavailable("douyin", "MS4-expected")).thenReturn(false);
 
 		fixture.worker.processOne();
 
 		verify(fixture.authorProfileService, never()).applyExternalDouyinProfile(any(), any());
 		verify(fixture.transaction).fail(eq(9), eq("IDENTITY_MISMATCH"), any(), any(Instant.class));
+	}
+
+	@Test
+	void unavailableAuthorEnrichmentIsCancelledWithoutRemoteRequest() {
+		Fixture fixture = new Fixture();
+		AuthorEnrichmentClaim claim = new AuthorEnrichmentClaim(10, "douyin", "MS4-deleted", 1);
+		when(fixture.transaction.claimNext(any(Instant.class), eq(15L))).thenReturn(claim);
+		when(fixture.transaction.isAuthorPermanentlyUnavailable("douyin", "MS4-deleted")).thenReturn(true);
+
+		fixture.worker.processOne();
+
+		verify(fixture.transaction).cancel(eq(10), eq("ACCOUNT_UNAVAILABLE"), any(), any(Instant.class));
+		verify(fixture.gateway, never()).fetchProfileUser(any());
+		verify(fixture.authorProfileService, never()).applyExternalDouyinProfile(any(), any());
 	}
 
 	private static class Fixture {

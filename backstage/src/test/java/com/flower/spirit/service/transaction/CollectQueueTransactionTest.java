@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.sqlite.SQLiteDataSource;
 
 import com.flower.spirit.service.CollectEnqueueResult;
+import com.flower.spirit.service.CollectBackfillProgress;
 import com.flower.spirit.service.CollectJobClaim;
 import com.flower.spirit.service.CollectRunFetchedItem;
 import com.flower.spirit.service.CollectRunState;
@@ -272,6 +273,80 @@ class CollectQueueTransactionTest {
 	}
 
 	@Test
+	void backfillProgressIsStoredWithTheFetchPlanAndRollsBackOnPlanFailure() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-07T09:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus) VALUES(7, 'queued')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+
+			CollectBackfillProgress progress = new CollectBackfillProgress(
+					"MS4-author", "480", false, true, 1, null);
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(), 20, "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("200", "work-1", 2, 0, "500"),
+					progress, now.plusSeconds(3));
+
+			assertThat(jdbc.queryForMap("SELECT backfill_cursor, backfill_complete, backfill_source_id, "
+					+ "backfill_verifying, backfill_clean_passes FROM biz_collect_data WHERE id = 7"))
+					.containsEntry("backfill_cursor", "480")
+					.containsEntry("backfill_complete", 0)
+					.containsEntry("backfill_source_id", "MS4-author")
+					.containsEntry("backfill_verifying", 1)
+					.containsEntry("backfill_clean_passes", 1);
+
+			jdbc.update("UPDATE biz_collect_run SET state='FETCHING' WHERE id = ?", queued.runId());
+			jdbc.execute("CREATE TRIGGER fail_backfill_plan BEFORE INSERT ON biz_collect_run_item "
+					+ "WHEN NEW.work_id = 'invalid' BEGIN SELECT RAISE(ABORT, 'forced plan failure'); END");
+			CollectBackfillProgress advanced = new CollectBackfillProgress(
+					"MS4-author", "900", true, false, 2, now.plusSeconds(4));
+			assertThatThrownBy(() -> transaction.storeFetchPlan(queued.runId(), 7, List.of(
+					new CollectRunFetchedItem(1, "douyin", "invalid", null, null, null, "100", "video",
+							"NEW", "QUEUED")), 1, "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("100", "invalid", 1, 0, "900"),
+					advanced, now.plusSeconds(5))).isInstanceOf(RuntimeException.class);
+
+			assertThat(jdbc.queryForMap("SELECT backfill_cursor, backfill_complete, backfill_verifying, "
+					+ "backfill_clean_passes FROM biz_collect_data WHERE id = 7"))
+					.containsEntry("backfill_cursor", "480")
+					.containsEntry("backfill_complete", 0)
+					.containsEntry("backfill_verifying", 1)
+					.containsEntry("backfill_clean_passes", 1);
+		}
+	}
+
+	@Test
+	void terminalRemoteAccountStateDisablesTaskAndSurvivesRunCompletion() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-07T10:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, taskenabled) VALUES(7, '排队中', 'Y')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(), 0, "ACCOUNT_DEACTIVATED",
+					new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, "0"), null,
+					now.plusSeconds(3));
+			transaction.complete(queued.runId(), queued.jobId(), now.plusSeconds(4));
+
+			assertThat(jdbc.queryForMap("SELECT taskenabled, taskstatus, remote_account_state, "
+					+ "remote_account_reason, remote_account_detected_at FROM biz_collect_data WHERE id = 7"))
+					.containsEntry("taskenabled", "N")
+					.containsEntry("taskstatus", "已删号")
+					.containsEntry("remote_account_state", "DEACTIVATED")
+					.containsEntry("remote_account_reason", "ACCOUNT_DEACTIVATED");
+		}
+	}
+
+	@Test
 	void blankStoredWatermarkAdvancesToNewestObservedWork() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
@@ -420,9 +495,12 @@ class CollectQueueTransactionTest {
 	}
 
 	private void createSchema(JdbcTemplate jdbc) {
-		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, taskstatus TEXT, count TEXT, "
+		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, taskstatus TEXT, taskenabled TEXT, count TEXT, "
 				+ "carriedout TEXT, endtime TEXT, last_successful_fetch_at TIMESTAMP, last_seen_publish_time TEXT, "
-				+ "last_seen_work_id TEXT)");
+				+ "last_seen_work_id TEXT, backfill_cursor TEXT, backfill_complete INTEGER NOT NULL DEFAULT 0, "
+				+ "backfill_source_id TEXT, backfill_verifying INTEGER NOT NULL DEFAULT 0, "
+				+ "backfill_clean_passes INTEGER NOT NULL DEFAULT 0, backfill_verified_at TIMESTAMP, "
+				+ "remote_account_state TEXT, remote_account_reason TEXT, remote_account_detected_at TIMESTAMP)");
 		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY AUTOINCREMENT, collect_task_id INTEGER NOT NULL, "
 				+ "trigger_type TEXT NOT NULL, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
 				+ "planned_count INTEGER, inserted_count INTEGER, skipped_existing_count INTEGER, failed_item_count INTEGER, "

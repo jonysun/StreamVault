@@ -53,6 +53,11 @@ public class CollectDataJob implements Job {
 				return;
 			}
 			CollectDataEntity collectDataEntity = taskOpt.get();
+			if ("N".equalsIgnoreCase(collectDataEntity.getTaskenabled())) {
+				quartzTaskService.removeTaskSchedule(taskId);
+				logger.info("收藏任务已停用，移除残留调度：{}", taskName);
+				return;
+			}
 			CollectEnqueueResult result = collectEnqueueService.enqueueScheduled(taskId,
 					context.getFireTime() == null ? null : context.getFireTime().toInstant());
 			if (!"Y".equals(collectDataEntity.getMonitoring())) {

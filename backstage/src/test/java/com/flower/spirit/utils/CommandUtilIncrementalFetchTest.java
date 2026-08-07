@@ -52,6 +52,10 @@ class CommandUtilIncrementalFetchTest {
 				"--empty_page_limit", "3",
 				"--mode", "audit",
 				"--max_items", "41",
+				"--backfill_cursor", "",
+				"--backfill_complete", "0",
+				"--backfill_verifying", "0",
+				"--backfill_clean_passes", "0",
 				"--output", output.toString());
 	}
 

@@ -31,6 +31,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.JSONArray;
 import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.entity.CollectDataEntity;
+import com.flower.spirit.task.QuartzTaskService;
 
 class CollectDataServiceFetchPlanTest {
 
@@ -43,6 +44,7 @@ class CollectDataServiceFetchPlanTest {
 	private final VideoDataService videoDataService = mock(VideoDataService.class);
 	private final HlsTranscodeService hlsTranscodeService = mock(HlsTranscodeService.class);
 	private final RuntimeControlService runtimeControlService = mock(RuntimeControlService.class);
+	private final QuartzTaskService quartzTaskService = mock(QuartzTaskService.class);
 	private CollectDataService service;
 
 	@BeforeEach
@@ -57,10 +59,12 @@ class CollectDataServiceFetchPlanTest {
 		ReflectionTestUtils.setField(service, "videoDataService", videoDataService);
 		ReflectionTestUtils.setField(service, "hlsTranscodeService", hlsTranscodeService);
 		ReflectionTestUtils.setField(service, "runtimeControlService", runtimeControlService);
+		ReflectionTestUtils.setField(service, "quartzTaskService", quartzTaskService);
 		ReflectionTestUtils.setField(service, "incrementalKnownBoundary", 20);
 		ReflectionTestUtils.setField(service, "incrementalMinPages", 20);
 		ReflectionTestUtils.setField(service, "backfillMaxPages", 500);
 		ReflectionTestUtils.setField(service, "auditMaxPages", 500);
+		ReflectionTestUtils.setField(service, "backfillVerifyIntervalHours", 24L);
 		ReflectionTestUtils.setField(service, "emptyPageLimit", 3);
 		ReflectionTestUtils.setField(service, "initialFetchLimit", 80);
 		when(cookieService.currentDouyinCookie(anyString())).thenReturn("cookie");
@@ -81,14 +85,17 @@ class CollectDataServiceFetchPlanTest {
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		ArgumentCaptor<CollectRunFetchedItem.FetchWatermark> watermark =
 				ArgumentCaptor.forClass(CollectRunFetchedItem.FetchWatermark.class);
+		ArgumentCaptor<CollectBackfillProgress> progress = ArgumentCaptor.forClass(CollectBackfillProgress.class);
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(90L),
 				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(2),
-				org.mockito.ArgumentMatchers.eq("NO_MORE"), watermark.capture());
+				org.mockito.ArgumentMatchers.eq("NO_MORE"), watermark.capture(), progress.capture());
 		assertThat(items.getValue()).extracting(CollectRunFetchedItem::workId,
 				CollectRunFetchedItem::processState, CollectRunFetchedItem::decision)
 				.containsExactly(tuple("new-1", "QUEUED", "NEW"));
 		assertThat(watermark.getValue().publishTime()).isEqualTo("200");
 		assertThat(watermark.getValue().workId()).isEqualTo("new-1");
+		assertThat(progress.getValue()).isEqualTo(
+				new CollectBackfillProgress("MS4-author", "0", false, false, 0, null));
 		verifyNoInteractions(videoDataService, hlsTranscodeService);
 	}
 
@@ -116,7 +123,111 @@ class CollectDataServiceFetchPlanTest {
 	}
 
 	@Test
-	void incrementalModeUsesMonitorLimitAndExpandsPageBudgetForKnownPrefix() {
+	void sourceChangeDiscardsPersistedBackfillState() {
+		CollectDataEntity task = postTask(new java.util.Date());
+		task.setBackfillSourceId("MS4-old-author");
+		task.setBackfillCursor("480");
+		task.setBackfillComplete(1);
+		task.setBackfillVerifying(1);
+		task.setBackfillCleanPasses(2);
+		when(taskDao.findById(7)).thenReturn(Optional.of(task));
+		when(queryService.findKnownWorkIds(7)).thenReturn(Set.of());
+		when(fetchService.fetch(any())).thenReturn(envelope(List.of(), Set.of(), "NO_MORE"));
+
+		service.executeQueuedCollectTask(7, 911L, CollectTriggerType.SCHEDULED);
+
+		ArgumentCaptor<DouyinFetchRequest> request = ArgumentCaptor.forClass(DouyinFetchRequest.class);
+		verify(fetchService).fetch(request.capture());
+		assertThat(request.getValue().secUserId()).isEqualTo("MS4-author");
+		assertThat(request.getValue().backfillCursor()).isNull();
+		assertThat(request.getValue().backfillComplete()).isFalse();
+		assertThat(request.getValue().backfillVerifying()).isFalse();
+		assertThat(request.getValue().backfillCleanPasses()).isZero();
+	}
+
+	@Test
+	void deactivatedAccountDoesNotOverwritePersistedBackfillState() {
+		CollectDataEntity task = postTask(new java.util.Date());
+		task.setBackfillSourceId("MS4-author");
+		task.setBackfillCursor("480");
+		task.setBackfillComplete(0);
+		task.setBackfillVerifying(0);
+		task.setBackfillCleanPasses(0);
+		when(taskDao.findById(7)).thenReturn(Optional.of(task));
+		when(queryService.findKnownWorkIds(7)).thenReturn(Set.of());
+		when(fetchService.fetch(any())).thenReturn(new DouyinFetchEnvelope(
+				List.of(), Set.of(), "ACCOUNT_DEACTIVATED", 0, 0, "0",
+				"999", false, true, 1, new JSONObject()));
+
+		service.executeQueuedCollectTask(7, 913L, CollectTriggerType.SCHEDULED);
+
+		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(913L),
+				org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(List.of()),
+				org.mockito.ArgumentMatchers.eq(0), org.mockito.ArgumentMatchers.eq("ACCOUNT_DEACTIVATED"),
+				any(), org.mockito.ArgumentMatchers.isNull());
+		verify(quartzTaskService).removeTaskSchedule(7);
+	}
+
+	@Test
+	void manualResumeClearsRemoteAccountStopAndRestoresSchedule() {
+		CollectDataEntity task = postTask(new java.util.Date());
+		task.setTaskenabled("N");
+		task.setTaskstatus("已删号");
+		task.setRemoteAccountState("DEACTIVATED");
+		task.setRemoteAccountReason("ACCOUNT_DEACTIVATED");
+		task.setRemoteAccountDetectedAt(new java.util.Date());
+		when(taskDao.findById(7)).thenReturn(Optional.of(task));
+
+		service.resumeCollectData(7);
+
+		assertThat(task.getTaskenabled()).isEqualTo("Y");
+		assertThat(task.getTaskstatus()).isEqualTo("任务已恢复");
+		assertThat(task.getRemoteAccountState()).isNull();
+		assertThat(task.getRemoteAccountReason()).isNull();
+		assertThat(task.getRemoteAccountDetectedAt()).isNull();
+		verify(taskDao).save(task);
+		verify(quartzTaskService).scheduleTask(task);
+	}
+
+	@Test
+	void overdueVerificationUsesFullPageBudgetAndRepairsMissingKnownMedia() {
+		CollectDataEntity task = postTask(new java.util.Date());
+		task.setBackfillSourceId("MS4-author");
+		task.setBackfillCursor("0");
+		task.setBackfillComplete(1);
+		task.setBackfillVerifying(0);
+		task.setBackfillCleanPasses(2);
+		task.setBackfillVerifiedAt(java.util.Date.from(java.time.Instant.now().minus(java.time.Duration.ofHours(25))));
+		when(taskDao.findById(7)).thenReturn(Optional.of(task));
+		when(queryService.findKnownWorkIds(7)).thenReturn(Set.of("known-missing", "known-complete"));
+		when(queryService.needsAuditRequeue(7, "douyin", "known-missing", "video")).thenReturn(true);
+		when(fetchService.fetch(any())).thenReturn(new DouyinFetchEnvelope(
+				List.of(work("known-missing", "100", "video"), work("known-complete", "90", "video")),
+				Set.of(), "NO_MORE", 20, 0, "0",
+				"0", false, true, 1, new JSONObject()));
+
+		service.executeQueuedCollectTask(7, 912L, CollectTriggerType.SCHEDULED);
+
+		ArgumentCaptor<DouyinFetchRequest> request = ArgumentCaptor.forClass(DouyinFetchRequest.class);
+		verify(fetchService).fetch(request.capture());
+		assertThat(request.getValue().mode()).isEqualTo(DouyinFetchMode.INCREMENTAL);
+		assertThat(request.getValue().maxPages()).isEqualTo(500);
+		assertThat(request.getValue().backfillVerifying()).isTrue();
+		assertThat(request.getValue().backfillCleanPasses()).isZero();
+
+		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
+		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(912L),
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(2),
+				org.mockito.ArgumentMatchers.eq("NO_MORE"), any(), any());
+		assertThat(items.getValue()).singleElement().satisfies(item -> {
+			assertThat(item.workId()).isEqualTo("known-missing");
+			assertThat(item.decision()).isEqualTo("AUDIT_REPAIR");
+			assertThat(item.processState()).isEqualTo("QUEUED");
+		});
+	}
+
+	@Test
+	void incrementalModeUsesMonitorLimitAndFixedPageBudget() {
 		CollectDataEntity task = postTask(new java.util.Date());
 		task.setMaxcur(20);
 		when(taskDao.findById(7)).thenReturn(Optional.of(task));
@@ -131,7 +242,7 @@ class CollectDataServiceFetchPlanTest {
 		verify(fetchService).fetch(request.capture());
 		assertThat(request.getValue().mode()).isEqualTo(DouyinFetchMode.INCREMENTAL);
 		assertThat(request.getValue().maxItems()).isEqualTo(20);
-		assertThat(request.getValue().maxPages()).isEqualTo(52);
+		assertThat(request.getValue().maxPages()).isEqualTo(20);
 	}
 
 	@Test
@@ -148,7 +259,7 @@ class CollectDataServiceFetchPlanTest {
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(93L),
 				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(1),
-				anyString(), any());
+				anyString(), any(), org.mockito.ArgumentMatchers.isNull());
 		assertThat(items.getValue()).singleElement().satisfies(item -> {
 			assertThat(item.decision()).isEqualTo("AUDIT_REPAIR");
 			assertThat(item.processState()).isEqualTo("QUEUED");
@@ -169,7 +280,7 @@ class CollectDataServiceFetchPlanTest {
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(94L),
 				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(1),
-				anyString(), any());
+				anyString(), any(), any());
 		assertThat(items.getValue()).singleElement().satisfies(item -> {
 			assertThat(item.decision()).isEqualTo("BLOCKED");
 			assertThat(item.processState()).isEqualTo("SKIPPED_BLOCKED");
@@ -192,7 +303,7 @@ class CollectDataServiceFetchPlanTest {
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(941L),
 				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(1),
-				anyString(), any());
+				anyString(), any(), any());
 		assertThat(items.getValue()).singleElement().satisfies(item ->
 				assertThat(item.processState()).isEqualTo("SKIPPED_BLOCKED"));
 	}
@@ -225,7 +336,7 @@ class CollectDataServiceFetchPlanTest {
 		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
 		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(943L),
 				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(2),
-				anyString(), any());
+				anyString(), any(), any());
 		assertThat(items.getValue()).extracting(CollectRunFetchedItem::decision, CollectRunFetchedItem::processState)
 				.containsExactly(tuple("NEW", "QUEUED"));
 	}
@@ -288,6 +399,20 @@ class CollectDataServiceFetchPlanTest {
 		assertThat(query.needsAuditRequeue(7, "douyin", "graphic-1", "image")).isTrue();
 		Files.writeString(second, "video");
 		assertThat(query.needsAuditRequeue(7, "douyin", "graphic-1", "image")).isFalse();
+	}
+
+	@Test
+	void auditDoesNotRequeueWorkThatStillHasAnActiveDownload() {
+		JdbcTemplate jdbc = mock(JdbcTemplate.class);
+		when(jdbc.queryForObject(org.mockito.ArgumentMatchers.startsWith(
+				"SELECT COUNT(*) FROM biz_collect_run_item"), org.mockito.ArgumentMatchers.eq(Integer.class),
+				org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq("douyin"),
+				org.mockito.ArgumentMatchers.eq("active-1"))).thenReturn(1);
+		CollectRunQueryService query = new CollectRunQueryService(jdbc, mock(SnapshotCodec.class));
+
+		assertThat(query.needsAuditRequeue(7, "douyin", "active-1", "video")).isFalse();
+		verify(jdbc, never()).queryForList(org.mockito.ArgumentMatchers.startsWith("SELECT videoaddr"),
+				org.mockito.ArgumentMatchers.eq(String.class), anyString(), anyString(), anyString());
 	}
 
 	@Test

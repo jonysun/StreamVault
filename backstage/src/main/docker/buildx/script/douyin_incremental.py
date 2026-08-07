@@ -80,7 +80,16 @@ def _parse_nonnegative_epoch(value):
 
 
 def _validate_config(
-    watermark, known_boundary, max_pages, empty_page_limit, mode, max_items
+    watermark,
+    known_boundary,
+    max_pages,
+    empty_page_limit,
+    mode,
+    max_items,
+    backfill_cursor,
+    backfill_complete,
+    backfill_verifying,
+    backfill_clean_passes,
 ):
     if not isinstance(mode, str) or mode not in _VALID_MODES:
         raise ValueError("mode must be one of: initial, incremental, audit")
@@ -96,6 +105,32 @@ def _validate_config(
     if isinstance(max_items, bool) or not isinstance(max_items, int) or max_items < 0:
         raise ValueError("max_items must be a nonnegative integer")
 
+    if backfill_cursor not in (None, "") and _parse_nonnegative_epoch(backfill_cursor) is None:
+        raise ValueError("backfill_cursor must be a nonnegative integer epoch or null")
+    for name, value in (
+        ("backfill_complete", backfill_complete),
+        ("backfill_verifying", backfill_verifying),
+    ):
+        if not isinstance(value, bool):
+            raise ValueError(f"{name} must be a boolean")
+    if (
+        isinstance(backfill_clean_passes, bool)
+        or not isinstance(backfill_clean_passes, int)
+        or backfill_clean_passes < 0
+        or backfill_clean_passes > 2
+    ):
+        raise ValueError("backfill_clean_passes must be an integer from 0 to 2")
+    if (
+        (backfill_complete and (backfill_verifying or backfill_clean_passes != 2))
+        or (backfill_verifying and backfill_clean_passes >= 2)
+        or (
+            not backfill_complete
+            and not backfill_verifying
+            and backfill_clean_passes != 0
+        )
+    ):
+        raise ValueError("backfill state is inconsistent")
+
     if watermark is None:
         return None
     parsed_watermark = _parse_nonnegative_epoch(watermark)
@@ -109,6 +144,8 @@ def _validate_page(raw, current_cursor):
         raise UpstreamSchemaError("response must be an object")
 
     if "aweme_list" not in raw:
+        if raw.get("status_code") == 0:
+            return [], 0, current_cursor
         raise UpstreamSchemaError("missing required keys: aweme_list")
 
     aweme_list = raw["aweme_list"]
@@ -192,6 +229,13 @@ def _response_summary(raw, aweme_list, has_more, next_cursor):
         "hasMore": has_more,
         "nextCursor": _bounded_text(next_cursor, _SUMMARY_VALUE_LENGTH),
         "observedAwemeIds": observed_ids,
+        "compatibilityReason": (
+            "STATUS_ONLY_EMPTY_PAGE"
+            if isinstance(raw, dict)
+            and raw.get("status_code") == 0
+            and "aweme_list" not in raw
+            else None
+        ),
     }
 
 
@@ -238,6 +282,10 @@ def envelope(
     empty_pages,
     last_cursor,
     diagnostics,
+    backfill_cursor="0",
+    backfill_complete=False,
+    backfill_verifying=False,
+    backfill_clean_passes=0,
 ):
     return {
         "items": items,
@@ -246,6 +294,10 @@ def envelope(
         "pagesFetched": pages_fetched,
         "emptyPages": empty_pages,
         "lastCursor": str(last_cursor),
+        "backfillCursor": str(backfill_cursor),
+        "backfillComplete": bool(backfill_complete),
+        "backfillVerifying": bool(backfill_verifying),
+        "backfillCleanPasses": int(backfill_clean_passes),
         "diagnostics": diagnostics,
     }
 
@@ -259,39 +311,86 @@ async def paginate(
     empty_page_limit,
     mode,
     max_items=0,
+    backfill_cursor=None,
+    backfill_complete=False,
+    backfill_verifying=False,
+    backfill_clean_passes=0,
 ):
-    _validate_config(
+    parsed_watermark = _validate_config(
         watermark,
         known_boundary,
         max_pages,
         empty_page_limit,
         mode,
         max_items,
+        backfill_cursor,
+        backfill_complete,
+        backfill_verifying,
+        backfill_clean_passes,
     )
     observed = []
     selected = []
     new_ids = []
-    cursor = 0
     empty_pages = 0
     seen_work_ids = set()
-    diagnostics = {"pages": [], "lastResponseSummary": None}
+    stored_backfill_cursor = (
+        _parse_nonnegative_epoch(backfill_cursor)
+        if backfill_cursor not in (None, "")
+        else 0
+    )
+    progress_cursor = stored_backfill_cursor
+    progress_complete = backfill_complete
+    progress_verifying = backfill_verifying
+    progress_clean_passes = backfill_clean_passes
+    phase = (
+        "AUDIT"
+        if mode == "audit"
+        else "BACKFILL"
+        if mode == "initial"
+        else "VERIFY"
+        if backfill_verifying
+        else "HEAD"
+    )
+    cursor = stored_backfill_cursor if phase in ("BACKFILL", "VERIFY") else 0
+    known_streak = 0
+    head_boundary_reached = False
+    diagnostics = {
+        "pages": [],
+        "lastResponseSummary": None,
+        "phase": phase,
+        "headPagesFetched": 0,
+        "backfillPagesFetched": 0,
+        "verifyPagesFetched": 0,
+    }
 
     def finish(outcome, pages_fetched, last_cursor):
         diagnostics["observedCount"] = len(observed)
         diagnostics["selectedCount"] = len(selected)
+        diagnostics["phase"] = phase
         return envelope(
-            observed if mode == "audit" else selected,
+            observed if mode == "audit" or phase == "VERIFY" else selected,
             new_ids,
             outcome,
             pages_fetched,
             empty_pages,
             last_cursor,
             diagnostics,
+            progress_cursor,
+            progress_complete,
+            progress_verifying,
+            progress_clean_passes,
         )
 
     for page_number in range(1, max_pages + 1):
+        request_cursor = cursor
         raw = await fetch_page(cursor)
         aweme_list, has_more, next_cursor = _validate_page(raw, cursor)
+        if phase == "HEAD":
+            diagnostics["headPagesFetched"] += 1
+        elif phase == "BACKFILL":
+            diagnostics["backfillPagesFetched"] += 1
+        elif phase == "VERIFY":
+            diagnostics["verifyPagesFetched"] += 1
         diagnostics["lastResponseSummary"] = _response_summary(
             raw, aweme_list, has_more, next_cursor
         )
@@ -303,6 +402,10 @@ async def paginate(
                 "hasMore": has_more,
                 "awemeListState": "null" if aweme_list is None else "list",
                 "itemCount": 0 if not aweme_list else len(aweme_list),
+                "phase": phase,
+                "compatibilityReason": diagnostics["lastResponseSummary"].get(
+                    "compatibilityReason"
+                ),
             }
         )
 
@@ -312,6 +415,31 @@ async def paginate(
         if not aweme_list:
             empty_pages += 1
             if not has_more:
+                if (
+                    phase == "HEAD"
+                    and mode == "incremental"
+                    and not progress_complete
+                    and stored_backfill_cursor != 0
+                ):
+                    phase = "BACKFILL"
+                    cursor = stored_backfill_cursor
+                    continue
+                if phase in ("HEAD", "BACKFILL") and mode != "audit":
+                    progress_cursor = 0
+                    progress_complete = False
+                    progress_verifying = True
+                    progress_clean_passes = 0
+                elif phase == "VERIFY":
+                    if selected:
+                        progress_cursor = 0
+                        progress_complete = False
+                        progress_verifying = False
+                        progress_clean_passes = 0
+                    else:
+                        progress_cursor = 0
+                        progress_clean_passes = min(2, progress_clean_passes + 1)
+                        progress_complete = progress_clean_passes >= 2
+                        progress_verifying = not progress_complete
                 outcome = "NO_PUBLIC_WORKS" if not observed else "NO_MORE"
                 return finish(outcome, page_number, next_cursor)
             if empty_pages >= empty_page_limit:
@@ -332,15 +460,72 @@ async def paginate(
                 seen_work_ids.add(work_id)
 
             if not known:
+                known_streak = 0
                 if work_id:
                     new_ids.append(work_id)
                     selected.append(item)
+            elif phase == "HEAD" and parsed_watermark is not None:
+                publish_time = _parse_nonnegative_epoch(item["create_time"])
+                if publish_time is not None and publish_time <= parsed_watermark:
+                    known_streak += 1
+                    if known_streak >= known_boundary:
+                        head_boundary_reached = True
+                else:
+                    known_streak = 0
 
             if mode in ("initial", "incremental") and max_items > 0 and len(selected) >= max_items:
+                if phase == "BACKFILL":
+                    progress_cursor = request_cursor
+                    progress_complete = False
+                    progress_verifying = False
+                    progress_clean_passes = 0
+                elif phase == "VERIFY":
+                    progress_cursor = request_cursor
+                    progress_complete = False
+                    progress_verifying = False
+                    progress_clean_passes = 0
                 return finish("BATCH_LIMIT", page_number, next_cursor)
 
+        if phase == "HEAD" and head_boundary_reached:
+            if progress_complete:
+                return finish("KNOWN_BOUNDARY", page_number, next_cursor)
+            phase = "BACKFILL"
+            cursor = stored_backfill_cursor
+            continue
+
         if not has_more:
+            if phase in ("HEAD", "BACKFILL") and mode != "audit":
+                progress_cursor = 0
+                progress_complete = False
+                progress_verifying = True
+                progress_clean_passes = 0
+            elif phase == "VERIFY":
+                if selected:
+                    progress_cursor = 0
+                    progress_complete = False
+                    progress_verifying = False
+                    progress_clean_passes = 0
+                else:
+                    progress_cursor = 0
+                    progress_clean_passes = min(2, progress_clean_passes + 1)
+                    progress_complete = progress_clean_passes >= 2
+                    progress_verifying = not progress_complete
             return finish("NO_MORE", page_number, next_cursor)
         cursor = next_cursor
 
+    if phase == "BACKFILL" and mode != "audit":
+        progress_cursor = cursor
+        progress_complete = False
+        progress_verifying = False
+        progress_clean_passes = 0
+    elif phase == "VERIFY":
+        if selected:
+            progress_cursor = 0
+            progress_complete = False
+            progress_verifying = False
+            progress_clean_passes = 0
+        else:
+            progress_cursor = cursor
+            progress_complete = False
+            progress_verifying = True
     return finish("MAX_PAGE_GUARD", max_pages, cursor)

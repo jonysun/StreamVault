@@ -103,7 +103,16 @@ public class CollectPipelineSchemaInitializer {
 		definitions.put("biz_collect_data", List.of(
 				"last_successful_fetch_at TIMESTAMP",
 				"last_seen_publish_time VARCHAR(64)",
-				"last_seen_work_id VARCHAR(255)"));
+				"last_seen_work_id VARCHAR(255)",
+				"backfill_cursor VARCHAR(64)",
+				"backfill_complete INTEGER NOT NULL DEFAULT 0",
+				"backfill_source_id VARCHAR(255)",
+				"backfill_verifying INTEGER NOT NULL DEFAULT 0",
+				"backfill_clean_passes INTEGER NOT NULL DEFAULT 0",
+				"backfill_verified_at TIMESTAMP",
+				"remote_account_state VARCHAR(32)",
+				"remote_account_reason VARCHAR(255)",
+				"remote_account_detected_at TIMESTAMP"));
 		definitions.put("biz_collect_run", List.of(
 				"fetch_stop_reason VARCHAR(64)",
 				"fetch_warning VARCHAR(255)"));

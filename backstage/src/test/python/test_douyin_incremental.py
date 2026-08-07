@@ -241,6 +241,10 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
             "empty_page_limit": 3,
             "mode": "initial",
             "max_items": 0,
+            "backfill_cursor": None,
+            "backfill_complete": False,
+            "backfill_verifying": False,
+            "backfill_clean_passes": 0,
         }
 
         for field, value in cases:
@@ -357,6 +361,272 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["newWorkIds"], [item["aweme_id"] for item in result["items"]])
         self.assertEqual(40, result["diagnostics"]["observedCount"])
         self.assertEqual(20, result["diagnostics"]["selectedCount"])
+
+    async def test_finite_rounds_download_all_history_and_midrun_new_works(self):
+        remote = [work(f"history-{index}", 1000 - index) for index in range(1000)]
+        known_ids = set()
+        watermark = None
+        backfill_cursor = None
+        backfill_complete = False
+        backfill_verifying = False
+        backfill_clean_passes = 0
+        inserted_new_head = False
+
+        for round_number in range(1, 61):
+            if round_number == 10:
+                remote[0:0] = [work(f"new-{index}", 2000 - index) for index in range(5)]
+                inserted_new_head = True
+
+            async def fetch_page(cursor):
+                start = int(cursor)
+                values = remote[start : start + 20]
+                next_cursor = start + len(values)
+                return page(
+                    values,
+                    has_more=1 if next_cursor < len(remote) else 0,
+                    cursor=next_cursor,
+                )
+
+            result = await paginate(
+                fetch_page,
+                known_ids=known_ids,
+                watermark=watermark,
+                known_boundary=20,
+                max_pages=100 if backfill_verifying else 20,
+                empty_page_limit=3,
+                mode="initial" if round_number == 1 else "incremental",
+                max_items=80 if round_number == 1 else 20,
+                backfill_cursor=backfill_cursor,
+                backfill_complete=backfill_complete,
+                backfill_verifying=backfill_verifying,
+                backfill_clean_passes=backfill_clean_passes,
+            )
+            known_ids.update(result["newWorkIds"])
+            selected_times = [
+                int(item["create_time"])
+                for item in result["items"]
+                if item["aweme_id"] in result["newWorkIds"]
+            ]
+            if selected_times:
+                watermark = max([watermark or 0, *selected_times])
+            backfill_cursor = result["backfillCursor"]
+            backfill_complete = result["backfillComplete"]
+            backfill_verifying = result["backfillVerifying"]
+            backfill_clean_passes = result["backfillCleanPasses"]
+            if backfill_complete:
+                break
+
+        self.assertTrue(inserted_new_head)
+        self.assertTrue(backfill_complete)
+        self.assertLessEqual(round_number, 60)
+        self.assertEqual({item["aweme_id"] for item in remote}, known_ids)
+
+    async def test_incremental_switches_from_known_head_to_persisted_backfill_cursor(self):
+        fetch_page = fake_fetch(
+            [
+                page(
+                    [work("known-1", 200), work("known-2", 190)],
+                    has_more=1,
+                    cursor=20,
+                ),
+                page([work("history-1", 100)], has_more=1, cursor=120),
+            ]
+        )
+
+        result = await paginate(
+            fetch_page,
+            known_ids={"known-1", "known-2"},
+            watermark=200,
+            known_boundary=2,
+            max_pages=20,
+            empty_page_limit=3,
+            mode="incremental",
+            max_items=1,
+            backfill_cursor=100,
+        )
+
+        self.assertEqual([0, 100], fetch_page.requested_cursors)
+        self.assertEqual(["history-1"], result["newWorkIds"])
+        self.assertEqual("100", result["backfillCursor"])
+        self.assertFalse(result["backfillComplete"])
+        self.assertFalse(result["backfillVerifying"])
+
+    async def test_status_only_success_page_is_a_compatible_terminal_page(self):
+        result = await paginate(
+            fake_fetch([{"status_code": 0}]),
+            set(),
+            None,
+            20,
+            20,
+            3,
+            "initial",
+        )
+
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+        self.assertTrue(result["backfillVerifying"])
+        self.assertEqual(
+            "STATUS_ONLY_EMPTY_PAGE",
+            result["diagnostics"]["pages"][0]["compatibilityReason"],
+        )
+
+    async def test_two_clean_verify_passes_are_required_for_completion(self):
+        first = await paginate(
+            fake_fetch([page([work("known", 100)], has_more=0, cursor=10)]),
+            {"known"},
+            100,
+            1,
+            20,
+            3,
+            "incremental",
+            max_items=20,
+            backfill_verifying=True,
+            backfill_clean_passes=0,
+        )
+
+        self.assertFalse(first["backfillComplete"])
+        self.assertTrue(first["backfillVerifying"])
+        self.assertEqual(1, first["backfillCleanPasses"])
+        self.assertEqual(["known"], [item["aweme_id"] for item in first["items"]])
+
+        second = await paginate(
+            fake_fetch([page([work("known", 100)], has_more=0, cursor=10)]),
+            {"known"},
+            100,
+            1,
+            20,
+            3,
+            "incremental",
+            max_items=20,
+            backfill_verifying=True,
+            backfill_clean_passes=first["backfillCleanPasses"],
+        )
+
+        self.assertTrue(second["backfillComplete"])
+        self.assertFalse(second["backfillVerifying"])
+        self.assertEqual(2, second["backfillCleanPasses"])
+
+    async def test_verify_discovery_clears_clean_state_and_queues_work(self):
+        result = await paginate(
+            fake_fetch([page([work("moved-work", 100)], has_more=0, cursor=10)]),
+            set(),
+            100,
+            1,
+            20,
+            3,
+            "incremental",
+            max_items=20,
+            backfill_verifying=True,
+            backfill_clean_passes=1,
+        )
+
+        self.assertEqual(["moved-work"], result["newWorkIds"])
+        self.assertFalse(result["backfillComplete"])
+        self.assertFalse(result["backfillVerifying"])
+        self.assertEqual(0, result["backfillCleanPasses"])
+
+    async def test_verify_resumes_across_page_guards_and_completes_two_clean_passes(self):
+        remote = [work(f"known-{index}", 100 - index) for index in range(6)]
+        known_ids = {item["aweme_id"] for item in remote}
+        backfill_cursor = 0
+        clean_passes = 0
+
+        async def run_verify():
+            requested = []
+
+            async def fetch_page(cursor):
+                requested.append(int(cursor))
+                start = int(cursor)
+                values = remote[start : start + 2]
+                next_cursor = start + len(values)
+                return page(
+                    values,
+                    has_more=next_cursor < len(remote),
+                    cursor=next_cursor,
+                )
+
+            result = await paginate(
+                fetch_page,
+                known_ids,
+                100,
+                1,
+                2,
+                3,
+                "incremental",
+                max_items=20,
+                backfill_cursor=backfill_cursor,
+                backfill_verifying=True,
+                backfill_clean_passes=clean_passes,
+            )
+            return result, requested
+
+        first, first_requests = await run_verify()
+        self.assertEqual("MAX_PAGE_GUARD", first["outcome"])
+        self.assertEqual([0, 2], first_requests)
+        self.assertEqual("4", first["backfillCursor"])
+        self.assertTrue(first["backfillVerifying"])
+        self.assertEqual(0, first["backfillCleanPasses"])
+
+        backfill_cursor = first["backfillCursor"]
+        second, second_requests = await run_verify()
+        self.assertEqual([4], second_requests)
+        self.assertEqual("0", second["backfillCursor"])
+        self.assertTrue(second["backfillVerifying"])
+        self.assertEqual(1, second["backfillCleanPasses"])
+
+        backfill_cursor = second["backfillCursor"]
+        clean_passes = second["backfillCleanPasses"]
+        third, third_requests = await run_verify()
+        self.assertEqual([0, 2], third_requests)
+        self.assertEqual("4", third["backfillCursor"])
+
+        backfill_cursor = third["backfillCursor"]
+        fourth, fourth_requests = await run_verify()
+        self.assertEqual([4], fourth_requests)
+        self.assertTrue(fourth["backfillComplete"])
+        self.assertFalse(fourth["backfillVerifying"])
+        self.assertEqual(2, fourth["backfillCleanPasses"])
+
+    async def test_verify_page_guard_with_unknown_work_aborts_clean_pass(self):
+        result = await paginate(
+            fake_fetch(
+                [
+                    page([work("known", 100)], has_more=1, cursor=1),
+                    page([work("unknown", 90)], has_more=1, cursor=2),
+                ]
+            ),
+            {"known"},
+            100,
+            1,
+            2,
+            3,
+            "incremental",
+            max_items=20,
+            backfill_verifying=True,
+            backfill_clean_passes=1,
+        )
+
+        self.assertEqual("MAX_PAGE_GUARD", result["outcome"])
+        self.assertEqual(["unknown"], result["newWorkIds"])
+        self.assertEqual("0", result["backfillCursor"])
+        self.assertFalse(result["backfillComplete"])
+        self.assertFalse(result["backfillVerifying"])
+        self.assertEqual(0, result["backfillCleanPasses"])
+
+    async def test_inconsistent_backfill_state_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "backfill state is inconsistent"):
+            await paginate(
+                fake_fetch([]),
+                set(),
+                None,
+                20,
+                20,
+                3,
+                "incremental",
+                max_items=20,
+                backfill_complete=True,
+                backfill_verifying=True,
+                backfill_clean_passes=2,
+            )
 
     async def test_incremental_known_prefix_does_not_stop_before_unknown_quota(self):
         result = await paginate(
@@ -702,6 +972,10 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
                 "pagesFetched",
                 "emptyPages",
                 "lastCursor",
+                "backfillCursor",
+                "backfillComplete",
+                "backfillVerifying",
+                "backfillCleanPasses",
                 "diagnostics",
             },
             set(result),
@@ -715,6 +989,8 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
                 "hasMore": 0,
                 "awemeListState": "list",
                 "itemCount": 3,
+                "phase": "AUDIT",
+                "compatibilityReason": None,
             },
             result["diagnostics"]["pages"][0],
         )
@@ -885,13 +1161,17 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             known_file.write_text("[]", encoding="utf-8")
             await module.fetch_douyin_list_incremental(
                 "cookie", "MS4-author", str(known_file), "", 20, 20, 3,
-                "incremental", 0, str(output_file)
+                "incremental", 0, str(output_file), "480", False, True, 1
             )
             result = json.loads(output_file.read_text(encoding="utf-8"))
 
         crawler = crawlers[0]
         self.assertEqual("ACCOUNT_DEACTIVATED", result["outcome"])
         self.assertEqual([], result["items"])
+        self.assertEqual("480", result["backfillCursor"])
+        self.assertFalse(result["backfillComplete"])
+        self.assertTrue(result["backfillVerifying"])
+        self.assertEqual(1, result["backfillCleanPasses"])
         self.assertEqual([], crawler.post_cursors)
         self.assertIn("profileStatus", result["diagnostics"])
 
@@ -1181,6 +1461,24 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("F2_UPSTREAM_TIMEOUT", payload["errorCode"])
         self.assertNotIn("raw upstream detail", output)
 
+    async def test_plain_api_response_error_is_classified_as_response_error(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "author"}},
+            [type("APIResponseError", (RuntimeError,), {})(
+                "invalid response; raw upstream detail"
+            )],
+        )
+        args = self._args()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            await module.run_incremental_command(args)
+
+        output = stderr.getvalue()
+        payload = self._error_payload(output)
+        self.assertEqual("F2_UPSTREAM_RESPONSE_ERROR", payload["errorCode"])
+        self.assertNotIn("raw upstream detail", output)
+
     async def test_empty_response_retry_exhaustion_is_upstream_unavailable(self):
         module, _ = self._load_command_module(
             {"status_code": 0, "user": {"nickname": "author"}},
@@ -1235,9 +1533,10 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("TASK_CONFIGURATION", payload["diagnostics"]["faultDomain"])
         self.assertFalse(payload["diagnostics"]["retryable"])
 
-    async def test_top_level_special_state_is_deactivated(self):
+    async def test_unknown_top_level_special_state_does_not_imply_deactivation(self):
         module, crawlers = self._load_command_module(
-            {"status_code": 0, "special_state_info": {"type": 1}}, []
+            {"status_code": 0, "special_state_info": {"type": 1}, "user": {"nickname": "author"}},
+            [{"status_code": 0, "aweme_list": [], "has_more": 0, "max_cursor": 0}],
         )
         args = self._args()
 
@@ -1247,7 +1546,20 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             args.empty_page_limit, args.mode, args.max_items, args.output,
         )
 
-        self.assertEqual("ACCOUNT_DEACTIVATED", result["outcome"])
+        self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
+        self.assertEqual([0], crawlers[0].post_cursors)
+
+    async def test_explicit_banned_account_writes_banned_envelope(self):
+        module, crawlers = self._load_command_module(
+            {"status_code": 0, "user": {"status_msg": "账号已封禁"}}, []
+        )
+        args = self._args()
+        result = await module.fetch_douyin_list_incremental(
+            args.cookie, args.sec_user_id, args.known_ids_file,
+            args.last_seen_publish_time, args.known_boundary, args.max_pages,
+            args.empty_page_limit, args.mode, args.max_items, args.output,
+        )
+        self.assertEqual("ACCOUNT_BANNED", result["outcome"])
         self.assertEqual([], crawlers[0].post_cursors)
 
     async def test_page_schema_error_emits_structured_nonzero_failure(self):
