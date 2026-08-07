@@ -143,6 +143,27 @@ class CollectJobWorkerTest {
 	}
 
 	@Test
+	void shutdownInterruptionSkipsFailureAndRetryWrites() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		CollectJobClaim claim = new CollectJobClaim(12L, 91L, 8,
+				CollectTriggerType.SCHEDULED, 1, 3);
+		when(dataService.isCollectTaskEnabled(8)).thenReturn(true);
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_PROTOCOL_ERROR", "process interrupted"))
+				.when(dataService).executeQueuedCollectTask(8, 91L, CollectTriggerType.SCHEDULED);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, mock(PlatformCookieService.class), passthroughWrites(), 1);
+		worker.shutdown();
+
+		ReflectionTestUtils.invokeMethod(worker, "process", claim);
+
+		verify(runService).start(91L);
+		verify(runService, never()).fail(anyLong(), any(), any(), anyString(), anyString(), anyString());
+		verify(runService, never()).failJob(any(), anyString(), anyString());
+		verify(runService, never()).retryOrFail(any(), anyString(), anyString(), anyLong());
+	}
+
+	@Test
 	void failureCodesExposeTheCorrectFaultDomain() {
 		assertThat(CollectJobWorker.faultDomain("F2_UPSTREAM_RESPONSE_ERROR")).isEqualTo("REMOTE_API");
 		assertThat(CollectJobWorker.faultDomain("DB_WRITE_FAILED")).isEqualTo("DATABASE");
@@ -186,6 +207,36 @@ class CollectJobWorkerTest {
 		} finally {
 			logger.detachAppender(events);
 			events.stop();
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void softBlockRetryUsesGlobalCooldown() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(3252L, 4999L, 10,
+				CollectTriggerType.RETRY, 1, 3);
+		when(dataService.isCollectTaskEnabled(10)).thenReturn(true);
+		when(runService.currentState(4999L)).thenReturn(CollectRunState.FETCHING);
+		when(cookieService.douyinGlobalCooldownRemainingMillis()).thenReturn(600_000L);
+		when(runService.retryOrFail(claim, "F2_UPSTREAM_SOFT_BLOCK",
+				"Douyin author-work endpoint repeatedly returned an empty HTTP response", 605L))
+				.thenReturn(new CollectEnqueueResult(5000L, 3252L, CollectRunState.QUEUED, true, false));
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_UPSTREAM_SOFT_BLOCK",
+				"Douyin author-work endpoint repeatedly returned an empty HTTP response"))
+				.when(dataService).executeQueuedCollectTask(10, 4999L, CollectTriggerType.RETRY);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).retryOrFail(claim, "F2_UPSTREAM_SOFT_BLOCK",
+					"Douyin author-work endpoint repeatedly returned an empty HTTP response", 605L);
+			verify(cookieService).douyinGlobalCooldownRemainingMillis();
+			verify(runService, never()).failJob(any(), anyString(), anyString());
+		} finally {
 			worker.shutdown();
 		}
 	}

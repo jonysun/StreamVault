@@ -9,6 +9,12 @@ import org.junit.jupiter.api.Test;
 class CollectDataServiceStatusTest {
 
 	@Test
+	void repeatedEmptyDouyinResponseIsAPlatformRiskSignal() {
+		assertThat(CollectDataService.isDouyinRiskError("F2_UPSTREAM_SOFT_BLOCK")).isTrue();
+		assertThat(CollectDataService.isDouyinRiskError("F2_UPSTREAM_UNAVAILABLE")).isFalse();
+	}
+
+	@Test
 	void resolveDouyinCollectStatusDoesNotShowRiskWhenThisRunOnlySkippedExistingItems() {
 		String status = CollectDataService.resolveDouyinCollectStatus("1", false, 0, 0, 57);
 

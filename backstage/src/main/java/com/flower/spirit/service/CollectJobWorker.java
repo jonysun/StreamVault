@@ -41,6 +41,7 @@ public class CollectJobWorker {
 	private ApplicationReadinessGate readinessGate;
 	private final String workerId = "sqlite-collect-" + UUID.randomUUID();
 	private final AtomicBoolean running = new AtomicBoolean(false);
+	private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 	private final AtomicLong activeRunId = new AtomicLong(0);
 	private final AtomicLong nextFetchEligibleAtMs = new AtomicLong(0);
 	private final ExecutorService workerExecutor = Executors.newSingleThreadExecutor(runnable -> {
@@ -207,6 +208,11 @@ public class CollectJobWorker {
 
 	private void recordFailure(CollectJobClaim claim, CollectRunState expected, CollectRunState failedState,
 			String errorCode, String message, Throwable error, long retryDelaySeconds) {
+		if (shuttingDown.get() || Thread.currentThread().isInterrupted()) {
+			logger.info("[CollectWorker] failure write skipped after worker interruption jobId={} runId={} "
+					+ "taskId={} code={}", claim.jobId(), claim.runId(), claim.taskId(), errorCode);
+			return;
+		}
 		try {
 			collectRunService.fail(claim.runId(), expected, failedState, errorCode, message, stackSummary(error));
 		} catch (RuntimeException terminalWriteError) {
@@ -249,6 +255,7 @@ public class CollectJobWorker {
 
 	private static boolean isExpectedDouyinRisk(String errorCode) {
 		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
+				|| "F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
 	}
 
@@ -279,6 +286,7 @@ public class CollectJobWorker {
 		if (error instanceof CollectFetchException fetchError) {
 			String errorCode = fetchError.getErrorCode();
 			if ("F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
+					|| "F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)
 					|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode)) {
 				return cooldownRetryDelaySeconds(platformCookieService.douyinGlobalCooldownRemainingMillis());
 			}
@@ -313,6 +321,7 @@ public class CollectJobWorker {
 
 	@PreDestroy
 	public void shutdown() {
+		shuttingDown.set(true);
 		workerExecutor.shutdownNow();
 		heartbeatExecutor.shutdownNow();
 	}
