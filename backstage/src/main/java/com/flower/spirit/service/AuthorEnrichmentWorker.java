@@ -71,6 +71,16 @@ public class AuthorEnrichmentWorker {
 			markFailed(claim, "UNSUPPORTED_IDENTITY", "Unsupported platform or non-canonical author UID");
 			return;
 		}
+		if (transaction.isAuthorPermanentlyUnavailable(claim.platformKey(), claim.authorUid())) {
+			databaseWriteExecutor.execute("author-enrichment-cancel-unavailable", () -> {
+				transaction.cancel(claim.id(), "ACCOUNT_UNAVAILABLE",
+						"关联收藏任务已标记为远端账号不可用", Instant.now());
+				return null;
+			});
+			logger.info("[AuthorEnrichment] cancelled unavailable author jobId={} authorUid={}", claim.id(),
+					claim.authorUid());
+			return;
+		}
 
 		JSONObject profileUser;
 		try {

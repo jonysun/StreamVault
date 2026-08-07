@@ -28,6 +28,11 @@ _DEACTIVATED_MARKERS = (
     "deactivated", "cancelled", "canceled", "account unavailable",
     "账号已注销", "帐号已注销", "用户已注销", "账号不存在",
 )
+_BANNED_ACCOUNT_MARKERS = (
+    "account banned", "account suspended", "user banned",
+    "账号已封禁", "账号被封禁", "帐号已封禁", "帐号被封禁",
+    "用户已封禁", "用户被封禁", "该用户已被封禁",
+)
 _SENSITIVE_COOKIE_PATTERN = re.compile(
     r"(?i)(sessionid(?:_ss)?|msToken|ttwid|odin_tt|passport_csrf_token)=([^;\s]+)"
 )
@@ -102,7 +107,7 @@ def _request_error(error, safe_message, diagnostics):
         )
         if value
     ).lower()
-    evidence = (raw_evidence + " " + safe_message).lower()
+    evidence = raw_evidence
     explicit_risk = any(
         marker in evidence
         for marker in ("http 403", "http 429", "status 403", "status 429")
@@ -126,9 +131,6 @@ def _request_error(error, safe_message, diagnostics):
         "timeout" in lowered_type
         or isinstance(error, TimeoutError)
         or any(marker in raw_evidence for marker in ("timeout", "timed out", "time out"))
-        or (not is_retry_exhausted and any(
-            marker in evidence for marker in ("timeout", "timed out", "time out")
-        ))
     ):
         return UpstreamFetchError(
             "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
@@ -153,7 +155,12 @@ def _request_error(error, safe_message, diagnostics):
             diagnostics,
             exception_type,
         )
-    return UpstreamCommandSchemaError(safe_message, diagnostics, exception_type)
+    return UpstreamFetchError(
+        "F2_UPSTREAM_RESPONSE_ERROR",
+        safe_message,
+        diagnostics,
+        exception_type,
+    )
 
 
 def douyin_kwargs(cookie):
@@ -462,13 +469,10 @@ def _validate_profile(profile, diagnostics, cookie=""):
         raise CookieOrVerifyRequired(diagnostics)
 
     user = profile.get("user")
-    if profile.get("special_state_info") or profile.get("user_not_see"):
-        return "ACCOUNT_DEACTIVATED"
-    if isinstance(user, dict):
-        if user.get("special_state_info") or user.get("user_not_see"):
-            return "ACCOUNT_DEACTIVATED"
     if any(marker in status_text for marker in _DEACTIVATED_MARKERS):
         return "ACCOUNT_DEACTIVATED"
+    if any(marker in status_text for marker in _BANNED_ACCOUNT_MARKERS):
+        return "ACCOUNT_BANNED"
     if _is_invalid_author_profile(profile, cookie):
         raise InvalidAuthorIdError(diagnostics)
     if not isinstance(user, dict):
@@ -505,6 +509,10 @@ async def fetch_douyin_list_incremental(
     mode,
     max_items,
     output_file,
+    backfill_cursor="",
+    backfill_complete=False,
+    backfill_verifying=False,
+    backfill_clean_passes=0,
 ):
     with open(known_ids_file, "r", encoding="utf-8") as handle:
         known_ids_value = json.load(handle)
@@ -528,15 +536,19 @@ async def fetch_douyin_list_incremental(
             if _exception_requires_verification(error, cookie):
                 raise CookieOrVerifyRequired(diagnostics) from None
             raise _request_error(
-                error, "Douyin profile request timed out", diagnostics
+                error, "Douyin profile request failed", diagnostics
             ) from None
         profile_summary = _profile_status_summary(profile, cookie)
         command_diagnostics = {"profileStatus": profile_summary}
         profile_state = _validate_profile(profile, command_diagnostics, cookie)
-        if profile_state == "ACCOUNT_DEACTIVATED":
+        if profile_state in ("ACCOUNT_DEACTIVATED", "ACCOUNT_BANNED"):
             result = envelope(
-                [], [], "ACCOUNT_DEACTIVATED", 0, 0, 0,
+                [], [], profile_state, 0, 0, 0,
                 {"pages": [], "profileStatus": profile_summary},
+                backfill_cursor or "0",
+                backfill_complete,
+                backfill_verifying,
+                backfill_clean_passes,
             )
             _write_fetch_result(result, output_file)
             return result
@@ -564,7 +576,7 @@ async def fetch_douyin_list_incremental(
                     ) from None
                 raise _request_error(
                     error,
-                    "Douyin author-work page request timed out",
+                    "Douyin author-work page request failed",
                     dict(command_diagnostics),
                 ) from None
 
@@ -596,6 +608,10 @@ async def fetch_douyin_list_incremental(
                 int(empty_page_limit),
                 mode,
                 int(max_items),
+                backfill_cursor=backfill_cursor,
+                backfill_complete=bool(backfill_complete),
+                backfill_verifying=bool(backfill_verifying),
+                backfill_clean_passes=int(backfill_clean_passes),
             )
         except FetchCommandError:
             raise
@@ -658,6 +674,10 @@ async def run_incremental_command(args):
             args.mode,
             args.max_items,
             args.output,
+            getattr(args, "backfill_cursor", ""),
+            bool(getattr(args, "backfill_complete", 0)),
+            bool(getattr(args, "backfill_verifying", 0)),
+            getattr(args, "backfill_clean_passes", 0),
         )
     except FetchCommandError as error:
         _emit_fetch_error(error, args.cookie)
@@ -1049,6 +1069,16 @@ async def main():
         "--mode", choices=("initial", "incremental", "audit"), required=True
     )
     incremental_parser.add_argument("--max_items", type=int, default=0)
+    incremental_parser.add_argument("--backfill_cursor", type=str, default="")
+    incremental_parser.add_argument(
+        "--backfill_complete", type=int, choices=(0, 1), default=0
+    )
+    incremental_parser.add_argument(
+        "--backfill_verifying", type=int, choices=(0, 1), default=0
+    )
+    incremental_parser.add_argument(
+        "--backfill_clean_passes", type=int, choices=(0, 1, 2), default=0
+    )
     incremental_parser.add_argument("--output", type=str, required=True)
    
    

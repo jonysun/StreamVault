@@ -54,8 +54,15 @@ public class CollectRunService {
 
 	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, int observedCount,
 			String stopReason, CollectRunFetchedItem.FetchWatermark watermark) {
+		storeFetchPlan(runId, taskId, items, observedCount, stopReason, watermark, null);
+	}
+
+	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, int observedCount,
+			String stopReason, CollectRunFetchedItem.FetchWatermark watermark,
+			CollectBackfillProgress backfillProgress) {
 		databaseWriteExecutor.execute("collect-run-store-fetch-plan", () -> {
-			transaction.storeFetchPlan(runId, taskId, items, observedCount, stopReason, watermark, Instant.now());
+			transaction.storeFetchPlan(runId, taskId, items, observedCount, stopReason, watermark,
+					backfillProgress, Instant.now());
 			return null;
 		});
 	}

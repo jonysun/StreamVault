@@ -57,6 +57,13 @@ public class CollectRunQueryService {
 	}
 
 	public boolean needsAuditRequeue(int taskId, String platformKey, String workId, String mediaType) {
+		Integer activeDownloads = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM biz_collect_run_item i "
+						+ "JOIN biz_collect_run r ON r.id = i.run_id "
+						+ "WHERE r.collect_task_id = ? AND i.platform_key = ? AND i.work_id = ? "
+						+ "AND i.process_state IN ('QUEUED','RUNNING','RETRY_WAIT')",
+				Integer.class, taskId, platformKey, workId);
+		if (activeDownloads != null && activeDownloads > 0) return false;
 		Integer failedDetails = jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM biz_collect_data_detail WHERE dataid = ? AND videoid = ? "
 						+ "AND (COALESCE(TRIM(errorcode), '') <> '' OR status LIKE '%失败%')",

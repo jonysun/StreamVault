@@ -88,6 +88,33 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	@Column(name = "last_seen_work_id")
 	private String lastSeenWorkId;
 
+	@Column(name = "backfill_cursor")
+	private String backfillCursor;
+
+	@Column(name = "backfill_complete")
+	private Integer backfillComplete;
+
+	@Column(name = "backfill_source_id")
+	private String backfillSourceId;
+
+	@Column(name = "backfill_verifying")
+	private Integer backfillVerifying;
+
+	@Column(name = "backfill_clean_passes")
+	private Integer backfillCleanPasses;
+
+	@Column(name = "backfill_verified_at")
+	private Date backfillVerifiedAt;
+
+	@Column(name = "remote_account_state")
+	private String remoteAccountState;
+
+	@Column(name = "remote_account_reason")
+	private String remoteAccountReason;
+
+	@Column(name = "remote_account_detected_at")
+	private Date remoteAccountDetectedAt;
+
 	@Transient
 	private String keyword;
 
@@ -186,6 +213,30 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 
 	public void setTaskenabled(String taskenabled) {
 		this.taskenabled = taskenabled;
+	}
+
+	public String getRemoteAccountState() {
+		return remoteAccountState;
+	}
+
+	public void setRemoteAccountState(String remoteAccountState) {
+		this.remoteAccountState = remoteAccountState;
+	}
+
+	public String getRemoteAccountReason() {
+		return remoteAccountReason;
+	}
+
+	public void setRemoteAccountReason(String remoteAccountReason) {
+		this.remoteAccountReason = remoteAccountReason;
+	}
+
+	public Date getRemoteAccountDetectedAt() {
+		return remoteAccountDetectedAt;
+	}
+
+	public void setRemoteAccountDetectedAt(Date remoteAccountDetectedAt) {
+		this.remoteAccountDetectedAt = remoteAccountDetectedAt;
 	}
 
 	public String getLastCheckTime() {
@@ -290,6 +341,54 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 
 	public void setLastSeenWorkId(String lastSeenWorkId) {
 		this.lastSeenWorkId = lastSeenWorkId;
+	}
+
+	public String getBackfillCursor() {
+		return backfillCursor;
+	}
+
+	public void setBackfillCursor(String backfillCursor) {
+		this.backfillCursor = backfillCursor;
+	}
+
+	public Integer getBackfillComplete() {
+		return backfillComplete;
+	}
+
+	public void setBackfillComplete(Integer backfillComplete) {
+		this.backfillComplete = backfillComplete;
+	}
+
+	public String getBackfillSourceId() {
+		return backfillSourceId;
+	}
+
+	public void setBackfillSourceId(String backfillSourceId) {
+		this.backfillSourceId = backfillSourceId;
+	}
+
+	public Integer getBackfillVerifying() {
+		return backfillVerifying;
+	}
+
+	public void setBackfillVerifying(Integer backfillVerifying) {
+		this.backfillVerifying = backfillVerifying;
+	}
+
+	public Integer getBackfillCleanPasses() {
+		return backfillCleanPasses;
+	}
+
+	public void setBackfillCleanPasses(Integer backfillCleanPasses) {
+		this.backfillCleanPasses = backfillCleanPasses;
+	}
+
+	public Date getBackfillVerifiedAt() {
+		return backfillVerifiedAt;
+	}
+
+	public void setBackfillVerifiedAt(Date backfillVerifiedAt) {
+		this.backfillVerifiedAt = backfillVerifiedAt;
 	}
 
 	public String getKeyword() {

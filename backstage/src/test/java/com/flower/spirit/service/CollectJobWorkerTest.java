@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
@@ -142,6 +143,14 @@ class CollectJobWorkerTest {
 	}
 
 	@Test
+	void failureCodesExposeTheCorrectFaultDomain() {
+		assertThat(CollectJobWorker.faultDomain("F2_UPSTREAM_RESPONSE_ERROR")).isEqualTo("REMOTE_API");
+		assertThat(CollectJobWorker.faultDomain("DB_WRITE_FAILED")).isEqualTo("DATABASE");
+		assertThat(CollectJobWorker.faultDomain("COOKIE_MISSING")).isEqualTo("TASK_CONFIGURATION");
+		assertThat(CollectJobWorker.faultDomain("UNEXPECTED")).isEqualTo("APPLICATION");
+	}
+
+	@Test
 	void queuedRiskRetryIsWarnWithoutStackTrace() {
 		CollectRunService runService = mock(CollectRunService.class);
 		CollectDataService dataService = mock(CollectDataService.class);
@@ -168,7 +177,8 @@ class CollectJobWorkerTest {
 			ReflectionTestUtils.invokeMethod(worker, "process", claim);
 			assertThat(events.list).anySatisfy(event -> {
 				assertThat(event.getLevel()).isEqualTo(Level.WARN);
-				assertThat(event.getFormattedMessage()).contains("upstream risk; retry queued",
+				assertThat(event.getFormattedMessage()).contains("retry queued",
+						"cooldownApplied=true",
 						"nextRunId=4998", "nextState=QUEUED");
 				assertThat(event.getThrowableProxy()).isNull();
 			});
@@ -224,12 +234,43 @@ class CollectJobWorkerTest {
 		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
 				dataService, cookieService, passthroughWrites(), 1);
 
+		Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger(CollectJobWorker.class);
+		ListAppender<ILoggingEvent> events = new ListAppender<>();
+		events.start();
+		logger.addAppender(events);
+
 		try {
 			ReflectionTestUtils.invokeMethod(worker, "process", claim);
 			verify(runService).retryOrFail(claim, "F2_UPSTREAM_UNAVAILABLE",
 					"Douyin author-work endpoint did not provide a usable response", 900L);
 			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
 			verify(runService, never()).failJob(any(), anyString(), anyString());
+			assertThat(events.list).anySatisfy(event -> {
+				assertThat(event.getLevel()).isEqualTo(Level.WARN);
+				assertThat(event.getFormattedMessage()).contains("retry queued", "faultDomain=REMOTE_API",
+						"cooldownApplied=false", "nextRunId=6301");
+				assertThat(event.getThrowableProxy()).isNull();
+			});
+			assertThat(events.list).noneMatch(event -> event.getLevel() == Level.ERROR);
+		} finally {
+			logger.detachAppender(events);
+			events.stop();
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void fetchRateLimitDefersClaimWithoutSleepingOrChangingQueueState() {
+		CollectQueueTransaction transaction = mock(CollectQueueTransaction.class);
+		CollectJobWorker worker = new CollectJobWorker(transaction, mock(CollectRunService.class),
+				mock(CollectDataService.class), mock(PlatformCookieService.class), passthroughWrites(), 1, 5000);
+		AtomicLong nextEligible = (AtomicLong) ReflectionTestUtils.getField(worker, "nextFetchEligibleAtMs");
+		assertThat(nextEligible).isNotNull();
+		nextEligible.set(System.currentTimeMillis() + 60_000);
+
+		try {
+			worker.processOne();
+			verify(transaction, never()).claimNext(anyString(), any());
 		} finally {
 			worker.shutdown();
 		}

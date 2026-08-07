@@ -5,6 +5,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -170,6 +172,9 @@ public class CollectDataService {
 
 	@Value("${streamvault.collect.initial-fetch-limit:80}")
 	private int initialFetchLimit;
+
+	@Value("${streamvault.collect.backfill-verify-interval-hours:24}")
+	private long backfillVerifyIntervalHours;
 	
     @Transactional
 	public synchronized AjaxEntity saveCollectData(CollectDataEntity entity) {
@@ -2241,11 +2246,33 @@ public class CollectDataService {
 		Set<String> knownIds = collectRunQueryService.findKnownWorkIds(task.getId());
 		int batchLimit = mode == DouyinFetchMode.INITIAL ? firstFetchLimit(task)
 				: mode == DouyinFetchMode.INCREMENTAL ? incrementalFetchLimit(task) : 0;
-		int maxPages = mode == DouyinFetchMode.AUDIT ? auditMaxPages
-				: effectiveIncrementalMaxPages(knownIds.size(), batchLimit);
-		DouyinFetchRequest request = new DouyinFetchRequest(sourceId(task), knownIds,
+		String currentSourceId = sourceId(task);
+		boolean sameBackfillSource = currentSourceId.equals(task.getBackfillSourceId());
+		String backfillCursor = sameBackfillSource ? task.getBackfillCursor() : null;
+		boolean backfillComplete = sameBackfillSource && flag(task.getBackfillComplete());
+		boolean backfillVerifying = sameBackfillSource && flag(task.getBackfillVerifying());
+		int backfillCleanPasses = sameBackfillSource
+				? Math.min(2, Math.max(0, valueOrZero(task.getBackfillCleanPasses()))) : 0;
+		boolean verificationDue = mode == DouyinFetchMode.INCREMENTAL && backfillComplete
+				&& verificationDue(task.getBackfillVerifiedAt(), Instant.now());
+		if (verificationDue) {
+			backfillCursor = "0";
+			backfillComplete = false;
+			backfillVerifying = true;
+			backfillCleanPasses = 0;
+		}
+		if (mode == DouyinFetchMode.INITIAL) {
+			backfillCursor = null;
+			backfillComplete = false;
+			backfillVerifying = false;
+			backfillCleanPasses = 0;
+		}
+		int maxPages = mode == DouyinFetchMode.AUDIT || backfillVerifying
+				? auditMaxPages : effectiveIncrementalMaxPages(batchLimit);
+		DouyinFetchRequest request = new DouyinFetchRequest(currentSourceId, knownIds,
 				task.getLastSeenPublishTime(), incrementalKnownBoundary,
-				maxPages, emptyPageLimit, mode, batchLimit, cookie);
+				maxPages, emptyPageLimit, mode, batchLimit, backfillCursor,
+				backfillComplete, backfillVerifying, backfillCleanPasses, cookie);
 		DouyinFetchEnvelope envelope;
 		try {
 			envelope = douyinIncrementalFetchService.fetch(request);
@@ -2256,11 +2283,33 @@ public class CollectDataService {
 			}
 			throw error;
 		}
-		DouyinFetchEnvelope planningEnvelope = mode == DouyinFetchMode.AUDIT
+		DouyinFetchMode planningMode = mode == DouyinFetchMode.AUDIT || backfillVerifying
+				? DouyinFetchMode.AUDIT : mode;
+		DouyinFetchEnvelope planningEnvelope = planningMode == DouyinFetchMode.AUDIT
 				? envelope : selectedEnvelope(envelope, batchLimit);
-		List<CollectRunFetchedItem> plan = buildFetchPlan(task, planningEnvelope, mode);
+		List<CollectRunFetchedItem> plan = buildFetchPlan(task, planningEnvelope, planningMode);
+		if (mode != DouyinFetchMode.AUDIT && backfillVerifying) {
+			Set<String> newWorkIds = planningEnvelope.newWorkIds() == null
+					? Set.of() : planningEnvelope.newWorkIds();
+			plan = plan.stream().filter(item -> "QUEUED".equals(item.processState())
+					|| ("BLOCKED".equals(item.decision()) && newWorkIds.contains(item.workId())))
+					.toList();
+		}
+		Instant verifiedAt = envelope.backfillComplete()
+				? backfillComplete && !verificationDue && task.getBackfillVerifiedAt() != null
+						? task.getBackfillVerifiedAt().toInstant() : Instant.now()
+				: null;
+		boolean terminalAccountUnavailable = isTerminalAccountUnavailable(envelope.outcome());
+		CollectBackfillProgress progress = mode == DouyinFetchMode.AUDIT
+				|| terminalAccountUnavailable ? null
+				: new CollectBackfillProgress(currentSourceId, envelope.backfillCursor(),
+						envelope.backfillComplete(), envelope.backfillVerifying(),
+						envelope.backfillCleanPasses(), verifiedAt);
 		collectRunService.storeFetchPlan(runId, task.getId(), plan, observedCount(envelope),
-				envelope.outcome(), newestWatermark(envelope));
+				envelope.outcome(), newestWatermark(envelope), progress);
+		if (terminalAccountUnavailable) {
+			quartzTaskService.removeTaskSchedule(task.getId());
+		}
 	}
 
 	private DouyinFetchEnvelope selectedEnvelope(DouyinFetchEnvelope envelope, int batchLimit) {
@@ -2281,7 +2330,9 @@ public class CollectDataService {
 		}
 		return new DouyinFetchEnvelope(List.copyOf(selectedItems), Collections.unmodifiableSet(uniqueSelectedIds),
 				envelope.outcome(), envelope.pagesFetched(),
-				envelope.emptyPages(), envelope.lastCursor(), envelope.diagnostics());
+				envelope.emptyPages(), envelope.lastCursor(), envelope.backfillCursor(),
+				envelope.backfillComplete(), envelope.backfillVerifying(), envelope.backfillCleanPasses(),
+				envelope.diagnostics());
 	}
 
 	private int observedCount(DouyinFetchEnvelope envelope) {
@@ -2414,12 +2465,25 @@ public class CollectDataService {
 				: Math.max(1, initialFetchLimit);
 	}
 
-	private int effectiveIncrementalMaxPages(int knownCount, int batchLimit) {
-		long requiredItems = Math.max(0L, knownCount) + Math.max(1L, batchLimit) + 20L;
-		long requiredPages = (requiredItems + 19L) / 20L;
+	private int effectiveIncrementalMaxPages(int batchLimit) {
+		long requiredPages = (Math.max(1L, batchLimit) + 19L) / 20L + 2L;
 		long minimum = Math.max(1L, incrementalMinPages);
 		long hardLimit = Math.max(minimum, backfillMaxPages);
 		return (int) Math.min(Integer.MAX_VALUE, Math.min(hardLimit, Math.max(minimum, requiredPages)));
+	}
+
+	private boolean verificationDue(Date verifiedAt, Instant now) {
+		if (verifiedAt == null) return true;
+		long hours = Math.max(1L, backfillVerifyIntervalHours);
+		return !verifiedAt.toInstant().plus(Duration.ofHours(hours)).isAfter(now);
+	}
+
+	private static boolean flag(Integer value) {
+		return value != null && value == 1;
+	}
+
+	private static int valueOrZero(Integer value) {
+		return value == null ? 0 : value;
 	}
 
 	private String sourceId(CollectDataEntity task) {
@@ -2440,6 +2504,10 @@ public class CollectDataService {
 	private boolean isDouyinRiskError(String errorCode) {
 		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
+	}
+
+	private boolean isTerminalAccountUnavailable(String outcome) {
+		return "ACCOUNT_DEACTIVATED".equals(outcome) || "ACCOUNT_BANNED".equals(outcome);
 	}
 
 	private void assertCollectFetchAllowed() {
@@ -2497,6 +2565,10 @@ public class CollectDataService {
 		}
 		CollectDataEntity task = byId.get();
 		task.setTaskenabled("Y");
+		task.setTaskstatus("任务已恢复");
+		task.setRemoteAccountState(null);
+		task.setRemoteAccountReason(null);
+		task.setRemoteAccountDetectedAt(null);
 		collectdDataDao.save(task);
 		quartzTaskService.scheduleTask(task);
 		return new AjaxEntity(Global.ajax_success, "任务已开始", task);

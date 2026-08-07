@@ -88,6 +88,28 @@ class PostgresqlDeploymentContractTest {
 	}
 
 	@Test
+	void collectBackfillAndRemoteAccountMigrationIsSafeForExistingPostgresqlDatabases() throws Exception {
+		String baseline = Files.readString(Path.of("src", "main", "resources", "db", "migration",
+				"postgresql", "V001__baseline.sql"), StandardCharsets.UTF_8);
+		String migration = Files.readString(Path.of("src", "main", "resources", "db", "migration",
+				"postgresql", "V003__collect_backfill_and_remote_account_state.sql"), StandardCharsets.UTF_8);
+
+		assertThat(baseline)
+				.as("applied V001 migration must remain unchanged")
+				.doesNotContain("backfill_cursor")
+				.doesNotContain("remote_account_state");
+		assertThat(migration)
+				.contains("ALTER TABLE biz_collect_data")
+				.contains("ADD COLUMN IF NOT EXISTS backfill_cursor VARCHAR(64)")
+				.contains("ADD COLUMN IF NOT EXISTS backfill_complete INTEGER NOT NULL DEFAULT 0")
+				.contains("ADD COLUMN IF NOT EXISTS backfill_verifying INTEGER NOT NULL DEFAULT 0")
+				.contains("ADD COLUMN IF NOT EXISTS backfill_clean_passes INTEGER NOT NULL DEFAULT 0")
+				.contains("ADD COLUMN IF NOT EXISTS remote_account_state VARCHAR(32)")
+				.contains("ADD COLUMN IF NOT EXISTS remote_account_reason VARCHAR(255)")
+				.contains("ADD COLUMN IF NOT EXISTS remote_account_detected_at TIMESTAMP");
+	}
+
+	@Test
 	void mainJavaSqlAvoidsBareNullableParameterChecks() throws Exception {
 		StringBuilder sources = new StringBuilder();
 		try (var stream = Files.walk(Path.of("src", "main", "java"))) {

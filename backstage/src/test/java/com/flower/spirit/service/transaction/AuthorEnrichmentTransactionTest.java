@@ -96,6 +96,8 @@ class AuthorEnrichmentTransactionTest {
 				+ "authoruid TEXT, secuid TEXT)");
 		jdbc.execute("CREATE TABLE biz_graphic_content (id INTEGER PRIMARY KEY, platformkey TEXT, platform TEXT, "
 				+ "authoruid TEXT, secuid TEXT)");
+		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, platform TEXT, originaladdress TEXT, "
+				+ "remote_account_state TEXT)");
 		jdbc.execute("CREATE TABLE biz_author_profile (id INTEGER PRIMARY KEY, platformkey TEXT, platform TEXT, "
 				+ "authoruid TEXT, username TEXT, displayname TEXT, avatar TEXT, signature TEXT, homepage TEXT)");
 	}

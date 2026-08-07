@@ -137,7 +137,13 @@ class SqliteSchemaPreflightTest {
 				.hasMessageContaining("biz_collect_data")
 				.hasMessageContaining("last_successful_fetch_at")
 				.hasMessageContaining("last_seen_publish_time")
-				.hasMessageContaining("last_seen_work_id");
+				.hasMessageContaining("last_seen_work_id")
+				.hasMessageContaining("backfill_cursor")
+				.hasMessageContaining("backfill_complete")
+				.hasMessageContaining("backfill_source_id")
+				.hasMessageContaining("backfill_verifying")
+				.hasMessageContaining("backfill_clean_passes")
+				.hasMessageContaining("backfill_verified_at");
 	}
 
 	@Test
@@ -152,7 +158,10 @@ class SqliteSchemaPreflightTest {
 	void rejectsLegacyUniqueRunItemIndexAndAcceptsTheObservationIndex() {
 		JdbcTemplate jdbcTemplate = jdbcTemplate("pipeline-index-migration.db");
 		jdbcTemplate.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, "
-				+ "last_successful_fetch_at TIMESTAMP, last_seen_publish_time TEXT, last_seen_work_id TEXT)");
+				+ "last_successful_fetch_at TIMESTAMP, last_seen_publish_time TEXT, last_seen_work_id TEXT, "
+				+ "backfill_cursor TEXT, backfill_complete INTEGER, backfill_source_id TEXT, "
+				+ "backfill_verifying INTEGER, backfill_clean_passes INTEGER, backfill_verified_at TIMESTAMP, "
+				+ "remote_account_state TEXT, remote_account_reason TEXT, remote_account_detected_at TIMESTAMP)");
 		jdbcTemplate.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, "
 				+ "fetch_stop_reason TEXT, fetch_warning TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER, "

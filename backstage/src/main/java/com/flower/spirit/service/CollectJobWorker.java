@@ -36,11 +36,13 @@ public class CollectJobWorker {
 	private final CollectDataService collectDataService;
 	private final PlatformCookieService platformCookieService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
+	private final long fetchMinIntervalMs;
 	@Autowired(required = false)
 	private ApplicationReadinessGate readinessGate;
 	private final String workerId = "sqlite-collect-" + UUID.randomUUID();
 	private final AtomicBoolean running = new AtomicBoolean(false);
 	private final AtomicLong activeRunId = new AtomicLong(0);
+	private final AtomicLong nextFetchEligibleAtMs = new AtomicLong(0);
 	private final ExecutorService workerExecutor = Executors.newSingleThreadExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "collect-fetch-worker");
 		thread.setDaemon(true);
@@ -52,19 +54,29 @@ public class CollectJobWorker {
 		return thread;
 	});
 
+	@Autowired
 	public CollectJobWorker(CollectQueueTransaction transaction, CollectRunService collectRunService,
 			CollectDataService collectDataService, PlatformCookieService platformCookieService,
 			DatabaseWriteExecutor databaseWriteExecutor,
-			@Value("${streamvault.collect.fetch-workers:1}") int configuredWorkers) {
+			@Value("${streamvault.collect.fetch-workers:1}") int configuredWorkers,
+			@Value("${streamvault.collect.fetch-min-interval-ms:5000}") long fetchMinIntervalMs) {
 		this.transaction = transaction;
 		this.collectRunService = collectRunService;
 		this.collectDataService = collectDataService;
 		this.platformCookieService = platformCookieService;
 		this.databaseWriteExecutor = databaseWriteExecutor;
+		this.fetchMinIntervalMs = Math.max(0, fetchMinIntervalMs);
 		if (configuredWorkers != 1) {
 			logger.warn("[CollectWorker] SQLite release supports one fetch worker; configured={} effective=1",
 					configuredWorkers);
 		}
+	}
+
+	CollectJobWorker(CollectQueueTransaction transaction, CollectRunService collectRunService,
+			CollectDataService collectDataService, PlatformCookieService platformCookieService,
+			DatabaseWriteExecutor databaseWriteExecutor, int configuredWorkers) {
+		this(transaction, collectRunService, collectDataService, platformCookieService,
+				databaseWriteExecutor, configuredWorkers, 0);
 	}
 
 	public void processOne() {
@@ -81,6 +93,11 @@ public class CollectJobWorker {
 			if (platformCookieService.isDouyinGlobalCooldownActive()) {
 				logger.debug("[CollectWorker] claim deferred by Douyin global cooldown remainingMs={}",
 						platformCookieService.douyinGlobalCooldownRemainingMillis());
+				return;
+			}
+			long waitMs = nextFetchEligibleAtMs.get() - System.currentTimeMillis();
+			if (waitMs > 0) {
+				logger.debug("[CollectWorker] claim deferred by fetch rate limit remainingMs={}", waitMs);
 				return;
 			}
 			CollectJobClaim claim = databaseWriteExecutor.execute("collect-job-claim",
@@ -135,6 +152,7 @@ public class CollectJobWorker {
 				deferForCooldown(claim, "Douyin global cooldown started after queue claim");
 				return;
 			}
+			markFetchStarted();
 			collectRunService.start(claim.runId());
 			collectDataService.executeQueuedCollectTask(claim.taskId(), claim.runId(), claim.triggerType());
 			collectRunService.complete(claim.runId(), claim.jobId());
@@ -211,14 +229,15 @@ public class CollectJobWorker {
 		}
 		try {
 			CollectEnqueueResult retry = collectRunService.retryOrFail(claim, errorCode, message, retryDelaySeconds);
-			if (retry.inserted() && isExpectedDouyinRisk(errorCode)) {
-				logger.warn("[CollectWorker] upstream risk; retry queued jobId={} runId={} taskId={} code={} "
-						+ "faultDomain={} retryable=true cooldownApplied=true root={} nextRunId={} nextState={}",
-						claim.jobId(), claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), message,
+			if (retry.inserted()) {
+				boolean cooldownApplied = isExpectedDouyinRisk(errorCode);
+				logger.warn("[CollectWorker] retry queued jobId={} runId={} taskId={} code={} faultDomain={} "
+						+ "retryable=true cooldownApplied={} root={} nextRunId={} nextState={}", claim.jobId(),
+						claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), cooldownApplied, message,
 						retry.runId(), retry.state());
 			} else {
-				logger.error("[CollectWorker] failed jobId={} runId={} taskId={} code={} faultDomain={} "
-						+ "retryable=true cooldownApplied=false root={} nextRunId={} nextState={}", claim.jobId(),
+				logger.error("[CollectWorker] retry exhausted jobId={} runId={} taskId={} code={} faultDomain={} "
+						+ "retryable=false cooldownApplied=false root={} nextRunId={} nextState={}", claim.jobId(),
 						claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), message, retry.runId(),
 						retry.state(), error);
 			}
@@ -233,13 +252,26 @@ public class CollectJobWorker {
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
 	}
 
-	private static boolean isNonRetryable(String errorCode) {
-		return "INVALID_AUTHOR_ID".equals(errorCode) || "F2_PROTOCOL_ERROR".equals(errorCode);
+	private void markFetchStarted() {
+		if (fetchMinIntervalMs <= 0) return;
+		long now = System.currentTimeMillis();
+		nextFetchEligibleAtMs.set(now + fetchMinIntervalMs);
 	}
 
-	private static String faultDomain(String errorCode) {
-		if ("INVALID_AUTHOR_ID".equals(errorCode)) return "TASK_CONFIGURATION";
-		if ("F2_PROTOCOL_ERROR".equals(errorCode)) return "APPLICATION";
+	private static boolean isNonRetryable(String errorCode) {
+		return "INVALID_AUTHOR_ID".equals(errorCode) || "INVALID_SOURCE".equals(errorCode)
+				|| "UNSUPPORTED_PERSISTENT_FETCH".equals(errorCode) || "COOKIE_MISSING".equals(errorCode)
+				|| "F2_PROTOCOL_ERROR".equals(errorCode);
+	}
+
+	static String faultDomain(String errorCode) {
+		if ("INVALID_AUTHOR_ID".equals(errorCode) || "INVALID_SOURCE".equals(errorCode)
+				|| "UNSUPPORTED_PERSISTENT_FETCH".equals(errorCode) || "COOKIE_MISSING".equals(errorCode)) {
+			return "TASK_CONFIGURATION";
+		}
+		if ("SQLITE_BUSY".equals(errorCode) || "DB_WRITE_FAILED".equals(errorCode)) return "DATABASE";
+		if ("PAUSED_DURING_EXECUTION".equals(errorCode)) return "RUNTIME_CONTROL";
+		if ("F2_PROTOCOL_ERROR".equals(errorCode) || "UNEXPECTED".equals(errorCode)) return "APPLICATION";
 		return "REMOTE_API";
 	}
 

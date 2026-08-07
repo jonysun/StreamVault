@@ -119,7 +119,10 @@ public class SqliteSchemaPreflight {
 	private static Map<String, List<String>> requiredPipelineColumns() {
 		Map<String, List<String>> columns = new LinkedHashMap<>();
 		columns.put("biz_collect_data", List.of(
-				"last_successful_fetch_at", "last_seen_publish_time", "last_seen_work_id"));
+				"last_successful_fetch_at", "last_seen_publish_time", "last_seen_work_id",
+				"backfill_cursor", "backfill_complete", "backfill_source_id", "backfill_verifying",
+				"backfill_clean_passes", "backfill_verified_at", "remote_account_state",
+				"remote_account_reason", "remote_account_detected_at"));
 		columns.put("biz_collect_run", List.of("fetch_stop_reason", "fetch_warning"));
 		columns.put("biz_collect_run_item", List.of(
 				"attempt_count", "max_attempts", "available_at", "locked_by", "locked_at", "started_at",

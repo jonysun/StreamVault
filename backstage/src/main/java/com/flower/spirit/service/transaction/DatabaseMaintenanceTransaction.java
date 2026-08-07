@@ -83,10 +83,17 @@ public class DatabaseMaintenanceTransaction {
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public BatchResult purgeExpiredRunItems(long operationId, long afterId, int batchSize, Instant now) {
-		return purgeByCondition(operationId, "biz_collect_run_item",
-				"((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < ?) "
+		StringBuilder condition = new StringBuilder();
+		if (tableExists("biz_collect_run") && tableExists("biz_collect_data")) {
+			condition.append("NOT EXISTS (SELECT 1 FROM biz_collect_run stopped_run "
+					+ "JOIN biz_collect_data stopped_task ON stopped_task.id = stopped_run.collect_task_id "
+					+ "WHERE stopped_run.id = biz_collect_run_item.run_id "
+					+ "AND stopped_task.remote_account_state IN ('DEACTIVATED','BANNED')) AND ");
+		}
+		condition.append("((UPPER(COALESCE(process_state, '')) = 'FAILED' AND created_at < ?) "
 						+ "OR (UPPER(COALESCE(process_state, '')) <> 'FAILED' "
-						+ "AND created_at < ?))",
+						+ "AND created_at < ?))");
+		return purgeByCondition(operationId, "biz_collect_run_item", condition.toString(),
 				List.of(cutoff(now, RuntimeHistoryRetentionPolicy.FAILED_RUN_ITEM_DAYS),
 						cutoff(now, RuntimeHistoryRetentionPolicy.NON_FAILED_RUN_ITEM_DAYS)),
 				afterId, batchSize, now);

@@ -83,6 +83,21 @@ public class AuthorEnrichmentTransaction {
 				candidate.authorUid(), candidate.attemptCount() + 1) : null;
 	}
 
+	@Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+	public boolean isAuthorPermanentlyUnavailable(String platformKey, String authorUid) {
+		Integer count = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM biz_collect_data WHERE LOWER(COALESCE(platform, '')) IN ('抖音', 'douyin') "
+						+ "AND remote_account_state IN ('DEACTIVATED','BANNED') "
+						+ "AND LOWER(TRIM(SUBSTR(COALESCE(originaladdress, ''), 1, 4))) = 'post' "
+						+ "AND TRIM(SUBSTR(originaladdress, 5)) = ?", Integer.class, authorUid);
+		return count != null && count > 0;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void cancel(int jobId, String errorCode, String message, Instant now) {
+		updateTerminal(jobId, "CANCELLED", errorCode, message, null, now);
+	}
+
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public int enqueueMissingWorkAuthors(Instant now, int limit) {
 		Timestamp recentCompletion = Timestamp.from(now.minus(30, ChronoUnit.DAYS));
@@ -104,6 +119,10 @@ public class AuthorEnrichmentTransaction {
 				+ "AND active.author_uid = works.author_uid AND active.state IN (" + ACTIVE_STATES + ")) "
 				+ "AND NOT EXISTS (SELECT 1 FROM biz_author_enrichment_job recent WHERE recent.platform_key = 'douyin' "
 				+ "AND recent.author_uid = works.author_uid AND recent.state = 'COMPLETED' AND recent.updated_at >= ?) "
+				+ "AND NOT EXISTS (SELECT 1 FROM biz_collect_data stopped "
+				+ "WHERE stopped.remote_account_state IN ('DEACTIVATED','BANNED') "
+				+ "AND LOWER(TRIM(SUBSTR(COALESCE(stopped.originaladdress, ''), 1, 4))) = 'post' "
+				+ "AND TRIM(SUBSTR(stopped.originaladdress, 5)) = works.author_uid) "
 				+ "ORDER BY works.author_uid LIMIT ?", String.class, recentCompletion, Math.max(1, limit));
 		int inserted = 0;
 		for (String authorUid : authorUids) {

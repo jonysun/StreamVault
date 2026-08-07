@@ -798,8 +798,9 @@
 							var monitorClass = list[i].monitoring === 'Y' ? 'text-success' : 'text-secondary';
 							var monitorText = list[i].monitoring === 'Y' ? '已开启' : '未开启';
 							var enabled = list[i].taskenabled !== 'N';
-							var enabledText = enabled ? '运行中' : '已暂停';
-							var enabledClass = enabled ? 'text-success' : 'text-warning';
+							var remoteStopped = list[i].taskstatus === '已删号' || list[i].taskstatus === '已封禁';
+							var enabledText = enabled ? '运行中' : (remoteStopped ? list[i].taskstatus : '已暂停');
+							var enabledClass = enabled ? 'text-success' : (remoteStopped ? 'text-danger' : 'text-warning');
 
 							html +='<tr>'
 									+'<td title="'+list[i].id+'">'+list[i].id+'</td>'
@@ -905,6 +906,10 @@
 				case '正在抓取':
 				case '正在入库':
 					statusClass = 'text-info';
+					break;
+				case '已删号':
+				case '已封禁':
+					statusClass = 'text-danger';
 					break;
 				default:
 					statusClass = 'text-secondary';
