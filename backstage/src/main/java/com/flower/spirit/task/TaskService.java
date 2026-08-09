@@ -14,6 +14,7 @@ import com.flower.spirit.service.AuthorEnrichmentQueueService;
 import com.flower.spirit.service.CollectJobWorker;
 import com.flower.spirit.service.CollectDownloadWorker;
 import com.flower.spirit.service.CookiesConfigService;
+import com.flower.spirit.service.DirectDownloadWorker;
 import com.flower.spirit.service.FfmpegQueueService;
 import com.flower.spirit.service.HlsTranscodeService;
 import com.flower.spirit.service.RuntimeControlService;
@@ -48,6 +49,9 @@ public class TaskService {
 
 	@Autowired
 	private CollectDownloadWorker collectDownloadWorker;
+
+	@Autowired
+	private DirectDownloadWorker directDownloadWorker;
 
 	@Autowired
 	private RuntimeControlService runtimeControlService;
@@ -100,6 +104,7 @@ public class TaskService {
 		}
 		if (runtimeControlService.mayRun(TaskCategory.MEDIA_DOWNLOAD).allowed()) {
 			collectDownloadWorker.wakeUp();
+			directDownloadWorker.wakeUp();
 		}
 	}
 

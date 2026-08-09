@@ -165,6 +165,11 @@ public class PageController {
 	public String processHistoryList() {
 		return "admin/processHistoryList";
 	}
+
+	@RequestMapping(value = "/downloadCenter")
+	public String downloadCenter() {
+		return "admin/downloadCenter";
+	}
 	
 	@RequestMapping(value = "/collectDataList")
 	public String collectDataList(Model model) {

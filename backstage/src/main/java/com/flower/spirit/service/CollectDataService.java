@@ -195,13 +195,20 @@ public class CollectDataService {
 					+ valueOr(duplicate.getTaskstatus(), "未执行");
 			return new AjaxEntity(Global.ajax_uri_error, message, duplicate);
 		}
+		initializeBackfillDefaults(entity);
 		if (entity.getTaskenabled() == null || entity.getTaskenabled().trim().isEmpty()) {
 			entity.setTaskenabled("Y");
 		}
-        collectdDataDao.save(entity);
-        quartzTaskService.scheduleTask(entity);
-     	return new AjaxEntity(Global.ajax_success, "任务创建成功", entity);
-    }
+		collectdDataDao.save(entity);
+		quartzTaskService.scheduleTask(entity);
+		return new AjaxEntity(Global.ajax_success, "任务创建成功", entity);
+	}
+
+	private void initializeBackfillDefaults(CollectDataEntity entity) {
+		if (entity.getBackfillComplete() == null) entity.setBackfillComplete(0);
+		if (entity.getBackfillVerifying() == null) entity.setBackfillVerifying(0);
+		if (entity.getBackfillCleanPasses() == null) entity.setBackfillCleanPasses(0);
+	}
     
 
     public AjaxEntity findPage(CollectDataEntity res) {

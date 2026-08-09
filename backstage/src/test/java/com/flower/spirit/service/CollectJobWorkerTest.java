@@ -199,7 +199,7 @@ class CollectJobWorkerTest {
 			assertThat(events.list).anySatisfy(event -> {
 				assertThat(event.getLevel()).isEqualTo(Level.WARN);
 				assertThat(event.getFormattedMessage()).contains("retry queued",
-						"cooldownApplied=true",
+						"cooldownApplied=false",
 						"nextRunId=4998", "nextState=QUEUED");
 				assertThat(event.getThrowableProxy()).isNull();
 			});
@@ -235,6 +235,34 @@ class CollectJobWorkerTest {
 			verify(runService).retryOrFail(claim, "F2_UPSTREAM_SOFT_BLOCK",
 					"Douyin author-work endpoint repeatedly returned an empty HTTP response", 605L);
 			verify(cookieService).douyinGlobalCooldownRemainingMillis();
+			verify(runService, never()).failJob(any(), anyString(), anyString());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void activeRiskCooldownDefersEvenWhenClaimReachedLastAttempt() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(3253L, 5001L, 11,
+				CollectTriggerType.RETRY, 3, 3);
+		Instant retryAt = Instant.parse("2026-08-09T01:30:00Z");
+		when(dataService.isCollectTaskEnabled(11)).thenReturn(true);
+		when(cookieService.isDouyinGlobalCooldownActive()).thenReturn(false, true);
+		when(cookieService.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_UPSTREAM_RATE_LIMIT",
+				"Douyin author-work page request failed with HTTP 403"))
+				.when(dataService).executeQueuedCollectTask(11, 5001L, CollectTriggerType.RETRY);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).deferForCooldown(claim, retryAt,
+					"Douyin author-work page request failed with HTTP 403");
+			verify(runService, never()).retryOrFail(any(), anyString(), anyString(), anyLong());
 			verify(runService, never()).failJob(any(), anyString(), anyString());
 		} finally {
 			worker.shutdown();

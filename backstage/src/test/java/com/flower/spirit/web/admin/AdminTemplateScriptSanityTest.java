@@ -114,7 +114,19 @@ class AdminTemplateScriptSanityTest {
 		String home = template("home.html");
 
 		assertThat(home).contains("downloadTaskProgress", "activeDownloadList", "waitingDownloadList",
-				"loadDownloadQueueState", "runningItems", "waitingItems", "downloadTasks");
+				"loadDownloadQueueState", "runningItems", "waitingItems", "downloadTasks",
+				"queueCount", "fetchQueue", "downloadQueue", "markDownloadQueueError",
+				"markTaskStatusError");
+	}
+
+	@Test
+	void downloadCenterShowsPersistentQueueHistoryAndControls() throws IOException {
+		String center = template("downloadCenter.html");
+
+		assertThat(center).contains("/admin/api/download-center/summary", "/admin/api/download-center/items",
+				"/admin/api/download-center/retry-batch", "/admin/api/download-center/history/hide",
+				"/admin/api/setBackgroundTaskPause", "YOUTUBE_COLLECTION", "SINGLE_LINK", "COLLECT",
+				"当前任务", "历史记录", "重试所选失败任务", "清除所选记录");
 	}
 
 	private String template(String name) throws IOException {

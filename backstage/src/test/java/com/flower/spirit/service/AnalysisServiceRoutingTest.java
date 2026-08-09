@@ -30,11 +30,14 @@ import com.flower.spirit.config.Global;
 import com.flower.spirit.config.PlatformAdapterProperties;
 import com.flower.spirit.config.PlatformAdapterProperties.Mode;
 import com.flower.spirit.entity.ProcessHistoryEntity;
+import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformResolver;
 import com.flower.spirit.platform.WorkContentType;
 import com.flower.spirit.platform.WorkMediaResource;
 import com.flower.spirit.platform.WorkMetadata;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 class AnalysisServiceRoutingTest {
 
@@ -47,6 +50,7 @@ class AnalysisServiceRoutingTest {
 	private AnalysisService service;
 	private WorkIngestService workIngestService;
 	private ProcessHistoryService processHistoryService;
+	private DirectDownloadQueueService directDownloadQueueService;
 	private PlatformAdapterProperties properties;
 
 	@BeforeEach
@@ -67,11 +71,15 @@ class AnalysisServiceRoutingTest {
 		service = spy(new AnalysisService());
 		workIngestService = mock(WorkIngestService.class);
 		processHistoryService = mock(ProcessHistoryService.class);
+		directDownloadQueueService = mock(DirectDownloadQueueService.class);
 		properties = new PlatformAdapterProperties();
 		ReflectionTestUtils.setField(service, "platformResolver", new PlatformResolver());
 		ReflectionTestUtils.setField(service, "platformAdapterProperties", properties);
 		ReflectionTestUtils.setField(service, "workIngestService", workIngestService);
 		ReflectionTestUtils.setField(service, "processHistoryService", processHistoryService);
+		ReflectionTestUtils.setField(service, "directDownloadQueueService", directDownloadQueueService);
+		when(directDownloadQueueService.enqueue(anyString(), any(), any(), any(), any()))
+				.thenReturn(new DirectDownloadEnqueueResult(100L, 42, true, DirectDownloadSource.SINGLE_LINK));
 	}
 
 	@AfterEach
@@ -86,20 +94,23 @@ class AnalysisServiceRoutingTest {
 	}
 
 	@Test
-	void disabledPlatformExecutesExactlyOneLegacyPath() throws Exception {
+	void disabledPlatformQueuesPersistentDownloadWithoutStartingLegacyThreadPool() throws Exception {
 		doNothing().when(service).processingVideosLegacy(anyString(), anyString());
 
 		AnalysisService.SubmissionResult result = service.submitProcessingVideos("app-token",
 				"https://www.youtube.com/watch?v=legacy");
 
-		assertThat(result.mode()).isEqualTo("legacy");
+		assertThat(result.mode()).isEqualTo("persistent");
+		assertThat(result.status()).isEqualTo("queued");
 		assertThat(result.platformKey()).isEqualTo("youtube");
-		verify(service).processingVideosLegacy("app-token", "https://www.youtube.com/watch?v=legacy");
+		verify(service, never()).processingVideosLegacy(anyString(), anyString());
+		verify(directDownloadQueueService).enqueue("https://www.youtube.com/watch?v=legacy",
+				DirectDownloadSource.SINGLE_LINK.name(), null, null, null);
 		verify(workIngestService, never()).ingest(anyString(), any(Function.class), anyBoolean(), any());
 	}
 
 	@Test
-	void aria2KeepsSupportedDomesticPlatformOnLegacyDownloader() throws Exception {
+	void aria2SubmissionStillUsesPersistentQueue() throws Exception {
 		properties.setAdapter(Map.of("douyin", Mode.NEW));
 		Global.downtype = "a2";
 		doNothing().when(service).processingVideosLegacy(anyString(), anyString());
@@ -107,48 +118,37 @@ class AnalysisServiceRoutingTest {
 		AnalysisService.SubmissionResult result = service.submitProcessingVideos("app-token",
 				"https://www.douyin.com/video/1234567890");
 
-		assertThat(result.mode()).isEqualTo("legacy");
-		verify(service).processingVideosLegacy("app-token", "https://www.douyin.com/video/1234567890");
+		assertThat(result.mode()).isEqualTo("persistent");
+		verify(service, never()).processingVideosLegacy(anyString(), anyString());
 		verify(workIngestService, never()).ingest(anyString(), any(Function.class), anyBoolean(), any());
 	}
 
 	@Test
 	@SuppressWarnings("unchecked")
-	void enabledPlatformUsesBoundedIngestQueueAndReturnsHistoryId() throws Exception {
+	void enabledPlatformUsesPersistentQueueAndReturnsHistoryId() throws Exception {
 		properties.setAdapter(Map.of("youtube", Mode.NEW));
 		doNothing().when(service).processingVideosLegacy(anyString(), anyString());
-		ProcessHistoryEntity history = new ProcessHistoryEntity();
-		history.setId(42);
-		when(processHistoryService.beginPlatformProcess(anyString(), eq("YouTube"), eq("SUBMITTED")))
-				.thenReturn(history);
-
 		AnalysisService.SubmissionResult result = service.submitProcessingVideos("app-token",
 				"https://www.youtube.com/watch?v=new-route");
 
-		assertThat(result).isEqualTo(new AnalysisService.SubmissionResult(42, "youtube", "new", "submitted"));
-		verify(workIngestService, org.mockito.Mockito.timeout(5000)).ingest(
-				eq("https://www.youtube.com/watch?v=new-route"), any(Function.class), eq(false), eq(42));
+		assertThat(result).isEqualTo(new AnalysisService.SubmissionResult(42, "youtube", "persistent", "queued"));
+		verify(workIngestService, never()).ingest(anyString(), any(Function.class), anyBoolean(), any());
 		verify(service, never()).processingVideosLegacy(anyString(), anyString());
 	}
 
 	@Test
 	@SuppressWarnings("unchecked")
-	void newAdapterFailureNeverFallsBackToLegacy() throws Exception {
+	void persistentQueueFailureNeverFallsBackToLegacy() throws Exception {
 		properties.setAdapter(Map.of("youtube", Mode.NEW));
 		doNothing().when(service).processingVideosLegacy(anyString(), anyString());
-		ProcessHistoryEntity history = new ProcessHistoryEntity();
-		history.setId(43);
-		when(processHistoryService.beginPlatformProcess(anyString(), anyString(), anyString())).thenReturn(history);
-		doThrow(new IllegalStateException("adapter failed")).when(workIngestService)
-				.ingest(anyString(), any(Function.class), eq(false), eq(43));
+		when(directDownloadQueueService.enqueue(anyString(), any(), any(), any(), any()))
+				.thenThrow(new IllegalStateException("queue failed"));
 
-		service.submitProcessingVideos("app-token", "https://www.youtube.com/watch?v=failure");
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.submitProcessingVideos("app-token",
+				"https://www.youtube.com/watch?v=failure")).isInstanceOf(IllegalStateException.class);
 
-		verify(workIngestService, org.mockito.Mockito.timeout(5000)).ingest(
-				anyString(), any(Function.class), eq(false), eq(43));
+		verify(workIngestService, never()).ingest(anyString(), any(Function.class), anyBoolean(), any());
 		verify(service, never()).processingVideosLegacy(anyString(), anyString());
-		verify(processHistoryService, after(500).never())
-				.failPlatformProcess(eq(43), eq("EXECUTING"), anyString());
 	}
 
 	@Test
@@ -183,6 +183,38 @@ class AnalysisServiceRoutingTest {
 
 		assertThat(response.getResCode()).isEqualTo(Global.ajax_uri_error);
 		verify(service, never()).legacyDirectData(anyString(), anyString(), anyString());
+	}
+
+	@Test
+	void youtubePlaylistPreviewUsesCollectionAwareLegacyParserWhenNewAdapterIsEnabled() {
+		properties.setAdapter(Map.of("youtube", Mode.NEW));
+		String playlist = "https://www.youtube.com/playlist?list=PL-example";
+		AjaxEntity expected = new AjaxEntity(Global.ajax_success, "parsed", Map.of(
+				"type", "multiple", "videos", List.of()));
+		doReturn(expected).when(service).legacyDirectData("read-token", playlist, "local");
+
+		AjaxEntity response = service.directData("read-token", playlist, "local");
+
+		assertThat(response).isSameAs(expected);
+		verify(service).legacyDirectData("read-token", playlist, "local");
+		verify(workIngestService, never()).preview(anyString());
+	}
+
+	@Test
+	void adminPlaylistIngestReturnsSelectionPreviewBeforeSubmittingAnyWork() throws Exception {
+		String playlist = "https://www.youtube.com/playlist?list=PL-example";
+		VideoDataEntity requestBody = new VideoDataEntity();
+		requestBody.setOriginaladdress(playlist);
+		HttpServletRequest request = mock(HttpServletRequest.class);
+		when(request.getParameter("type")).thenReturn("1");
+		AjaxEntity expected = new AjaxEntity(Global.ajax_success, "parsed", Map.of(
+				"type", "multiple", "videos", List.of()));
+		doReturn(expected).when(service).directData(Global.apptoken, playlist, "local");
+
+		AjaxEntity response = service.directData(requestBody, request);
+
+		assertThat(response).isSameAs(expected);
+		verify(service, never()).submitProcessingVideos(anyString(), anyString());
 	}
 
 	private WorkMetadata youtubeDash() {

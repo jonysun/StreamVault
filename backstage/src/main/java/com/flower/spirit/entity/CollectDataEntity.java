@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.TableGenerator;
 import jakarta.persistence.Transient;
@@ -91,17 +92,17 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 	@Column(name = "backfill_cursor")
 	private String backfillCursor;
 
-	@Column(name = "backfill_complete")
-	private Integer backfillComplete;
+	@Column(name = "backfill_complete", nullable = false)
+	private Integer backfillComplete = 0;
 
 	@Column(name = "backfill_source_id")
 	private String backfillSourceId;
 
-	@Column(name = "backfill_verifying")
-	private Integer backfillVerifying;
+	@Column(name = "backfill_verifying", nullable = false)
+	private Integer backfillVerifying = 0;
 
-	@Column(name = "backfill_clean_passes")
-	private Integer backfillCleanPasses;
+	@Column(name = "backfill_clean_passes", nullable = false)
+	private Integer backfillCleanPasses = 0;
 
 	@Column(name = "backfill_verified_at")
 	private Date backfillVerifiedAt;
@@ -117,6 +118,13 @@ public class CollectDataEntity   extends DataEntity<CollectDataEntity> implement
 
 	@Transient
 	private String keyword;
+
+	@PrePersist
+	private void initializeBackfillDefaults() {
+		if (backfillComplete == null) backfillComplete = 0;
+		if (backfillVerifying == null) backfillVerifying = 0;
+		if (backfillCleanPasses == null) backfillCleanPasses = 0;
+	}
 
 	public Integer getId() {
 		return id;

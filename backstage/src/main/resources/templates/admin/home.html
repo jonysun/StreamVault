@@ -1345,16 +1345,13 @@
 						$('#taskStatusGrid').removeClass('runtime-stale');
 						$('#taskStatusStale').hide();
 						$('#taskControlContainer').fadeIn(400);
+					} else {
+						markTaskStatusError(response && response.message
+								? response.message : '后台任务状态接口返回错误');
 					}
 				},
 				error: function(xhr, status, error) {
-					if ($('#taskStatusGrid').children().length) {
-						$('#taskStatusGrid').addClass('runtime-stale');
-						$('#taskStatusStale').show();
-					} else {
-						$('#taskStatusGrid').html('<div class="task-status-block">后台任务状态加载失败：' + escapeRecentlyHtml(error || status || '') + '</div>');
-					}
-					$('#taskControlContainer').fadeIn(400);
+					markTaskStatusError('后台任务状态查询失败，请检查登录状态和后台日志');
 				},
 				complete: function() {
 					scheduleTaskControlPoll();
@@ -1378,12 +1375,15 @@
 					if (response && response.resCode === '000001' && response.record) {
 						renderDownloadQueueState(response.record);
 						$('#activeDownloadList, #waitingDownloadList').removeClass('runtime-stale');
+						$('#downloadQueueStale').text('数据可能已过期');
 						$('#downloadQueueStale').hide();
+					} else {
+						markDownloadQueueError(response && response.message
+								? response.message : '下载队列接口返回错误');
 					}
 				},
 				error: function() {
-					$('#activeDownloadList, #waitingDownloadList').addClass('runtime-stale');
-					$('#downloadQueueStale').show();
+					markDownloadQueueError('下载队列查询失败，请检查登录状态和后台日志');
 				},
 				complete: function() {
 					scheduleDownloadQueuePoll();
@@ -1413,18 +1413,27 @@
 			const quartz = collect.quartz || {};
 			const hls = data.hls || {};
 			const jobs = data.jobs || {};
+			const fetchQueue = jobs.fetchQueue || {};
+			const downloadQueue = jobs.downloadQueue || {};
+			const fetchRunning = queueCount(fetchQueue, 'RUNNING', (jobs.running || []).length);
+			const fetchWaiting = queueCount(fetchQueue, 'QUEUED', 0)
+					+ queueCount(fetchQueue, 'RETRY_WAIT', (jobs.queued || []).length);
+			const downloadRunning = queueCount(downloadQueue, 'RUNNING', 0);
+			const downloadWaiting = queueCount(downloadQueue, 'QUEUED', 0)
+					+ queueCount(downloadQueue, 'RETRY_WAIT', 0);
 			renderDownloadTaskProgress(jobs.downloadTasks || []);
 			let html = '';
 			html += taskStatusBlock('下载任务', 'mdi-download', !!control.effectiveDownloadPaused, [
 				'国内池：运行 ' + numberText(domestic.activeCount) + ' / 队列 ' + numberText(domestic.queueSize),
 				'哔哩池：运行 ' + numberText(bilibili.activeCount) + ' / 队列 ' + numberText(bilibili.queueSize),
-				'yt-dlp池：运行 ' + numberText(ytdlp.activeCount) + ' / 队列 ' + numberText(ytdlp.queueSize)
+				'yt-dlp池：运行 ' + numberText(ytdlp.activeCount) + ' / 队列 ' + numberText(ytdlp.queueSize),
+				'持久下载：运行 ' + numberText(downloadRunning) + ' / 队列 ' + numberText(downloadWaiting)
 			]);
 			html += taskStatusBlock('收藏/爬取', 'mdi-cloud-search-outline', !!control.effectiveCollectPaused, [
 				'触发器：' + (quartz.isStarted ? '已启动' : '未启动'),
 				'监控定义：' + numberText(quartz.totalTasks),
-				'持久运行：' + numberText((jobs.running || []).length),
-				'持久排队：' + numberText((jobs.queued || []).length)
+				'持久运行：' + numberText(fetchRunning),
+				'持久排队：' + numberText(fetchWaiting)
 			]);
 			html += taskStatusBlock('HLS转码', 'mdi-filmstrip-box-multiple', !!control.effectiveHlsPaused, [
 				'功能：' + (hls.enabled ? '已开启' : '已关闭'),
@@ -1470,8 +1479,9 @@
 			const runningItems = Array.isArray(data.runningItems) ? data.runningItems : [];
 			const waitingItems = Array.isArray(data.waitingItems) ? data.waitingItems : [];
 			const counts = data.counts || {};
-			$('#activeDownloadCount').text(runningItems.length);
-			$('#waitingDownloadCount').text(numberValue(counts.QUEUED) + numberValue(counts.RETRY_WAIT));
+			$('#activeDownloadCount').text(queueCount(counts, 'RUNNING', runningItems.length));
+			$('#waitingDownloadCount').text(queueCount(counts, 'QUEUED', 0)
+					+ queueCount(counts, 'RETRY_WAIT', waitingItems.length));
 			$('#activeDownloadList').html(renderDownloadRows(runningItems, true,
 				'当前没有正在下载的作品'));
 			$('#waitingDownloadList').html(renderDownloadRows(waitingItems, false, '队列为空'));
@@ -1527,6 +1537,27 @@
 		function numberValue(value) {
 			const parsed = Number(value);
 			return Number.isFinite(parsed) ? parsed : 0;
+		}
+
+		function queueCount(counts, state, fallback) {
+			return counts && Object.prototype.hasOwnProperty.call(counts, state)
+					? numberValue(counts[state]) : numberValue(fallback);
+		}
+
+		function markTaskStatusError(message) {
+			if ($('#taskStatusGrid').children().length) {
+				$('#taskStatusGrid').addClass('runtime-stale');
+				$('#taskStatusStale').text('状态查询失败：' + message).show();
+			} else {
+				$('#taskStatusGrid').html('<div class="task-status-block">后台任务状态查询失败：'
+						+ escapeRecentlyHtml(message) + '</div>');
+			}
+			$('#taskControlContainer').fadeIn(400);
+		}
+
+		function markDownloadQueueError(message) {
+			$('#activeDownloadList, #waitingDownloadList').addClass('runtime-stale');
+			$('#downloadQueueStale').text('下载队列查询失败：' + message).show();
 		}
 
 		function idsText(value) {

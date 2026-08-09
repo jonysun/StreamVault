@@ -66,16 +66,28 @@ public class ApiController {
 	 */
 	@RequestMapping("/processingVideos")
 	@CrossOrigin
-	public AjaxEntity processingVideos(String token,String video) {
+	public AjaxEntity processingVideos(String token, String video, String sourceType, String title, String author,
+			String batchId) {
 		AnalysisService.SubmissionResult submission = null;
 		try {
-			submission = analysisService.submitProcessingVideos(token,video);
+			submission = analysisService.submitProcessingVideos(token, video, sourceType, title, author, batchId);
 		} catch (Exception e) {
 			logger.error("线程中异常 先打印 不一定有用 标记");
 		}
 		return analysisService.applySubmission(
 				new AjaxEntity(Global.ajax_success, "已提交,等待系统处理", ""), submission);
 	
+	}
+
+	public AjaxEntity processingVideos(String token, String video) {
+		AnalysisService.SubmissionResult submission = null;
+		try {
+			submission = analysisService.submitProcessingVideos(token, video);
+		} catch (Exception e) {
+			logger.error("Download submission failed", e);
+		}
+		return analysisService.applySubmission(
+				new AjaxEntity(Global.ajax_success, "已提交，等待系统处理", ""), submission);
 	}
 
 	

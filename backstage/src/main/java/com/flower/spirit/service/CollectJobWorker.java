@@ -150,7 +150,7 @@ public class CollectJobWorker {
 				return;
 			}
 			if (platformCookieService.isDouyinGlobalCooldownActive()) {
-				deferForCooldown(claim, "Douyin global cooldown started after queue claim");
+				deferForCooldown(claim, "F2_COOKIE_COOLDOWN", "Douyin global cooldown started after queue claim");
 				return;
 			}
 			markFetchStarted();
@@ -161,7 +161,12 @@ public class CollectJobWorker {
 					claim.taskId());
 		} catch (CollectFetchException error) {
 			if ("F2_COOKIE_COOLDOWN".equals(error.getErrorCode())) {
-				deferForCooldown(claim, rootMessage(error));
+				deferForCooldown(claim, error.getErrorCode(), rootMessage(error));
+				return;
+			}
+			if (isExpectedDouyinRisk(error.getErrorCode())
+					&& platformCookieService.isDouyinGlobalCooldownActive()) {
+				deferForCooldown(claim, error.getErrorCode(), rootMessage(error));
 				return;
 			}
 			CollectRunState expected = currentExpectedState(claim.runId(), CollectRunState.FETCHING);
@@ -185,12 +190,13 @@ public class CollectJobWorker {
 		}
 	}
 
-	private void deferForCooldown(CollectJobClaim claim, String reason) {
+	private void deferForCooldown(CollectJobClaim claim, String errorCode, String reason) {
 		Instant availableAt = platformCookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5));
 		try {
 			collectRunService.deferForCooldown(claim, availableAt, reason);
-			logger.warn("[CollectWorker] deferred by Douyin cooldown jobId={} runId={} taskId={} availableAt={}",
-					claim.jobId(), claim.runId(), claim.taskId(), availableAt);
+			logger.warn("[CollectWorker] deferred by Douyin cooldown jobId={} runId={} taskId={} code={} "
+					+ "faultDomain=REMOTE_API retryable=true cooldownApplied=true availableAt={}",
+					claim.jobId(), claim.runId(), claim.taskId(), errorCode, availableAt);
 		} catch (RuntimeException queueWriteError) {
 			logger.error("[CollectCooldownDeferralWrite] failed jobId={} runId={} taskId={}", claim.jobId(),
 					claim.runId(), claim.taskId(), queueWriteError);
@@ -236,7 +242,8 @@ public class CollectJobWorker {
 		try {
 			CollectEnqueueResult retry = collectRunService.retryOrFail(claim, errorCode, message, retryDelaySeconds);
 			if (retry.inserted()) {
-				boolean cooldownApplied = isExpectedDouyinRisk(errorCode);
+				boolean cooldownApplied = isExpectedDouyinRisk(errorCode)
+						&& platformCookieService.isDouyinGlobalCooldownActive();
 				logger.warn("[CollectWorker] retry queued jobId={} runId={} taskId={} code={} faultDomain={} "
 						+ "retryable=true cooldownApplied={} root={} nextRunId={} nextState={}", claim.jobId(),
 						claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), cooldownApplied, message,

@@ -771,6 +771,9 @@
 $(document).ready(function() {
     $('input[name="operationMode"]').on('change', updateSubmitButton);
 
+    let currentMultipleRecord = null;
+    let selectedMultipleIndexes = new Set();
+
     function selectedMode() {
         return $('input[name="operationMode"]:checked').val() || 'preview';
     }
@@ -791,7 +794,6 @@ $(document).ready(function() {
         
         const videoUrl = $('#videoUrl').val().trim();
         const mode = selectedMode();
-        const onlyGetLink = mode === 'preview';
         
         // 验证输入
         if (!videoUrl) {
@@ -803,12 +805,10 @@ $(document).ready(function() {
         showLoading(mode);
         
         // 构建API URL
-        let apiUrl = '/admin/api/directData';
-        if (onlyGetLink) {
-            apiUrl += '?type=2';
-        }else{
-        	apiUrl += '?type=1';
-        }
+        // Only collections need a preview before ingest. Ordinary single-work
+        // submissions keep the original one-request path.
+        const previewBeforeIngest = mode === 'ingest' && isYoutubeCollectionUrl(videoUrl);
+        let apiUrl = '/admin/api/directData?type=' + (mode === 'preview' || previewBeforeIngest ? '2' : '1');
         
         // 发送请求
         $.ajax({
@@ -820,7 +820,7 @@ $(document).ready(function() {
             success: function(response) {
                 console.log('API响应成功:', response);
                 hideLoading();
-                handleApiResponse(response, mode);
+                handleApiResponse(response, mode, videoUrl);
             },
             error: function(xhr, status, error) {
                 console.error('API请求失败:', error);
@@ -854,7 +854,7 @@ $(document).ready(function() {
      * @param {Object} response - API响应数据
      * @param {string} mode - preview 或 ingest
      */
-    function handleApiResponse(response, mode) {
+    function handleApiResponse(response, mode, originalUrl) {
         if (response.resCode === '000001') {
             if (mode === 'preview' && response.record) {
                 const record = response.record;
@@ -862,6 +862,13 @@ $(document).ready(function() {
                     renderMultipleVideos(record);
                 } else {
                     renderVideoInfo(record);
+                }
+            } else if (mode === 'ingest' && response.record) {
+                const record = response.record;
+                if (record.type === 'multiple') {
+                    renderMultipleVideos(record);
+                } else {
+                    submitSingleWork(originalUrl);
                 }
             } else {
                 renderSubmission(response);
@@ -873,6 +880,26 @@ $(document).ready(function() {
             layer.msg(response.message || '解析失败', {icon: 2});
             $('#resultDiv').hide();
         }
+    }
+
+    function submitSingleWork(url) {
+        $.ajax({
+            url: '/admin/api/directData?type=1',
+            type: 'POST',
+            data: { originaladdress: url },
+            success: function(response) {
+                if (response.resCode === '000001') renderSubmission(response);
+                else layer.msg(response.message || '下载提交失败', {icon: 2});
+            },
+            error: function() { layer.msg('下载提交失败', {icon: 2}); }
+        });
+    }
+
+    function isYoutubeCollectionUrl(url) {
+        if (!url) return false;
+        const normalized = String(url).toLowerCase();
+        const isYoutube = normalized.includes('youtube.com') || normalized.includes('youtu.be');
+        return isYoutube && (normalized.includes('/playlist?') || /[?&]list=[^&\s]+/.test(normalized));
     }
 
     function renderSubmission(response) {
@@ -1120,6 +1147,8 @@ $(document).ready(function() {
         const platform = record.platform || '未知平台';
         const totalCount = record.totalCount || 0;
         const videos = record.videos || [];
+        currentMultipleRecord = record;
+        selectedMultipleIndexes = new Set();
         
         let videosHtml = videos.map((video, index) => {
             const title = video.title || '无标题';
@@ -1129,10 +1158,14 @@ $(document).ready(function() {
             const audioUrl = video.audioUrl || '';
             const coverUrl = video.coverUrl || '';
             const isDash = video.isDash || false;
+            const sourceUrl = video.sourceUrl || '';
             
             return `
                 <div class="video-item mb-3">
                     <div class="video-item-content">
+                        <label class="mr-2" title="选择下载">
+                            <input type="checkbox" class="multiple-video-checkbox" data-index="${index}" ${sourceUrl ? '' : 'disabled'}>
+                        </label>
                         ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" class="video-cover" alt="视频${index + 1}封面" referrerpolicy="no-referrer">` : ''}
                         <div class="video-info">
                             <h6 class="video-title"><strong>${index + 1}. ${escapeHtml(title)}</strong></h6>
@@ -1162,6 +1195,13 @@ $(document).ready(function() {
             <div class="platform-info mb-3">
                 <strong>平台：</strong>${escapeHtml(platform)}
             </div>
+            <div class="batch-selection-actions mb-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="selectAllMultipleBtn">全选</button>
+                <span class="ml-2">已选择 <strong id="selectedMultipleCount">0</strong> / ${videos.length}</span>
+                <button type="button" class="btn btn-sm btn-primary ml-3" id="submitSelectedMultipleBtn" disabled>
+                    <i class="mdi mdi-download"></i> 下载选中作品
+                </button>
+            </div>
             <div class="videos-list">
                 ${videosHtml}
             </div>
@@ -1169,8 +1209,80 @@ $(document).ready(function() {
         
         $('#resultContent').html(resultHtml);
         $('#resultDiv').show();
+
+        $('#selectAllMultipleBtn').on('click', function() {
+            const checkboxes = $('.multiple-video-checkbox:not(:disabled)');
+            const shouldSelect = selectedMultipleIndexes.size !== checkboxes.length;
+            checkboxes.prop('checked', shouldSelect).each(function() {
+                const index = Number($(this).data('index'));
+                if (shouldSelect) selectedMultipleIndexes.add(index);
+                else selectedMultipleIndexes.delete(index);
+            });
+            updateMultipleSelectionUi();
+        });
+        $('#resultContent').off('change.multipleVideo').on(
+            'change.multipleVideo', '.multiple-video-checkbox', function() {
+                const index = Number($(this).data('index'));
+                if (this.checked) selectedMultipleIndexes.add(index);
+                else selectedMultipleIndexes.delete(index);
+                updateMultipleSelectionUi();
+            }
+        );
+        $('#submitSelectedMultipleBtn').on('click', submitSelectedMultiple);
         
         layer.msg('成功解析 ' + totalCount + ' 个视频', {icon: 1});
+    }
+
+    function updateMultipleSelectionUi() {
+        const count = selectedMultipleIndexes.size;
+        const available = $('.multiple-video-checkbox:not(:disabled)').length;
+        $('#selectedMultipleCount').text(count);
+        $('#submitSelectedMultipleBtn').prop('disabled', count === 0);
+        $('#selectAllMultipleBtn').text(count === available && available > 0 ? '取消全选' : '全选');
+    }
+
+    function submitSelectedMultiple() {
+        if (!currentMultipleRecord || selectedMultipleIndexes.size === 0) return;
+        const selected = Array.from(selectedMultipleIndexes).sort((left, right) => left - right)
+            .map(index => currentMultipleRecord.videos[index])
+            .filter(video => video && video.sourceUrl);
+        if (selected.length === 0) {
+            layer.msg('选中作品没有可用的原始链接', {icon: 2});
+            return;
+        }
+
+        const button = $('#submitSelectedMultipleBtn');
+        button.prop('disabled', true).html('<i class="mdi mdi-loading mdi-spin"></i> 提交中...');
+        let completed = 0;
+        let failed = 0;
+        let cursor = 0;
+		const batchId = 'youtube-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+        const submitNext = function() {
+            if (cursor >= selected.length) {
+                button.prop('disabled', false).html('<i class="mdi mdi-download"></i> 下载选中作品');
+                layer.msg('已提交 ' + completed + ' 个，失败 ' + failed + ' 个', {icon: failed ? 2 : 1});
+                return;
+            }
+            const video = selected[cursor++];
+            $.ajax({
+                url: '/admin/api/directData?type=1',
+                type: 'POST',
+				data: {
+					originaladdress: video.sourceUrl,
+					sourceType: 'YOUTUBE_COLLECTION',
+					title: video.title || '',
+					author: video.author || '',
+					batchId: batchId
+				},
+                success: function(response) {
+                    if (response.resCode === '000001') completed++;
+                    else failed++;
+                },
+                error: function() { failed++; },
+                complete: submitNext
+            });
+        };
+        submitNext();
     }
     
     /**

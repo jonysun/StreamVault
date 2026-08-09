@@ -115,6 +115,9 @@ public class AnalysisService {
 	private WorkIngestService workIngestService;
 
 	@Autowired
+	private DirectDownloadQueueService directDownloadQueueService;
+
+	@Autowired
 	private RawPayloadService rawPayloadService;
 
 
@@ -130,28 +133,59 @@ public class AnalysisService {
 	}
 
 	public SubmissionResult submitProcessingVideos(String token, String video) throws Exception {
+		return submitProcessingVideos(token, video, DirectDownloadSource.SINGLE_LINK.name(), null, null, null);
+	}
+
+	public SubmissionResult submitProcessingVideos(String token, String video, String sourceType, String title,
+			String author, String batchId) throws Exception {
 		if (!Objects.equals(token, Global.apptoken) || StringUtils.isBlank(video) || video.length() < 5) {
-			processingVideosLegacy(token, video);
-			return new SubmissionResult(null, resolvedPlatformKey(video), "legacy", "rejected");
+			return new SubmissionResult(null, resolvedPlatformKey(video), "persistent", "rejected");
+		}
+		DirectDownloadEnqueueResult queued = directDownloadQueueService.enqueue(video, sourceType, title, author,
+				batchId);
+		return new SubmissionResult(queued.historyId(), resolvedPlatformKey(video), "persistent",
+				queued.created() ? "queued" : "duplicate");
+	}
+
+	public void executeQueuedDownload(String video, Integer historyId) throws Exception {
+		if (StringUtils.isBlank(video) || video.length() < 5) {
+			throw new IllegalArgumentException("Download URL is required");
 		}
 		PlatformResolver.Resolution resolution = platformResolver.resolve(video).orElse(null);
-		if (resolution == null || !platformAdapterProperties.useNewAdapter(resolution.platform().getKey())
-				|| requiresLegacyAria2(resolution.platform().getKey())) {
-			processingVideosLegacy(token, video);
-			return new SubmissionResult(null, resolution == null ? null : resolution.platform().getKey(),
-					"legacy", "submitted");
+		if (resolution != null && platformAdapterProperties.useNewAdapter(resolution.platform().getKey())
+				&& !requiresLegacyAria2(resolution.platform().getKey())) {
+			workIngestService.ingest(video, this::adapterOutputDirectory, false, historyId);
+			return;
 		}
-		if (Global.isDownloadPaused()) {
-			return new SubmissionResult(null, resolution.platform().getKey(), "new", "paused");
+		executeLegacyDownloadNow(video, historyId);
+	}
+
+	private void executeLegacyDownloadNow(String video, Integer historyId) throws Exception {
+		String platform = getPlatform(video);
+		String url = getUrl(video);
+		if (platform == null || StringUtils.isBlank(url)) {
+			throw new IllegalArgumentException("Unsupported or invalid download URL");
 		}
-		ProcessHistoryEntity history = processHistoryService.beginPlatformProcess(video,
-				resolution.platform().getDisplayName(), "SUBMITTED");
-		Integer historyId = history == null ? null : history.getId();
-		ExecutorService executor = executorFor(resolution.platform().getKey());
-		boolean accepted = executeTask(executor, historyId, "queued for unified platform ingest", true, () ->
-				workIngestService.ingest(video, this::adapterOutputDirectory, false, historyId));
-		return new SubmissionResult(historyId, resolution.platform().getKey(), "new",
-				accepted ? "submitted" : "rejected");
+		if (!videoDataDao.findByOriginaladdress(url).isEmpty()) {
+			processHistoryService.markProcessLog(historyId, "COMPLETED", "Duplicate media already exists");
+			return;
+		}
+		switch (platform) {
+		case "哔哩哔哩" -> bilivideo(platform, url);
+		case "抖音" -> dyvideo(platform, url, historyId);
+		case "YouTube" -> YouTube(platform, url);
+		case "instagram" -> instagram(platform, url);
+		case "twitter" -> twitter(platform, url);
+		case "快手" -> kuaishou(platform, url);
+		case "微博" -> weibo(platform, url);
+		case "小红书" -> xiaohongshu(platform, url);
+		default -> {
+			if (!"1".equals(Global.ytdlpmode)) {
+				throw new IllegalArgumentException("Unsupported platform: " + platform);
+			}
+			processByYtdlp(url);
+		}
+		}
 	}
 
 	private boolean requiresLegacyAria2(String platformKey) {
@@ -255,19 +289,21 @@ public class AnalysisService {
 		try {
 			hongShuExecutor.dataExecutor(platform,url);
 		} catch (Exception e) {
-			logger.error("rednote url 解析错误,请提交对应日志 到issues");
+			logger.error("rednote url 解析错误,请提交对应日志 到issues", e);
+			throw e;
 		}
 	}
 
-	private void weibo(String platform, String url) {
+	private void weibo(String platform, String url) throws IOException {
 		try {
 			weiBoExecutor.dataExecutor(url);
 		} catch (IOException e) {
-			logger.error("weibo url 解析错误,请提交对应日志 到issues");
+			logger.error("weibo url 解析错误,请提交对应日志 到issues", e);
+			throw e;
 		}
 	}
 
-	private void processByYtdlp(String url) {
+	private void processByYtdlp(String url) throws Exception {
 		// 先通过yt-dlp获取平台信息
 		String detectedPlatform = YtDlpUtil.getPlatform(url);
 		if(null!=detectedPlatform) {
@@ -307,14 +343,14 @@ public class AnalysisService {
 				}
 			} catch (Exception e) {
 				logger.error("yt-dlp解析异常: " + e.getMessage(), e);
+				throw e;
 			}
-			
-			
+			return;
 		}
-
+		throw new IllegalStateException("yt-dlp could not detect the source platform");
 	}
 
-	private void kuaishou(String platform, String url) {
+	private void kuaishou(String platform, String url) throws IOException {
 		logger.info("平台归属:" + platform);
 		String kuaishouCookie = platformCookieService.currentKuaishouCookie("single_video");
 		if (null != kuaishouCookie && !"".equals(kuaishouCookie)) {
@@ -386,10 +422,11 @@ public class AnalysisService {
 				}
 				// 失败
 				sendNotify.sendNotifyError(url, platform, e.getMessage());
+				throw e;
 			}
 
 		} else {
-			logger.info(platform + "当前未设置cookie.本次提交无效");
+			throw new IllegalStateException(platform + " cookie is not configured");
 		}
 
 	}
@@ -527,12 +564,13 @@ public class AnalysisService {
 		return status;
 	}
 
-	private void twitter(String platform, String url) {
+	private void twitter(String platform, String url) throws Exception {
 		ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, url, platform);
 		try {
 			String dirtemp = FileUtil.generateDir(true, Global.platform.twitter.name(), true, null, null, null);
 			String exec = YtDlpUtil.exec(url, dirtemp, "twitter",true);
 			List<JSONObject> jsonObjects = JsonChunkParser.parseJsonObjects(exec);
+			if (jsonObjects.isEmpty()) throw new IllegalStateException("twitter downloader returned no media");
 			for (int i = 0; i < jsonObjects.size(); i++) {
 				JSONObject parseObject = jsonObjects.get(i);
 				String filename = parseObject.getString("filename");
@@ -578,13 +616,13 @@ public class AnalysisService {
 
 			// return ;
 		} catch (Exception e) {
-
-			// logger.error(youtube+"解析异常");
+			logger.error("twitter parse failed: {}", e.getMessage(), e);
+			throw e;
 		}
 
 	}
 
-	private void instagram(String platform, String url) {
+	private void instagram(String platform, String url) throws Exception {
 		ProcessHistoryEntity saveProcess = processHistoryService.saveProcess(null, url, platform);
 		try {
 			String dirtemp = FileUtil.generateDir(true, Global.platform.instagram.name(), true, null, null, null);
@@ -631,8 +669,8 @@ public class AnalysisService {
 			}
 			sendNotify.sendNotifyData(namefix, url, platform);
 		} catch (Exception e) {
-
-			// logger.error(youtube+"解析异常");
+			logger.error("instagram parse failed: {}", e.getMessage(), e);
+			throw e;
 		}
 	}
 
@@ -650,6 +688,7 @@ public class AnalysisService {
 			String dirtemp = FileUtil.generateDir(true, Global.platform.youtube.name(), true, null, null, null);
 			String exec = YtDlpUtil.exec(youtube, dirtemp, "youtube",true);
 			List<JSONObject> jsonObjects = JsonChunkParser.parseJsonObjects(exec);
+			if (jsonObjects.isEmpty()) throw new IllegalStateException("youtube downloader returned no media");
 			for (int i = 0; i < jsonObjects.size(); i++) {
 				JSONObject parseObject = jsonObjects.get(i);
 				String filename = parseObject.getString("filename");
@@ -717,9 +756,7 @@ public class AnalysisService {
 			List<Map<String, String>> videoStreams = BiliUtil.findVideoStreaming(video, Global.bilicookies);
 			// System.out.println(videoStreams);
 			if (videoStreams == null || videoStreams.isEmpty()) {
-				logger.warn("未找到视频流信息: {}", video);
-				processHistoryService.saveProcess(saveProcess.getId(), video, platform);
-				return;
+				throw new IllegalStateException("bilibili returned no downloadable streams");
 			}
 			logger.info("找到{}个视频流", videoStreams.size());
 			for (Map<String, String> videoInfo : videoStreams) {
@@ -837,9 +874,10 @@ public class AnalysisService {
 			}
 			if (downVideo == null) {
 				platformCookieService.reportRisk("抖音", cookie, "single video parse failed");
+				throw new IOException("Douyin single video parser returned no media");
 			}
 		} else {
-			logger.info("抖音cookie未填 不处理");
+			throw new IllegalStateException("Douyin cookie is not configured");
 		}
 
 	}
@@ -1025,8 +1063,13 @@ public class AnalysisService {
 	public AjaxEntity directData(VideoDataEntity video,HttpServletRequest resq) {
 		String type = resq.getParameter("type");
 		if("1".equals(type)) {
+			if (isYoutubeCollectionInput(video.getOriginaladdress())) {
+				return directData(Global.apptoken, video.getOriginaladdress(), "local");
+			}
 			try {
-				SubmissionResult result = submitProcessingVideos(Global.apptoken, video.getOriginaladdress());
+				SubmissionResult result = submitProcessingVideos(Global.apptoken, video.getOriginaladdress(),
+						resq.getParameter("sourceType"), resq.getParameter("title"),
+						resq.getParameter("author"), resq.getParameter("batchId"));
 				return applySubmission(new AjaxEntity(Global.ajax_success, "提交成功", null), result);
 			} catch (Exception e) {
 				return new AjaxEntity(Global.ajax_uri_error, "submission failed: " + e.getMessage(), null);
@@ -1044,7 +1087,8 @@ public class AnalysisService {
 			return new AjaxEntity(Global.ajax_uri_error, "token 错误", null);
 		}
 		PlatformResolver.Resolution resolution = platformResolver.resolve(video).orElse(null);
-		if (resolution != null && platformAdapterProperties.useNewAdapter(resolution.platform().getKey())) {
+		if (resolution != null && platformAdapterProperties.useNewAdapter(resolution.platform().getKey())
+				&& !isYoutubeCollectionInput(video)) {
 			try {
 				return newAdapterPreview(video);
 			} catch (RuntimeException e) {
@@ -1052,6 +1096,17 @@ public class AnalysisService {
 			}
 		}
 		return legacyDirectData(token, video, type);
+	}
+
+	private boolean isYoutubeCollectionInput(String input) {
+		if (input == null || platformResolver == null) return false;
+		String normalized = input.toLowerCase(java.util.Locale.ROOT);
+		boolean youtube = platformResolver.resolve(input)
+				.map(value -> "youtube".equals(value.platform().getKey()))
+				.orElse(false);
+		if (!youtube) return false;
+		return normalized.contains("/playlist?")
+				|| Pattern.compile("[?&]list=[^&\\s]+").matcher(normalized).find();
 	}
 
 	AjaxEntity legacyDirectData(String token, String video,String type) {
@@ -1211,8 +1266,19 @@ public class AnalysisService {
 					logger.error("JSON解析失败，原始数据: {}", jsonStr);
 					return new AjaxEntity(Global.ajax_uri_error, "视频解析失败: 未找到有效的视频数据", null);
 				}
+				if (allVideos.size() == 1) {
+					JSONArray entries = allVideos.get(0).getJSONArray("entries");
+					if (entries != null && !entries.isEmpty()) {
+						List<JSONObject> expanded = new ArrayList<>();
+						for (int i = 0; i < entries.size(); i++) {
+							JSONObject entry = entries.getJSONObject(i);
+							if (entry != null) expanded.add(entry);
+						}
+						if (!expanded.isEmpty()) allVideos = expanded;
+					}
+				}
 				// 如果有多个视频，返回视频列表
-				if (allVideos.size() > 1) {
+				if (allVideos.size() > 1 || isYoutubeCollectionInput(video)) {
 					logger.info("检测到 {} 个视频，全部返回", allVideos.size());
 					List<Map<String, Object>> videoList = new ArrayList<>();
 					for (int i = 0; i < allVideos.size(); i++) {
@@ -1224,12 +1290,28 @@ public class AnalysisService {
 						videoItem.put("author", jsonObject.getString("uploader"));
 						videoItem.put("duration", jsonObject.getInteger("duration"));
 						videoItem.put("coverUrl", extractBestCoverUrlSimple(jsonObject));
+						// A playlist item must be submitted again as its canonical work URL.
+						// The media URL (when present) is often short-lived and cannot be
+						// handed to the normal ingest pipeline.
+						String sourceUrl = jsonObject.getString("webpage_url");
+						if (sourceUrl == null || sourceUrl.isEmpty()) {
+							sourceUrl = jsonObject.getString("original_url");
+						}
+						if (sourceUrl == null || sourceUrl.isEmpty()) {
+							sourceUrl = jsonObject.getString("url");
+						}
+						videoItem.put("sourceUrl", sourceUrl);
 						
 						JSONArray formats = jsonObject.getJSONArray("formats");
 						VideoUrlResult urlResult = selectBestVideoUrl(formats);
 						String videoUrl = urlResult.videoUrl;
 						if (videoUrl == null) {
 							videoUrl = jsonObject.getString("url");
+						}
+						String itemType = jsonObject.getString("_type");
+						if (("url".equalsIgnoreCase(itemType) || "url_transparent".equalsIgnoreCase(itemType))
+								&& Objects.equals(videoUrl, sourceUrl)) {
+							videoUrl = null;
 						}
 						
 						videoItem.put("videoUrl", videoUrl);

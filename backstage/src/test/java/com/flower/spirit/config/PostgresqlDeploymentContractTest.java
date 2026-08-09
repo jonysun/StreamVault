@@ -110,6 +110,33 @@ class PostgresqlDeploymentContractTest {
 	}
 
 	@Test
+	void collectBackfillDefaultsAreRepairedForExistingPostgresqlDatabases() throws Exception {
+		String migration = Files.readString(Path.of("src", "main", "resources", "db", "migration",
+				"postgresql", "V004__repair_collect_backfill_defaults.sql"), StandardCharsets.UTF_8);
+
+		assertThat(migration)
+				.contains("COALESCE(backfill_complete, 0)")
+				.contains("COALESCE(backfill_verifying, 0)")
+				.contains("COALESCE(backfill_clean_passes, 0)")
+				.contains("ALTER COLUMN backfill_complete SET DEFAULT 0")
+				.contains("ALTER COLUMN backfill_complete SET NOT NULL")
+				.contains("ALTER COLUMN backfill_verifying SET DEFAULT 0")
+				.contains("ALTER COLUMN backfill_verifying SET NOT NULL")
+				.contains("ALTER COLUMN backfill_clean_passes SET DEFAULT 0")
+				.contains("ALTER COLUMN backfill_clean_passes SET NOT NULL");
+	}
+
+	@Test
+	void downloadHistoryVisibilityMigrationPreservesQueueAuditRows() throws Exception {
+		String migration = Files.readString(Path.of("src", "main", "resources", "db", "migration",
+				"postgresql", "V005__add_download_history_visibility.sql"), StandardCharsets.UTF_8);
+
+		assertThat(migration).contains("CREATE TABLE biz_download_history_hidden",
+				"record_key VARCHAR(80) PRIMARY KEY", "source_type VARCHAR(32) NOT NULL",
+				"source_id BIGINT NOT NULL", "idx_download_history_hidden_source");
+	}
+
+	@Test
 	void mainJavaSqlAvoidsBareNullableParameterChecks() throws Exception {
 		StringBuilder sources = new StringBuilder();
 		try (var stream = Files.walk(Path.of("src", "main", "java"))) {
