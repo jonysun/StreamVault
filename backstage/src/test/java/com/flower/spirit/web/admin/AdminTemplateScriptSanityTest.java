@@ -12,6 +12,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
+import org.thymeleaf.context.Context;
+import org.thymeleaf.spring6.SpringTemplateEngine;
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
 
 class AdminTemplateScriptSanityTest {
 
@@ -127,6 +130,23 @@ class AdminTemplateScriptSanityTest {
 				"/admin/api/download-center/retry-batch", "/admin/api/download-center/history/hide",
 				"/admin/api/setBackgroundTaskPause", "YOUTUBE_COLLECTION", "SINGLE_LINK", "COLLECT",
 				"当前任务", "历史记录", "重试所选失败任务", "清除所选记录");
+	}
+
+	@Test
+	void downloadCenterRendersWithoutTreatingJavaScriptArraysAsInlineExpressions() {
+		ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
+		resolver.setPrefix("templates/");
+		resolver.setSuffix(".html");
+		resolver.setCharacterEncoding(StandardCharsets.UTF_8.name());
+
+		SpringTemplateEngine engine = new SpringTemplateEngine();
+		engine.setTemplateResolver(resolver);
+		Context context = new Context();
+		context.setVariable("session", Map.of("user_login_session", Map.of("username", "test")));
+
+		String rendered = engine.process("admin/downloadCenter", context);
+
+		assertThat(rendered).contains("下载中心", "全部状态", "等待重试");
 	}
 
 	private String template(String name) throws IOException {

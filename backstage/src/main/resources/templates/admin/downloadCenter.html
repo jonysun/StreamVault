@@ -244,8 +244,8 @@
 
         function renderStateFilter() {
             const options = state.view === 'active'
-                ? [['ALL','全部状态'],['RUNNING','正在下载'],['QUEUED','等待下载'],['RETRY_WAIT','等待重试']]
-                : [['ALL','全部状态'],['COMPLETED','已完成'],['FAILED','失败'],['CANCELLED','已取消'],['SKIPPED_EXISTING','已跳过']];
+                ? [ ['ALL','全部状态'],['RUNNING','正在下载'],['QUEUED','等待下载'],['RETRY_WAIT','等待重试'] ]
+                : [ ['ALL','全部状态'],['COMPLETED','已完成'],['FAILED','失败'],['CANCELLED','已取消'],['SKIPPED_EXISTING','已跳过'] ];
             $('#stateFilter').html(options.map(function(option) { return '<option value="'+option[0]+'">'+option[1]+'</option>'; }).join(''));
         }
         function togglePause() {
