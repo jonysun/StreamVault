@@ -135,7 +135,7 @@
 <script src="../static/js/layer/layer.js"></script>
 <script>
     (function() {
-        const state = { view:'active', page:0, pageSize:25, totalPages:0, rows:[], paused:false, timer:null };
+        const state = { view:'active', page:0, pageSize:25, totalPages:0, rows:[], paused:false, timer:null, selectedKeys:new Set() };
         const labels = {
             RUNNING:'正在下载', QUEUED:'等待下载', RETRY_WAIT:'等待重试', COMPLETED:'已完成', FAILED:'失败',
             CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽',
@@ -151,6 +151,7 @@
 
         function bindEvents() {
             $('.download-tab').on('click', function() {
+                clearSelection();
                 state.view = $(this).data('view');
                 state.page = 0;
                 $('.download-tab').removeClass('active');
@@ -159,14 +160,28 @@
                 renderStateFilter();
                 loadItems();
             });
-            $('#searchButton').on('click', function() { state.page = 0; loadItems(); });
-            $('#keywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { event.preventDefault(); state.page=0; loadItems(); } });
-            $('#sourceFilter,#stateFilter').on('change', function() { state.page=0; loadItems(); });
-            $('#previousPage').on('click', function() { if (state.page > 0) { state.page--; loadItems(); } });
-            $('#nextPage').on('click', function() { if (state.page + 1 < state.totalPages) { state.page++; loadItems(); } });
+            $('#searchButton').on('click', function() { clearSelection(); state.page = 0; loadItems(); });
+            $('#keywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { event.preventDefault(); clearSelection(); state.page=0; loadItems(); } });
+            $('#sourceFilter,#stateFilter').on('change', function() { clearSelection(); state.page=0; loadItems(); });
+            $('#previousPage').on('click', function() { if (state.page > 0) { clearSelection(); state.page--; loadItems(); } });
+            $('#nextPage').on('click', function() { if (state.page + 1 < state.totalPages) { clearSelection(); state.page++; loadItems(); } });
             $('#pauseButton').on('click', togglePause);
-            $('#selectAll').on('change', function() { $('.row-select:not(:disabled)').prop('checked', this.checked); updateBulkButtons(); });
-            $('#downloadRows').on('change', '.row-select', updateBulkButtons);
+            $('#selectAll').on('change', function() {
+                const checked = this.checked;
+                $('.row-select:not(:disabled)').each(function() {
+                    const key = String($(this).attr('data-key') || '');
+                    $(this).prop('checked', checked);
+                    if (checked) state.selectedKeys.add(key); else state.selectedKeys.delete(key);
+                });
+                syncSelectAll();
+                updateBulkButtons();
+            });
+            $('#downloadRows').on('change', '.row-select', function() {
+                const key = String($(this).attr('data-key') || '');
+                if (this.checked) state.selectedKeys.add(key); else state.selectedKeys.delete(key);
+                syncSelectAll();
+                updateBulkButtons();
+            });
             $('#downloadRows').on('click', '.retry-item', function() { retryKeys([$(this).data('key')]); });
             $('#downloadRows').on('click', '.show-detail', function() { showDetail($(this).data('key')); });
             $('#retrySelected').on('click', function() { retryKeys(selectedKeys(true)); });
@@ -215,13 +230,16 @@
         }
 
         function renderRows() {
-            $('#selectAll').prop('checked', false);
-            updateBulkButtons();
+            const visibleKeys = new Set(state.rows.filter(function(item) {
+                return state.view === 'history' || item.state === 'FAILED';
+            }).map(function(item) { return String(item.record_key || ''); }));
+            state.selectedKeys = new Set(Array.from(state.selectedKeys).filter(function(key) { return visibleKeys.has(key); }));
             $('#emptyState').toggle(state.rows.length === 0);
             $('#downloadRows').html(state.rows.map(function(item,index) {
                 const key = item.record_key || '';
                 const canRetry = item.state === 'FAILED';
                 const selectable = state.view === 'history' || canRetry;
+                const checked = state.selectedKeys.has(String(key)) ? ' checked' : '';
                 const title = item.title || item.task_name || item.work_id || item.source_url || '未命名任务';
                 const subtitle = item.task_name && item.title ? item.task_name + ' · ' + (item.author || item.work_id || '')
                     : (item.author || item.work_id || item.source_url || '');
@@ -229,7 +247,7 @@
                     : (item.started_at || item.available_at || item.created_at);
                 const position = state.page * state.pageSize + index + 1;
                 return '<tr>'
-                    + '<td><input type="checkbox" class="row-select" data-key="'+attr(key)+'" data-failed="'+canRetry+'" '+(selectable?'':'disabled')+'></td>'
+                    + '<td><input type="checkbox" class="row-select" data-key="'+attr(key)+'" data-failed="'+canRetry+'" '+(selectable?'':'disabled')+checked+'></td>'
                     + '<td>' + position + '</td>'
                     + '<td><div class="download-title" title="'+attr(title)+'">'+html(title)+'</div><div class="download-meta" title="'+attr(subtitle)+'">'+html(subtitle)+'</div></td>'
                     + '<td><span class="source-chip">'+html(sourceLabels[item.sourceType] || item.sourceType || '未知')+'</span></td>'
@@ -240,6 +258,8 @@
                     + '<td><button class="btn btn-xs btn-default icon-action show-detail" data-key="'+attr(key)+'" title="查看详情"><i class="mdi mdi-information-outline"></i></button> '
                     + (canRetry ? '<button class="btn btn-xs btn-primary icon-action retry-item" data-key="'+attr(key)+'" title="重试"><i class="mdi mdi-replay"></i></button>' : '') + '</td></tr>';
             }).join(''));
+            syncSelectAll();
+            updateBulkButtons();
         }
 
         function renderStateFilter() {
@@ -255,17 +275,30 @@
                 .fail(function(){ layer.msg('操作失败'); }).always(function(){ $('#pauseButton').prop('disabled', false); });
         }
         function selectedKeys(failedOnly) {
-            return $('.row-select:checked').filter(function(){ return !failedOnly || $(this).data('failed') === true; })
-                .map(function(){ return $(this).data('key'); }).get();
+            return state.rows.filter(function(item) {
+                const key = String(item.record_key || '');
+                return state.selectedKeys.has(key) && (!failedOnly || item.state === 'FAILED');
+            }).map(function(item) { return item.record_key; });
         }
         function updateBulkButtons() {
             $('#retrySelected').prop('disabled', selectedKeys(true).length === 0);
             $('#hideSelected').prop('disabled', selectedKeys(false).length === 0);
         }
+        function syncSelectAll() {
+            const boxes = $('.row-select:not(:disabled)');
+            const checked = boxes.filter(':checked').length;
+            $('#selectAll').prop('checked', boxes.length > 0 && checked === boxes.length)
+                .prop('indeterminate', checked > 0 && checked < boxes.length);
+        }
+        function clearSelection() {
+            state.selectedKeys.clear();
+            $('#selectAll').prop('checked', false).prop('indeterminate', false);
+            updateBulkButtons();
+        }
         function retryKeys(keys) {
             if (!keys.length) return;
             $.ajax({ url:'/admin/api/download-center/retry-batch', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys}) })
-                .done(function(response){ layer.msg(response.message || '已重新排队'); refreshAll(); })
+                .done(function(response){ clearSelection(); layer.msg(response.message || '已重新排队'); refreshAll(); })
                 .fail(function(){ layer.msg('重试请求失败'); });
         }
         function hideSelectedHistory() {
@@ -273,7 +306,7 @@
             if (!keys.length) return;
             layer.confirm('只清除下载中心中的历史显示，不会删除媒体文件。是否继续？', function(index) {
                 $.ajax({ url:'/admin/api/download-center/history/hide', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys}) })
-                    .done(function(response){ layer.msg(response.message || '记录已清除'); loadItems(); })
+                    .done(function(response){ clearSelection(); layer.msg(response.message || '记录已清除'); loadItems(); })
                     .fail(function(){ layer.msg('清除失败'); });
                 layer.close(index);
             });
