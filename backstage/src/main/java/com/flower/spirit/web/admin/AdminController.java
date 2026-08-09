@@ -61,6 +61,7 @@ import com.flower.spirit.service.DouyinWorkMaintenanceService;
 import com.flower.spirit.service.DatabaseAuditService;
 import com.flower.spirit.service.DatabaseMaintenanceService;
 import com.flower.spirit.service.DownloaderService;
+import com.flower.spirit.service.DownloadCenterService;
 import com.flower.spirit.service.GraphicContentService;
 import com.flower.spirit.service.HlsTranscodeService;
 import com.flower.spirit.service.MediaFeedService;
@@ -136,6 +137,9 @@ public class AdminController {
 
 	@Autowired
 	private RuntimeJobQueryService runtimeJobQueryService;
+
+	@Autowired
+	private DownloadCenterService downloadCenterService;
 
 	@Autowired
 	private DatabaseAuditService databaseAuditService;
@@ -830,6 +834,53 @@ public class AdminController {
 		status.put("database", sqlite == null ? Map.of("databaseKind", "postgresql") : sqlite.snapshot());
 		status.put("readiness", applicationReadinessGate.snapshot());
 		return new AjaxEntity(Global.ajax_success, "获取数据库运行状态成功", status);
+	}
+
+	@GetMapping("/download-center/summary")
+	public AjaxEntity downloadCenterSummary() {
+		return new AjaxEntity(Global.ajax_success, "Download summary loaded", downloadCenterService.summary());
+	}
+
+	@GetMapping("/download-center/items")
+	public AjaxEntity downloadCenterItems(@RequestParam(defaultValue = "active") String view,
+			@RequestParam(defaultValue = "ALL") String source,
+			@RequestParam(required = false) String state,
+			@RequestParam(required = false) String keyword,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "25") int pageSize) {
+		return new AjaxEntity(Global.ajax_success, "Download records loaded",
+				downloadCenterService.items(view, source, state, keyword, page, pageSize));
+	}
+
+	@PostMapping("/download-center/retry")
+	public AjaxEntity retryDownloadCenterItem(@RequestParam String recordKey) {
+		try {
+			boolean retried = downloadCenterService.retry(recordKey);
+			return new AjaxEntity(retried ? Global.ajax_success : Global.ajax_uri_error,
+					retried ? "Download requeued" : "Only failed downloads can be retried", null);
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@PostMapping("/download-center/retry-batch")
+	public AjaxEntity retryDownloadCenterItems(@RequestBody Map<String, List<String>> request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "Failed downloads requeued",
+					Map.of("requeued", downloadCenterService.retry(request.get("recordKeys"))));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@PostMapping("/download-center/history/hide")
+	public AjaxEntity hideDownloadCenterHistory(@RequestBody Map<String, List<String>> request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "Download history hidden",
+					Map.of("hidden", downloadCenterService.hideHistory(request.get("recordKeys"))));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
 	}
 
 	@PostMapping("/runtime-controls/pause-all")

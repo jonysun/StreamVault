@@ -68,6 +68,9 @@ class CollectDataServiceDuplicateTest {
 			return saved;
 		});
 		CollectDataEntity requested = task(" 抖音 ", " POSTMS4wLjAB-existing ", " 新任务 ");
+		requested.setBackfillComplete(null);
+		requested.setBackfillVerifying(null);
+		requested.setBackfillCleanPasses(null);
 
 		AjaxEntity result = service.saveCollectData(requested);
 
@@ -76,6 +79,9 @@ class CollectDataServiceDuplicateTest {
 		assertThat(requested.getPlatform()).isEqualTo("抖音");
 		assertThat(requested.getTaskname()).isEqualTo("新任务");
 		assertThat(requested.getTaskenabled()).isEqualTo("Y");
+		assertThat(requested.getBackfillComplete()).isZero();
+		assertThat(requested.getBackfillVerifying()).isZero();
+		assertThat(requested.getBackfillCleanPasses()).isZero();
 		verify(collectdDataDao).save(requested);
 		verify(quartzTaskService).scheduleTask(requested);
 	}

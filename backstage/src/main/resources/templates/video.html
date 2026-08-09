@@ -585,6 +585,14 @@
             margin-bottom: 0.5rem;
         }
 
+        .video-item-checkbox {
+            flex-shrink: 0;
+            width: 18px;
+            height: 18px;
+            accent-color: #2563eb;
+            cursor: pointer;
+        }
+
         .video-item-index {
             flex-shrink: 0;
             width: 32px;
@@ -2205,7 +2213,7 @@
             const multiResult = document.getElementById('multiVideoResult');
             
             // 检查是否为多视频结果
-            if (result.type === 'multiple' && result.videos && result.videos.length > 1) {
+            if (result.type === 'multiple' && result.videos && result.videos.length > 0) {
                 // 显示多视频界面
                 singleResult.style.display = 'none';
                 multiResult.style.display = 'block';
@@ -2361,6 +2369,15 @@
             
             const header = document.createElement('div');
             header.className = 'video-item-header';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'video-item-checkbox';
+            checkbox.setAttribute('aria-label', `选择视频 ${index + 1}`);
+            checkbox.addEventListener('click', event => event.stopPropagation());
+            checkbox.addEventListener('change', () => {
+                setVideoSelection(index, checkbox.checked);
+            });
             
             const indexEl = document.createElement('div');
             indexEl.className = 'video-item-index';
@@ -2370,6 +2387,7 @@
             titleEl.className = 'video-item-title';
             titleEl.textContent = sanitizeText(video.title || `视频 ${index + 1}`);
             
+            header.appendChild(checkbox);
             header.appendChild(indexEl);
             header.appendChild(titleEl);
             
@@ -2393,16 +2411,17 @@
         
         // 切换视频选中状态 (新增)
         function toggleVideoSelection(index) {
+            setVideoSelection(index, !selectedVideoIndices.has(index));
+        }
+
+        function setVideoSelection(index, selected) {
             const card = document.querySelector(`.video-item-card[data-index="${index}"]`);
-            
-            if (selectedVideoIndices.has(index)) {
-                selectedVideoIndices.delete(index);
-                card.classList.remove('selected');
-            } else {
-                selectedVideoIndices.add(index);
-                card.classList.add('selected');
-            }
-            
+            if (!card) return;
+            if (selected) selectedVideoIndices.add(index);
+            else selectedVideoIndices.delete(index);
+            card.classList.toggle('selected', selected);
+            const checkbox = card.querySelector('.video-item-checkbox');
+            if (checkbox) checkbox.checked = selected;
             updateSelectedCount();
         }
         
@@ -2415,6 +2434,8 @@
                 selectedVideoIndices.clear();
                 document.querySelectorAll('.video-item-card').forEach(card => {
                     card.classList.remove('selected');
+                    const checkbox = card.querySelector('.video-item-checkbox');
+                    if (checkbox) checkbox.checked = false;
                 });
                 btn.textContent = '全选';
             } else {
@@ -2425,6 +2446,8 @@
                 });
                 document.querySelectorAll('.video-item-card').forEach(card => {
                     card.classList.add('selected');
+                    const checkbox = card.querySelector('.video-item-checkbox');
+                    if (checkbox) checkbox.checked = true;
                 });
                 btn.textContent = '取消全选';
             }
@@ -2445,30 +2468,59 @@
         }
         
         // 下载选中的视频 (新增)
-        function downloadSelectedVideos() {
+        async function downloadSelectedVideos() {
             if (selectedVideoIndices.size === 0) {
                 alert('请先选择要下载的视频');
                 return;
             }
             
-            const selectedVideos = Array.from(selectedVideoIndices).map(i => currentMultiVideos[i]);
-            
-            selectedVideos.forEach((video, index) => {
-                setTimeout(() => {
-                    if (video.videoUrl && isValidUrl(video.videoUrl)) {
-                        const title = sanitizeText(video.title || `video_${video.index}`);
-                        const link = document.createElement('a');
-                        link.href = video.videoUrl;
-                        link.download = title;
-                        link.target = '_blank';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                    }
-                }, index * MULTI_DOWNLOAD_DELAY_MS);
+            const selectedVideos = Array.from(selectedVideoIndices).sort((left, right) => left - right)
+                .map(i => currentMultiVideos[i]);
+            let completed = 0;
+            let failed = 0;
+			const batchId = 'youtube-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+            for (const selectedVideo of selectedVideos) {
+                try {
+					if (!selectedVideo.sourceUrl || !isValidUrl(selectedVideo.sourceUrl)) {
+						throw new Error('合辑作品缺少原始链接');
+					}
+					const formData = new URLSearchParams();
+					formData.append('token', serverToken);
+					formData.append('video', selectedVideo.sourceUrl);
+					formData.append('sourceType', 'YOUTUBE_COLLECTION');
+					formData.append('title', selectedVideo.title || '');
+					formData.append('author', selectedVideo.author || '');
+					formData.append('batchId', batchId);
+					const response = await axios.post('/api/processingVideos', formData, {
+						headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+					});
+					if (!response.data || response.data.resCode !== '000001') {
+						throw new Error((response.data && response.data.message) || '提交失败');
+					}
+                    completed++;
+                } catch (error) {
+                    failed++;
+                    console.error('合辑作品下载失败', error);
+                }
+                await new Promise(resolve => setTimeout(resolve, MULTI_DOWNLOAD_DELAY_MS));
+            }
+			alert(`已提交 ${completed} 个后台下载任务${failed ? `，${failed} 个提交失败` : ''}`);
+        }
+
+        async function resolvePlaylistVideo(video) {
+            if (video.videoUrl && isValidUrl(video.videoUrl)) return video;
+            if (!video.sourceUrl || !isValidUrl(video.sourceUrl)) throw new Error('合辑作品缺少原始链接');
+            const formData = new URLSearchParams();
+            formData.append('token', serverToken);
+            formData.append('video', video.sourceUrl);
+            const response = await axios.post('/api/directData', formData, {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
             });
-            
-            alert(`开始下载 ${selectedVideos.length} 个视频`);
+            if (response.data.resCode !== '000001' || !response.data.record
+                    || response.data.record.type === 'multiple') {
+                throw new Error(response.data.message || '作品解析失败');
+            }
+            return response.data.record;
         }
         
         // 复制选中的链接 (新增)
@@ -2478,7 +2530,8 @@
                 return;
             }
             
-            const selectedVideos = Array.from(selectedVideoIndices).map(i => currentMultiVideos[i]);
+            const selectedVideos = Array.from(selectedVideoIndices).sort((left, right) => left - right)
+                .map(i => currentMultiVideos[i]);
             const urls = selectedVideos
                 .map((v, i) => {
                     // 清理标题，移除换行符和控制字符

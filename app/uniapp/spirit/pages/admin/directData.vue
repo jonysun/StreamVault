@@ -32,8 +32,11 @@
 					<text class="multi-tip-text">检测到 {{parseResult.totalCount || parseResult.videos.length}} 个视频</text>
 					<text class="multi-tip-platform">平台：{{parseResult.platform || '未知'}}</text>
 				</view>
+				<checkbox-group @change="onVideoSelectionChange">
 				<view class="video-list" v-for="(video, idx) in parseResult.videos" :key="idx">
 					<view class="video-item-row">
+						<checkbox class="video-select-checkbox" :value="idx + ''"
+							:checked="selectedVideoIndexes.indexOf(idx) >= 0" :disabled="!video.sourceUrl" color="#2563eb" />
 						<image v-if="video.coverUrl" :src="video.coverUrl" class="video-item-cover" mode="aspectFill" @error="onCoverError"></image>
 						<view class="video-item-info">
 							<text class="video-item-title">{{idx + 1}}. {{video.title || '无标题'}}</text>
@@ -54,6 +57,13 @@
 							</view>
 						</view>
 					</view>
+				</view>
+				</checkbox-group>
+				<view class="batch-selection-actions">
+					<button class="batch-select-btn" size="mini" @tap="toggleSelectAllVideos">{{allVideosSelected ? '取消全选' : '全选'}}</button>
+					<text class="batch-selection-count">已选择 {{selectedVideoIndexes.length}} / {{parseResult.videos.length}}</text>
+					<button class="batch-download-btn" size="mini" type="primary" @tap="submitSelectedVideos"
+						:disabled="selectedVideoIndexes.length === 0 || batchSubmitting">{{batchSubmitting ? '提交中...' : '下载选中作品'}}</button>
 				</view>
 			</view>
 
@@ -159,7 +169,16 @@
 			return {
 				directUrl: '',
 				directType: 2,
-				parseResult: null
+				parseResult: null,
+				selectedVideoIndexes: [],
+				batchSubmitting: false
+			}
+		},
+		computed: {
+			allVideosSelected() {
+				if (!this.parseResult || this.parseResult.type !== 'multiple') return false;
+				const available = this.parseResult.videos.filter(video => video.sourceUrl).length;
+				return available > 0 && this.selectedVideoIndexes.length === available;
 			}
 		},
 		onShow() {
@@ -196,7 +215,7 @@
 					success: (res) => {
 						uni.hideLoading();
 						if (res.data && res.data.resCode === '000001') {
-							if (this.directType === 1) {
+							if (this.directType === 1 && !(res.data.record && res.data.record.type === 'multiple')) {
 								uni.showToast({ title: '已提交下载', icon: 'success' });
 								this.parseResult = null;
 							} else {
@@ -206,6 +225,7 @@
 										record.mediaType = 'video';
 									}
 									this.parseResult = record;
+									this.selectedVideoIndexes = [];
 									uni.showToast({ title: '解析成功', icon: 'success' });
 								} else {
 									uni.showToast({ title: '解析结果为空', icon: 'none' });
@@ -219,6 +239,65 @@
 						uni.hideLoading();
 						uni.showToast({ title: '网络请求失败', icon: 'none' });
 					}
+				});
+			},
+			onVideoSelectionChange(event) {
+				this.selectedVideoIndexes = (event.detail.value || []).map(value => Number(value));
+			},
+			toggleSelectAllVideos() {
+				if (!this.parseResult || this.parseResult.type !== 'multiple') return;
+				if (this.allVideosSelected) {
+					this.selectedVideoIndexes = [];
+					return;
+				}
+				this.selectedVideoIndexes = this.parseResult.videos
+					.map((video, index) => video.sourceUrl ? index : -1)
+					.filter(index => index >= 0);
+			},
+			async submitSelectedVideos() {
+				if (!this.parseResult || this.selectedVideoIndexes.length === 0 || this.batchSubmitting) return;
+				const selected = this.selectedVideoIndexes.slice().sort((left, right) => left - right)
+					.map(index => this.parseResult.videos[index])
+					.filter(video => video && video.sourceUrl);
+				this.batchSubmitting = true;
+				let completed = 0;
+				let failed = 0;
+				const batchId = 'youtube-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+				for (const video of selected) {
+					try {
+						const response = await this.submitPlaylistWork(video, batchId);
+						if (response && response.resCode === '000001') completed++;
+						else failed++;
+					} catch (error) {
+						failed++;
+					}
+				}
+				this.batchSubmitting = false;
+				uni.showModal({
+					title: '批量提交完成',
+					content: `已提交 ${completed} 个，失败 ${failed} 个`,
+					showCancel: false
+				});
+			},
+			submitPlaylistWork(video, batchId) {
+				const serveraddr = uni.getStorageSync('serveraddr');
+				const serverport = uni.getStorageSync('serverport');
+				const adminCookie = uni.getStorageSync('adminCookie');
+				return new Promise((resolve, reject) => {
+					uni.request({
+						url: `${serveraddr}:${serverport}/admin/api/directData?type=1`,
+						method: 'POST',
+						header: { 'Cookie': adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
+						data: {
+							originaladdress: video.sourceUrl,
+							sourceType: 'YOUTUBE_COLLECTION',
+							title: video.title || '',
+							author: video.author || '',
+							batchId: batchId
+						},
+						success: response => resolve(response.data),
+						fail: reject
+					});
 				});
 			},
 			copyText(text) {
@@ -560,9 +639,34 @@
 
 .video-item-row {
 	display: flex;
+	align-items: center;
 	padding-bottom: 16rpx;
 	border-bottom: 1rpx solid #f5f5f5;
 	margin-bottom: 16rpx;
+}
+
+.video-select-checkbox {
+	flex-shrink: 0;
+	margin-right: 12rpx;
+}
+
+.batch-selection-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 12rpx;
+	padding-top: 16rpx;
+	border-top: 1rpx solid #e5e7eb;
+}
+
+.batch-select-btn,
+.batch-download-btn {
+	margin: 0;
+}
+
+.batch-selection-count {
+	font-size: 24rpx;
+	color: #4b5563;
 }
 
 .video-list:last-child .video-item-row {

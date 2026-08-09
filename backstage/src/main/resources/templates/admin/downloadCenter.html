@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>下载中心-StreamVault</title>
+    <th:block th:insert="~{admin/include/header :: metaHeader}"></th:block>
+    <link href="../static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="../static/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="../static/css/style.min.css" rel="stylesheet">
+    <style>
+        .download-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+        .download-toolbar h4 { margin:0; font-size:20px; letter-spacing:0; }
+        .download-actions { display:flex; gap:8px; flex-wrap:wrap; }
+        .summary-grid { display:grid; grid-template-columns:repeat(6,minmax(110px,1fr)); border:1px solid #e3e7eb; background:#fff; margin-bottom:16px; }
+        .summary-item { min-height:82px; padding:14px 16px; border-right:1px solid #e3e7eb; }
+        .summary-item:last-child { border-right:0; }
+        .summary-label { color:#6b7280; font-size:12px; margin-bottom:6px; }
+        .summary-value { color:#20252b; font-size:24px; font-weight:600; line-height:1; }
+        .summary-value.running { color:#147d64; }
+        .summary-value.failed { color:#c23b3b; }
+        .download-surface { background:#fff; border:1px solid #e3e7eb; }
+        .download-tabs { display:flex; border-bottom:1px solid #e3e7eb; padding:0 16px; gap:20px; }
+        .download-tab { border:0; background:transparent; height:48px; padding:0 2px; color:#66707a; border-bottom:2px solid transparent; }
+        .download-tab.active { color:#147d64; border-bottom-color:#147d64; font-weight:600; }
+        .filter-row { display:grid; grid-template-columns:180px 160px minmax(220px,1fr) auto; gap:10px; padding:14px 16px; border-bottom:1px solid #edf0f2; }
+        .filter-row .form-control { height:36px; }
+        .table-wrap { overflow-x:auto; }
+        .download-table { margin:0; min-width:1060px; table-layout:fixed; }
+        .download-table th { background:#f7f8f9; color:#59636d; font-size:12px; font-weight:600; border-bottom:1px solid #dde2e6 !important; }
+        .download-table td { vertical-align:middle; }
+        .download-title { font-weight:600; color:#262c31; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .download-meta { color:#7a838c; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:3px; }
+        .status-badge { display:inline-flex; align-items:center; min-width:70px; justify-content:center; padding:4px 8px; border-radius:4px; font-size:12px; background:#edf0f2; color:#56606a; }
+        .status-RUNNING { background:#dff3ec; color:#147d64; }
+        .status-QUEUED { background:#e9eef6; color:#3f5f84; }
+        .status-RETRY_WAIT { background:#fff2d8; color:#94691a; }
+        .status-COMPLETED { background:#e6f3e9; color:#29743a; }
+        .status-FAILED { background:#f9e4e4; color:#a72f2f; }
+        .status-SKIPPED_EXISTING,.status-SKIPPED_BLOCKED,.status-SKIPPED_EXISTING_ACTIVE_DOWNLOAD { background:#f0f0f0; color:#666; }
+        .source-chip { display:inline-block; padding:3px 6px; border:1px solid #d8dde2; border-radius:4px; font-size:11px; color:#59636d; }
+        .error-text { color:#a72f2f; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .icon-action { width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+        .empty-state { padding:50px 20px; text-align:center; color:#7b848d; }
+        .download-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-top:1px solid #edf0f2; }
+        .page-controls { display:flex; align-items:center; gap:8px; }
+        .stale-note { display:none; color:#a72f2f; font-size:12px; }
+        .detail-list { margin:0; padding:0; list-style:none; }
+        .detail-list li { display:grid; grid-template-columns:90px 1fr; gap:10px; padding:8px 0; border-bottom:1px solid #eee; word-break:break-word; }
+        @media(max-width:1000px) { .summary-grid { grid-template-columns:repeat(3,1fr); } .summary-item:nth-child(3) { border-right:0; } .filter-row { grid-template-columns:1fr 1fr; } }
+        @media(max-width:600px) { .summary-grid { grid-template-columns:repeat(2,1fr); } .summary-item:nth-child(3) { border-right:1px solid #e3e7eb; } .summary-item:nth-child(2n) { border-right:0; } .filter-row { grid-template-columns:1fr; } .download-toolbar { align-items:flex-start; flex-direction:column; } .download-footer { align-items:flex-start; flex-direction:column; } }
+    </style>
+</head>
+<body>
+<div class="lyear-layout-web">
+    <div class="lyear-layout-container">
+        <div th:insert="~{admin/include/common :: headermenu}"></div>
+        <main class="lyear-layout-content">
+            <div class="container-fluid">
+                <div class="download-toolbar">
+                    <div>
+                        <h4>下载中心</h4>
+                        <span class="stale-note" id="staleNote">数据刷新失败，当前显示上次结果</span>
+                    </div>
+                    <div class="download-actions">
+                        <a class="btn btn-default" href="/admin/processHistoryList"><i class="mdi mdi-history"></i> 旧版提交记录</a>
+                        <button class="btn btn-warning" type="button" id="pauseButton"><i class="mdi mdi-pause"></i> <span>暂停下载</span></button>
+                    </div>
+                </div>
+
+                <div class="summary-grid">
+                    <div class="summary-item"><div class="summary-label">正在下载</div><div class="summary-value running" id="countRunning">0</div></div>
+                    <div class="summary-item"><div class="summary-label">等待下载</div><div class="summary-value" id="countQueued">0</div></div>
+                    <div class="summary-item"><div class="summary-label">等待重试</div><div class="summary-value" id="countRetry">0</div></div>
+                    <div class="summary-item"><div class="summary-label">失败</div><div class="summary-value failed" id="countFailed">0</div></div>
+                    <div class="summary-item"><div class="summary-label">累计完成</div><div class="summary-value" id="countCompleted">0</div></div>
+                    <div class="summary-item"><div class="summary-label">今日完成</div><div class="summary-value" id="countToday">0</div></div>
+                </div>
+
+                <section class="download-surface">
+                    <div class="download-tabs">
+                        <button type="button" class="download-tab active" data-view="active">当前任务</button>
+                        <button type="button" class="download-tab" data-view="history">历史记录</button>
+                    </div>
+                    <div class="filter-row">
+                        <select class="form-control" id="sourceFilter" title="下载来源">
+                            <option value="ALL">全部来源</option>
+                            <option value="COLLECT">收藏下载</option>
+                            <option value="SINGLE_LINK">单链接下载</option>
+                            <option value="YOUTUBE_COLLECTION">YouTube 合辑</option>
+                        </select>
+                        <select class="form-control" id="stateFilter" title="任务状态"></select>
+                        <input class="form-control" id="keywordFilter" type="search" placeholder="搜索标题、作者、任务名或作品 ID">
+                        <button class="btn btn-primary" type="button" id="searchButton"><i class="mdi mdi-magnify"></i> 查询</button>
+                    </div>
+                    <div class="download-actions" style="padding:10px 16px;border-bottom:1px solid #edf0f2;">
+                        <button class="btn btn-sm btn-outline-primary" type="button" id="retrySelected" disabled><i class="mdi mdi-replay"></i> 重试所选失败任务</button>
+                        <button class="btn btn-sm btn-outline-danger" type="button" id="hideSelected" disabled style="display:none;"><i class="mdi mdi-delete-outline"></i> 清除所选记录</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="table download-table">
+                            <thead><tr>
+                                <th style="width:42px;"><input type="checkbox" id="selectAll"></th>
+                                <th style="width:70px;">序号</th>
+                                <th style="width:300px;">任务</th>
+                                <th style="width:105px;">来源</th>
+                                <th style="width:110px;">状态</th>
+                                <th style="width:105px;">尝试</th>
+                                <th style="width:170px;">时间</th>
+                                <th>错误</th>
+                                <th style="width:90px;">操作</th>
+                            </tr></thead>
+                            <tbody id="downloadRows"></tbody>
+                        </table>
+                        <div class="empty-state" id="emptyState" style="display:none;"><i class="mdi mdi-download-off" style="font-size:30px;"></i><div>没有符合条件的下载任务</div></div>
+                    </div>
+                    <div class="download-footer">
+                        <span id="pageSummary">共 0 条</span>
+                        <div class="page-controls">
+                            <button class="btn btn-sm btn-default" id="previousPage" title="上一页"><i class="mdi mdi-chevron-left"></i></button>
+                            <span id="pageText">第 1 / 1 页</span>
+                            <button class="btn btn-sm btn-default" id="nextPage" title="下一页"><i class="mdi mdi-chevron-right"></i></button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+</div>
+
+<script src="../static/js/jquery.min.js"></script>
+<script src="../static/js/bootstrap.min.js"></script>
+<script src="../static/js/perfect-scrollbar.min.js"></script>
+<script src="../static/js/main.min.js"></script>
+<script src="../static/js/layer/layer.js"></script>
+<script>
+    (function() {
+        const state = { view:'active', page:0, pageSize:25, totalPages:0, rows:[], paused:false, timer:null };
+        const labels = {
+            RUNNING:'正在下载', QUEUED:'等待下载', RETRY_WAIT:'等待重试', COMPLETED:'已完成', FAILED:'失败',
+            CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽',
+            SKIPPED_EXISTING_ACTIVE_DOWNLOAD:'活动任务已存在'
+        };
+        const sourceLabels = { COLLECT:'收藏下载', SINGLE_LINK:'单链接', YOUTUBE_COLLECTION:'YouTube 合辑' };
+
+        $(function() {
+            renderStateFilter();
+            bindEvents();
+            refreshAll();
+        });
+
+        function bindEvents() {
+            $('.download-tab').on('click', function() {
+                state.view = $(this).data('view');
+                state.page = 0;
+                $('.download-tab').removeClass('active');
+                $(this).addClass('active');
+                $('#hideSelected').toggle(state.view === 'history');
+                renderStateFilter();
+                loadItems();
+            });
+            $('#searchButton').on('click', function() { state.page = 0; loadItems(); });
+            $('#keywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { event.preventDefault(); state.page=0; loadItems(); } });
+            $('#sourceFilter,#stateFilter').on('change', function() { state.page=0; loadItems(); });
+            $('#previousPage').on('click', function() { if (state.page > 0) { state.page--; loadItems(); } });
+            $('#nextPage').on('click', function() { if (state.page + 1 < state.totalPages) { state.page++; loadItems(); } });
+            $('#pauseButton').on('click', togglePause);
+            $('#selectAll').on('change', function() { $('.row-select:not(:disabled)').prop('checked', this.checked); updateBulkButtons(); });
+            $('#downloadRows').on('change', '.row-select', updateBulkButtons);
+            $('#downloadRows').on('click', '.retry-item', function() { retryKeys([$(this).data('key')]); });
+            $('#downloadRows').on('click', '.show-detail', function() { showDetail($(this).data('key')); });
+            $('#retrySelected').on('click', function() { retryKeys(selectedKeys(true)); });
+            $('#hideSelected').on('click', hideSelectedHistory);
+            document.addEventListener('visibilitychange', scheduleRefresh);
+        }
+
+        function refreshAll() { loadSummary(); loadItems(); }
+        function scheduleRefresh() {
+            if (state.timer) clearTimeout(state.timer);
+            state.timer = setTimeout(refreshAll, document.hidden ? 15000 : 3000);
+        }
+        function loadSummary() {
+            $.getJSON('/admin/api/download-center/summary').done(function(response) {
+                if (!response || response.resCode !== '000001') return markStale();
+                const data = response.record || {}, counts = data.counts || {};
+                $('#countRunning').text(number(counts.RUNNING));
+                $('#countQueued').text(number(counts.QUEUED));
+                $('#countRetry').text(number(counts.RETRY_WAIT));
+                $('#countFailed').text(number(counts.FAILED));
+                $('#countCompleted').text(number(counts.COMPLETED));
+                $('#countToday').text(number(data.todayCompleted));
+                state.paused = !!data.paused;
+                $('#pauseButton').toggleClass('btn-success', state.paused).toggleClass('btn-warning', !state.paused)
+                    .find('span').text(state.paused ? '恢复下载' : '暂停下载');
+                $('#pauseButton i').attr('class', state.paused ? 'mdi mdi-play' : 'mdi mdi-pause');
+                $('#staleNote').hide();
+            }).fail(markStale);
+        }
+        function loadItems() {
+            $.getJSON('/admin/api/download-center/items', {
+                view:state.view, source:$('#sourceFilter').val(), state:$('#stateFilter').val(),
+                keyword:$('#keywordFilter').val(), page:state.page, pageSize:state.pageSize
+            }).done(function(response) {
+                if (!response || response.resCode !== '000001') return markStale();
+                const data = response.record || {};
+                state.rows = Array.isArray(data.content) ? data.content : [];
+                state.totalPages = number(data.totalPages);
+                renderRows();
+                $('#pageSummary').text('共 ' + number(data.totalElements) + ' 条');
+                $('#pageText').text('第 ' + (state.page + 1) + ' / ' + Math.max(1,state.totalPages) + ' 页');
+                $('#previousPage').prop('disabled', state.page === 0);
+                $('#nextPage').prop('disabled', state.page + 1 >= state.totalPages);
+                $('#staleNote').hide();
+            }).fail(markStale).always(scheduleRefresh);
+        }
+
+        function renderRows() {
+            $('#selectAll').prop('checked', false);
+            updateBulkButtons();
+            $('#emptyState').toggle(state.rows.length === 0);
+            $('#downloadRows').html(state.rows.map(function(item,index) {
+                const key = item.record_key || '';
+                const canRetry = item.state === 'FAILED';
+                const selectable = state.view === 'history' || canRetry;
+                const title = item.title || item.task_name || item.work_id || item.source_url || '未命名任务';
+                const subtitle = item.task_name && item.title ? item.task_name + ' · ' + (item.author || item.work_id || '')
+                    : (item.author || item.work_id || item.source_url || '');
+                const time = state.view === 'history' ? (item.completed_at || item.sort_at || item.created_at)
+                    : (item.started_at || item.available_at || item.created_at);
+                const position = state.page * state.pageSize + index + 1;
+                return '<tr>'
+                    + '<td><input type="checkbox" class="row-select" data-key="'+attr(key)+'" data-failed="'+canRetry+'" '+(selectable?'':'disabled')+'></td>'
+                    + '<td>' + position + '</td>'
+                    + '<td><div class="download-title" title="'+attr(title)+'">'+html(title)+'</div><div class="download-meta" title="'+attr(subtitle)+'">'+html(subtitle)+'</div></td>'
+                    + '<td><span class="source-chip">'+html(sourceLabels[item.sourceType] || item.sourceType || '未知')+'</span></td>'
+                    + '<td><span class="status-badge status-'+attr(item.state)+'">'+html(labels[item.state] || item.state)+'</span></td>'
+                    + '<td>'+number(item.attempt_count)+' / '+number(item.max_attempts)+'</td>'
+                    + '<td>'+html(timeText(time))+'</td>'
+                    + '<td><div class="error-text" title="'+attr(item.error_message || '')+'">'+html(item.error_message || '--')+'</div></td>'
+                    + '<td><button class="btn btn-xs btn-default icon-action show-detail" data-key="'+attr(key)+'" title="查看详情"><i class="mdi mdi-information-outline"></i></button> '
+                    + (canRetry ? '<button class="btn btn-xs btn-primary icon-action retry-item" data-key="'+attr(key)+'" title="重试"><i class="mdi mdi-replay"></i></button>' : '') + '</td></tr>';
+            }).join(''));
+        }
+
+        function renderStateFilter() {
+            const options = state.view === 'active'
+                ? [['ALL','全部状态'],['RUNNING','正在下载'],['QUEUED','等待下载'],['RETRY_WAIT','等待重试']]
+                : [['ALL','全部状态'],['COMPLETED','已完成'],['FAILED','失败'],['CANCELLED','已取消'],['SKIPPED_EXISTING','已跳过']];
+            $('#stateFilter').html(options.map(function(option) { return '<option value="'+option[0]+'">'+option[1]+'</option>'; }).join(''));
+        }
+        function togglePause() {
+            $('#pauseButton').prop('disabled', true);
+            $.post('/admin/api/setBackgroundTaskPause', { scope:'download', paused:state.paused ? 'false':'true', reason:'download center control' })
+                .done(function(response) { if (!response || response.resCode !== '000001') layer.msg((response && response.message) || '操作失败'); else loadSummary(); })
+                .fail(function(){ layer.msg('操作失败'); }).always(function(){ $('#pauseButton').prop('disabled', false); });
+        }
+        function selectedKeys(failedOnly) {
+            return $('.row-select:checked').filter(function(){ return !failedOnly || $(this).data('failed') === true; })
+                .map(function(){ return $(this).data('key'); }).get();
+        }
+        function updateBulkButtons() {
+            $('#retrySelected').prop('disabled', selectedKeys(true).length === 0);
+            $('#hideSelected').prop('disabled', selectedKeys(false).length === 0);
+        }
+        function retryKeys(keys) {
+            if (!keys.length) return;
+            $.ajax({ url:'/admin/api/download-center/retry-batch', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys}) })
+                .done(function(response){ layer.msg(response.message || '已重新排队'); refreshAll(); })
+                .fail(function(){ layer.msg('重试请求失败'); });
+        }
+        function hideSelectedHistory() {
+            const keys = selectedKeys(false);
+            if (!keys.length) return;
+            layer.confirm('只清除下载中心中的历史显示，不会删除媒体文件。是否继续？', function(index) {
+                $.ajax({ url:'/admin/api/download-center/history/hide', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys}) })
+                    .done(function(response){ layer.msg(response.message || '记录已清除'); loadItems(); })
+                    .fail(function(){ layer.msg('清除失败'); });
+                layer.close(index);
+            });
+        }
+        function showDetail(key) {
+            const item = state.rows.find(function(row){ return row.record_key === key; });
+            if (!item) return;
+            const values = [
+                ['记录',item.record_key],['状态',labels[item.state] || item.state],['来源',sourceLabels[item.sourceType] || item.sourceType],
+                ['标题',item.title],['作者',item.author],['收藏任务',item.task_name],['作品 ID',item.work_id],
+                ['原始链接',item.source_url],['创建时间',timeText(item.created_at)],['开始时间',timeText(item.started_at)],
+                ['完成时间',timeText(item.completed_at)],['错误代码',item.error_code],['错误详情',item.error_message]
+            ];
+            const content = '<ul class="detail-list">'+values.filter(function(row){ return row[1]; }).map(function(row){ return '<li><strong>'+html(row[0])+'</strong><span>'+html(row[1])+'</span></li>'; }).join('')+'</ul>';
+            layer.open({ type:1, title:'下载详情', area:['min(680px, 92vw)','auto'], content:'<div style="padding:16px;">'+content+'</div>' });
+        }
+        function markStale(){ $('#staleNote').show(); scheduleRefresh(); }
+        function number(value){ const result=Number(value); return Number.isFinite(result)?result:0; }
+        function timeText(value){ if(!value)return '--'; const date=new Date(value); return isNaN(date.getTime())?String(value):date.toLocaleString(); }
+        function html(value){ return String(value == null ? '' : value).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];}); }
+        function attr(value){ return html(value); }
+    })();
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 package com.flower.spirit.service;
 
 public enum JobType {
-	COLLECT_FETCH
+	COLLECT_FETCH,
+	DIRECT_DOWNLOAD
 }

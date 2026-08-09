@@ -17,8 +17,20 @@ class DirectDataTemplateTest {
 				.contains("name=\"operationMode\" value=\"preview\"")
 				.contains("name=\"operationMode\" value=\"ingest\"")
 				.contains("解析预览", "下载入库")
-				.contains("apiUrl += '?type=2'", "apiUrl += '?type=1'")
+				.contains("/admin/api/directData?type=", "/admin/api/directData?type=1")
 				.doesNotContain("id=\"onlyGetLink\"");
+	}
+
+	@Test
+	void rendersPlaylistCheckboxesAndSubmitsCanonicalWorkUrlsSerially() throws IOException {
+		String template = template();
+
+		assertThat(template).contains("multiple-video-checkbox")
+				.contains("id=\"selectAllMultipleBtn\"")
+				.contains("id=\"submitSelectedMultipleBtn\"")
+				.contains("video.sourceUrl")
+				.contains("complete: submitNext")
+				.contains("下载选中作品");
 	}
 
 	@Test
