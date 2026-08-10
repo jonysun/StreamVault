@@ -20,7 +20,7 @@ try:
     os.chdir(_f2_runtime_directory.name)
     from f2.apps.douyin.handler import DouyinHandler
     from f2.apps.douyin.crawler import DouyinCrawler
-    from f2.apps.douyin.model import UserPost, UserProfile
+    from f2.apps.douyin.model import PostDetail, UserPost, UserProfile
     from f2.apps.douyin.utils import XBogusManager
     from f2.log.logger import logger
 finally:
@@ -244,7 +244,7 @@ def _last_request_evidence(diagnostics):
     )
 
 
-def _request_error(error, safe_message, diagnostics):
+def _request_error(error, safe_message, diagnostics, *, work=False):
     request_evidence = _last_request_evidence(diagnostics)
     exception_type = request_evidence.get("exceptionType") or type(error).__name__
     lowered_type = str(exception_type).lower()
@@ -257,19 +257,29 @@ def _request_error(error, safe_message, diagnostics):
         if value
     ).lower()
     evidence = raw_evidence
-    status_code = request_evidence.get("statusCode")
+    status_code = request_evidence.get("statusCode") or (
+        diagnostics.get("upstreamStatus") if isinstance(diagnostics, dict) else None
+    )
     error_kind = request_evidence.get("errorKind")
-    if status_code in (403, 429, "403", "429"):
+    if status_code in (429, "429"):
         return UpstreamFetchError(
             "F2_UPSTREAM_RATE_LIMIT", safe_message, diagnostics, exception_type
         )
-    if status_code in (401, "401"):
+    if status_code in (401, 403, "401", "403"):
         return CookieOrVerifyRequired(diagnostics)
+    if work and status_code in (404, "404"):
+        return UpstreamFetchError(
+            "F2_WORK_UNAVAILABLE", "Douyin work is no longer available", diagnostics, exception_type
+        )
     if error_kind == "TIMEOUT" or status_code in (408, "408"):
         return UpstreamFetchError(
             "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
         )
-    if error_kind == "NETWORK_ERROR" or status_code in (503, "503"):
+    if error_kind == "NETWORK_ERROR":
+        return UpstreamFetchError(
+            "F2_NETWORK_ERROR", safe_message, diagnostics, exception_type
+        )
+    if status_code in (503, "503"):
         return UpstreamFetchError(
             "F2_UPSTREAM_UNAVAILABLE", safe_message, diagnostics, exception_type
         )
@@ -281,18 +291,17 @@ def _request_error(error, safe_message, diagnostics):
             exception_type,
         )
 
-    explicit_risk = any(
+    explicit_auth = any(
         marker in evidence
-        for marker in ("http 403", "http 429", "status 403", "status 429")
-    )
-    explicit_risk = explicit_risk or bool(
-        re.search(r"(?:statuscode|status_code)\D{0,8}(?:403|429)", evidence)
-    )
-    explicit_risk = explicit_risk or any(
+        for marker in ("http 401", "http 403", "status 401", "status 403", "captcha", "verification", "login required")
+    ) or bool(re.search(r"(?:statuscode|status_code)\D{0,8}(?:401|403)", evidence))
+    if explicit_auth:
+        return CookieOrVerifyRequired(diagnostics)
+    explicit_rate = any(
         marker in evidence
-        for marker in ("too many requests", "rate limit", "rate_limit", "risk control")
-    )
-    if explicit_risk:
+        for marker in ("http 429", "status 429", "too many requests", "rate limit", "rate_limit", "risk control")
+    ) or bool(re.search(r"(?:statuscode|status_code)\D{0,8}429", evidence))
+    if explicit_rate:
         return UpstreamFetchError(
             "F2_UPSTREAM_RATE_LIMIT",
             safe_message,
@@ -307,6 +316,14 @@ def _request_error(error, safe_message, diagnostics):
     ):
         return UpstreamFetchError(
             "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
+        )
+    if (
+        isinstance(error, ConnectionError)
+        or "network" in lowered_type
+        or "connection" in lowered_type
+    ):
+        return UpstreamFetchError(
+            "F2_NETWORK_ERROR", safe_message, diagnostics, exception_type
         )
     if (
         is_retry_exhausted
@@ -334,6 +351,13 @@ def _request_error(error, safe_message, diagnostics):
         diagnostics,
         exception_type,
     )
+
+
+def _work_unavailable_evidence(value):
+    text = "" if value is None else str(value).lower()
+    return any(marker in text for marker in (
+        "deleted", "not found", "unavailable", "no longer exists", "不可见", "已删除", "不存在",
+    ))
 
 
 def douyin_kwargs(cookie):
@@ -811,14 +835,16 @@ async def fetch_douyin_list_incremental(
 
 
 def _emit_fetch_error(error, cookie):
-    fault_domain = (
-        "APPLICATION"
-        if error.error_code == "F2_PROTOCOL_ERROR"
-        else "TASK_CONFIGURATION"
-        if error.error_code == "INVALID_AUTHOR_ID"
-        else "REMOTE_API"
+    fault_domain = "REMOTE_API"
+    if error.error_code in ("F2_NETWORK_ERROR", "F2_UPSTREAM_TIMEOUT"):
+        fault_domain = "NETWORK"
+    elif error.error_code in ("F2_RUNTIME_ERROR", "F2_PROTOCOL_ERROR"):
+        fault_domain = "APPLICATION"
+    elif error.error_code == "INVALID_AUTHOR_ID":
+        fault_domain = "TASK_CONFIGURATION"
+    retryable = error.error_code not in (
+        "INVALID_AUTHOR_ID", "F2_PROTOCOL_ERROR", "F2_WORK_UNAVAILABLE"
     )
-    retryable = error.error_code not in ("INVALID_AUTHOR_ID", "F2_PROTOCOL_ERROR")
     cooldown_applied = error.error_code in (
         "F2_UPSTREAM_RATE_LIMIT",
         "F2_COOKIE_OR_VERIFY_REQUIRED",
@@ -956,19 +982,53 @@ async def fetch_post_data(cookie: str, aweme_id: str, output_file: str):
 # Return one raw work as JSON without creating an output file. The Java adapter
 # uses this path for parse/preview so media and persistence remain side-effect free.
 async def fetch_work_data(cookie: str, aweme_id: str):
-    kwargs = {
-        "headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
-            "Referer": "https://www.douyin.com/",
-        },
-        "cookie": cookie,
-        "proxies": {"http": None, "https": None},
-    }
+    diagnostics = {"workId": str(aweme_id)}
+    async with InstrumentedDouyinCrawler(douyin_kwargs(cookie)) as crawler:
+        crawler.bogus_manager = XBogusManager
+        try:
+            response = await crawler.fetch_post_detail(PostDetail(aweme_id=aweme_id))
+        except Exception as error:
+            if crawler.last_request_evidence:
+                diagnostics["lastRequest"] = crawler.last_request_evidence
+                diagnostics["upstreamStatus"] = crawler.last_request_evidence.get("statusCode")
+            if _exception_requires_verification(error, cookie):
+                raise CookieOrVerifyRequired(diagnostics) from None
+            raise _request_error(error, "Douyin work metadata request failed", diagnostics, work=True) from None
 
-    handler = DouyinHandler(kwargs)
-    setattr(handler, "enable_bark", False)
-    work = await handler.fetch_one_video(aweme_id=aweme_id)
-    print(json.dumps(work._to_raw(), ensure_ascii=False))
+        if crawler.last_request_evidence:
+            diagnostics["lastRequest"] = crawler.last_request_evidence
+            diagnostics["upstreamStatus"] = crawler.last_request_evidence.get("statusCode")
+        if _response_requires_verification(response, cookie):
+            raise CookieOrVerifyRequired(diagnostics)
+        if not isinstance(response, dict):
+            raise UpstreamFetchError(
+                "F2_UPSTREAM_RESPONSE_ERROR", "Douyin work metadata response was not an object",
+                diagnostics, "ResponseTypeError"
+            )
+        status_code = response.get("status_code")
+        if status_code is not None:
+            diagnostics["upstreamStatus"] = status_code
+        if status_code not in (None, 0, "0"):
+            if status_code in (404, "404"):
+                raise UpstreamFetchError(
+                    "F2_WORK_UNAVAILABLE", "Douyin work is no longer available", diagnostics, "HTTPStatus"
+                )
+            raise _request_error(
+                RuntimeError("Douyin work metadata returned a nonzero status"),
+                "Douyin work metadata returned a nonzero status",
+                {**diagnostics, "responseStatus": status_code},
+            )
+        detail = response.get("aweme_detail")
+        if not isinstance(detail, dict):
+            if _work_unavailable_evidence(response):
+                raise UpstreamFetchError(
+                    "F2_WORK_UNAVAILABLE", "Douyin work is no longer available", diagnostics, "MissingAwemeDetail"
+                )
+            raise UpstreamFetchError(
+                "F2_UPSTREAM_RESPONSE_ERROR", "Douyin work metadata did not contain aweme detail",
+                diagnostics, "MissingAwemeDetail"
+            )
+        print(json.dumps(response, ensure_ascii=False))
 
 # 获取用户点赞列表方法
 async def fetch_user_like_videos(cookie: str, uid: str, maxc: str, output_file: str):
@@ -1310,7 +1370,21 @@ async def main():
     if args.command == "fetch_post_data":
     	await fetch_post_data(args.cookie, args.aweme_id, args.output)
     if args.command == "fetch_work_data":
-        await fetch_work_data(args.cookie, args.aweme_id)
+        try:
+            await fetch_work_data(args.cookie, args.aweme_id)
+        except FetchCommandError as error:
+            _emit_fetch_error(error, args.cookie)
+            exit_code = 2 if error.error_code in (
+                "F2_UPSTREAM_RATE_LIMIT", "F2_COOKIE_OR_VERIFY_REQUIRED"
+            ) else 3
+            raise SystemExit(exit_code) from None
+        except Exception as error:
+            wrapped = FetchCommandError(
+                "F2_RUNTIME_ERROR", "Douyin work command failed before producing a valid result",
+                {}, type(error).__name__
+            )
+            _emit_fetch_error(wrapped, args.cookie)
+            raise SystemExit(3) from None
 
 if __name__ == "__main__":
     asyncio.run(main())

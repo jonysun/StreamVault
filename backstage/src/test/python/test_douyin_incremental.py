@@ -1859,7 +1859,86 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         end = "stream-vault-end-cookie-probe"
         return json.loads(output.split(start, 1)[1].split(end, 1)[0].strip())
 
-    def _load_command_module(self, profile_response, post_responses, collect_responses=None):
+    async def test_single_work_returns_raw_detail_response(self):
+        response = {"status_code": 0, "aweme_detail": {"aweme_id": "7301"}}
+        module, _ = self._load_command_module({}, [], work_response=response)
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            await module.fetch_work_data("cookie", "7301")
+
+        self.assertEqual(response, json.loads(stdout.getvalue()))
+
+    async def test_single_work_http_429_is_structured_rate_limit(self):
+        module, _ = self._load_command_module(
+            {}, [], work_response={"status_code": 429, "status_msg": "limited"}
+        )
+
+        with self.assertRaises(module.FetchCommandError) as raised:
+            await module.fetch_work_data("cookie", "7301")
+
+        self.assertEqual("F2_UPSTREAM_RATE_LIMIT", raised.exception.error_code)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            module._emit_fetch_error(raised.exception, "cookie")
+        payload = self._error_payload(stderr.getvalue())
+        self.assertTrue(payload["diagnostics"]["cooldownApplied"])
+        self.assertEqual(429, payload["diagnostics"]["upstreamStatus"])
+
+    async def test_single_work_http_403_requires_cookie_or_verification(self):
+        module, _ = self._load_command_module(
+            {}, [], work_response={"status_code": 403, "status_msg": "forbidden"}
+        )
+
+        with self.assertRaises(module.FetchCommandError) as raised:
+            await module.fetch_work_data("cookie", "7301")
+
+        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", raised.exception.error_code)
+
+    async def test_single_work_http_404_is_not_retryable(self):
+        module, _ = self._load_command_module(
+            {}, [], work_response={"status_code": 404, "status_msg": "not found"}
+        )
+
+        with self.assertRaises(module.FetchCommandError) as raised:
+            await module.fetch_work_data("cookie", "7301")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            module._emit_fetch_error(raised.exception, "cookie")
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("F2_WORK_UNAVAILABLE", payload["errorCode"])
+        self.assertFalse(payload["diagnostics"]["retryable"])
+
+    async def test_single_work_missing_detail_remains_retryable(self):
+        module, _ = self._load_command_module(
+            {}, [], work_response={"status_code": 0, "status_msg": "temporary response"}
+        )
+
+        with self.assertRaises(module.FetchCommandError) as raised:
+            await module.fetch_work_data("cookie", "7301")
+
+        self.assertEqual("F2_UPSTREAM_RESPONSE_ERROR", raised.exception.error_code)
+
+    async def test_single_work_network_error_is_safe_and_retryable(self):
+        module, _ = self._load_command_module(
+            {}, [], work_response=ConnectionError("sessionid=secret network detail")
+        )
+
+        with self.assertRaises(module.FetchCommandError) as raised:
+            await module.fetch_work_data("sessionid=secret", "7301")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            module._emit_fetch_error(raised.exception, "sessionid=secret")
+        payload = self._error_payload(stderr.getvalue())
+        self.assertEqual("F2_NETWORK_ERROR", payload["errorCode"])
+        self.assertEqual("NETWORK", payload["diagnostics"]["faultDomain"])
+        self.assertNotIn("secret", stderr.getvalue())
+
+    def _load_command_module(
+        self, profile_response, post_responses, collect_responses=None, work_response=None
+    ):
         crawler_instances = []
         collect_responses = list(collect_responses or [])
 
@@ -1873,6 +1952,10 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 self.count = count
                 self.sec_user_id = sec_user_id
 
+        class FakePostDetail:
+            def __init__(self, aweme_id):
+                self.aweme_id = aweme_id
+
         class FakeCrawler:
             def __init__(self, kwargs):
                 self.kwargs = kwargs
@@ -1880,6 +1963,10 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 self.post_cursors = []
                 self.post_params = []
                 self._pages = list(post_responses)
+                self.work_response = work_response or {
+                    "status_code": 0,
+                    "aweme_detail": {"aweme_id": "default-work"},
+                }
                 crawler_instances.append(self)
 
             async def __aenter__(self):
@@ -1901,6 +1988,11 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 if isinstance(response, Exception):
                     raise response
                 return response
+
+            async def fetch_post_detail(self, params):
+                if isinstance(self.work_response, Exception):
+                    raise self.work_response
+                return self.work_response
 
         class FakeRawResult:
             def __init__(self, raw):
@@ -1934,6 +2026,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         fake_modules["f2.apps.douyin.crawler"].DouyinCrawler = FakeCrawler
         fake_modules["f2.apps.douyin.model"].UserProfile = FakeUserProfile
         fake_modules["f2.apps.douyin.model"].UserPost = FakeUserPost
+        fake_modules["f2.apps.douyin.model"].PostDetail = FakePostDetail
         fake_modules["f2.apps.douyin.utils"].XBogusManager = object()
         fake_modules["f2.log.logger"].logger = types.SimpleNamespace(
             setLevel=lambda *_: None

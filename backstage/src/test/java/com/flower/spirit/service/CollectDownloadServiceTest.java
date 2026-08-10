@@ -28,6 +28,7 @@ import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.DouyinGlobalCooldownException;
+import com.flower.spirit.platform.DouyinWorkFetchException;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.WorkContentType;
 import com.flower.spirit.platform.WorkMetadata;
@@ -119,6 +120,33 @@ class CollectDownloadServiceTest {
 		verify(transaction).deferForCooldown(claim, retryAt, "Douyin global cooldown is active", NOW);
 		verify(transaction, never()).retryOrFail(any(), anyString(), anyString(), anyString(), any());
 		verify(transaction, never()).fail(any(), anyString(), anyString(), anyString(), any());
+	}
+
+	@Test
+	void unavailableRemoteWorkStopsAutomaticRetryWithoutChangingOtherItems() {
+		var cause = new DouyinWorkFetchException("F2_WORK_UNAVAILABLE", "Douyin work is no longer available",
+				"REMOTE_API", false, false, 404, "HTTPStatusError");
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+				.thenThrow(new WorkMetadataValidationException("Douyin parsing failed", cause));
+
+		service.process(claim, NOW);
+
+		verify(transaction).fail(eq(claim), eq("F2_WORK_UNAVAILABLE"),
+				org.mockito.ArgumentMatchers.contains("no longer available"), anyString(), eq(NOW));
+		verify(transaction, never()).retryOrFail(any(), anyString(), anyString(), anyString(), any());
+	}
+
+	@Test
+	void temporaryRemoteResponseUsesTypedRetryCodeInsteadOfNetworkIo() {
+		var cause = new DouyinWorkFetchException("F2_UPSTREAM_RESPONSE_ERROR", "Douyin response was invalid",
+				"REMOTE_API", true, false, null, "APIResponseError");
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+				.thenThrow(new WorkMetadataValidationException("Douyin parsing failed", cause));
+
+		service.process(claim, NOW);
+
+		verify(transaction).retryOrFail(eq(claim), eq("F2_UPSTREAM_RESPONSE_ERROR"),
+				org.mockito.ArgumentMatchers.contains("response was invalid"), anyString(), eq(NOW));
 	}
 
 	@Test
