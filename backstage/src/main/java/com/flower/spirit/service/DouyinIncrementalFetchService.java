@@ -66,6 +66,10 @@ public class DouyinIncrementalFetchService {
 					throw new CollectFetchException("F2_UPSTREAM_TIMEOUT",
 							"Douyin incremental fetch process timed out");
 				}
+				if (isF2LogCleanupRace(diagnostic)) {
+					throw new CollectFetchException("F2_RUNTIME_ERROR",
+							"F2 runtime failed while initializing its isolated log directory; retry is safe");
+				}
 				throw new CollectFetchException("F2_PROTOCOL_ERROR",
 						"Douyin fetch command exited without a valid structured error exitCode="
 								+ commandResult.exitCode() + " output=" + bounded(diagnostic, 2000));
@@ -105,6 +109,13 @@ public class DouyinIncrementalFetchService {
 			}
 		}
 		return null;
+	}
+
+	private boolean isF2LogCleanupRace(String diagnostic) {
+		if (diagnostic == null || diagnostic.isBlank()) return false;
+		return diagnostic.contains("FileNotFoundError")
+				&& diagnostic.contains("f2/log/logger.py")
+				&& diagnostic.contains("clean_logs");
 	}
 
 	private String structuredMessage(String message, JSONObject payload) {

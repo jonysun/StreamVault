@@ -161,6 +161,24 @@ class DouyinIncrementalFetchServiceTest {
 	}
 
 	@Test
+	void f2LogCleanupRaceIsARetryableRuntimeFailure() {
+		FakeRunner runner = new FakeRunner();
+		runner.commandResult = new F2CommandResult(1, """
+				Traceback (most recent call last):
+				  File \"/opt/venv/lib/python3.12/site-packages/f2/log/logger.py\", line 115, in clean_logs
+				    log_file.unlink()
+				FileNotFoundError: missing shared f2 log
+				""", 25);
+
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(runner).fetch(request(Set.of())))
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("retry is safe")
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("F2_RUNTIME_ERROR");
+		assertTemporaryFilesDeleted(runner);
+	}
+
+	@Test
 	void processTimeoutIsClassifiedAsUpstreamTimeout() {
 		FakeRunner runner = new FakeRunner();
 		runner.commandResult = new F2CommandResult(-1,

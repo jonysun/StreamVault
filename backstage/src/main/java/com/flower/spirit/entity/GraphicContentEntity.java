@@ -26,6 +26,7 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 	
+	@Column(columnDefinition = "TEXT")
 	private String originaladdress;
 	
 	private String videoid;
@@ -41,6 +42,7 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 	@Column(columnDefinition = "TEXT")
 	private String images;
 	
+	@Column(columnDefinition = "TEXT")
 	private String markroute;
 	
 	private String author;
@@ -49,6 +51,7 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	private String authorusername;
 
+	@Column(columnDefinition = "TEXT")
 	private String authoravatar;
 
 	private String secuid;
@@ -64,6 +67,7 @@ public class GraphicContentEntity extends DataEntity<GraphicContentEntity> imple
 
 	private String publishtime;
 
+	@Column(columnDefinition = "TEXT")
 	private String sourceurl;
 
 	@Column(length = 64)

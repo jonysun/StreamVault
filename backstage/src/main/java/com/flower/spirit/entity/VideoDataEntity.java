@@ -40,6 +40,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	/**
 	 * 源地址
 	 */
+	@Column(columnDefinition = "TEXT")
 	public String originaladdress;
 	
 	@Column(length = 2000)
@@ -51,6 +52,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	private String authorusername;
 
+	@Column(columnDefinition = "TEXT")
 	private String authoravatar;
 
 	private String secuid;
@@ -69,10 +71,13 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 	
 	private String videoplatform;
 	
+	@Column(columnDefinition = "TEXT")
 	private String videocover;
 	
+	@Column(columnDefinition = "TEXT")
 	private String videounrealaddr;
 	
+	@Column(columnDefinition = "TEXT")
 	private String videoaddr;
 	
 	private Date createtime;
@@ -82,6 +87,7 @@ public class VideoDataEntity  extends DataEntity<VideoDataEntity> implements Ser
 
 	private String publishtime;
 
+	@Column(columnDefinition = "TEXT")
 	private String sourceurl;
 
 	private String favorite;

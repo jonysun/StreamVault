@@ -14,6 +14,17 @@ import org.springframework.test.util.ReflectionTestUtils;
 class PlatformCookieServiceTest {
 
 	@Test
+	void explicitRateLimitSignalsAreRecognizedWithoutTreatingOrdinaryHttpFailuresAsRisk() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		assertThat(service.isRiskSignal("media request failed with HTTP 429")).isTrue();
+		assertThat(service.isRiskSignal("Too Many Requests")).isTrue();
+		assertThat(service.isRiskSignal("upstream rate limit reached")).isTrue();
+		assertThat(service.isRiskSignal("media request failed with HTTP 404")).isFalse();
+		assertThat(service.isRiskSignal("connection timeout")).isFalse();
+	}
+
+	@Test
 	void roundRobinAlternatesAcrossCookiePool() {
 		PlatformCookieService service = new PlatformCookieService();
 

@@ -11,6 +11,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.nio.charset.StandardCharsets;
@@ -371,22 +372,68 @@ public class DouUtil {
 		return videoId == null ? extractNoteId(resolvedUrl) : videoId;
 	}
 
-	public static String fetchWorkDataJson(String awemeId, String cookie) {
+	public static String fetchWorkDataJson(String awemeId, String cookie) throws IOException {
 		if (awemeId == null || awemeId.trim().isEmpty() || cookie == null || cookie.trim().isEmpty()) {
 			return null;
 		}
 		String output = CommandUtil.f2cmd(cookie, awemeId, "fetch_work_data", null, null, null, null);
 		if (output == null || output.trim().isEmpty()) {
-			return null;
+			throw new IOException(f2WorkResponseDiagnostic(output));
 		}
+		JSONObject object = parseF2WorkJson(output);
+		if (object == null) {
+			String diagnostic = f2WorkResponseDiagnostic(output);
+			logger.warn("[DouyinSingle] fetch_work_data returned unusable response awemeId={} classification={} "
+					+ "exitCode={} outputLength={}", awemeId, diagnostic,
+					CommandUtil.getLastF2ExitCode(), output.length());
+			throw new IOException(diagnostic);
+		}
+		return object.toJSONString();
+	}
+
+	static JSONObject parseF2WorkJson(String output) {
 		try {
 			JSONObject object = JSONObject.parseObject(output.trim());
-			return object == null ? null : object.toJSONString();
-		} catch (RuntimeException e) {
-			logger.warn("[DouyinSingle] fetch_work_data returned invalid JSON awemeId={} outputLength={}",
-					awemeId, output.length());
-			return null;
+			if (object != null) return object;
+		} catch (RuntimeException ignored) {
+			// F2 may emit a diagnostic line before the final JSON payload.
 		}
+		String[] lines = output.split("\\R");
+		for (int index = lines.length - 1; index >= 0; index--) {
+			String line = lines[index].trim();
+			if (!line.startsWith("{") || !line.endsWith("}")) continue;
+			try {
+				JSONObject object = JSONObject.parseObject(line);
+				if (object != null) return object;
+			} catch (RuntimeException ignored) {
+				// Continue looking for the last valid JSON line.
+			}
+		}
+		return null;
+	}
+
+	static String f2WorkResponseDiagnostic(String output) {
+		String safe = output == null ? "" : output;
+		String lower = safe.toLowerCase(Locale.ROOT);
+		if (lower.contains("429") || lower.contains("too many requests")
+				|| lower.contains("rate limit") || lower.contains("ratelimit")) {
+			return "F2 upstream rate limited the work request (HTTP 429)";
+		}
+		if (lower.contains("401") || lower.contains("403") || lower.contains("captcha")
+				|| lower.contains("verify") || lower.contains("login") || lower.contains("challenge")) {
+			return "F2 upstream authentication or verification rejected the work request";
+		}
+		if (safe.contains("FileNotFoundError") && safe.contains("clean_logs")) {
+			return "F2 runtime failed while initializing its log directory";
+		}
+		if (lower.contains("<!doctype html") || lower.contains("<html")) {
+			return "F2 upstream returned a non-JSON HTML response";
+		}
+		Integer exitCode = CommandUtil.getLastF2ExitCode();
+		if (lower.contains("traceback") || (exitCode != null && exitCode != 0)) {
+			return "F2 work command failed exitCode=" + (exitCode == null ? "unknown" : exitCode);
+		}
+		return "F2 upstream returned a non-JSON response outputLength=" + safe.length();
 	}
 	
 	/**

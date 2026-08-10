@@ -84,7 +84,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			return metadata;
 		} catch (IOException e) {
 			if (reportRisk(cookie, e.getMessage(), "parse request failed")) {
-				throw new DouyinGlobalCooldownException("Douyin authentication or risk control rejected parsing",
+				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "parsing"),
 						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
 			}
 			throw new WorkMetadataValidationException("Douyin parsing failed", e);
@@ -126,7 +126,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				} catch (IOException error) {
 					if (reportRisk(cookie, error.getMessage(), "cover download request failed")) {
 						throw new DouyinGlobalCooldownException(
-								"Douyin authentication or risk control rejected cover download",
+								riskFailureMessage(error.getMessage(), "cover download"),
 								cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
 					}
 				}
@@ -138,7 +138,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			return DownloadResult.completed(downloaded);
 		} catch (IOException e) {
 			if (reportRisk(cookie, e.getMessage(), "download request failed")) {
-				throw new DouyinGlobalCooldownException("Douyin authentication or risk control rejected download",
+				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "download"),
 						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
 			}
 			throw new WorkMetadataValidationException("Douyin download failed", e);
@@ -288,6 +288,15 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			return true;
 		}
 		return false;
+	}
+
+	private String riskFailureMessage(String signal, String operation) {
+		String lower = signal == null ? "" : signal.toLowerCase(java.util.Locale.ROOT);
+		if (lower.contains("429") || lower.contains("too many requests")
+				|| lower.contains("rate limit") || lower.contains("ratelimit")) {
+			return "Douyin upstream rate limit rejected " + operation + " (HTTP 429)";
+		}
+		return "Douyin authentication or risk control rejected " + operation;
 	}
 
 	private String extension(WorkMediaResource source) {
