@@ -168,7 +168,37 @@ class CollectJobWorkerTest {
 		assertThat(CollectJobWorker.faultDomain("F2_UPSTREAM_RESPONSE_ERROR")).isEqualTo("REMOTE_API");
 		assertThat(CollectJobWorker.faultDomain("DB_WRITE_FAILED")).isEqualTo("DATABASE");
 		assertThat(CollectJobWorker.faultDomain("COOKIE_MISSING")).isEqualTo("TASK_CONFIGURATION");
+		assertThat(CollectJobWorker.faultDomain("F2_RUNTIME_ERROR")).isEqualTo("APPLICATION");
 		assertThat(CollectJobWorker.faultDomain("UNEXPECTED")).isEqualTo("APPLICATION");
+	}
+
+	@Test
+	void f2RuntimeFailureUsesOrdinaryRetryWithoutCooldown() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(4300L, 6400L, 13,
+				CollectTriggerType.RETRY, 1, 3);
+		when(dataService.isCollectTaskEnabled(13)).thenReturn(true);
+		when(runService.currentState(6400L)).thenReturn(CollectRunState.FETCHING);
+		when(runService.retryOrFail(claim, "F2_RUNTIME_ERROR",
+				"F2 runtime failed while initializing its isolated log directory; retry is safe", 900L))
+				.thenReturn(new CollectEnqueueResult(6401L, 4300L, CollectRunState.QUEUED, true, false));
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_RUNTIME_ERROR",
+				"F2 runtime failed while initializing its isolated log directory; retry is safe"))
+				.when(dataService).executeQueuedCollectTask(13, 6400L, CollectTriggerType.RETRY);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).retryOrFail(claim, "F2_RUNTIME_ERROR",
+					"F2 runtime failed while initializing its isolated log directory; retry is safe", 900L);
+			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
+			verify(runService, never()).failJob(any(), anyString(), anyString());
+		} finally {
+			worker.shutdown();
+		}
 	}
 
 	@Test

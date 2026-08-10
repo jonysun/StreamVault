@@ -189,6 +189,35 @@ class DouyinPlatformAdapterTest {
 		verify(cookies).reportRisk("抖音", "cookie-value", "download request failed");
 	}
 
+	@Test
+	void explicitRateLimitDuringDownloadRaisesCooldownSignal() throws Exception {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		Instant retryAt = Instant.parse("2026-08-10T08:00:05Z");
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
+		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
+		when(cookies.isRiskSignal("media request failed with HTTP 429")).thenReturn(true);
+		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		FakeGateway gateway = new FakeGateway(resource("video.json"),
+				"https://www.douyin.com/video/7300000000000000001") {
+			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
+				throw new IOException("media request failed with HTTP 429");
+			}
+		};
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+		WorkMetadata metadata = adapter.parse(new WorkParseRequest("input",
+				"https://www.douyin.com/video/7300000000000000001", false));
+
+		assertThatThrownBy(() -> adapter.download(metadata, new WorkDownloadRequest(tempDir, false)))
+				.isInstanceOf(DouyinGlobalCooldownException.class)
+				.hasMessageContaining("HTTP 429")
+				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
+				.isEqualTo(retryAt);
+		verify(cookies).reportRisk(org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.eq("cookie-value"),
+				org.mockito.ArgumentMatchers.eq("download request failed"));
+	}
+
 	private WorkMetadata parseFixture(String fixture, String id, String path) throws Exception {
 		TestContext context = context(resource(fixture), "https://www.douyin.com" + path + id);
 		return context.adapter.parse(new WorkParseRequest("input", "https://www.douyin.com" + path + id, true));

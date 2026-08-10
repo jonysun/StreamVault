@@ -285,7 +285,8 @@ public class CollectJobWorker {
 		}
 		if ("SQLITE_BUSY".equals(errorCode) || "DB_WRITE_FAILED".equals(errorCode)) return "DATABASE";
 		if ("PAUSED_DURING_EXECUTION".equals(errorCode)) return "RUNTIME_CONTROL";
-		if ("F2_PROTOCOL_ERROR".equals(errorCode) || "UNEXPECTED".equals(errorCode)) return "APPLICATION";
+		if ("F2_PROTOCOL_ERROR".equals(errorCode) || "F2_RUNTIME_ERROR".equals(errorCode)
+				|| "UNEXPECTED".equals(errorCode)) return "APPLICATION";
 		return "REMOTE_API";
 	}
 

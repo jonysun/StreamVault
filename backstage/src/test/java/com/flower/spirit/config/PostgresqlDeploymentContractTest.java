@@ -147,4 +147,31 @@ class PostgresqlDeploymentContractTest {
 
 		assertThat(sources.toString()).doesNotContain("? IS NOT NULL");
 	}
+
+	@Test
+	void dynamicMediaFieldsAreExpandedByAForwardOnlyPostgresqlMigration() throws Exception {
+		Path migrationRoot = Path.of("src", "main", "resources", "db", "migration", "postgresql");
+		String baseline = Files.readString(migrationRoot.resolve("V001__baseline.sql"), StandardCharsets.UTF_8);
+		String migration = Files.readString(migrationRoot.resolve(
+				"V006__expand_dynamic_media_fields.sql"), StandardCharsets.UTF_8);
+		String videoEntity = Files.readString(Path.of("src", "main", "java", "com", "flower", "spirit",
+				"entity", "VideoDataEntity.java"), StandardCharsets.UTF_8);
+		String graphicEntity = Files.readString(Path.of("src", "main", "java", "com", "flower", "spirit",
+				"entity", "GraphicContentEntity.java"), StandardCharsets.UTF_8);
+
+		assertThat(baseline).as("applied V001 checksum must retain the original column definitions")
+				.contains("videoaddr VARCHAR(255), videocover VARCHAR(255)",
+						"images TEXT, markroute VARCHAR(255), originaladdress VARCHAR(255)");
+		assertThat(migration)
+				.contains("ALTER TABLE biz_video", "ALTER COLUMN videoaddr TYPE TEXT",
+						"ALTER COLUMN videocover TYPE TEXT", "ALTER COLUMN videounrealaddr TYPE TEXT",
+						"ALTER COLUMN originaladdress TYPE TEXT", "ALTER COLUMN sourceurl TYPE TEXT",
+						"ALTER COLUMN authoravatar TYPE TEXT", "ALTER TABLE biz_graphic_content",
+						"ALTER COLUMN markroute TYPE TEXT")
+				.doesNotContain("DROP TABLE", "DELETE FROM", "TRUNCATE");
+		assertThat(videoEntity).contains("@Column(columnDefinition = \"TEXT\")\n\tprivate String videocover;",
+				"@Column(columnDefinition = \"TEXT\")\n\tprivate String sourceurl;");
+		assertThat(graphicEntity).contains("@Column(columnDefinition = \"TEXT\")\n\tprivate String markroute;",
+				"@Column(columnDefinition = \"TEXT\")\n\tprivate String authoravatar;");
+	}
 }

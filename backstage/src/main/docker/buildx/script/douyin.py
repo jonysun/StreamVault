@@ -4,15 +4,27 @@ warnings.simplefilter("ignore")
 import asyncio
 import sys
 import argparse
-from f2.apps.douyin.handler import DouyinHandler
-from f2.apps.douyin.crawler import DouyinCrawler
-from f2.apps.douyin.model import UserPost, UserProfile
-from f2.apps.douyin.utils import XBogusManager
-from f2.log.logger import logger
 import json
 import math
 import os
 import re
+import tempfile
+
+# f2 creates and prunes ./logs while it is imported. Every Java worker launches
+# a separate Python process, so a shared working directory lets two imports race
+# while deleting the same log file. Isolate only the f2 import, then restore the
+# caller's working directory for the rest of the script.
+_f2_original_working_directory = os.getcwd()
+_f2_runtime_directory = tempfile.TemporaryDirectory(prefix="stream-vault-f2-")
+try:
+    os.chdir(_f2_runtime_directory.name)
+    from f2.apps.douyin.handler import DouyinHandler
+    from f2.apps.douyin.crawler import DouyinCrawler
+    from f2.apps.douyin.model import UserPost, UserProfile
+    from f2.apps.douyin.utils import XBogusManager
+    from f2.log.logger import logger
+finally:
+    os.chdir(_f2_original_working_directory)
 
 from douyin_incremental import UpstreamSchemaError, envelope, paginate
 

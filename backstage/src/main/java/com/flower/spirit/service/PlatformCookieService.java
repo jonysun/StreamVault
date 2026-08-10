@@ -130,6 +130,10 @@ public class PlatformCookieService {
 			return false;
 		}
 		String lower = text.toLowerCase();
+		if (lower.contains("429") || lower.contains("too many requests")
+				|| lower.contains("rate limit") || lower.contains("ratelimit")) {
+			return true;
+		}
 		return lower.contains("risk") || lower.contains("verify") || lower.contains("login")
 				|| lower.contains("403") || lower.contains("401") || text.contains("验证码") || text.contains("风控");
 	}
