@@ -128,6 +128,9 @@ public class CollectDataService {
 	private DouyinIncrementalFetchService douyinIncrementalFetchService;
 
 	@Autowired
+	private DouyinF2RequestCoordinator douyinF2RequestCoordinator = new DouyinF2RequestCoordinator();
+
+	@Autowired
 	private RawPayloadService rawPayloadService;
 
 	@Autowired
@@ -2281,14 +2284,24 @@ public class CollectDataService {
 				maxPages, emptyPageLimit, mode, batchLimit, backfillCursor,
 				backfillComplete, backfillVerifying, backfillCleanPasses, cookie);
 		DouyinFetchEnvelope envelope;
-		try {
-			envelope = douyinIncrementalFetchService.fetch(request);
-			platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
-		} catch (CollectFetchException error) {
-			if (isDouyinRiskError(error.getErrorCode())) {
-				platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, error.getErrorCode());
+		try (DouyinF2RequestCoordinator.Permit ignored = douyinF2RequestCoordinator.acquire()) {
+			if (platformCookieService.isDouyinGlobalCooldownActive()) {
+				throw new CollectFetchException("F2_COOKIE_COOLDOWN",
+						"Douyin global cooldown is active; fetch deferred before launching F2");
 			}
-			throw error;
+			try {
+				envelope = douyinIncrementalFetchService.fetch(request);
+				platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
+			} catch (CollectFetchException error) {
+				if (isDouyinRiskError(error.getErrorCode())) {
+					platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, error.getErrorCode());
+				}
+				throw error;
+			}
+		} catch (InterruptedException error) {
+			Thread.currentThread().interrupt();
+			throw new CollectFetchException("F2_RUNTIME_ERROR",
+					"Douyin F2 request coordination was interrupted", error);
 		}
 		DouyinFetchMode planningMode = mode == DouyinFetchMode.AUDIT || backfillVerifying
 				? DouyinFetchMode.AUDIT : mode;
@@ -2510,7 +2523,6 @@ public class CollectDataService {
 
 	static boolean isDouyinRiskError(String errorCode) {
 		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
-				|| "F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
 	}
 

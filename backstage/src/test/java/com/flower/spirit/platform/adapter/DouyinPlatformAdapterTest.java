@@ -21,6 +21,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.DouyinGlobalCooldownException;
+import com.flower.spirit.platform.DouyinWorkFetchException;
 import com.flower.spirit.platform.PlatformResolver;
 import com.flower.spirit.platform.WorkContentType;
 import com.flower.spirit.platform.WorkDownloadRequest;
@@ -190,6 +191,26 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void typedF2RateLimitIsReportedAndConvertedToGlobalCooldown() {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		Instant retryAt = Instant.parse("2026-08-10T08:00:05Z");
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
+		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		FakeGateway gateway = new FakeGateway("{}", "https://www.douyin.com/video/7300000000000000001");
+		gateway.fetchError = new DouyinWorkFetchException("F2_UPSTREAM_RATE_LIMIT", "rate limited",
+				"REMOTE_API", true, true, 429, "HTTPStatusError");
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+
+		assertThatThrownBy(() -> adapter.parse(new WorkParseRequest("input",
+				"https://www.douyin.com/video/7300000000000000001", false)))
+				.isInstanceOf(DouyinGlobalCooldownException.class)
+				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
+				.isEqualTo(retryAt);
+		verify(cookies).reportRisk("抖音", "cookie-value", "F2_UPSTREAM_RATE_LIMIT");
+	}
+
+	@Test
 	void explicitRateLimitDuringDownloadRaisesCooldownSignal() throws Exception {
 		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		Instant retryAt = Instant.parse("2026-08-10T08:00:05Z");
@@ -249,6 +270,7 @@ class DouyinPlatformAdapterTest {
 		private int fetchCalls;
 		private int downloadCalls;
 		private String lastCookie;
+		private IOException fetchError;
 		private final List<String> cookies = new ArrayList<>();
 
 		private FakeGateway(String raw, String resolvedUrl) {
@@ -257,10 +279,11 @@ class DouyinPlatformAdapterTest {
 		}
 
 		@Override public String resolve(String url) { return resolvedUrl; }
-		@Override public String fetch(String workId, String cookie) {
+		@Override public String fetch(String workId, String cookie) throws IOException {
 			fetchCalls++;
 			lastCookie = cookie;
 			cookies.add(cookie);
+			if (fetchError != null) throw fetchError;
 			return raw;
 		}
 		@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {

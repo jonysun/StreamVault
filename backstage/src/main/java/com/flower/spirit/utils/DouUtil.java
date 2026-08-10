@@ -28,6 +28,7 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.executor.DouYinExecutor;
+import com.flower.spirit.platform.DouyinWorkFetchException;
 
 public class DouUtil {
 	
@@ -378,17 +379,81 @@ public class DouUtil {
 		}
 		String output = CommandUtil.f2cmd(cookie, awemeId, "fetch_work_data", null, null, null, null);
 		if (output == null || output.trim().isEmpty()) {
-			throw new IOException(f2WorkResponseDiagnostic(output));
+			throw legacyWorkFetchException(output);
 		}
+		DouyinWorkFetchException structuredError = parseF2WorkError(output);
+		if (structuredError != null) throw structuredError;
 		JSONObject object = parseF2WorkJson(output);
 		if (object == null) {
 			String diagnostic = f2WorkResponseDiagnostic(output);
 			logger.warn("[DouyinSingle] fetch_work_data returned unusable response awemeId={} classification={} "
 					+ "exitCode={} outputLength={}", awemeId, diagnostic,
 					CommandUtil.getLastF2ExitCode(), output.length());
-			throw new IOException(diagnostic);
+			throw legacyWorkFetchException(output, diagnostic);
 		}
 		return object.toJSONString();
+	}
+
+	static DouyinWorkFetchException parseF2WorkError(String output) {
+		if (output == null || output.isBlank()) return null;
+		String prefix = "stream-vault-fetch-error=";
+		String[] lines = output.split("\\R");
+		for (int index = lines.length - 1; index >= 0; index--) {
+			String line = lines[index].trim();
+			if (!line.startsWith(prefix)) continue;
+			try {
+				JSONObject payload = JSONObject.parseObject(line.substring(prefix.length()));
+				JSONObject diagnostics = payload.getJSONObject("diagnostics");
+				String code = boundedDiagnostic(payload.getString("errorCode"), "F2_RUNTIME_ERROR");
+				String message = boundedDiagnostic(payload.getString("message"), "Douyin work metadata request failed");
+				String domain = diagnostics == null ? "REMOTE_API"
+						: boundedDiagnostic(diagnostics.getString("faultDomain"), "REMOTE_API");
+				boolean retryable = diagnostics == null || !Boolean.FALSE.equals(diagnostics.getBoolean("retryable"));
+				boolean cooldown = diagnostics != null && Boolean.TRUE.equals(diagnostics.getBoolean("cooldownApplied"));
+				Integer status = diagnostics == null ? null : diagnostics.getInteger("upstreamStatus");
+				String exceptionType = diagnostics == null ? null : boundedDiagnostic(diagnostics.getString("exceptionType"), null);
+				return new DouyinWorkFetchException(code, message, domain, retryable, cooldown, status, exceptionType);
+			} catch (RuntimeException ignored) {
+				return new DouyinWorkFetchException("F2_RUNTIME_ERROR",
+						"F2 work command emitted malformed structured error", "APPLICATION", true, false, null,
+						"MalformedStructuredError");
+			}
+		}
+		return null;
+	}
+
+	private static DouyinWorkFetchException legacyWorkFetchException(String output) {
+		return legacyWorkFetchException(output, f2WorkResponseDiagnostic(output));
+	}
+
+	private static DouyinWorkFetchException legacyWorkFetchException(String output, String message) {
+		String lower = output == null ? "" : output.toLowerCase(Locale.ROOT);
+		if (lower.contains("429") || lower.contains("too many requests")
+				|| lower.contains("rate limit") || lower.contains("ratelimit")) {
+			return new DouyinWorkFetchException("F2_UPSTREAM_RATE_LIMIT", message, "REMOTE_API", true, true, 429,
+				"LegacyF2Output");
+		}
+		if (lower.contains("401") || lower.contains("403") || lower.contains("captcha")
+				|| lower.contains("verify") || lower.contains("login") || lower.contains("challenge")) {
+			return new DouyinWorkFetchException("F2_COOKIE_OR_VERIFY_REQUIRED", message, "REMOTE_API", true, true,
+				lower.contains("403") ? 403 : 401, "LegacyF2Output");
+		}
+		if (lower.contains("timeout") || lower.contains("timed out")) {
+			return new DouyinWorkFetchException("F2_UPSTREAM_TIMEOUT", message, "NETWORK", true, false, null,
+				"LegacyF2Output");
+		}
+		if (lower.contains("connection") || lower.contains("dns") || lower.contains("network")) {
+			return new DouyinWorkFetchException("F2_NETWORK_ERROR", message, "NETWORK", true, false, null,
+				"LegacyF2Output");
+		}
+		return new DouyinWorkFetchException("F2_UPSTREAM_RESPONSE_ERROR", message, "REMOTE_API", true, false, null,
+			"LegacyF2Output");
+	}
+
+	private static String boundedDiagnostic(String value, String fallback) {
+		if (value == null || value.isBlank()) return fallback;
+		String normalized = value.replace('\r', ' ').replace('\n', ' ').trim();
+		return normalized.length() <= 300 ? normalized : normalized.substring(0, 300);
 	}
 
 	static JSONObject parseF2WorkJson(String output) {

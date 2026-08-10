@@ -15,6 +15,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.DouyinGlobalCooldownException;
+import com.flower.spirit.platform.DouyinWorkFetchException;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.PlatformResolver;
 import com.flower.spirit.platform.WorkContentType;
@@ -24,6 +25,7 @@ import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.platform.WorkParseRequest;
 import com.flower.spirit.service.PlatformCookieService;
+import com.flower.spirit.service.DouyinF2RequestCoordinator;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
@@ -35,17 +37,25 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	private final PlatformResolver resolver;
 	private final PlatformCookieService cookieService;
 	private final Gateway gateway;
+	private final DouyinF2RequestCoordinator requestCoordinator;
 	private final ThreadLocal<String> operationCookie = new ThreadLocal<>();
 
 	@Autowired
-	public DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService) {
-		this(resolver, cookieService, systemGateway());
+	public DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService,
+			DouyinF2RequestCoordinator requestCoordinator) {
+		this(resolver, cookieService, systemGateway(), requestCoordinator);
 	}
 
 	DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService, Gateway gateway) {
+		this(resolver, cookieService, gateway, new DouyinF2RequestCoordinator());
+	}
+
+	DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService, Gateway gateway,
+			DouyinF2RequestCoordinator requestCoordinator) {
 		this.resolver = java.util.Objects.requireNonNull(resolver, "resolver");
 		this.cookieService = java.util.Objects.requireNonNull(cookieService, "cookieService");
 		this.gateway = java.util.Objects.requireNonNull(gateway, "gateway");
+		this.requestCoordinator = java.util.Objects.requireNonNull(requestCoordinator, "requestCoordinator");
 	}
 
 	@Override
@@ -72,16 +82,33 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	@Override
 	public WorkMetadata parse(WorkParseRequest request) {
 		String cookie = requireCookie("single_work_parse");
-		try {
+		try (DouyinF2RequestCoordinator.Permit ignored = requestCoordinator.acquire()) {
+			if (cookieService.isDouyinGlobalCooldownActive()) {
+				throw new DouyinGlobalCooldownException("Douyin global cooldown is active",
+						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+			}
 			String resolvedUrl = gateway.resolve(request.getUrl());
 			String inputWorkId = DouUtil.extractWorkId(resolvedUrl);
 			if (inputWorkId == null || inputWorkId.isBlank()) {
 				throw new WorkMetadataValidationException("Douyin input does not contain a video or note work ID");
 			}
-			String raw = gateway.fetch(inputWorkId, cookie);
+			String raw;
+			try {
+				raw = gateway.fetch(inputWorkId, cookie);
+			} catch (DouyinWorkFetchException e) {
+				if (e.cooldownApplied()) {
+					cookieService.reportRisk("\u6296\u97f3", cookie, e.errorCode());
+					throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "parsing"),
+							cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+				}
+				throw new WorkMetadataValidationException("Douyin parsing failed: " + e.errorCode(), e);
+			}
 			WorkMetadata metadata = parseRaw(raw, inputWorkId, request.getInput(), resolvedUrl);
 			cookieService.reportSuccess("抖音", cookie);
 			return metadata;
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new WorkMetadataValidationException("Douyin F2 request coordination was interrupted", e);
 		} catch (IOException e) {
 			if (reportRisk(cookie, e.getMessage(), "parse request failed")) {
 				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "parsing"),

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.DouyinGlobalCooldownException;
+import com.flower.spirit.platform.DouyinWorkFetchException;
 import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.service.WorkIngestService.IngestResult;
@@ -154,6 +155,11 @@ public class CollectDownloadService {
 
 	private CollectDownloadException classify(RuntimeException error) {
 		if (error instanceof CollectDownloadException download) return download;
+		DouyinWorkFetchException workFetch = findCause(error, DouyinWorkFetchException.class);
+		if (workFetch != null) {
+			return new CollectDownloadException(workFetch.errorCode(), workFetch.retryable(),
+					workFetch.getMessage(), error);
+		}
 		String root = rootCauseMessage(error);
 		String normalized = root.toLowerCase(Locale.ROOT);
 		if (hasCause(error, DataAccessException.class)) {
@@ -169,6 +175,9 @@ public class CollectDownloadService {
 		}
 		if (containsAny(normalized, "no aweme detail", "detail refresh", "failed to refresh")) {
 			return new CollectDownloadException("DETAIL_REFRESH_FAILED", true, root, error);
+		}
+		if (hasCause(error, InterruptedException.class)) {
+			return new CollectDownloadException("F2_RUNTIME_ERROR", true, root, error);
 		}
 		if (containsAny(normalized, "no media resources", "no downloadable visual media", "missing or empty",
 				"media is missing or empty", "empty media")) {
@@ -188,6 +197,13 @@ public class CollectDownloadService {
 			if (type.isInstance(current)) return true;
 		}
 		return false;
+	}
+
+	private <T extends Throwable> T findCause(Throwable error, Class<T> type) {
+		for (Throwable current = error; current != null; current = current.getCause()) {
+			if (type.isInstance(current)) return type.cast(current);
+		}
+		return null;
 	}
 
 	private boolean containsAny(String value, String... candidates) {
