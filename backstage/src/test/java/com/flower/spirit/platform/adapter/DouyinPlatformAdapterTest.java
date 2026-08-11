@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -207,7 +208,7 @@ class DouyinPlatformAdapterTest {
 				.isInstanceOf(DouyinGlobalCooldownException.class)
 				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
 				.isEqualTo(retryAt);
-		verify(cookies).reportRisk("抖音", "cookie-value", "F2_UPSTREAM_RATE_LIMIT");
+		verify(cookies, times(1)).reportRisk("抖音", "cookie-value", "F2_UPSTREAM_RATE_LIMIT");
 	}
 
 	@Test
