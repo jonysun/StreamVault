@@ -116,7 +116,9 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			}
 			throw new WorkMetadataValidationException("Douyin parsing failed", e);
 		} catch (WorkMetadataValidationException e) {
-			reportRisk(cookie, e.getMessage(), "parse response rejected");
+			if (!(e instanceof DouyinGlobalCooldownException)) {
+				reportRisk(cookie, e.getMessage(), "parse response rejected");
+			}
 			throw e;
 		}
 	}
