@@ -29,6 +29,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.config.Global;
 import com.flower.spirit.executor.DouYinExecutor;
 import com.flower.spirit.platform.DouyinWorkFetchException;
+import com.flower.spirit.platform.DouyinF2Diagnostics;
 
 public class DouUtil {
 	
@@ -412,7 +413,8 @@ public class DouUtil {
 				boolean cooldown = diagnostics != null && Boolean.TRUE.equals(diagnostics.getBoolean("cooldownApplied"));
 				Integer status = diagnostics == null ? null : diagnostics.getInteger("upstreamStatus");
 				String exceptionType = diagnostics == null ? null : boundedDiagnostic(diagnostics.getString("exceptionType"), null);
-				return new DouyinWorkFetchException(code, message, domain, retryable, cooldown, status, exceptionType);
+				return new DouyinWorkFetchException(code, message, domain, retryable, cooldown, status, exceptionType,
+						DouyinF2Diagnostics.from(diagnostics));
 			} catch (RuntimeException ignored) {
 				return new DouyinWorkFetchException("F2_RUNTIME_ERROR",
 						"F2 work command emitted malformed structured error", "APPLICATION", true, false, null,

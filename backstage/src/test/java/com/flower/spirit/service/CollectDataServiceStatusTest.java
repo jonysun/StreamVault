@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 class CollectDataServiceStatusTest {
 
 	@Test
-	void repeatedEmptyDouyinResponseIsAPlatformRiskSignal() {
-		assertThat(CollectDataService.isDouyinRiskError("F2_UPSTREAM_SOFT_BLOCK")).isTrue();
+	void repeatedEmptyDouyinResponseUsesSoftBackoffRatherThanStrongRiskCooldown() {
+		assertThat(CollectDataService.isDouyinRiskError("F2_UPSTREAM_SOFT_BLOCK")).isFalse();
 		assertThat(CollectDataService.isDouyinRiskError("F2_UPSTREAM_UNAVAILABLE")).isFalse();
 	}
 

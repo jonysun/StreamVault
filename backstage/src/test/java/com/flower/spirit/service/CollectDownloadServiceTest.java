@@ -123,6 +123,21 @@ class CollectDownloadServiceTest {
 	}
 
 	@Test
+	void upstreamFailureThatOpenedCooldownStillConsumesOnlyItsOwnRetryAttempt() {
+		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
+		var f2 = new DouyinWorkFetchException("F2_UPSTREAM_SOFT_BLOCK", "empty detail response",
+				"REMOTE_API", true, false, 200, "APIRetryExhaustedError");
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+				.thenThrow(new DouyinGlobalCooldownException("empty detail response", retryAt, true, f2));
+
+		service.process(claim, NOW);
+
+		verify(transaction).retryOrFail(eq(claim), eq("F2_UPSTREAM_SOFT_BLOCK"),
+				org.mockito.ArgumentMatchers.contains("empty detail response"), anyString(), eq(NOW));
+		verify(transaction, never()).deferForCooldown(any(), any(), anyString(), any());
+	}
+
+	@Test
 	void unavailableRemoteWorkStopsAutomaticRetryWithoutChangingOtherItems() {
 		var cause = new DouyinWorkFetchException("F2_WORK_UNAVAILABLE", "Douyin work is no longer available",
 				"REMOTE_API", false, false, 404, "HTTPStatusError");

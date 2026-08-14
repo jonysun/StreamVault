@@ -130,6 +130,16 @@ class PlatformCookieServiceTest {
 	}
 
 	@Test
+	void softBlockAppliesFiveMinuteGlobalGateAndStrongRiskTakesPrecedence() {
+		PlatformCookieService service = new PlatformCookieService();
+		service.reportSoftBlock("douyin", "F2_UPSTREAM_SOFT_BLOCK");
+
+		assertThat(service.douyinGlobalCooldownRemainingMillis()).isBetween(4 * 60 * 1000L, 5 * 60 * 1000L);
+		service.reportRisk("douyin", "a=1", "verify");
+		assertThat(service.douyinGlobalCooldownRemainingMillis()).isGreaterThan(9 * 60 * 1000L);
+	}
+
+	@Test
 	void poolFallsBackToLegacySingleCookie() {
 		PlatformCookieService service = new PlatformCookieService();
 

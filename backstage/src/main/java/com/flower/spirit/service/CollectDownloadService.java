@@ -53,7 +53,11 @@ public class CollectDownloadService {
 			result = workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null);
 			validateResult(claim, result);
 		} catch (DouyinGlobalCooldownException cooldown) {
-			deferForCooldown(claim, cooldown, now);
+			if (cooldown.actualUpstreamFailure()) {
+				recordFailure(claim, classify(cooldown), cooldown, now);
+			} else {
+				deferForCooldown(claim, cooldown, now);
+			}
 			return;
 		} catch (RuntimeException error) {
 			recordFailure(claim, classify(error), error, now);
@@ -158,7 +162,7 @@ public class CollectDownloadService {
 		DouyinWorkFetchException workFetch = findCause(error, DouyinWorkFetchException.class);
 		if (workFetch != null) {
 			return new CollectDownloadException(workFetch.errorCode(), workFetch.retryable(),
-					workFetch.getMessage(), error);
+					workFetch.getMessage() + "; " + workFetch.diagnostics().summary(), error);
 		}
 		String root = rootCauseMessage(error);
 		String normalized = root.toLowerCase(Locale.ROOT);

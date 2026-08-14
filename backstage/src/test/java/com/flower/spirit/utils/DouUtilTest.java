@@ -41,4 +41,20 @@ class DouUtilTest {
 		assertThat(error.upstreamStatus()).isEqualTo(429);
 		assertThat(error.getMessage()).doesNotContain("sessionid", "secret");
 	}
+
+	@Test
+	void allowlistsStructuredTransportEvidenceWithoutRetainingQueryOrCookieValues() {
+		var error = DouUtil.parseF2WorkError(
+				"stream-vault-fetch-error={\"errorCode\":\"F2_UPSTREAM_SOFT_BLOCK\","
+						+ "\"message\":\"empty response\",\"diagnostics\":{\"requestIdentity\":{"
+						+ "\"method\":\"GET\",\"origin\":\"https://www.douyin.com\","
+						+ "\"path\":\"/aweme/v1/web/aweme/detail/\",\"queryKeyNames\":[\"aweme_id\",\"X-Bogus\"],"
+						+ "\"signedQueryPresent\":true},\"requestAttempts\":[{\"attempt\":1,\"statusCode\":200,"
+						+ "\"bodyEmpty\":true,\"bodyLength\":0,\"contentType\":\"application/json\","
+						+ "\"errorKind\":\"EMPTY_RESPONSE\",\"exceptionType\":\"APIRetryExhaustedError\","
+						+ "\"durationMs\":12,\"cookie\":\"sessionid=secret\"}]}}");
+
+		assertThat(error.diagnostics().summary()).contains("/aweme/v1/web/aweme/detail/", "EMPTY_RESPONSE",
+				"aweme_id", "X-Bogus").doesNotContain("secret", "sessionid=");
+	}
 }

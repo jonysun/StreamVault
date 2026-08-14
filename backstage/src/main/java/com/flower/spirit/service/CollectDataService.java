@@ -1629,7 +1629,9 @@ public class CollectDataService {
 			platformCookieService.reportSuccess(platform, cookie);
 			return;
 		}
-		if (platformCookieService.isRiskSignal(f2cmd)) {
+		if (f2cmd != null && f2cmd.contains("F2_UPSTREAM_SOFT_BLOCK")) {
+			platformCookieService.reportSoftBlock(platform, "F2_UPSTREAM_SOFT_BLOCK");
+		} else if (platformCookieService.isRiskSignal(f2cmd)) {
 			platformCookieService.reportRisk(platform, cookie, previewOutput(f2cmd));
 		}
 	}
@@ -2293,7 +2295,9 @@ public class CollectDataService {
 				envelope = douyinIncrementalFetchService.fetch(request);
 				platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
 			} catch (CollectFetchException error) {
-				if (isDouyinRiskError(error.getErrorCode())) {
+				if ("F2_UPSTREAM_SOFT_BLOCK".equals(error.getErrorCode())) {
+					platformCookieService.reportSoftBlock(Global.platform.douyin.name(), error.getErrorCode());
+				} else if (isDouyinRiskError(error.getErrorCode())) {
 					platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, error.getErrorCode());
 				}
 				throw error;

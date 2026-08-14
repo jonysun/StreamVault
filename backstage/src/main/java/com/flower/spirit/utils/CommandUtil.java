@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.platform.DouyinWorkFetchException;
 import com.flower.spirit.process.ControlledProcessExecutor;
 import com.flower.spirit.service.DouyinFetchRequest;
 
@@ -259,6 +260,17 @@ public class CommandUtil {
                 logger.warn("[F2] process returned empty output");
             } else if (suppressOutputPreview) {
                 logger.info("[F2] output preview suppressed for signed media metadata");
+                if (exitCode != 0) {
+                    DouyinWorkFetchException failure = DouUtil.parseF2WorkError(output);
+                    if (failure != null) {
+                        logger.error("[F2] single-work command failed exitCode={} code={} domain={} status={} message={} {}",
+                                exitCode, failure.errorCode(), failure.faultDomain(), failure.upstreamStatus(),
+                                failure.getMessage(), failure.diagnostics().summary());
+                    } else {
+                        logger.error("[F2] single-work command failed exitCode={} structuredFailure=false outputLength={}",
+                                exitCode, output.length());
+                    }
+                }
             } else {
                 String preview = previewOutput(output);
                 logger.info("[F2] output preview={}", preview);
