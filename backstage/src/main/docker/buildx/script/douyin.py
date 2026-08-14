@@ -9,6 +9,8 @@ import math
 import os
 import re
 import tempfile
+import time
+from urllib.parse import parse_qsl, urlsplit
 
 # f2 creates and prunes ./logs while it is imported. Every Java worker launches
 # a separate Python process, so a shared working directory lets two imports race
@@ -65,6 +67,8 @@ _VERIFICATION_FAILURE_VALUES = {
 _VERIFICATION_RESULT_FIELDS = (
     "status", "result", "state", "verify_status", "verify_result", "required",
 )
+_F2_REQUEST_ATTEMPT_LIMIT = 2
+_F2_WORK_DETAIL_PATH = "/aweme/v1/web/aweme/detail/"
 
 
 class FetchCommandError(RuntimeError):
@@ -116,7 +120,25 @@ class UpstreamRequestEvidenceError(RuntimeError):
         self.request_evidence = request_evidence or {}
 
 
-def _request_evidence(response=None, *, attempt=0, error_kind="", error=None):
+def _safe_request_identity(endpoint):
+    parsed = urlsplit(str(endpoint or ""))
+    query_keys = sorted({key for key, _value in parse_qsl(parsed.query, keep_blank_values=True)})
+    hostname = parsed.hostname or ""
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    origin = parsed.scheme + "://" + hostname + ((":" + str(port)) if port else "")
+    return {
+        "method": "GET",
+        "origin": origin[:120],
+        "path": (parsed.path or _F2_WORK_DETAIL_PATH)[:180],
+        "queryKeyNames": query_keys[:24],
+        "signedQueryPresent": any(key.lower() in ("x-bogus", "a_bogus") for key in query_keys),
+    }
+
+
+def _request_evidence(response=None, *, attempt=0, error_kind="", error=None, duration_ms=0):
     content = b""
     if response is not None:
         try:
@@ -134,6 +156,7 @@ def _request_evidence(response=None, *, attempt=0, error_kind="", error=None):
         "contentType": _bounded_status_text(headers.get("content-type", "")),
         "errorKind": error_kind or None,
         "exceptionType": type(error).__name__ if error is not None else None,
+        "durationMs": max(0, int(duration_ms)),
     }
 
 
@@ -145,6 +168,14 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
     def __init__(self, kwargs):
         super().__init__(kwargs)
         self.last_request_evidence = None
+        self.request_attempts = []
+        self.request_identity = None
+
+    def _record_request_evidence(self, evidence, endpoint):
+        self.request_identity = _safe_request_identity(endpoint)
+        self.last_request_evidence = evidence
+        previous_attempts = list(getattr(self, "request_attempts", []) or [])
+        self.request_attempts = (previous_attempts + [dict(evidence)])[-_F2_REQUEST_ATTEMPT_LIMIT:]
 
     async def _fetch_get_json(self, endpoint):
         # F2 drops the status code when an empty response exhausts retries. Keep
@@ -152,10 +183,13 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
         import httpx
 
         for attempt in range(self._max_retries):
+            started_at = time.monotonic()
             try:
                 response = await self.aclient.get(endpoint, follow_redirects=True)
-                evidence = _request_evidence(response, attempt=attempt)
-                self.last_request_evidence = evidence
+                evidence = _request_evidence(
+                    response, attempt=attempt, duration_ms=(time.monotonic() - started_at) * 1000
+                )
+                self._record_request_evidence(evidence, endpoint)
                 content = response.content or b""
                 if not content.strip():
                     evidence["errorKind"] = "EMPTY_RESPONSE"
@@ -193,33 +227,37 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
                 raise
             except httpx.TimeoutException as error:
                 evidence = _request_evidence(
-                    attempt=attempt, error_kind="TIMEOUT", error=error
+                    attempt=attempt, error_kind="TIMEOUT", error=error,
+                    duration_ms=(time.monotonic() - started_at) * 1000
                 )
-                self.last_request_evidence = evidence
+                self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
                     "Douyin endpoint request timed out", evidence
                 ) from error
             except httpx.ProxyError as error:
                 evidence = _request_evidence(
-                    attempt=attempt, error_kind="NETWORK_ERROR", error=error
+                    attempt=attempt, error_kind="NETWORK_ERROR", error=error,
+                    duration_ms=(time.monotonic() - started_at) * 1000
                 )
-                self.last_request_evidence = evidence
+                self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
                     "Douyin endpoint proxy connection failed", evidence
                 ) from error
             except httpx.NetworkError as error:
                 evidence = _request_evidence(
-                    attempt=attempt, error_kind="NETWORK_ERROR", error=error
+                    attempt=attempt, error_kind="NETWORK_ERROR", error=error,
+                    duration_ms=(time.monotonic() - started_at) * 1000
                 )
-                self.last_request_evidence = evidence
+                self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
                     "Douyin endpoint network connection failed", evidence
                 ) from error
             except httpx.RequestError as error:
                 evidence = _request_evidence(
-                    attempt=attempt, error_kind="NETWORK_ERROR", error=error
+                    attempt=attempt, error_kind="NETWORK_ERROR", error=error,
+                    duration_ms=(time.monotonic() - started_at) * 1000
                 )
-                self.last_request_evidence = evidence
+                self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
                     "Douyin endpoint request failed", evidence
                 ) from error
@@ -286,7 +324,7 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
     if error_kind == "EMPTY_RESPONSE":
         return UpstreamFetchError(
             "F2_UPSTREAM_SOFT_BLOCK",
-            "Douyin author-work endpoint repeatedly returned an empty HTTP response",
+            "Douyin single-work detail endpoint repeatedly returned an empty HTTP response",
             diagnostics,
             exception_type,
         )
@@ -351,6 +389,24 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
         diagnostics,
         exception_type,
     )
+
+
+def _work_request_diagnostics(crawler):
+    diagnostics = {
+        "requestIdentity": getattr(crawler, "request_identity", None)
+        or {
+            "method": "GET",
+            "origin": "https://www.douyin.com",
+            "path": _F2_WORK_DETAIL_PATH,
+            "queryKeyNames": [],
+            "signedQueryPresent": True,
+        },
+        "requestAttempts": list(getattr(crawler, "request_attempts", []) or [])[-_F2_REQUEST_ATTEMPT_LIMIT:],
+    }
+    if getattr(crawler, "last_request_evidence", None):
+        diagnostics["lastRequest"] = crawler.last_request_evidence
+        diagnostics["upstreamStatus"] = crawler.last_request_evidence.get("statusCode")
+    return diagnostics
 
 
 def _work_unavailable_evidence(value):
@@ -988,16 +1044,12 @@ async def fetch_work_data(cookie: str, aweme_id: str):
         try:
             response = await crawler.fetch_post_detail(PostDetail(aweme_id=aweme_id))
         except Exception as error:
-            if crawler.last_request_evidence:
-                diagnostics["lastRequest"] = crawler.last_request_evidence
-                diagnostics["upstreamStatus"] = crawler.last_request_evidence.get("statusCode")
+            diagnostics.update(_work_request_diagnostics(crawler))
             if _exception_requires_verification(error, cookie):
                 raise CookieOrVerifyRequired(diagnostics) from None
             raise _request_error(error, "Douyin work metadata request failed", diagnostics, work=True) from None
 
-        if crawler.last_request_evidence:
-            diagnostics["lastRequest"] = crawler.last_request_evidence
-            diagnostics["upstreamStatus"] = crawler.last_request_evidence.get("statusCode")
+        diagnostics.update(_work_request_diagnostics(crawler))
         if _response_requires_verification(response, cookie):
             raise CookieOrVerifyRequired(diagnostics)
         if not isinstance(response, dict):

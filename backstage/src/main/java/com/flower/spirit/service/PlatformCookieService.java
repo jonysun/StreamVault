@@ -27,6 +27,7 @@ public class PlatformCookieService {
 	public static final String STRATEGY_ROUND_ROBIN = "round_robin";
 	public static final String STRATEGY_RISK_SHIFT = "risk_shift";
 	private static final long COOKIE_RISK_COOLDOWN_MS = 10 * 60 * 1000L;
+	private static final long DOUYIN_SOFT_BLOCK_COOLDOWN_MS = 5 * 60 * 1000L;
 	private static final String DOUYIN_PLATFORM_KEY = "douyin";
 	private static final Logger logger = LoggerFactory.getLogger(PlatformCookieService.class);
 
@@ -34,6 +35,7 @@ public class PlatformCookieService {
 	private final Map<String, Long> riskUntil = new ConcurrentHashMap<>();
 	private final Map<String, Long> successAt = new ConcurrentHashMap<>();
 	private final AtomicLong douyinGlobalRiskStartedAtMs = new AtomicLong(0);
+	private final AtomicLong douyinGlobalSoftBlockStartedAtMs = new AtomicLong(0);
 
 	@Autowired(required = false)
 	private TikTokConfigService tikTokConfigService;
@@ -117,6 +119,15 @@ public class PlatformCookieService {
 		if (isBlank(platform) || isBlank(cookie)) return;
 		successAt.put(riskKey(canonicalPlatform(platform), cookie), System.currentTimeMillis());
 		// Recording evidence must not cancel a newer risk cooldown.
+	}
+
+	/** Records a confirmed repeated empty F2 response without treating it as an authentication failure. */
+	public void reportSoftBlock(String platform, String reason) {
+		if (!DOUYIN_PLATFORM_KEY.equals(canonicalPlatform(platform))) return;
+		long now = System.currentTimeMillis();
+		douyinGlobalSoftBlockStartedAtMs.accumulateAndGet(now, Math::max);
+		logger.warn("platform global soft backoff platform={} reason={} cooldownMs={}", DOUYIN_PLATFORM_KEY,
+				reason, DOUYIN_SOFT_BLOCK_COOLDOWN_MS);
 	}
 
 	public boolean hasRecentSuccess(String platform, String cookie, Duration maxAge) {
@@ -227,8 +238,11 @@ public class PlatformCookieService {
 	}
 
 	private long douyinGlobalCooldownUntilEpochMillis() {
-		long startedAt = douyinGlobalRiskStartedAtMs.get();
-		return startedAt <= 0 ? 0 : startedAt + douyinRiskCooldownMillis();
+		long strongStartedAt = douyinGlobalRiskStartedAtMs.get();
+		long softStartedAt = douyinGlobalSoftBlockStartedAtMs.get();
+		long strongDeadline = strongStartedAt <= 0 ? 0 : strongStartedAt + douyinRiskCooldownMillis();
+		long softDeadline = softStartedAt <= 0 ? 0 : softStartedAt + DOUYIN_SOFT_BLOCK_COOLDOWN_MS;
+		return Math.max(strongDeadline, softDeadline);
 	}
 
 	private long douyinRiskCooldownMillis() {

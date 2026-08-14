@@ -96,10 +96,15 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			try {
 				raw = gateway.fetch(inputWorkId, cookie);
 			} catch (DouyinWorkFetchException e) {
+				if ("F2_UPSTREAM_SOFT_BLOCK".equals(e.errorCode())) {
+					cookieService.reportSoftBlock("douyin", e.errorCode());
+					throw new DouyinGlobalCooldownException(e.getMessage(),
+							cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)), true, e);
+				}
 				if (e.cooldownApplied()) {
 					cookieService.reportRisk("\u6296\u97f3", cookie, e.errorCode());
 					throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "parsing"),
-							cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+							cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)), true, e);
 				}
 				throw new WorkMetadataValidationException("Douyin parsing failed: " + e.errorCode(), e);
 			}

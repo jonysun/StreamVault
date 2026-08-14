@@ -1584,6 +1584,8 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             "EMPTY_RESPONSE", raised.exception.request_evidence["errorKind"]
         )
+        self.assertEqual(2, len(crawler.request_attempts))
+        self.assertEqual("https://example.test", crawler.request_identity["origin"])
 
     def test_request_evidence_classifies_transport_timeout(self):
         module, _ = self._load_command_module({}, [])
