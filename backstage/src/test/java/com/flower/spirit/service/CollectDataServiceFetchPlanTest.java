@@ -92,6 +92,9 @@ class CollectDataServiceFetchPlanTest {
 		assertThat(items.getValue()).extracting(CollectRunFetchedItem::workId,
 				CollectRunFetchedItem::processState, CollectRunFetchedItem::decision)
 				.containsExactly(tuple("new-1", "QUEUED", "NEW"));
+		assertThat(items.getValue().get(0).metadataSnapshot())
+				.contains("\"aweme_id\":\"new-1\"")
+				.doesNotContain("cookie", "msToken");
 		assertThat(watermark.getValue().publishTime()).isEqualTo("200");
 		assertThat(watermark.getValue().workId()).isEqualTo("new-1");
 		assertThat(progress.getValue()).isEqualTo(
@@ -472,6 +475,11 @@ class CollectDataServiceFetchPlanTest {
 		item.put("nickname", "author");
 		item.put("uid", "MS4-author");
 		item.put("media_type", mediaType);
+		JSONObject detail = new JSONObject();
+		detail.put("aweme_id", id);
+		JSONObject snapshot = new JSONObject();
+		snapshot.put("aweme_detail", detail);
+		item.put("download_snapshot", snapshot);
 		return item;
 	}
 }

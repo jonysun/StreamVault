@@ -34,7 +34,7 @@ public class CollectDownloadTransaction {
 		Timestamp timestamp = Timestamp.from(now);
 		List<DownloadCandidate> candidates = jdbcTemplate.query(
 				"SELECT i.id, i.run_id, r.collect_task_id, t.taskname, i.platform_key, i.work_id, "
-						+ "i.media_type, i.decision, i.ordinal, i.attempt_count, i.max_attempts "
+						+ "i.media_type, i.decision, i.ordinal, i.attempt_count, i.max_attempts, i.metadata_snapshot "
 						+ "FROM biz_collect_run_item i "
 						+ "JOIN biz_collect_run r ON r.id = i.run_id "
 						+ "JOIN biz_collect_data t ON t.id = r.collect_task_id "
@@ -48,7 +48,7 @@ public class CollectDownloadTransaction {
 						rs.getInt("collect_task_id"), rs.getString("taskname"), rs.getString("platform_key"),
 						rs.getString("work_id"), rs.getString("media_type"), rs.getString("decision"),
 						rs.getInt("ordinal"),
-						rs.getInt("attempt_count"), rs.getInt("max_attempts")),
+						rs.getInt("attempt_count"), rs.getInt("max_attempts"), rs.getString("metadata_snapshot")),
 				QUEUE_GENERATION, timestamp);
 		if (candidates.isEmpty()) {
 			return null;
@@ -64,7 +64,8 @@ public class CollectDownloadTransaction {
 		if (updated != 1) return null;
 		return new CollectDownloadClaim(candidate.id(), candidate.runId(), candidate.taskId(), candidate.taskName(),
 				candidate.platformKey(), candidate.workId(), candidate.mediaType(), candidate.decision(),
-				candidate.ordinal(), candidate.attemptCount() + 1, candidate.maxAttempts(), lockToken);
+				candidate.ordinal(), candidate.attemptCount() + 1, candidate.maxAttempts(), lockToken,
+				candidate.metadataSnapshot());
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -110,7 +111,7 @@ public class CollectDownloadTransaction {
 		Timestamp timestamp = Timestamp.from(now);
 		int updated = jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'SKIPPED_BLOCKED', "
 				+ "available_at = NULL, locked_by = NULL, locked_at = NULL, finished_at = ?, "
-				+ "error_code = 'WORK_BLOCKED', error_message = ?, error_detail = NULL, updated_at = ? "
+				+ "error_code = 'WORK_BLOCKED', error_message = ?, error_detail = NULL, metadata_snapshot = NULL, updated_at = ? "
 				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'RUNNING' AND locked_by = ?",
 				timestamp, truncate(reason, 2048), timestamp, claim.id(), QUEUE_GENERATION, claim.lockToken());
 		requireTransition(updated, claim.id(), "SKIPPED_BLOCKED");
@@ -171,7 +172,7 @@ public class CollectDownloadTransaction {
 		}
 		int updated = jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = ?, "
 				+ "available_at = NULL, locked_by = NULL, locked_at = NULL, finished_at = ?, "
-				+ "error_code = NULL, error_message = NULL, error_detail = NULL, updated_at = ? "
+				+ "error_code = NULL, error_message = NULL, error_detail = NULL, metadata_snapshot = NULL, updated_at = ? "
 				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'RUNNING' AND locked_by = ?",
 				processState, timestamp, timestamp, claim.id(), QUEUE_GENERATION, claim.lockToken());
 		requireTransition(updated, claim.id(), processState);
@@ -253,6 +254,7 @@ public class CollectDownloadTransaction {
 	}
 
 	private record DownloadCandidate(long id, long runId, int taskId, String taskName, String platformKey,
-			String workId, String mediaType, String decision, int ordinal, int attemptCount, int maxAttempts) {
+			String workId, String mediaType, String decision, int ordinal, int attemptCount, int maxAttempts,
+			String metadataSnapshot) {
 	}
 }

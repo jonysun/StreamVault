@@ -117,6 +117,7 @@ public class CollectPipelineSchemaInitializer {
 				"fetch_stop_reason VARCHAR(64)",
 				"fetch_warning VARCHAR(255)"));
 		definitions.put("biz_collect_run_item", List.of(
+				"metadata_snapshot TEXT",
 				"attempt_count INTEGER NOT NULL DEFAULT 0",
 				"max_attempts INTEGER NOT NULL DEFAULT 4",
 				"available_at TIMESTAMP",

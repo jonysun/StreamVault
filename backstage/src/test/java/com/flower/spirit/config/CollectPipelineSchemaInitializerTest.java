@@ -55,6 +55,7 @@ class CollectPipelineSchemaInitializerTest {
 				"fetch_stop_reason", "VARCHAR(64)",
 				"fetch_warning", "VARCHAR(255)"));
 		assertColumns(jdbcTemplate, "biz_collect_run_item", Map.of(
+				"metadata_snapshot", "TEXT",
 				"attempt_count", "INTEGER",
 				"max_attempts", "INTEGER",
 				"available_at", "TIMESTAMP",

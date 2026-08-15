@@ -274,6 +274,88 @@ def normalize_aweme(aweme):
     }
 
 
+def _snapshot_text(value):
+    return value if isinstance(value, str) else None
+
+
+def _snapshot_scalar(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return str(value)
+    return None
+
+
+def _snapshot_url_container(value):
+    if not isinstance(value, dict):
+        return None
+    urls = value.get("url_list")
+    if not isinstance(urls, list):
+        return None
+    safe_urls = [url for url in urls if isinstance(url, str) and url]
+    return {"url_list": safe_urls} if safe_urls else None
+
+
+def build_download_snapshot(aweme):
+    """Return a compact, allowlisted aweme-detail snapshot for later download."""
+    if not isinstance(aweme, dict):
+        return None
+
+    detail = {}
+    for key in ("aweme_id", "create_time"):
+        value = _snapshot_scalar(aweme.get(key))
+        if value is not None:
+            detail[key] = value
+    desc = _snapshot_text(aweme.get("desc"))
+    if desc is not None:
+        detail["desc"] = desc
+
+    raw_author = aweme.get("author")
+    if isinstance(raw_author, dict):
+        author = {}
+        for key in ("sec_uid", "uid", "unique_id", "nickname", "signature"):
+            value = _snapshot_text(raw_author.get(key))
+            if value is not None:
+                author[key] = value
+        avatar = _snapshot_url_container(raw_author.get("avatar_thumb"))
+        if avatar is not None:
+            author["avatar_thumb"] = avatar
+        if author:
+            detail["author"] = author
+
+    raw_video = aweme.get("video")
+    if isinstance(raw_video, dict):
+        video = {}
+        for key in ("play_addr", "cover", "origin_cover"):
+            value = _snapshot_url_container(raw_video.get(key))
+            if value is not None:
+                video[key] = value
+        if video:
+            detail["video"] = video
+
+    raw_images = aweme.get("images")
+    if isinstance(raw_images, list):
+        images = []
+        for raw_image in raw_images:
+            if not isinstance(raw_image, dict):
+                continue
+            image = _snapshot_url_container(raw_image)
+            raw_item_video = raw_image.get("video")
+            item_video = None
+            if isinstance(raw_item_video, dict):
+                play_addr = _snapshot_url_container(raw_item_video.get("play_addr"))
+                if play_addr is not None:
+                    item_video = {"play_addr": play_addr}
+            if item_video is not None:
+                images.append({"video": item_video})
+            elif image is not None:
+                images.append(image)
+        if images:
+            detail["images"] = images
+
+    return {"aweme_detail": detail} if detail.get("aweme_id") else None
+
+
 def envelope(
     items,
     new_work_ids,
@@ -450,6 +532,9 @@ async def paginate(
         empty_pages = 0
         for raw_work in aweme_list:
             item = normalize_aweme(raw_work)
+            snapshot = build_download_snapshot(raw_work)
+            if snapshot is not None:
+                item["download_snapshot"] = snapshot
             work_id = item["aweme_id"]
             known = bool(work_id) and (
                 work_id in known_ids or work_id in seen_work_ids

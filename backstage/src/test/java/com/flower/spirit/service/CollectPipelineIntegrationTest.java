@@ -221,7 +221,8 @@ class CollectPipelineIntegrationTest {
 		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, "
 				+ "ordinal INTEGER NOT NULL, platform_key TEXT NOT NULL, work_id TEXT NOT NULL, author_uid TEXT, "
 				+ "nickname_snapshot TEXT, title_snapshot TEXT, publish_time TEXT, media_type TEXT, decision TEXT NOT NULL, "
-				+ "process_state TEXT NOT NULL, error_code TEXT, error_message TEXT, attempt_count INTEGER NOT NULL DEFAULT 0, "
+				+ "process_state TEXT NOT NULL, metadata_snapshot TEXT, error_code TEXT, error_message TEXT, "
+				+ "attempt_count INTEGER NOT NULL DEFAULT 0, "
 				+ "max_attempts INTEGER NOT NULL DEFAULT 4, available_at DATETIME, locked_by TEXT, locked_at DATETIME, "
 				+ "started_at DATETIME, finished_at DATETIME, error_detail TEXT, queue_generation TEXT, "
 				+ "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");

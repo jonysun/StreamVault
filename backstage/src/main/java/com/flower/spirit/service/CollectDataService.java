@@ -2432,9 +2432,14 @@ public class CollectDataService {
 					firstNotBlank(item.getString("uid"),
 							firstNotBlank(item.getString("sec_uid"), item.getString("author_uid"))),
 					item.getString("nickname"), item.getString("desc"), item.getString("create_time"), mediaType,
-					decision, processState));
+					decision, processState, "QUEUED".equals(processState) ? downloadSnapshot(item) : null));
 		}
 		return List.copyOf(result);
+	}
+
+	private String downloadSnapshot(JSONObject item) {
+		JSONObject snapshot = item.getJSONObject("download_snapshot");
+		return snapshot == null || snapshot.isEmpty() ? null : snapshot.toJSONString();
 	}
 
 	private CollectRunFetchedItem.FetchWatermark newestWatermark(DouyinFetchEnvelope envelope) {
