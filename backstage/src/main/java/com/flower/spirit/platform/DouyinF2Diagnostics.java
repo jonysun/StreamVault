@@ -53,8 +53,13 @@ public final class DouyinF2Diagnostics {
 	public String summary() {
 		if (attempts.isEmpty()) return "f2Evidence=unavailable";
 		Attempt last = attempts.get(attempts.size() - 1);
+		String attemptSummary = attempts.stream().map(attempt -> "attempt=" + attempt.attempt
+				+ ":status=" + value(attempt.statusCode, "none") + ",empty=" + attempt.bodyEmpty
+				+ ",error=" + value(attempt.errorKind, "none"))
+				.collect(java.util.stream.Collectors.joining(";"));
 		return "f2 endpoint=" + value(method, "GET") + " " + value(origin, "unknown") + value(path, "")
 				+ " queryKeys=" + queryKeyNames + " signedQuery=" + signedQueryPresent + " attempts=" + attempts.size()
+				+ " history=[" + attemptSummary + "]"
 				+ " last={attempt=" + last.attempt + ",status=" + value(last.statusCode, "none")
 				+ ",empty=" + last.bodyEmpty + ",bodyLength=" + last.bodyLength
 				+ ",contentType=" + value(last.contentType, "none") + ",errorKind="

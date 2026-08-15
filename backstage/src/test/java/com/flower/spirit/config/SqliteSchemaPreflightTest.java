@@ -165,7 +165,8 @@ class SqliteSchemaPreflightTest {
 		jdbcTemplate.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, "
 				+ "fetch_stop_reason TEXT, fetch_warning TEXT)");
 		jdbcTemplate.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER, "
-				+ "platform_key TEXT, work_id TEXT, attempt_count INTEGER, max_attempts INTEGER, available_at TIMESTAMP, "
+				+ "platform_key TEXT, work_id TEXT, metadata_snapshot TEXT, attempt_count INTEGER, "
+				+ "max_attempts INTEGER, available_at TIMESTAMP, "
 				+ "locked_by TEXT, locked_at TIMESTAMP, started_at TIMESTAMP, finished_at TIMESTAMP, "
 				+ "error_detail TEXT, queue_generation TEXT)");
 		jdbcTemplate.execute("CREATE UNIQUE INDEX uq_collect_run_item_work "

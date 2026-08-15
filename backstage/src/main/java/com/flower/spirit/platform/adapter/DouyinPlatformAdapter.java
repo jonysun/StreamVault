@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -33,6 +35,7 @@ import com.flower.spirit.utils.DouyinSourceUrlUtil;
 
 @Component
 public class DouyinPlatformAdapter implements PlatformWorkAdapter {
+	private static final Logger logger = LoggerFactory.getLogger(DouyinPlatformAdapter.class);
 
 	private final PlatformResolver resolver;
 	private final PlatformCookieService cookieService;
@@ -81,6 +84,16 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 
 	@Override
 	public WorkMetadata parse(WorkParseRequest request) {
+		String requestWorkId = DouUtil.extractWorkId(request.getUrl());
+		if (request.getRawMetadata() != null && !request.getRawMetadata().isBlank()
+				&& requestWorkId != null && !requestWorkId.isBlank()) {
+			try {
+				return parseSnapshot(request.getRawMetadata(), requestWorkId, request.getInput(), request.getUrl());
+			} catch (RuntimeException error) {
+				logger.warn("[DouyinSnapshot] rejected list snapshot workId={} reason={}; falling back to detail request",
+						requestWorkId, error.getMessage());
+			}
+		}
 		String cookie = requireCookie("single_work_parse");
 		try (DouyinF2RequestCoordinator.Permit ignored = requestCoordinator.acquire()) {
 			if (cookieService.isDouyinGlobalCooldownActive()) {
@@ -126,6 +139,25 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			}
 			throw e;
 		}
+	}
+
+	private WorkMetadata parseSnapshot(String raw, String expectedWorkId, String originalInput, String resolvedUrl) {
+		JSONObject root = parseObject(raw);
+		JSONObject detail = DouUtil.findAwemeDetail(root);
+		String snapshotWorkId = detail == null ? null : detail.getString("aweme_id");
+		if (snapshotWorkId == null || snapshotWorkId.isBlank()) {
+			throw new WorkMetadataValidationException("Douyin list snapshot has no work ID");
+		}
+		if (!expectedWorkId.equals(snapshotWorkId.trim())) {
+			throw new WorkMetadataValidationException("Douyin list snapshot work ID does not match request");
+		}
+		WorkMetadata metadata = parseRaw(raw, expectedWorkId, originalInput, resolvedUrl);
+		if (!expectedWorkId.equals(metadata.getWorkId())) {
+			throw new WorkMetadataValidationException("Douyin list snapshot parsed a different work ID");
+		}
+		logger.info("[DouyinSnapshot] accepted list snapshot workId={} contentType={} resources={}", expectedWorkId,
+				metadata.getContentType(), metadata.getMediaResources().size());
+		return metadata;
 	}
 
 	@Override

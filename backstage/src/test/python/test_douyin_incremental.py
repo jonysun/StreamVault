@@ -18,7 +18,12 @@ SCRIPT_DIR = (
 )
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from douyin_incremental import UpstreamSchemaError, normalize_aweme, paginate
+from douyin_incremental import (
+    UpstreamSchemaError,
+    build_download_snapshot,
+    normalize_aweme,
+    paginate,
+)
 
 
 def work(
@@ -168,6 +173,107 @@ class NormalizeAwemeTest(unittest.TestCase):
                     UpstreamSchemaError, message.replace(".", r"\.")
                 ):
                     normalize_aweme(raw_work)
+
+
+class DownloadSnapshotTest(unittest.TestCase):
+    def test_builds_allowlisted_video_snapshot(self):
+        raw = work("video-1", 1720000000, desc="caption")
+        raw["author"].update(
+            {
+                "uid": "uid-1",
+                "unique_id": "username",
+                "signature": "bio",
+                "cookie": "must-not-leak",
+            }
+        )
+        raw["video"].update(
+            {
+                "play_addr": {"url_list": ["https://media.test/video.mp4"]},
+                "origin_cover": {"url_list": ["https://media.test/origin.jpg"]},
+                "bit_rate": [{"secret": "must-not-leak"}],
+            }
+        )
+        raw["msToken"] = "must-not-leak"
+
+        snapshot = build_download_snapshot(raw)
+
+        self.assertEqual("video-1", snapshot["aweme_detail"]["aweme_id"])
+        self.assertEqual(
+            ["https://media.test/video.mp4"],
+            snapshot["aweme_detail"]["video"]["play_addr"]["url_list"],
+        )
+        serialized = json.dumps(snapshot)
+        self.assertNotIn("must-not-leak", serialized)
+        self.assertNotIn("msToken", serialized)
+        self.assertNotIn("bit_rate", serialized)
+        self.assertNotIn("cookie", serialized)
+
+    def test_builds_graphic_and_mixed_item_snapshot(self):
+        raw = work(
+            "mixed-1",
+            1720000001,
+            images=[
+                {"url_list": ["https://media.test/image.jpg"]},
+                {
+                    "url_list": ["https://media.test/live-photo-cover.jpg"],
+                    "video": {
+                        "play_addr": {
+                            "url_list": ["https://media.test/live-photo.mp4"]
+                        }
+                    }
+                },
+            ],
+        )
+
+        images = build_download_snapshot(raw)["aweme_detail"]["images"]
+
+        self.assertEqual(
+            {"url_list": ["https://media.test/image.jpg"]}, images[0]
+        )
+        self.assertEqual(
+            ["https://media.test/live-photo.mp4"],
+            images[1]["video"]["play_addr"]["url_list"],
+        )
+
+    def test_ignores_malformed_optional_media_fields_for_later_fallback(self):
+        raw = work("fallback-1", 1720000002)
+        raw["video"] = {"play_addr": "invalid", "cover": {"url_list": [123]}}
+        raw["images"] = ["invalid", {"url_list": None}]
+
+        snapshot = build_download_snapshot(raw)
+
+        self.assertEqual("fallback-1", snapshot["aweme_detail"]["aweme_id"])
+        self.assertNotIn("video", snapshot["aweme_detail"])
+        self.assertNotIn("images", snapshot["aweme_detail"])
+
+    def test_paginator_attaches_snapshot_without_changing_normalized_shape(self):
+        raw = work("snapshot-1", 1720000003)
+        raw["video"]["play_addr"] = {
+            "url_list": ["https://media.test/snapshot.mp4"]
+        }
+        fetch_page = fake_fetch([page([raw], has_more=0, cursor=0)])
+
+        result = self._run_paginate(fetch_page)
+
+        self.assertEqual(
+            "snapshot-1",
+            result["items"][0]["download_snapshot"]["aweme_detail"]["aweme_id"],
+        )
+
+    def _run_paginate(self, fetch_page):
+        import asyncio
+
+        return asyncio.run(
+            paginate(
+                fetch_page,
+                known_ids=set(),
+                watermark=None,
+                known_boundary=20,
+                max_pages=2,
+                empty_page_limit=2,
+                mode="initial",
+            )
+        )
 
     def test_rejects_non_mapping_work(self):
         with self.assertRaisesRegex(UpstreamSchemaError, "work must be an object"):
@@ -1585,7 +1691,38 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             "EMPTY_RESPONSE", raised.exception.request_evidence["errorKind"]
         )
         self.assertEqual(2, len(crawler.request_attempts))
+        self.assertEqual("EMPTY_RESPONSE", crawler.request_attempts[-1]["errorKind"])
         self.assertEqual("https://example.test", crawler.request_identity["origin"])
+
+    async def test_invalid_json_records_one_classified_attempt(self):
+        module, _ = self._load_command_module({}, [])
+
+        class InvalidJsonResponse:
+            content = b"not-json"
+            headers = {"content-type": "application/json"}
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                raise json.JSONDecodeError("invalid", "not-json", 0)
+
+        class InvalidJsonClient:
+            async def get(self, *_args, **_kwargs):
+                return InvalidJsonResponse()
+
+        crawler = object.__new__(module.InstrumentedDouyinCrawler)
+        crawler._max_retries = 5
+        crawler._timeout = 0
+        crawler.aclient = InvalidJsonClient()
+
+        with mock.patch.dict(sys.modules, {"httpx": types.ModuleType("httpx")}):
+            with self.assertRaises(module.UpstreamRequestEvidenceError):
+                await crawler._fetch_get_json("https://example.test/author-works")
+
+        self.assertEqual(1, len(crawler.request_attempts))
+        self.assertEqual("INVALID_JSON", crawler.request_attempts[0]["errorKind"])
 
     def test_request_evidence_classifies_transport_timeout(self):
         module, _ = self._load_command_module({}, [])

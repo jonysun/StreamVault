@@ -120,7 +120,7 @@ class CollectQueueTransactionTest {
 					now.plusSeconds(3));
 			transaction.storeFetchPlan(claim.runId(), 7, List.of(
 					new CollectRunFetchedItem(1, "douyin", "work-1", "MS4-author", "作者", "作品一",
-							"200", "video", "NEW", "QUEUED"),
+							"200", "video", "NEW", "QUEUED", "{\"aweme_detail\":{\"aweme_id\":\"work-1\"}}"),
 					new CollectRunFetchedItem(2, "douyin", "work-2", "MS4-author", "作者", "作品二",
 							"100", "image", "EXISTING", "SKIPPED_EXISTING")), 40, "NO_MORE",
 					new CollectRunFetchedItem.FetchWatermark("200", "work-1", 2, 0, "cursor-2"),
@@ -145,6 +145,8 @@ class CollectQueueTransactionTest {
 					String.class)).isEqualTo("QUEUED");
 			assertThat(jdbc.queryForObject("SELECT queue_generation FROM biz_collect_run_item WHERE work_id = 'work-1'",
 					String.class)).isEqualTo("FETCH_DOWNLOAD_V1");
+			assertThat(jdbc.queryForObject("SELECT metadata_snapshot FROM biz_collect_run_item WHERE work_id = 'work-1'",
+					String.class)).contains("\"aweme_id\":\"work-1\"");
 			assertThat(jdbc.queryForObject("SELECT queue_generation FROM biz_collect_run_item WHERE work_id = 'work-2'",
 					String.class)).isNull();
 			assertThat(jdbc.queryForObject("SELECT last_seen_work_id FROM biz_collect_data WHERE id = 7", String.class))
@@ -511,7 +513,8 @@ class CollectQueueTransactionTest {
 		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, "
 				+ "ordinal INTEGER NOT NULL, platform_key TEXT NOT NULL, work_id TEXT NOT NULL, author_uid TEXT, "
 				+ "nickname_snapshot TEXT, title_snapshot TEXT, publish_time TEXT, media_type TEXT, decision TEXT NOT NULL, "
-				+ "process_state TEXT NOT NULL, error_code TEXT, error_message TEXT, attempt_count INTEGER NOT NULL DEFAULT 0, "
+				+ "process_state TEXT NOT NULL, metadata_snapshot TEXT, error_code TEXT, error_message TEXT, "
+				+ "attempt_count INTEGER NOT NULL DEFAULT 0, "
 				+ "max_attempts INTEGER NOT NULL DEFAULT 4, available_at DATETIME, locked_by TEXT, locked_at DATETIME, "
 				+ "started_at DATETIME, finished_at DATETIME, error_detail TEXT, queue_generation TEXT, "
 				+ "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");

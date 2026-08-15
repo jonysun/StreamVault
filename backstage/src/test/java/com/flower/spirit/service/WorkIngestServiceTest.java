@@ -182,6 +182,23 @@ class WorkIngestServiceTest {
 	}
 
 	@Test
+	void rawMetadataBypassesOperationCookieScopeAndReachesAdapterParseRequest() {
+		stubAdapterPipeline();
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(45);
+		when(persistenceService.findExisting(any())).thenReturn(
+				Optional.of(PersistenceResult.video(false, video)));
+		String snapshot = "{\"aweme_detail\":{\"aweme_id\":\"work-1\"}}";
+
+		service.ingest("https://youtu.be/work-1", ignored -> Path.of("C:/unused"), false, 13, snapshot);
+
+		verify(adapter, never()).openOperationScope(anyString());
+		verify(adapter).parseAll(org.mockito.ArgumentMatchers.argThat(
+				request -> snapshot.equals(request.getRawMetadata())));
+		verify(mediaDownloadService, never()).download(any(), any(), any());
+	}
+
+	@Test
 	void replacementIngestDoesNotShortCircuitOnExistingPersistence() {
 		stubAdapterPipeline();
 		VideoDataEntity video = new VideoDataEntity();

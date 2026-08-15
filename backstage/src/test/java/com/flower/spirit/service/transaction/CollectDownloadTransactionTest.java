@@ -55,9 +55,13 @@ class CollectDownloadTransactionTest {
 			insertItem(jdbc, 3, 101, 1, "QUEUED", "FETCH_DOWNLOAD_V1", "NEW", 0, 4, NOW, "other");
 			insertItem(jdbc, 4, 102, 8, "QUEUED", "FETCH_DOWNLOAD_V1", "MANUAL_RETRY", 0, 4, NOW,
 					"manual");
+			jdbc.update("UPDATE biz_collect_run_item SET metadata_snapshot = ? WHERE id = 4",
+					"{\"aweme_detail\":{\"aweme_id\":\"manual\"}}");
 			CollectDownloadTransaction transaction = context.getBean(CollectDownloadTransaction.class);
 
-			assertThat(transaction.claimNext("worker-a", NOW).id()).isEqualTo(4L);
+			CollectDownloadClaim manual = transaction.claimNext("worker-a", NOW);
+			assertThat(manual.id()).isEqualTo(4L);
+			assertThat(manual.metadataSnapshot()).contains("\"aweme_id\":\"manual\"");
 			assertThat(transaction.claimNext("worker-a", NOW).id()).isEqualTo(3L);
 			assertThat(transaction.claimNext("worker-a", NOW).id()).isEqualTo(2L);
 			assertThat(transaction.claimNext("worker-a", NOW)).isNull();
@@ -223,6 +227,7 @@ class CollectDownloadTransactionTest {
 			createSchema(jdbc);
 			insertTaskAndRun(jdbc, 10, 100, "author");
 			insertItem(jdbc, 1, 100, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 1, 4, NOW, "work");
+			jdbc.update("UPDATE biz_collect_run_item SET metadata_snapshot = 'snapshot' WHERE id = 1");
 			CollectDownloadTransaction transaction = context.getBean(CollectDownloadTransaction.class);
 			CollectDownloadClaim first = new CollectDownloadClaim(1, 100, 10, "author", "douyin", "work",
 					"video", "NEW", 1, 1, 4, "worker");
@@ -230,6 +235,7 @@ class CollectDownloadTransactionTest {
 			transaction.complete(first, completedResult(true), NOW);
 
 			assertThat(row(jdbc, 1).get("process_state")).isEqualTo("COMPLETED");
+			assertThat(row(jdbc, 1).get("metadata_snapshot")).isNull();
 			assertThat(jdbc.queryForMap("SELECT * FROM biz_collect_data_detail WHERE dataid=10 AND videoid='work'"))
 					.containsEntry("status", "已完成").containsEntry("mediatype", "video")
 					.containsEntry("videoname", "title");
@@ -355,6 +361,7 @@ class CollectDownloadTransactionTest {
 		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, "
 				+ "ordinal INTEGER NOT NULL, platform_key TEXT NOT NULL, work_id TEXT NOT NULL, media_type TEXT, "
 				+ "decision TEXT NOT NULL, process_state TEXT NOT NULL, error_code TEXT, error_message TEXT, "
+				+ "metadata_snapshot TEXT, "
 				+ "attempt_count INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 4, "
 				+ "available_at TIMESTAMP, locked_by TEXT, locked_at TIMESTAMP, started_at TIMESTAMP, "
 				+ "finished_at TIMESTAMP, error_detail TEXT, queue_generation TEXT, created_at TIMESTAMP NOT NULL, "

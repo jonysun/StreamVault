@@ -50,7 +50,10 @@ public class CollectDownloadService {
 			validateClaim(claim);
 			String source = "https://www.douyin.com/video/" + claim.workId();
 			Function<WorkMetadata, Path> directory = metadata -> outputDirectory(claim, metadata);
-			result = workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null);
+			result = claim.metadataSnapshot() == null || claim.metadataSnapshot().isBlank()
+					? workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null)
+					: workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null,
+							claim.metadataSnapshot());
 			validateResult(claim, result);
 		} catch (DouyinGlobalCooldownException cooldown) {
 			if (cooldown.actualUpstreamFailure()) {

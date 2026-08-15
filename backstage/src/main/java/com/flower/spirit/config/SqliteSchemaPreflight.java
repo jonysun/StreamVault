@@ -125,7 +125,7 @@ public class SqliteSchemaPreflight {
 				"remote_account_reason", "remote_account_detected_at"));
 		columns.put("biz_collect_run", List.of("fetch_stop_reason", "fetch_warning"));
 		columns.put("biz_collect_run_item", List.of(
-				"attempt_count", "max_attempts", "available_at", "locked_by", "locked_at", "started_at",
+				"metadata_snapshot", "attempt_count", "max_attempts", "available_at", "locked_by", "locked_at", "started_at",
 				"finished_at", "error_detail", "queue_generation"));
 		return Collections.unmodifiableMap(columns);
 	}

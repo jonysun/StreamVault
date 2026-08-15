@@ -64,6 +64,39 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void parsesValidatedListSnapshotWithoutResolvingOrFetchingSingleWorkDetail() throws Exception {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		FakeGateway gateway = new FakeGateway("remote response must not be used",
+				"https://www.douyin.com/video/7300000000000000001");
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+
+		WorkMetadata metadata = adapter.parse(new WorkParseRequest("collection item",
+				"https://www.douyin.com/video/7300000000000000001", false, resource("video.json")));
+
+		assertThat(metadata.getWorkId()).isEqualTo("7300000000000000001");
+		assertThat(metadata.getMediaResources()).singleElement()
+				.extracting(WorkMediaResource::getSourceUrl)
+				.isEqualTo("https://media.example/douyin-video.mp4");
+		assertThat(gateway.fetchCalls).isZero();
+		assertThat(gateway.resolveCalls).isZero();
+		verify(cookies, never()).currentDouyinCookie(any());
+		verify(cookies, never()).reportSuccess(any(), any());
+	}
+
+	@Test
+	void mismatchedListSnapshotFallsBackToCurrentSingleWorkDetailFlow() throws Exception {
+		TestContext context = context(resource("graphic.json"),
+				"https://www.douyin.com/note/7300000000000000002");
+
+		WorkMetadata metadata = context.adapter.parse(new WorkParseRequest("collection item",
+				"https://www.douyin.com/note/7300000000000000002", false, resource("video.json")));
+
+		assertThat(metadata.getWorkId()).isEqualTo("7300000000000000002");
+		assertThat(context.gateway.fetchCalls).isEqualTo(1);
+		verify(context.cookieService).currentDouyinCookie("single_work_parse");
+	}
+
+	@Test
 	void parsesGraphicCarouselAndMixedInResourceOrder() throws Exception {
 		WorkMetadata graphic = parseFixture("graphic.json", "7300000000000000002", "/note/");
 		WorkMetadata carousel = parseFixture("carousel.json", "7300000000000000003", "/note/");
@@ -269,6 +302,7 @@ class DouyinPlatformAdapterTest {
 		private final String raw;
 		private final String resolvedUrl;
 		private int fetchCalls;
+		private int resolveCalls;
 		private int downloadCalls;
 		private String lastCookie;
 		private IOException fetchError;
@@ -279,7 +313,10 @@ class DouyinPlatformAdapterTest {
 			this.resolvedUrl = resolvedUrl;
 		}
 
-		@Override public String resolve(String url) { return resolvedUrl; }
+		@Override public String resolve(String url) {
+			resolveCalls++;
+			return resolvedUrl;
+		}
 		@Override public String fetch(String workId, String cookie) throws IOException {
 			fetchCalls++;
 			lastCookie = cookie;

@@ -155,9 +155,9 @@ class PostgresqlDeploymentContractTest {
 		String migration = Files.readString(migrationRoot.resolve(
 				"V006__expand_dynamic_media_fields.sql"), StandardCharsets.UTF_8);
 		String videoEntity = Files.readString(Path.of("src", "main", "java", "com", "flower", "spirit",
-				"entity", "VideoDataEntity.java"), StandardCharsets.UTF_8);
+				"entity", "VideoDataEntity.java"), StandardCharsets.UTF_8).replace("\r\n", "\n");
 		String graphicEntity = Files.readString(Path.of("src", "main", "java", "com", "flower", "spirit",
-				"entity", "GraphicContentEntity.java"), StandardCharsets.UTF_8);
+				"entity", "GraphicContentEntity.java"), StandardCharsets.UTF_8).replace("\r\n", "\n");
 
 		assertThat(baseline).as("applied V001 checksum must retain the original column definitions")
 				.contains("videoaddr VARCHAR(255), videocover VARCHAR(255)",
@@ -173,5 +173,20 @@ class PostgresqlDeploymentContractTest {
 				"@Column(columnDefinition = \"TEXT\")\n\tprivate String sourceurl;");
 		assertThat(graphicEntity).contains("@Column(columnDefinition = \"TEXT\")\n\tprivate String markroute;",
 				"@Column(columnDefinition = \"TEXT\")\n\tprivate String authoravatar;");
+	}
+
+	@Test
+	void collectDownloadsCanPersistAForwardOnlyMetadataSnapshot() throws Exception {
+		Path migrationRoot = Path.of("src", "main", "resources", "db", "migration", "postgresql");
+		String baseline = Files.readString(migrationRoot.resolve("V001__baseline.sql"), StandardCharsets.UTF_8);
+		String migration = Files.readString(migrationRoot.resolve(
+				"V007__add_collect_download_metadata_snapshot.sql"), StandardCharsets.UTF_8);
+
+		assertThat(baseline).as("applied V001 checksum must remain unchanged")
+				.doesNotContain("metadata_snapshot");
+		assertThat(migration)
+				.contains("ALTER TABLE biz_collect_run_item")
+				.contains("ADD COLUMN IF NOT EXISTS metadata_snapshot TEXT")
+				.doesNotContain("DROP TABLE", "DELETE FROM", "TRUNCATE");
 	}
 }

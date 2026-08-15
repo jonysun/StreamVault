@@ -157,11 +157,12 @@ public class CollectQueueTransaction {
 			boolean claimable = "QUEUED".equals(processState);
 			jdbcTemplate.update("INSERT INTO biz_collect_run_item "
 					+ "(run_id, ordinal, platform_key, work_id, author_uid, nickname_snapshot, title_snapshot, "
-					+ "publish_time, media_type, decision, process_state, attempt_count, max_attempts, available_at, "
+					+ "publish_time, media_type, decision, process_state, metadata_snapshot, attempt_count, max_attempts, available_at, "
 					+ "queue_generation, created_at, updated_at) "
-					+ "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", runId, item.ordinal(),
+					+ "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)", runId, item.ordinal(),
 					item.platformKey(), item.workId(), item.authorUid(), item.nickname(), truncate(item.title(), 2000),
 					item.publishTime(), item.mediaType(), decision, processState,
+					claimable ? item.metadataSnapshot() : null,
 					claimable ? Math.max(1, downloadMaxRetries + 1) : 0,
 					claimable ? timestamp : null, claimable ? "FETCH_DOWNLOAD_V1" : null, timestamp, timestamp);
 		}

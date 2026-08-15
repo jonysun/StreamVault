@@ -110,6 +110,22 @@ class CollectDownloadServiceTest {
 	}
 
 	@Test
+	void claimedListSnapshotIsPassedIntoWorkIngest() {
+		String snapshot = "{\"aweme_detail\":{\"aweme_id\":\"work-a\"}}";
+		CollectDownloadClaim snapshotClaim = new CollectDownloadClaim(1, 10, 7, "task", "douyin", "work-a",
+				"video", "NEW", 1, 1, 4, "worker:lease", snapshot);
+		IngestResult result = completed(true);
+		when(ingestService.ingest(eq("https://www.douyin.com/video/work-a"), anyDirectory(), eq(false),
+				isNull(), eq(snapshot))).thenReturn(result);
+
+		service.process(snapshotClaim, NOW);
+
+		verify(ingestService).ingest(eq("https://www.douyin.com/video/work-a"), anyDirectory(), eq(false),
+				isNull(), eq(snapshot));
+		verify(transaction).complete(snapshotClaim, result, NOW);
+	}
+
+	@Test
 	void cooldownDuringIngestDefersWithoutConsumingRetryBudget() {
 		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
 		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))

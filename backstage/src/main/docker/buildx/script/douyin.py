@@ -189,11 +189,11 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
                 evidence = _request_evidence(
                     response, attempt=attempt, duration_ms=(time.monotonic() - started_at) * 1000
                 )
-                self._record_request_evidence(evidence, endpoint)
                 content = response.content or b""
                 if not content.strip():
                     evidence["errorKind"] = "EMPTY_RESPONSE"
                     evidence["exceptionType"] = "APIRetryExhaustedError"
+                    self._record_request_evidence(evidence, endpoint)
                     empty_attempt_limit = min(
                         self._max_retries,
                         self.EMPTY_RESPONSE_CONFIRMATION_ATTEMPTS,
@@ -210,19 +210,23 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
                 except httpx.HTTPStatusError as error:
                     evidence["errorKind"] = "HTTP_STATUS"
                     evidence["exceptionType"] = type(error).__name__
+                    self._record_request_evidence(evidence, endpoint)
                     raise UpstreamRequestEvidenceError(
                         "Douyin endpoint returned HTTP status "
                         + str(response.status_code),
                         evidence,
                     ) from error
                 try:
-                    return response.json()
+                    parsed = response.json()
                 except (json.JSONDecodeError, UnicodeDecodeError) as error:
                     evidence["errorKind"] = "INVALID_JSON"
                     evidence["exceptionType"] = type(error).__name__
+                    self._record_request_evidence(evidence, endpoint)
                     raise UpstreamRequestEvidenceError(
                         "Douyin endpoint returned invalid JSON", evidence
                     ) from error
+                self._record_request_evidence(evidence, endpoint)
+                return parsed
             except UpstreamRequestEvidenceError:
                 raise
             except httpx.TimeoutException as error:

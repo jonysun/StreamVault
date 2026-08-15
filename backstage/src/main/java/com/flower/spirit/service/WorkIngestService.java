@@ -62,6 +62,11 @@ public class WorkIngestService {
 
 	public IngestResult ingest(String input, Function<WorkMetadata, Path> outputDirectoryResolver,
 			boolean replaceExisting, Integer historyId) {
+		return ingest(input, outputDirectoryResolver, replaceExisting, historyId, null);
+	}
+
+	public IngestResult ingest(String input, Function<WorkMetadata, Path> outputDirectoryResolver,
+			boolean replaceExisting, Integer historyId, String rawMetadata) {
 		if (outputDirectoryResolver == null) {
 			throw new IllegalArgumentException("output directory resolver is required");
 		}
@@ -69,10 +74,12 @@ public class WorkIngestService {
 		try {
 			PlatformResolver.Resolution resolution = resolver.resolveRequired(input);
 			PlatformWorkAdapter adapter = adapterRegistry.requireByPlatformKey(resolution.platform().getKey());
-			try (PlatformWorkAdapter.OperationScope ignored = adapter.openOperationScope("work_ingest")) {
+			try (PlatformWorkAdapter.OperationScope ignored = rawMetadata == null || rawMetadata.isBlank()
+					? adapter.openOperationScope("work_ingest") : PlatformWorkAdapter.OperationScope.NOOP) {
 				stage = "PARSING";
 				processHistoryService.recordPlatformStage(historyId, stage);
-				List<WorkMetadata> works = adapter.parseAll(new WorkParseRequest(input, resolution.url(), false)).stream()
+				List<WorkMetadata> works = adapter.parseAll(
+						new WorkParseRequest(input, resolution.url(), false, rawMetadata)).stream()
 						.map(normalizer::normalize).toList();
 				if (works.isEmpty()) throw new IllegalArgumentException("adapter returned no works");
 				stage = "INGESTING";
