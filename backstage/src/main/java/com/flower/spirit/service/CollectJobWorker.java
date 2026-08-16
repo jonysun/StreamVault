@@ -31,6 +31,7 @@ public class CollectJobWorker {
 
 	private static final Logger logger = LoggerFactory.getLogger(CollectJobWorker.class);
 	private static final long AUTHOR_LIST_SOFT_BLOCK_RETRY_SECONDS = 300;
+	private static final long AUTHOR_LIST_AUTH_SUSPECTED_RETRY_SECONDS = 300;
 
 	private final CollectQueueTransaction transaction;
 	private final CollectRunService collectRunService;
@@ -195,9 +196,10 @@ public class CollectJobWorker {
 		Instant availableAt = platformCookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5));
 		try {
 			collectRunService.deferForCooldown(claim, availableAt, reason);
-			logger.warn("[CollectWorker] deferred by Douyin cooldown jobId={} runId={} taskId={} code={} "
-					+ "faultDomain=REMOTE_API retryable=true cooldownApplied=true availableAt={}",
-					claim.jobId(), claim.runId(), claim.taskId(), errorCode, availableAt);
+			logger.warn("[CollectWorker] event=F2_FETCH_FAILURE action=GLOBAL_COOLDOWN_DEFERRED "
+					+ "jobId={} runId={} taskId={} code={} faultDomain=REMOTE_API retryable=true "
+					+ "cooldownApplied=true availableAt={} root={}",
+					claim.jobId(), claim.runId(), claim.taskId(), errorCode, availableAt, reason);
 		} catch (RuntimeException queueWriteError) {
 			logger.error("[CollectCooldownDeferralWrite] failed jobId={} runId={} taskId={}", claim.jobId(),
 					claim.runId(), claim.taskId(), queueWriteError);
@@ -263,7 +265,6 @@ public class CollectJobWorker {
 
 	private static boolean isExpectedDouyinRisk(String errorCode) {
 		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
-				|| "F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
 	}
 
@@ -286,6 +287,7 @@ public class CollectJobWorker {
 		}
 		if ("SQLITE_BUSY".equals(errorCode) || "DB_WRITE_FAILED".equals(errorCode)) return "DATABASE";
 		if ("PAUSED_DURING_EXECUTION".equals(errorCode)) return "RUNTIME_CONTROL";
+		if ("F2_UPSTREAM_TIMEOUT".equals(errorCode) || "F2_NETWORK_ERROR".equals(errorCode)) return "NETWORK";
 		if ("F2_PROTOCOL_ERROR".equals(errorCode) || "F2_RUNTIME_ERROR".equals(errorCode)
 				|| "UNEXPECTED".equals(errorCode)) return "APPLICATION";
 		return "REMOTE_API";
@@ -296,6 +298,10 @@ public class CollectJobWorker {
 			String errorCode = fetchError.getErrorCode();
 			if ("F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)) {
 				return AUTHOR_LIST_SOFT_BLOCK_RETRY_SECONDS;
+			}
+			if ("F2_AUTH_OR_VERIFY_SUSPECTED".equals(errorCode)
+					|| "F2_RATE_LIMIT_SUSPECTED".equals(errorCode)) {
+				return AUTHOR_LIST_AUTH_SUSPECTED_RETRY_SECONDS;
 			}
 			if ("F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
 					|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode)) {

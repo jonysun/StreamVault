@@ -312,7 +312,7 @@ public class DouyinWorkMaintenanceService {
 		if (f2cmd != null && f2cmd.contains("stream-vault-ok")) {
 			platformCookieService.reportSuccess("抖音", cookie);
 		} else if (platformCookieService.isRiskSignal(f2cmd)) {
-			platformCookieService.reportRisk("抖音", cookie, "redownload graphic failed");
+			platformCookieService.reportRisk("抖音", cookie, f2cmd);
 		}
 		if (f2cmd == null || !f2cmd.contains("stream-vault-ok")) {
 			throw new IOException("fetch_post_data failed");

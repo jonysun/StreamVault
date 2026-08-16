@@ -176,7 +176,7 @@ class DouyinPlatformAdapterTest {
 		assertThatThrownBy(() -> riskyAdapter.parse(new WorkParseRequest("input",
 				"https://www.douyin.com/video/1", true)))
 				.isInstanceOf(WorkMetadataValidationException.class).hasMessageContaining("no metadata");
-		verify(risky).reportRisk("抖音", "risky-cookie", "parse response rejected");
+		verify(risky).reportRisk("抖音", "risky-cookie", "Douyin returned no metadata");
 		verify(noCookie, never()).reportSuccess("抖音", "");
 	}
 
@@ -206,6 +206,7 @@ class DouyinPlatformAdapterTest {
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
 		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
 		when(cookies.isRiskSignal("HTTP 403")).thenReturn(true);
+		when(cookies.reportRisk("抖音", "cookie-value", "HTTP 403")).thenReturn(true);
 		when(cookies.douyinGlobalRiskCooldownRetryAt(any())).thenReturn(retryAt);
 		FakeGateway gateway = new FakeGateway(resource("video.json"),
 				"https://www.douyin.com/video/7300000000000000001") {
@@ -221,7 +222,7 @@ class DouyinPlatformAdapterTest {
 				.isInstanceOf(DouyinGlobalCooldownException.class)
 				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
 				.isEqualTo(retryAt);
-		verify(cookies).reportRisk("抖音", "cookie-value", "download request failed");
+		verify(cookies).reportRisk("抖音", "cookie-value", "HTTP 403");
 	}
 
 	@Test
@@ -272,6 +273,7 @@ class DouyinPlatformAdapterTest {
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
 		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
 		when(cookies.isRiskSignal("media request failed with HTTP 429")).thenReturn(true);
+		when(cookies.reportRisk("抖音", "cookie-value", "media request failed with HTTP 429")).thenReturn(true);
 		when(cookies.douyinGlobalRiskCooldownRetryAt(any())).thenReturn(retryAt);
 		FakeGateway gateway = new FakeGateway(resource("video.json"),
 				"https://www.douyin.com/video/7300000000000000001") {
@@ -288,9 +290,7 @@ class DouyinPlatformAdapterTest {
 				.hasMessageContaining("HTTP 429")
 				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
 				.isEqualTo(retryAt);
-		verify(cookies).reportRisk(org.mockito.ArgumentMatchers.anyString(),
-				org.mockito.ArgumentMatchers.eq("cookie-value"),
-				org.mockito.ArgumentMatchers.eq("download request failed"));
+		verify(cookies).reportRisk("抖音", "cookie-value", "media request failed with HTTP 429");
 	}
 
 	private WorkMetadata parseFixture(String fixture, String id, String path) throws Exception {

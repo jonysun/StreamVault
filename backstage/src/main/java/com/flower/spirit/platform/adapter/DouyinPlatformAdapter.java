@@ -132,14 +132,14 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			Thread.currentThread().interrupt();
 			throw new WorkMetadataValidationException("Douyin F2 request coordination was interrupted", e);
 		} catch (IOException e) {
-			if (reportRisk(cookie, e.getMessage(), "parse request failed")) {
+			if (reportRisk(cookie, e.getMessage())) {
 				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "parsing"),
 						cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
 			}
 			throw new WorkMetadataValidationException("Douyin parsing failed", e);
 		} catch (WorkMetadataValidationException e) {
 			if (!(e instanceof DouyinGlobalCooldownException)) {
-				reportRisk(cookie, e.getMessage(), "parse response rejected");
+				reportRisk(cookie, e.getMessage());
 			}
 			throw e;
 		}
@@ -194,7 +194,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 					downloaded.add(new WorkMediaResource(coverSource.getOrder(), WorkMediaResource.Type.IMAGE,
 							metadata.getCoverUrl(), local, "jpg", coverSource.getRequestHeaders()));
 				} catch (IOException error) {
-					if (reportRisk(cookie, error.getMessage(), "cover download request failed")) {
+					if (reportRisk(cookie, error.getMessage())) {
 						throw new DouyinGlobalCooldownException(
 								riskFailureMessage(error.getMessage(), "cover download"),
 								cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
@@ -207,7 +207,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			cookieService.reportSuccess("抖音", cookie);
 			return DownloadResult.completed(downloaded);
 		} catch (IOException e) {
-			if (reportRisk(cookie, e.getMessage(), "download request failed")) {
+			if (reportRisk(cookie, e.getMessage())) {
 				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "download"),
 						cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
 			}
@@ -352,10 +352,9 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		return cookie;
 	}
 
-	private boolean reportRisk(String cookie, String signal, String fallback) {
+	private boolean reportRisk(String cookie, String signal) {
 		if (cookieService.isRiskSignal(signal)) {
-			cookieService.reportRisk("抖音", cookie, fallback);
-			return true;
+			return cookieService.reportRisk("抖音", cookie, signal);
 		}
 		return false;
 	}

@@ -12,6 +12,17 @@ class CollectDataServiceStatusTest {
 	void repeatedEmptyDouyinResponseUsesSoftBackoffRatherThanStrongRiskCooldown() {
 		assertThat(CollectDataService.isDouyinRiskError("F2_UPSTREAM_SOFT_BLOCK")).isFalse();
 		assertThat(CollectDataService.isDouyinRiskError("F2_UPSTREAM_UNAVAILABLE")).isFalse();
+		assertThat(CollectDataService.isDouyinRiskError("F2_AUTH_OR_VERIFY_SUSPECTED")).isFalse();
+		assertThat(CollectDataService.isDouyinRiskError("F2_RATE_LIMIT_SUSPECTED")).isFalse();
+	}
+
+	@Test
+	void identifiesNetworkAndApplicationF2FaultDomains() {
+		assertThat(CollectDataService.douyinFetchFaultDomain("F2_NETWORK_ERROR")).isEqualTo("NETWORK");
+		assertThat(CollectDataService.douyinFetchFaultDomain("F2_UPSTREAM_TIMEOUT")).isEqualTo("NETWORK");
+		assertThat(CollectDataService.douyinFetchFaultDomain("F2_RUNTIME_ERROR")).isEqualTo("APPLICATION");
+		assertThat(CollectDataService.douyinFetchFaultDomain("F2_AUTH_OR_VERIFY_SUSPECTED"))
+				.isEqualTo("REMOTE_API");
 	}
 
 	@Test
