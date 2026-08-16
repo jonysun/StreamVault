@@ -1281,7 +1281,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], crawler.post_cursors)
         self.assertIn("profileStatus", result["diagnostics"])
 
-    async def test_verification_profile_emits_structured_nonzero_failure(self):
+    async def test_verification_profile_text_is_suspected_not_confirmed(self):
         module, _ = self._load_command_module(
             {
                 "status_code": 10000,
@@ -1298,7 +1298,9 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotEqual(0, raised.exception.code)
         payload = self._error_payload(stderr.getvalue())
-        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        self.assertEqual("F2_AUTH_OR_VERIFY_SUSPECTED", payload["errorCode"])
+        self.assertEqual("SUSPECTED", payload["diagnostics"]["confidence"])
+        self.assertEqual("STATUS_TEXT_MARKER_CAPTCHA", payload["diagnostics"]["classificationReason"])
         profile = payload["diagnostics"]["profileStatus"]
         self.assertEqual(10000, profile["statusCode"])
         self.assertIn("raw_payload", profile["topLevelKeys"])
@@ -1324,6 +1326,11 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         payload = self._error_payload(stderr.getvalue())
         self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        self.assertEqual("CONFIRMED", payload["diagnostics"]["confidence"])
+        self.assertEqual(
+            "STRUCTURED_USER_CAPTCHA_REQUIRED",
+            payload["diagnostics"]["classificationReason"],
+        )
 
     async def test_structured_page_verification_signals_are_cookie_failures(self):
         signals = (
@@ -1353,6 +1360,10 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 payload = self._error_payload(stderr.getvalue())
                 self.assertEqual(
                     "F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"]
+                )
+                self.assertEqual("CONFIRMED", payload["diagnostics"]["confidence"])
+                self.assertTrue(
+                    payload["diagnostics"]["classificationReason"].startswith("STRUCTURED_")
                 )
 
     async def test_structured_verification_success_values_are_not_failures(self):
@@ -1436,7 +1447,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("NO_PUBLIC_WORKS", result["outcome"])
 
-    async def test_verification_page_emits_cookie_failure_not_schema_failure(self):
+    async def test_verification_page_text_is_suspected_not_schema_failure(self):
         cookie = (
             "sid_guard=guard-secret; sid_tt=tt-secret; "
             "passport_auth_status=auth-secret"
@@ -1457,7 +1468,8 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         output = stderr.getvalue()
         payload = self._error_payload(output)
-        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        self.assertEqual("F2_AUTH_OR_VERIFY_SUSPECTED", payload["errorCode"])
+        self.assertEqual("SUSPECTED", payload["diagnostics"]["confidence"])
         page = payload["diagnostics"]["lastPage"]
         self.assertEqual(1, page["page"])
         self.assertEqual("0", page["cursor"])
@@ -1496,7 +1508,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("passport_auth_status=0", output)
         self.assertNotIn("guard-secret", output)
 
-    async def test_profile_request_verification_exception_is_cookie_failure(self):
+    async def test_profile_request_verification_exception_is_suspected(self):
         cookie = "sid_guard=guard-secret; passport_auth_status=0"
         module, _ = self._load_command_module(
             RuntimeError("captcha verification required guard-secret"), []
@@ -1509,12 +1521,13 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         output = stderr.getvalue()
         payload = self._error_payload(output)
-        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        self.assertEqual("F2_AUTH_OR_VERIFY_SUSPECTED", payload["errorCode"])
+        self.assertEqual("SUSPECTED", payload["diagnostics"]["confidence"])
         self.assertEqual("NoneType", payload["diagnostics"]["profileStatus"]["responseType"])
         self.assertNotIn("guard-secret", output)
         self.assertNotIn("captcha verification required", output)
 
-    async def test_page_request_exception_classification_uses_safe_markers(self):
+    async def test_page_request_exception_classification_is_suspected(self):
         module, _ = self._load_command_module(
             {"status_code": 0, "user": {"nickname": "author"}},
             [RuntimeError("login expired; raw upstream detail")],
@@ -1527,7 +1540,8 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         output = stderr.getvalue()
         payload = self._error_payload(output)
-        self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", payload["errorCode"])
+        self.assertEqual("F2_AUTH_OR_VERIFY_SUSPECTED", payload["errorCode"])
+        self.assertEqual("SUSPECTED", payload["diagnostics"]["confidence"])
         self.assertEqual(1, payload["diagnostics"]["lastPage"]["page"])
         self.assertNotIn("raw upstream detail", output)
 
@@ -1606,7 +1620,7 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("raw endpoint detail", output)
 
-    async def test_explicit_http_429_retry_exhaustion_is_rate_limit(self):
+    async def test_text_only_http_429_retry_exhaustion_is_suspected_rate_limit(self):
         module, _ = self._load_command_module(
             {"status_code": 0, "user": {"nickname": "author"}},
             [type("APIRetryExhaustedError", (RuntimeError,), {})(
@@ -1620,8 +1634,9 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             await module.run_incremental_command(args)
 
         payload = self._error_payload(stderr.getvalue())
-        self.assertEqual("F2_UPSTREAM_RATE_LIMIT", payload["errorCode"])
-        self.assertTrue(payload["diagnostics"]["cooldownApplied"])
+        self.assertEqual("F2_RATE_LIMIT_SUSPECTED", payload["errorCode"])
+        self.assertEqual("SUSPECTED", payload["diagnostics"]["confidence"])
+        self.assertFalse(payload["diagnostics"]["cooldownApplied"])
 
     def test_request_evidence_classifies_empty_http_429_as_rate_limit(self):
         module, _ = self._load_command_module({}, [])
@@ -2033,6 +2048,8 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
             await module.fetch_work_data("cookie", "7301")
 
         self.assertEqual("F2_COOKIE_OR_VERIFY_REQUIRED", raised.exception.error_code)
+        self.assertEqual("CONFIRMED", raised.exception.confidence)
+        self.assertEqual("HTTP_STATUS_403", raised.exception.classification_reason)
 
     async def test_single_work_http_404_is_not_retryable(self):
         module, _ = self._load_command_module(

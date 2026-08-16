@@ -94,25 +94,39 @@ public class PlatformCookieService {
 		return selectAvailable(safePlatform, safeStrategy, cookies);
 	}
 
-	public void reportRisk(String platform, String cookie, String reason) {
+	/**
+	 * Records a platform risk signal.
+	 *
+	 * @return {@code true} when the signal was accepted as confirmed risk evidence;
+	 *         {@code false} when it was ignored or, for Douyin, deliberately suppressed
+	 *         because it lacks confirmation.
+	 */
+	public boolean reportRisk(String platform, String cookie, String reason) {
 		if (isBlank(platform) || isBlank(cookie)) {
-			return;
+			return false;
 		}
 		String safePlatform = canonicalPlatform(platform);
 		long now = System.currentTimeMillis();
 		if (DOUYIN_PLATFORM_KEY.equals(safePlatform)) {
+			String confirmedEvidence = confirmedDouyinRiskEvidence(reason);
+			if (confirmedEvidence == null) {
+				logger.warn("platform risk signal suppressed platform={} scope=GLOBAL_RISK reason=UNCONFIRMED", safePlatform);
+				return false;
+			}
 			successAt.remove(riskKey(safePlatform, cookie));
 			douyinGlobalRiskStartedAtMs.accumulateAndGet(now, Math::max);
 			long cooldownMs = douyinRiskCooldownMillis();
-			logger.warn("platform cooldown platform={} scope=GLOBAL_RISK reason={} cooldownMs={}", safePlatform, reason,
+			logger.warn("platform cooldown platform={} scope=GLOBAL_RISK reason={} cooldownMs={}", safePlatform,
+					confirmedEvidence,
 					cooldownMs);
-			return;
+			return true;
 		}
 		purgeExpiredRisks(now);
 		successAt.remove(riskKey(safePlatform, cookie));
 		riskUntil.put(riskKey(safePlatform, cookie), now + COOKIE_RISK_COOLDOWN_MS);
 		logger.warn("platform cookie risk platform={} reason={} cooldownMs={}", safePlatform, reason,
 				COOKIE_RISK_COOLDOWN_MS);
+		return true;
 	}
 
 	public void reportSuccess(String platform, String cookie) {
@@ -289,6 +303,34 @@ public class PlatformCookieService {
 
 	private long douyinRiskCooldownMillis() {
 		return Duration.ofMinutes(douyinRiskCooldownMinutes()).toMillis();
+	}
+
+	private String confirmedDouyinRiskEvidence(String reason) {
+		String normalized = reason == null ? "" : reason.toLowerCase();
+		if (normalized.contains("f2_cookie_or_verify_required")) {
+			return "F2_COOKIE_OR_VERIFY_REQUIRED";
+		}
+		if (normalized.contains("f2_upstream_rate_limit")) {
+			return "F2_UPSTREAM_RATE_LIMIT";
+		}
+		if (containsHttpStatusEvidence(normalized, "401")) return "HTTP_STATUS_401";
+		if (containsHttpStatusEvidence(normalized, "403")) return "HTTP_STATUS_403";
+		if (containsHttpStatusEvidence(normalized, "429")) return "HTTP_STATUS_429";
+		if (normalized.contains("confidence\":\"confirmed")
+				&& normalized.contains("structured_")
+				&& normalized.contains("_required")) {
+			return "STRUCTURED_AUTH_OR_VERIFY_REQUIRED";
+		}
+		return null;
+	}
+
+	private boolean containsHttpStatusEvidence(String normalized, String status) {
+		return normalized.contains("http " + status)
+				|| normalized.contains("status=" + status)
+				|| normalized.contains("statuscode\": " + status)
+				|| normalized.contains("statuscode\":" + status)
+				|| normalized.contains("status_code\": " + status)
+				|| normalized.contains("status_code\":" + status);
 	}
 
 	private int douyinRiskCooldownMinutes() {

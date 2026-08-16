@@ -271,6 +271,35 @@ class CollectJobWorkerTest {
 	}
 
 	@Test
+	void suspectedAuthorVerificationUsesJobOnlyBackoffWithoutGlobalCooldown() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(3254L, 5002L, 12,
+				CollectTriggerType.RETRY, 1, 3);
+		when(dataService.isCollectTaskEnabled(12)).thenReturn(true);
+		when(runService.currentState(5002L)).thenReturn(CollectRunState.FETCHING);
+		when(runService.retryOrFail(claim, "F2_AUTH_OR_VERIFY_SUSPECTED",
+				"Douyin response may require login or verification; confirmation was not available", 300L))
+				.thenReturn(new CollectEnqueueResult(5003L, 3254L, CollectRunState.QUEUED, true, false));
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_AUTH_OR_VERIFY_SUSPECTED",
+				"Douyin response may require login or verification; confirmation was not available"))
+				.when(dataService).executeQueuedCollectTask(12, 5002L, CollectTriggerType.RETRY);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).retryOrFail(claim, "F2_AUTH_OR_VERIFY_SUSPECTED",
+					"Douyin response may require login or verification; confirmation was not available", 300L);
+			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
+			verify(runService, never()).failJob(any(), anyString(), anyString());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
 	void activeRiskCooldownDefersEvenWhenClaimReachedLastAttempt() {
 		CollectRunService runService = mock(CollectRunService.class);
 		CollectDataService dataService = mock(CollectDataService.class);

@@ -2295,6 +2295,11 @@ public class CollectDataService {
 				envelope = douyinIncrementalFetchService.fetch(request);
 				platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
 			} catch (CollectFetchException error) {
+				logger.warn("[F2] event=F2_FETCH_FAILURE endpoint=AUTHOR_LIST code={} faultDomain={} "
+						+ "cooldownScope={} evidence={}", error.getErrorCode(),
+						douyinFetchFaultDomain(error.getErrorCode()),
+						isDouyinRiskError(error.getErrorCode()) ? "GLOBAL_RISK" : "TASK_ONLY",
+						error.getMessage());
 				if ("F2_UPSTREAM_SOFT_BLOCK".equals(error.getErrorCode())) {
 					logger.warn("[F2] upstream soft block platform=douyin scope=AUTHOR_LIST "
 							+ "cooldownApplied=false code={}", error.getErrorCode());
@@ -2542,6 +2547,19 @@ public class CollectDataService {
 	static boolean isDouyinRiskError(String errorCode) {
 		return "F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
 				|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode);
+	}
+
+	static String douyinFetchFaultDomain(String errorCode) {
+		if ("F2_NETWORK_ERROR".equals(errorCode) || "F2_UPSTREAM_TIMEOUT".equals(errorCode)) {
+			return "NETWORK";
+		}
+		if ("F2_RUNTIME_ERROR".equals(errorCode) || "F2_PROTOCOL_ERROR".equals(errorCode)) {
+			return "APPLICATION";
+		}
+		if ("INVALID_AUTHOR_ID".equals(errorCode) || "INVALID_SOURCE".equals(errorCode)) {
+			return "TASK_CONFIGURATION";
+		}
+		return "REMOTE_API";
 	}
 
 	private boolean isTerminalAccountUnavailable(String outcome) {

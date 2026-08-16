@@ -72,20 +72,38 @@ _F2_WORK_DETAIL_PATH = "/aweme/v1/web/aweme/detail/"
 
 
 class FetchCommandError(RuntimeError):
-    def __init__(self, error_code, safe_message, diagnostics=None, exception_type=None):
+    def __init__(
+        self, error_code, safe_message, diagnostics=None, exception_type=None,
+        classification_reason="UNCLASSIFIED", confidence="NONE",
+    ):
         super().__init__(safe_message)
         self.error_code = error_code
         self.safe_message = safe_message
         self.diagnostics = diagnostics or {}
         self.exception_type = exception_type or type(self).__name__
+        self.classification_reason = classification_reason
+        self.confidence = confidence
 
 
 class CookieOrVerifyRequired(FetchCommandError):
-    def __init__(self, diagnostics):
+    def __init__(self, diagnostics, classification_reason="CONFIRMED_AUTH_OR_VERIFY"):
         super().__init__(
             "F2_COOKIE_OR_VERIFY_REQUIRED",
             "Douyin login or verification is required",
             diagnostics,
+            classification_reason=classification_reason,
+            confidence="CONFIRMED",
+        )
+
+
+class AuthOrVerifySuspected(FetchCommandError):
+    def __init__(self, diagnostics, classification_reason="STATUS_TEXT_AUTH_OR_VERIFY"):
+        super().__init__(
+            "F2_AUTH_OR_VERIFY_SUSPECTED",
+            "Douyin response may require login or verification; confirmation was not available",
+            diagnostics,
+            classification_reason=classification_reason,
+            confidence="SUSPECTED",
         )
 
 
@@ -95,6 +113,7 @@ class InvalidAuthorIdError(FetchCommandError):
             "INVALID_AUTHOR_ID",
             "Douyin author identifier is invalid; update the task source",
             diagnostics,
+            classification_reason="INVALID_AUTHOR_IDENTIFIER",
         )
 
 
@@ -105,6 +124,7 @@ class UpstreamCommandSchemaError(FetchCommandError):
             safe_message,
             diagnostics,
             exception_type,
+            classification_reason="UPSTREAM_SCHEMA",
         )
 
 
@@ -305,25 +325,30 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
     error_kind = request_evidence.get("errorKind")
     if status_code in (429, "429"):
         return UpstreamFetchError(
-            "F2_UPSTREAM_RATE_LIMIT", safe_message, diagnostics, exception_type
+            "F2_UPSTREAM_RATE_LIMIT", safe_message, diagnostics, exception_type,
+            "HTTP_STATUS_429", "CONFIRMED"
         )
     if status_code in (401, 403, "401", "403"):
-        return CookieOrVerifyRequired(diagnostics)
+        return CookieOrVerifyRequired(diagnostics, "HTTP_STATUS_" + str(status_code))
     if work and status_code in (404, "404"):
         return UpstreamFetchError(
-            "F2_WORK_UNAVAILABLE", "Douyin work is no longer available", diagnostics, exception_type
+            "F2_WORK_UNAVAILABLE", "Douyin work is no longer available", diagnostics, exception_type,
+            "HTTP_STATUS_404", "CONFIRMED"
         )
     if error_kind == "TIMEOUT" or status_code in (408, "408"):
         return UpstreamFetchError(
-            "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
+            "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type,
+            "HTTP_STATUS_408" if status_code in (408, "408") else "NETWORK_TIMEOUT", "NONE"
         )
     if error_kind == "NETWORK_ERROR":
         return UpstreamFetchError(
-            "F2_NETWORK_ERROR", safe_message, diagnostics, exception_type
+            "F2_NETWORK_ERROR", safe_message, diagnostics, exception_type,
+            "NETWORK_TRANSPORT_ERROR", "NONE"
         )
     if status_code in (503, "503"):
         return UpstreamFetchError(
-            "F2_UPSTREAM_UNAVAILABLE", safe_message, diagnostics, exception_type
+            "F2_UPSTREAM_UNAVAILABLE", safe_message, diagnostics, exception_type,
+            "HTTP_STATUS_503", "NONE"
         )
     if error_kind == "EMPTY_RESPONSE":
         return UpstreamFetchError(
@@ -331,24 +356,31 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
             "Douyin single-work detail endpoint repeatedly returned an empty HTTP response",
             diagnostics,
             exception_type,
+            "EMPTY_HTTP_RESPONSE",
+            "NONE",
         )
 
     explicit_auth = any(
         marker in evidence
         for marker in ("http 401", "http 403", "status 401", "status 403", "captcha", "verification", "login required")
     ) or bool(re.search(r"(?:statuscode|status_code)\D{0,8}(?:401|403)", evidence))
-    if explicit_auth:
-        return CookieOrVerifyRequired(diagnostics)
+    exception_auth_reason = _exception_auth_or_verify_reason(error)
+    if explicit_auth or exception_auth_reason:
+        return AuthOrVerifySuspected(
+            diagnostics, exception_auth_reason or "EXCEPTION_TEXT_AUTH_OR_VERIFY"
+        )
     explicit_rate = any(
         marker in evidence
         for marker in ("http 429", "status 429", "too many requests", "rate limit", "rate_limit", "risk control")
     ) or bool(re.search(r"(?:statuscode|status_code)\D{0,8}429", evidence))
     if explicit_rate:
         return UpstreamFetchError(
-            "F2_UPSTREAM_RATE_LIMIT",
-            safe_message,
+            "F2_RATE_LIMIT_SUSPECTED",
+            "Douyin response may be rate limited; confirmation was not available",
             diagnostics,
             exception_type,
+            "EXCEPTION_TEXT_RATE_LIMIT",
+            "SUSPECTED",
         )
     is_retry_exhausted = "retryexhausted" in lowered_type
     if (
@@ -357,7 +389,8 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
         or any(marker in raw_evidence for marker in ("timeout", "timed out", "time out"))
     ):
         return UpstreamFetchError(
-            "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type
+            "F2_UPSTREAM_TIMEOUT", safe_message, diagnostics, exception_type,
+            "EXCEPTION_TIMEOUT", "NONE"
         )
     if (
         isinstance(error, ConnectionError)
@@ -365,7 +398,8 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
         or "connection" in lowered_type
     ):
         return UpstreamFetchError(
-            "F2_NETWORK_ERROR", safe_message, diagnostics, exception_type
+            "F2_NETWORK_ERROR", safe_message, diagnostics, exception_type,
+            "EXCEPTION_NETWORK", "NONE"
         )
     if (
         is_retry_exhausted
@@ -386,12 +420,14 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
             "Douyin author-work endpoint did not provide a usable response",
             diagnostics,
             exception_type,
+            "RETRY_EXHAUSTED_OR_UNAVAILABLE", "NONE"
         )
     return UpstreamFetchError(
         "F2_UPSTREAM_RESPONSE_ERROR",
         safe_message,
         diagnostics,
         exception_type,
+        "UNCLASSIFIED_UPSTREAM_RESPONSE", "NONE"
     )
 
 
@@ -465,9 +501,32 @@ def _bounded_status_text(value, cookie=""):
     return _redact_cookie(value, cookie)[:300]
 
 
-def _exception_requires_verification(error, cookie=""):
+def _status_text_auth_or_verify_reason(response, cookie=""):
+    status_text = _status_text(response, cookie).lower()
+    for marker in _COOKIE_OR_VERIFY_MARKERS:
+        if marker in status_text:
+            return _marker_reason("STATUS_TEXT_MARKER_", marker)
+    return None
+
+
+def _exception_auth_or_verify_reason(error, cookie=""):
     safe_message = _bounded_status_text(str(error), cookie).lower()
-    return any(marker in safe_message for marker in _COOKIE_OR_VERIFY_MARKERS)
+    for marker in _COOKIE_OR_VERIFY_MARKERS:
+        if marker in safe_message:
+            return _marker_reason("EXCEPTION_TEXT_MARKER_", marker)
+    return None
+
+
+def _marker_reason(prefix, marker):
+    normalized = re.sub(r"[^A-Z0-9]+", "_", marker.upper()).strip("_")
+    if normalized:
+        return prefix + normalized
+    return prefix + {
+        "验证码": "CAPTCHA",
+        "验证": "VERIFY",
+        "请登录": "LOGIN",
+        "登录后": "LOGIN",
+    }.get(marker, "AUTH_OR_VERIFY")
 
 
 def _configured_page_delay_seconds():
@@ -585,31 +644,57 @@ def _login_status_requires_verification(value):
     return False
 
 
-def _has_structured_verification(response):
+def _structured_verification_reason(response):
     if not isinstance(response, dict):
-        return False
+        return None
     user = response.get("user")
-    sources = (response, user if isinstance(user, dict) else {})
-    for source in sources:
+    sources = (("ROOT", response), ("USER", user if isinstance(user, dict) else {}))
+    for source_name, source in sources:
         if _captcha_requires_verification(source.get("captcha")):
-            return True
+            return "STRUCTURED_" + source_name + "_CAPTCHA_REQUIRED"
         if _verification_field_requires_verification(source.get("verify_status")):
-            return True
+            return "STRUCTURED_" + source_name + "_VERIFY_STATUS_REQUIRED"
         if _verification_field_requires_verification(source.get("verify_required")):
-            return True
+            return "STRUCTURED_" + source_name + "_VERIFY_REQUIRED"
         if (
             "login_status" in source
             and _login_status_requires_verification(source.get("login_status"))
         ):
-            return True
-    return False
+            return "STRUCTURED_" + source_name + "_LOGIN_STATUS_REQUIRED"
+    return None
+
+
+def _has_structured_verification(response):
+    return _structured_verification_reason(response) is not None
 
 
 def _response_requires_verification(response, cookie=""):
-    if _has_structured_verification(response):
-        return True
-    status_text = _status_text(response, cookie).lower()
-    return any(marker in status_text for marker in _COOKIE_OR_VERIFY_MARKERS)
+    return _response_verification_error(response, cookie) is not None
+
+
+def _response_verification_error(response, cookie=""):
+    structured_reason = _structured_verification_reason(response)
+    if structured_reason:
+        return CookieOrVerifyRequired({}, structured_reason)
+    text_reason = _status_text_auth_or_verify_reason(response, cookie)
+    if text_reason:
+        return AuthOrVerifySuspected({}, text_reason)
+    return None
+
+
+def _with_request_evidence(diagnostics, crawler):
+    result = dict(diagnostics or {})
+    request_identity = getattr(crawler, "request_identity", None)
+    request_attempts = list(getattr(crawler, "request_attempts", []) or [])[-_F2_REQUEST_ATTEMPT_LIMIT:]
+    if request_identity:
+        result["requestIdentity"] = request_identity
+    if request_attempts:
+        result["requestAttempts"] = request_attempts
+    last_request = getattr(crawler, "last_request_evidence", None)
+    if last_request:
+        result["lastRequest"] = last_request
+        result["upstreamStatus"] = last_request.get("statusCode")
+    return result
 
 
 def _profile_status_summary(profile, cookie=""):
@@ -722,8 +807,10 @@ def _validate_profile(profile, diagnostics, cookie=""):
             "Douyin profile schema validation failed", diagnostics
         )
     status_text = _status_text(profile, cookie).lower()
-    if _response_requires_verification(profile, cookie):
-        raise CookieOrVerifyRequired(diagnostics)
+    verification_error = _response_verification_error(profile, cookie)
+    if verification_error is not None:
+        verification_error.diagnostics = dict(diagnostics)
+        raise verification_error
 
     user = profile.get("user")
     if any(marker in status_text for marker in _DEACTIVATED_MARKERS):
@@ -791,16 +878,18 @@ async def fetch_douyin_list_incremental(
             profile_summary = _profile_status_summary(None, cookie)
             if crawler.last_request_evidence:
                 profile_summary["lastRequest"] = crawler.last_request_evidence
-            diagnostics = {"profileStatus": profile_summary}
-            if _exception_requires_verification(error, cookie):
-                raise CookieOrVerifyRequired(diagnostics) from None
+            diagnostics = _with_request_evidence(
+                {"profileStatus": profile_summary}, crawler
+            )
             raise _request_error(
                 error, "Douyin profile request failed", diagnostics
             ) from None
         profile_summary = _profile_status_summary(profile, cookie)
         if crawler.last_request_evidence:
             profile_summary["lastRequest"] = crawler.last_request_evidence
-        command_diagnostics = {"profileStatus": profile_summary}
+        command_diagnostics = _with_request_evidence(
+            {"profileStatus": profile_summary}, crawler
+        )
         profile_state = _validate_profile(profile, command_diagnostics, cookie)
         if profile_state in ("ACCOUNT_DEACTIVATED", "ACCOUNT_BANNED"):
             result = envelope(
@@ -817,7 +906,7 @@ async def fetch_douyin_list_incremental(
         page_number = 0
 
         async def fetch_page(cursor):
-            nonlocal page_number
+            nonlocal page_number, command_diagnostics
             page_number += 1
             if page_number > 1:
                 await _delay_before_page(page_number, page_delay_seconds)
@@ -832,11 +921,9 @@ async def fetch_douyin_list_incremental(
                 )
                 if crawler.last_request_evidence:
                     page_summary["lastRequest"] = crawler.last_request_evidence
-                command_diagnostics["lastPage"] = page_summary
-                if _exception_requires_verification(error, cookie):
-                    raise CookieOrVerifyRequired(
-                        dict(command_diagnostics)
-                    ) from None
+                command_diagnostics = _with_request_evidence(
+                    {**command_diagnostics, "lastPage": page_summary}, crawler
+                )
                 raise _request_error(
                     error,
                     "Douyin author-work page request failed",
@@ -848,9 +935,13 @@ async def fetch_douyin_list_incremental(
             )
             if crawler.last_request_evidence:
                 page_summary["lastRequest"] = crawler.last_request_evidence
-            command_diagnostics["lastPage"] = page_summary
-            if _response_requires_verification(response, cookie):
-                raise CookieOrVerifyRequired(dict(command_diagnostics))
+            command_diagnostics = _with_request_evidence(
+                {**command_diagnostics, "lastPage": page_summary}, crawler
+            )
+            verification_error = _response_verification_error(response, cookie)
+            if verification_error is not None:
+                verification_error.diagnostics = dict(command_diagnostics)
+                raise verification_error
             if not isinstance(response, dict) or "status_code" not in response:
                 raise UpstreamCommandSchemaError(
                     "Douyin page is missing status_code",
@@ -913,6 +1004,8 @@ def _emit_fetch_error(error, cookie):
         "errorCode": error.error_code,
         "message": error.safe_message,
         "diagnostics": {
+            "classificationReason": error.classification_reason,
+            "confidence": error.confidence,
             **error.diagnostics,
             "exceptionType": error.exception_type,
             "faultDomain": fault_domain,
@@ -1049,17 +1142,17 @@ async def fetch_work_data(cookie: str, aweme_id: str):
             response = await crawler.fetch_post_detail(PostDetail(aweme_id=aweme_id))
         except Exception as error:
             diagnostics.update(_work_request_diagnostics(crawler))
-            if _exception_requires_verification(error, cookie):
-                raise CookieOrVerifyRequired(diagnostics) from None
             raise _request_error(error, "Douyin work metadata request failed", diagnostics, work=True) from None
 
         diagnostics.update(_work_request_diagnostics(crawler))
-        if _response_requires_verification(response, cookie):
-            raise CookieOrVerifyRequired(diagnostics)
+        verification_error = _response_verification_error(response, cookie)
+        if verification_error is not None:
+            verification_error.diagnostics = dict(diagnostics)
+            raise verification_error
         if not isinstance(response, dict):
             raise UpstreamFetchError(
                 "F2_UPSTREAM_RESPONSE_ERROR", "Douyin work metadata response was not an object",
-                diagnostics, "ResponseTypeError"
+                diagnostics, "ResponseTypeError", "INVALID_RESPONSE_TYPE", "NONE"
             )
         status_code = response.get("status_code")
         if status_code is not None:
@@ -1067,7 +1160,8 @@ async def fetch_work_data(cookie: str, aweme_id: str):
         if status_code not in (None, 0, "0"):
             if status_code in (404, "404"):
                 raise UpstreamFetchError(
-                    "F2_WORK_UNAVAILABLE", "Douyin work is no longer available", diagnostics, "HTTPStatus"
+                    "F2_WORK_UNAVAILABLE", "Douyin work is no longer available", diagnostics, "HTTPStatus",
+                    "HTTP_STATUS_404", "CONFIRMED"
                 )
             raise _request_error(
                 RuntimeError("Douyin work metadata returned a nonzero status"),

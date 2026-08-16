@@ -42,7 +42,7 @@ class PlatformCookieServiceTest {
 		PlatformCookieService service = new PlatformCookieService();
 
 		String first = service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch");
-		service.reportRisk("douyin", first, "verify");
+		service.reportRisk("douyin", first, "F2_COOKIE_OR_VERIFY_REQUIRED");
 
 		assertThat(first).isEqualTo("a=1");
 		assertThat(service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch"))
@@ -69,7 +69,7 @@ class PlatformCookieServiceTest {
 
 		startedAt.set(System.currentTimeMillis() - 9 * 60 * 1000L);
 		long before = service.douyinGlobalCooldownRemainingMillis();
-		service.reportRisk("douyin", "a=1", "rate-limit");
+		service.reportRisk("douyin", "a=1", "F2_UPSTREAM_RATE_LIMIT");
 		long after = service.douyinGlobalCooldownRemainingMillis();
 
 		assertThat(before).isBetween(1L, 61_000L);
@@ -81,7 +81,7 @@ class PlatformCookieServiceTest {
 		PlatformCookieService service = new PlatformCookieService();
 
 		String first = service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch");
-		service.reportRisk("douyin", first, "verify");
+		service.reportRisk("douyin", first, "F2_COOKIE_OR_VERIFY_REQUIRED");
 		service.reportSuccess("douyin", first);
 
 		assertThat(service.selectCookie("douyin", "risk_shift", "a=1\nb=2", "fallback", "fetch"))
@@ -122,7 +122,7 @@ class PlatformCookieServiceTest {
 		TikTokConfigService configService = mock(TikTokConfigService.class);
 		when(configService.getRiskCooldownMinutes()).thenReturn(25);
 		ReflectionTestUtils.setField(service, "tikTokConfigService", configService);
-		service.reportRisk("douyin", "a=1", "verify");
+		service.reportRisk("douyin", "a=1", "F2_COOKIE_OR_VERIFY_REQUIRED");
 
 		assertThat(service.cookieStatus("douyin"))
 				.containsEntry("cooling", 1)
@@ -144,11 +144,22 @@ class PlatformCookieServiceTest {
 				.containsEntry("cooling", 0)
 				.containsEntry("detailCooling", 1);
 
-		service.reportRisk("douyin", "a=1", "verify");
+		service.reportRisk("douyin", "a=1", "F2_COOKIE_OR_VERIFY_REQUIRED");
 		assertThat(service.isDouyinGlobalRiskCooldownActive()).isTrue();
 		assertThat(service.douyinGlobalRiskCooldownRemainingMillis()).isGreaterThan(9 * 60 * 1000L);
 		assertThat(service.selectCookie("douyin", "round_robin", "a=1", "fallback", "collect_worker"))
 				.isEmpty();
+	}
+
+	@Test
+	void unconfirmedDouyinSignalDoesNotStartGlobalCooldown() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		assertThat(service.reportRisk("douyin", "a=1", "login expired without HTTP evidence")).isFalse();
+		assertThat(service.isDouyinGlobalRiskCooldownActive()).isFalse();
+
+		assertThat(service.reportRisk("douyin", "a=1", "request failed status=403")).isTrue();
+		assertThat(service.isDouyinGlobalRiskCooldownActive()).isTrue();
 	}
 
 	@Test
