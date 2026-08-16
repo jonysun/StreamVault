@@ -130,13 +130,25 @@ class PlatformCookieServiceTest {
 	}
 
 	@Test
-	void softBlockAppliesFiveMinuteGlobalGateAndStrongRiskTakesPrecedence() {
+	void detailSoftBlockDoesNotGateCookiesAndStrongRiskRemainsGlobal() {
 		PlatformCookieService service = new PlatformCookieService();
-		service.reportSoftBlock("douyin", "F2_UPSTREAM_SOFT_BLOCK");
+		service.reportDetailSoftBlock("douyin", "F2_UPSTREAM_SOFT_BLOCK");
 
-		assertThat(service.douyinGlobalCooldownRemainingMillis()).isBetween(4 * 60 * 1000L, 5 * 60 * 1000L);
+		assertThat(service.isDouyinGlobalRiskCooldownActive()).isFalse();
+		assertThat(service.isDouyinDetailSoftBackoffActive()).isTrue();
+		assertThat(service.douyinDetailSoftBackoffRemainingMillis())
+				.isBetween(4 * 60 * 1000L, 5 * 60 * 1000L);
+		assertThat(service.selectCookie("douyin", "round_robin", "a=1", "fallback", "collect_worker"))
+				.isEqualTo("a=1");
+		assertThat(service.cookieStatus("douyin"))
+				.containsEntry("cooling", 0)
+				.containsEntry("detailCooling", 1);
+
 		service.reportRisk("douyin", "a=1", "verify");
-		assertThat(service.douyinGlobalCooldownRemainingMillis()).isGreaterThan(9 * 60 * 1000L);
+		assertThat(service.isDouyinGlobalRiskCooldownActive()).isTrue();
+		assertThat(service.douyinGlobalRiskCooldownRemainingMillis()).isGreaterThan(9 * 60 * 1000L);
+		assertThat(service.selectCookie("douyin", "round_robin", "a=1", "fallback", "collect_worker"))
+				.isEmpty();
 	}
 
 	@Test

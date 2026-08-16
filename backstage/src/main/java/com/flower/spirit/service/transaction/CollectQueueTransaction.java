@@ -150,9 +150,23 @@ public class CollectQueueTransaction {
 		appendEvent(runId, "INFO", "PROCESSING", "STATE_TRANSITION", "FETCHING -> PROCESSING", null, now);
 		for (CollectRunFetchedItem item : items) {
 			boolean queued = "QUEUED".equals(item.processState());
-			boolean activeElsewhere = queued && hasActiveDownload(runId, item.platformKey(), item.workId());
-			String decision = activeElsewhere ? "EXISTING_ACTIVE_DOWNLOAD" : valueOr(item.decision(), "EXISTING");
-			String processState = activeElsewhere ? "SKIPPED_EXISTING_ACTIVE_DOWNLOAD"
+			boolean activeElsewhere = hasActiveDownload(runId, item.platformKey(), item.workId());
+			int hydrated = activeElsewhere && blankToNull(item.metadataSnapshot()) != null
+					? hydrateActiveDownloads(runId, item, timestamp) : 0;
+			if (hydrated > 0) {
+				appendEvent(runId, "INFO", "PROCESSING", "LIST_SNAPSHOT_HYDRATED",
+						"workId=" + item.workId() + ", activeItems=" + hydrated, item.workId(), now);
+			}
+			if (activeElsewhere && (isBlocked(item) || blankToNull(item.metadataSnapshot()) == null)) {
+				int blocked = blockPendingDownloads(runId, item, timestamp);
+				if (blocked > 0) {
+					appendEvent(runId, "INFO", "PROCESSING", "LIST_SNAPSHOT_BLOCKED",
+							"workId=" + item.workId() + ", activeItems=" + blocked, item.workId(), now);
+				}
+			}
+			boolean skipActive = activeElsewhere && (queued || hydrated > 0);
+			String decision = skipActive ? "EXISTING_ACTIVE_DOWNLOAD" : valueOr(item.decision(), "EXISTING");
+			String processState = skipActive ? "SKIPPED_EXISTING_ACTIVE_DOWNLOAD"
 					: valueOr(item.processState(), "SKIPPED_EXISTING");
 			boolean claimable = "QUEUED".equals(processState);
 			jdbcTemplate.update("INSERT INTO biz_collect_run_item "
@@ -188,12 +202,18 @@ public class CollectQueueTransaction {
 					backfillProgress.complete() ? 1 : 0, blankToNull(backfillProgress.sourceId()),
 					backfillProgress.verifying() ? 1 : 0, backfillProgress.cleanPasses(),
 					backfillProgress.verifiedAt() == null ? null : Timestamp.from(backfillProgress.verifiedAt()), taskId);
+			if (backfillProgress.complete()) {
+				finalizeMissingSnapshotDownloads(runId, taskId,
+						"Remote work was not present after a complete author-list verification", timestamp, now);
+			}
 		}
 		String remoteAccountState = remoteAccountState(stopReason);
 		if (remoteAccountState != null) {
 			jdbcTemplate.update("UPDATE biz_collect_data SET taskenabled = 'N', taskstatus = ?, "
 					+ "remote_account_state = ?, remote_account_reason = ?, remote_account_detected_at = ? WHERE id = ?",
 					accountTaskStatus(stopReason), remoteAccountState, stopReason, timestamp, taskId);
+			finalizeMissingSnapshotDownloads(runId, taskId,
+					"Remote account is unavailable: " + stopReason, timestamp, now);
 		}
 		jdbcTemplate.update("UPDATE biz_collect_run SET fetched_count = ?, fetch_stop_reason = ?, fetch_warning = ?, "
 				+ "heartbeat_at = ? WHERE id = ? AND state = 'PROCESSING'", observedCount, stopReason,
@@ -472,6 +492,57 @@ public class CollectQueueTransaction {
 				+ "AND process_state IN ('QUEUED','RUNNING','RETRY_WAIT')", Integer.class,
 				runId, platformKey, workId);
 		return count != null && count > 0;
+	}
+
+	private int hydrateActiveDownloads(long runId, CollectRunFetchedItem item, Timestamp timestamp) {
+		int running = jdbcTemplate.update("UPDATE biz_collect_run_item SET metadata_snapshot = ?, updated_at = ? "
+				+ "WHERE run_id <> ? AND platform_key = ? AND work_id = ? "
+				+ "AND queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND process_state = 'RUNNING' "
+				+ "AND (metadata_snapshot IS NULL OR TRIM(metadata_snapshot) = '')",
+				item.metadataSnapshot(), timestamp, runId, item.platformKey(), item.workId());
+		int waiting = jdbcTemplate.update("UPDATE biz_collect_run_item SET metadata_snapshot = ?, "
+				+ "process_state = 'QUEUED', attempt_count = 0, available_at = ?, locked_by = NULL, locked_at = NULL, "
+				+ "finished_at = NULL, error_code = NULL, error_message = NULL, error_detail = NULL, updated_at = ? "
+				+ "WHERE run_id <> ? AND platform_key = ? AND work_id = ? "
+				+ "AND queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND process_state IN ('QUEUED','RETRY_WAIT') "
+				+ "AND (metadata_snapshot IS NULL OR TRIM(metadata_snapshot) = '')",
+				item.metadataSnapshot(), timestamp, timestamp, runId, item.platformKey(), item.workId());
+		return running + waiting;
+	}
+
+	private int blockPendingDownloads(long runId, CollectRunFetchedItem item, Timestamp timestamp) {
+		return jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'SKIPPED_BLOCKED', "
+				+ "available_at = NULL, locked_by = NULL, locked_at = NULL, finished_at = ?, "
+				+ "error_code = 'WORK_BLOCKED', error_message = 'Remote author list marked the work unavailable', "
+				+ "error_detail = NULL, metadata_snapshot = NULL, updated_at = ? "
+				+ "WHERE run_id <> ? AND platform_key = ? AND work_id = ? "
+				+ "AND queue_generation = 'FETCH_DOWNLOAD_V1' AND process_state IN ('QUEUED','RETRY_WAIT') "
+				+ "AND error_code = ?", timestamp, timestamp, runId, item.platformKey(), item.workId(),
+				CollectDownloadTransaction.SNAPSHOT_PENDING);
+	}
+
+	private int finalizeMissingSnapshotDownloads(long runId, int taskId, String reason, Timestamp timestamp,
+			Instant now) {
+		int updated = jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'SKIPPED_REMOTE_MISSING', "
+				+ "available_at = NULL, locked_by = NULL, locked_at = NULL, finished_at = ?, "
+				+ "error_code = 'REMOTE_LIST_MISSING', error_message = ?, error_detail = NULL, "
+				+ "metadata_snapshot = NULL, updated_at = ? WHERE queue_generation = 'FETCH_DOWNLOAD_V1' "
+				+ "AND process_state IN ('QUEUED','RETRY_WAIT') AND error_code = ? "
+				+ "AND (metadata_snapshot IS NULL OR TRIM(metadata_snapshot) = '') AND run_id IN "
+				+ "(SELECT id FROM biz_collect_run WHERE collect_task_id = ?)", timestamp, truncate(reason, 2048),
+				timestamp, CollectDownloadTransaction.SNAPSHOT_PENDING, taskId);
+		if (updated > 0) {
+			appendEvent(runId, "INFO", "PROCESSING", "SKIPPED_REMOTE_MISSING",
+					"taskId=" + taskId + ", activeItems=" + updated + ", reason=" + reason, null, now);
+		}
+		return updated;
+	}
+
+	private boolean isBlocked(CollectRunFetchedItem item) {
+		return "BLOCKED".equalsIgnoreCase(valueOr(item.decision(), ""))
+				|| "SKIPPED_BLOCKED".equalsIgnoreCase(valueOr(item.processState(), ""));
 	}
 
 	private String warningFor(String stopReason) {

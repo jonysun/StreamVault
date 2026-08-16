@@ -242,7 +242,7 @@ class CollectJobWorkerTest {
 	}
 
 	@Test
-	void softBlockRetryUsesGlobalCooldown() {
+	void authorListSoftBlockUsesJobOnlyBackoffWithoutGlobalCooldown() {
 		CollectRunService runService = mock(CollectRunService.class);
 		CollectDataService dataService = mock(CollectDataService.class);
 		PlatformCookieService cookieService = mock(PlatformCookieService.class);
@@ -250,9 +250,8 @@ class CollectJobWorkerTest {
 				CollectTriggerType.RETRY, 1, 3);
 		when(dataService.isCollectTaskEnabled(10)).thenReturn(true);
 		when(runService.currentState(4999L)).thenReturn(CollectRunState.FETCHING);
-		when(cookieService.douyinGlobalCooldownRemainingMillis()).thenReturn(600_000L);
 		when(runService.retryOrFail(claim, "F2_UPSTREAM_SOFT_BLOCK",
-				"Douyin author-work endpoint repeatedly returned an empty HTTP response", 605L))
+				"Douyin author-work endpoint repeatedly returned an empty HTTP response", 300L))
 				.thenReturn(new CollectEnqueueResult(5000L, 3252L, CollectRunState.QUEUED, true, false));
 		org.mockito.Mockito.doThrow(new CollectFetchException("F2_UPSTREAM_SOFT_BLOCK",
 				"Douyin author-work endpoint repeatedly returned an empty HTTP response"))
@@ -263,8 +262,8 @@ class CollectJobWorkerTest {
 		try {
 			ReflectionTestUtils.invokeMethod(worker, "process", claim);
 			verify(runService).retryOrFail(claim, "F2_UPSTREAM_SOFT_BLOCK",
-					"Douyin author-work endpoint repeatedly returned an empty HTTP response", 605L);
-			verify(cookieService).douyinGlobalCooldownRemainingMillis();
+					"Douyin author-work endpoint repeatedly returned an empty HTTP response", 300L);
+			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
 			verify(runService, never()).failJob(any(), anyString(), anyString());
 		} finally {
 			worker.shutdown();

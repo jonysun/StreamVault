@@ -42,6 +42,10 @@ public class CollectEnqueueService {
 		return enqueue(taskId, CollectTriggerType.AUDIT, Instant.now(), 10);
 	}
 
+	public CollectEnqueueResult enqueueSnapshotRefresh(int taskId) {
+		return enqueue(taskId, CollectTriggerType.SCHEDULED, Instant.now(), 20);
+	}
+
 	private CollectEnqueueResult enqueue(int taskId, CollectTriggerType triggerType, Instant availableAt,
 			int priority) {
 		CollectDataEntity task = collectdDataDao.findById(taskId)

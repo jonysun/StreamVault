@@ -2,6 +2,7 @@ package com.flower.spirit.service;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.function.Function;
@@ -29,12 +30,15 @@ public class CollectDownloadService {
 	private final WorkIngestService workIngestService;
 	private final CollectDownloadTransaction transaction;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
+	private final CollectEnqueueService collectEnqueueService;
+	private static final Duration SNAPSHOT_REFRESH_WAIT = Duration.ofMinutes(15);
 
 	public CollectDownloadService(WorkIngestService workIngestService, CollectDownloadTransaction transaction,
-			DatabaseWriteExecutor databaseWriteExecutor) {
+			DatabaseWriteExecutor databaseWriteExecutor, CollectEnqueueService collectEnqueueService) {
 		this.workIngestService = workIngestService;
 		this.transaction = transaction;
 		this.databaseWriteExecutor = databaseWriteExecutor;
+		this.collectEnqueueService = collectEnqueueService;
 	}
 
 	public void process(CollectDownloadClaim claim) {
@@ -48,12 +52,14 @@ public class CollectDownloadService {
 		IngestResult result;
 		try {
 			validateClaim(claim);
+			if (claim.metadataSnapshot() == null || claim.metadataSnapshot().isBlank()) {
+				deferForSnapshotRefresh(claim, now);
+				return;
+			}
 			String source = "https://www.douyin.com/video/" + claim.workId();
 			Function<WorkMetadata, Path> directory = metadata -> outputDirectory(claim, metadata);
-			result = claim.metadataSnapshot() == null || claim.metadataSnapshot().isBlank()
-					? workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null)
-					: workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null,
-							claim.metadataSnapshot());
+			result = workIngestService.ingest(source, directory, shouldReplaceExisting(claim), null,
+					claim.metadataSnapshot());
 			validateResult(claim, result);
 		} catch (DouyinGlobalCooldownException cooldown) {
 			if (cooldown.actualUpstreamFailure()) {
@@ -86,6 +92,22 @@ public class CollectDownloadService {
 		}
 	}
 
+	private void deferForSnapshotRefresh(CollectDownloadClaim claim, Instant now) {
+		Instant availableAt = now.plus(SNAPSHOT_REFRESH_WAIT);
+		int pending = databaseWriteExecutor.execute("collect-download-list-snapshot-pending",
+				() -> transaction.deferForSnapshotRefresh(claim, availableAt, now));
+		try {
+			CollectEnqueueResult refresh = collectEnqueueService.enqueueSnapshotRefresh(claim.taskId());
+			logger.warn("[CollectDownload] event=LIST_SNAPSHOT_PENDING itemId={} runId={} taskId={} workId={} "
+					+ "pending={} availableAt={} refreshRunId={} refreshInserted={}", claim.id(), claim.runId(),
+					claim.taskId(), claim.workId(), pending, availableAt, refresh.runId(), refresh.inserted());
+		} catch (RuntimeException error) {
+			logger.error("[CollectDownload] event=LIST_SNAPSHOT_REFRESH_QUEUE_FAILED itemId={} runId={} "
+					+ "taskId={} workId={} pending={} availableAt={}", claim.id(), claim.runId(), claim.taskId(),
+					claim.workId(), pending, availableAt, error);
+		}
+	}
+
 	private void deferForCooldown(CollectDownloadClaim claim, DouyinGlobalCooldownException cooldown, Instant now) {
 		databaseWriteExecutor.execute("collect-download-douyin-cooldown", () -> {
 			transaction.deferForCooldown(claim, cooldown.retryAt(), cooldown.getMessage(), now);
@@ -102,6 +124,13 @@ public class CollectDownloadService {
 
 	private void recordFailure(CollectDownloadClaim claim, CollectDownloadException classified,
 			RuntimeException error, Instant now) {
+		boolean hydrated = databaseWriteExecutor.execute("collect-download-snapshot-race-retry",
+				() -> transaction.retryAfterSnapshotHydration(claim, now));
+		if (hydrated) {
+			logger.info("[CollectDownload] event=LIST_SNAPSHOT_HYDRATED_AFTER_CLAIM itemId={} runId={} "
+					+ "taskId={} workId={}", claim.id(), claim.runId(), claim.taskId(), claim.workId());
+			return;
+		}
 		String operation = "collect-download-" + classified.errorCode().toLowerCase(Locale.ROOT);
 		String detail = stackSummary(error);
 		databaseWriteExecutor.execute(operation, () -> {

@@ -22,6 +22,7 @@ public class CollectDownloadTransaction {
 	public static final String QUEUE_GENERATION = "FETCH_DOWNLOAD_V1";
 	private static final List<Duration> RETRY_DELAYS = List.of(
 			Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofMinutes(30));
+	public static final String SNAPSHOT_PENDING = "LIST_SNAPSHOT_PENDING";
 
 	private final JdbcTemplate jdbcTemplate;
 
@@ -43,6 +44,7 @@ public class CollectDownloadTransaction {
 						+ "AND i.attempt_count < i.max_attempts "
 						+ "AND (i.available_at IS NULL OR i.available_at <= ?) "
 						+ "ORDER BY CASE WHEN i.decision LIKE 'MANUAL_RETRY%' THEN 0 ELSE 1 END, "
+						+ "CASE WHEN i.metadata_snapshot IS NOT NULL AND TRIM(i.metadata_snapshot) <> '' THEN 0 ELSE 1 END, "
 						+ "i.ordinal ASC, i.available_at ASC, i.created_at ASC, i.id ASC LIMIT 1",
 				(rs, rowNum) -> new DownloadCandidate(rs.getLong("id"), rs.getLong("run_id"),
 						rs.getInt("collect_task_id"), rs.getString("taskname"), rs.getString("platform_key"),
@@ -140,6 +142,49 @@ public class CollectDownloadTransaction {
 				Timestamp.from(availableAt), truncate(reason, 2048), timestamp, claim.id(), QUEUE_GENERATION,
 				claim.lockToken());
 		requireTransition(updated, claim.id(), "RETRY_WAIT");
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int deferForSnapshotRefresh(CollectDownloadClaim claim, Instant availableAt, Instant now) {
+		Timestamp timestamp = Timestamp.from(now);
+		Timestamp retryAt = Timestamp.from(availableAt);
+		int updated = jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'RETRY_WAIT', "
+				+ "attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END, "
+				+ "available_at = ?, locked_by = NULL, locked_at = NULL, finished_at = NULL, "
+				+ "error_code = ?, error_message = 'Waiting for a refreshed author-list snapshot', "
+				+ "error_detail = NULL, updated_at = ? "
+				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'RUNNING' AND locked_by = ?",
+				retryAt, SNAPSHOT_PENDING, timestamp, claim.id(), QUEUE_GENERATION, claim.lockToken());
+		requireTransition(updated, claim.id(), "RETRY_WAIT");
+		jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'RETRY_WAIT', available_at = ?, "
+				+ "error_code = ?, error_message = 'Waiting for a refreshed author-list snapshot', "
+				+ "error_detail = NULL, updated_at = ? "
+				+ "WHERE queue_generation = ? AND (metadata_snapshot IS NULL OR TRIM(metadata_snapshot) = '') "
+				+ "AND process_state IN ('QUEUED','RETRY_WAIT') AND run_id IN "
+				+ "(SELECT id FROM biz_collect_run WHERE collect_task_id = ?)",
+				retryAt, SNAPSHOT_PENDING, timestamp, QUEUE_GENERATION, claim.taskId());
+		jdbcTemplate.update("UPDATE biz_collect_data SET backfill_cursor = '0', backfill_complete = 0, "
+				+ "backfill_verifying = 1, backfill_clean_passes = 0, backfill_verified_at = NULL WHERE id = ?",
+				claim.taskId());
+		Integer pending = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item "
+				+ "WHERE queue_generation = ? AND (metadata_snapshot IS NULL OR TRIM(metadata_snapshot) = '') "
+				+ "AND error_code = ? "
+				+ "AND process_state IN ('QUEUED','RETRY_WAIT','RUNNING') AND run_id IN "
+				+ "(SELECT id FROM biz_collect_run WHERE collect_task_id = ?)", Integer.class,
+				QUEUE_GENERATION, SNAPSHOT_PENDING, claim.taskId());
+		return pending == null ? 0 : pending;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public boolean retryAfterSnapshotHydration(CollectDownloadClaim claim, Instant now) {
+		if (claim.metadataSnapshot() != null && !claim.metadataSnapshot().isBlank()) return false;
+		Timestamp timestamp = Timestamp.from(now);
+		return jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state = 'QUEUED', attempt_count = 0, "
+				+ "available_at = ?, locked_by = NULL, locked_at = NULL, finished_at = NULL, "
+				+ "error_code = NULL, error_message = NULL, error_detail = NULL, updated_at = ? "
+				+ "WHERE id = ? AND queue_generation = ? AND process_state = 'RUNNING' AND locked_by = ? "
+				+ "AND metadata_snapshot IS NOT NULL AND TRIM(metadata_snapshot) <> ''",
+				timestamp, timestamp, claim.id(), QUEUE_GENERATION, claim.lockToken()) == 1;
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)

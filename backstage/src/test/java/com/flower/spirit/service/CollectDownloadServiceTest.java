@@ -45,6 +45,7 @@ class CollectDownloadServiceTest {
 	@Mock private WorkIngestService ingestService;
 	@Mock private CollectDownloadTransaction transaction;
 	@Mock private DatabaseWriteExecutor databaseWriteExecutor;
+	@Mock private CollectEnqueueService collectEnqueueService;
 
 	private CollectDownloadService service;
 	private CollectDownloadClaim claim;
@@ -54,14 +55,31 @@ class CollectDownloadServiceTest {
 		org.mockito.Mockito.lenient().when(databaseWriteExecutor.execute(anyString(),
 				org.mockito.ArgumentMatchers.<Supplier<Object>>any()))
 				.thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
-		service = new CollectDownloadService(ingestService, transaction, databaseWriteExecutor);
+		service = new CollectDownloadService(ingestService, transaction, databaseWriteExecutor, collectEnqueueService);
 		claim = claim("work-a");
+	}
+
+	@Test
+	void legacyClaimWithoutSnapshotWaitsForDeduplicatedListRefreshWithoutCallingF2() {
+		CollectDownloadClaim legacy = new CollectDownloadClaim(9, 12, 7, "收藏作者", "douyin", "legacy-work",
+				"video", "NEW", 3, 2, 4, "worker:legacy");
+		when(transaction.deferForSnapshotRefresh(eq(legacy), eq(NOW.plusSeconds(900)), eq(NOW))).thenReturn(6);
+		when(collectEnqueueService.enqueueSnapshotRefresh(7))
+				.thenReturn(new CollectEnqueueResult(90, 91L, CollectRunState.QUEUED, true, false));
+
+		service.process(legacy, NOW);
+
+		verify(transaction).deferForSnapshotRefresh(legacy, NOW.plusSeconds(900), NOW);
+		verify(collectEnqueueService).enqueueSnapshotRefresh(7);
+		verify(ingestService, never()).ingest(anyString(), anyDirectory(), eq(false), isNull());
+		verify(ingestService, never()).ingest(anyString(), anyDirectory(), eq(false), isNull(), anyString());
 	}
 
 	@Test
 	void completedWorkUsesCanonicalSourceAndCompletesOnlyItsClaim() {
 		IngestResult result = completed(true);
-		when(ingestService.ingest(eq("https://www.douyin.com/video/work-a"), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(eq("https://www.douyin.com/video/work-a"), anyDirectory(), eq(false), isNull(),
+				eq(claim.metadataSnapshot())))
 				.thenReturn(result);
 
 		service.process(claim, NOW);
@@ -73,12 +91,14 @@ class CollectDownloadServiceTest {
 
 	@Test
 	void eachWorkGetsAStableSeparateOutputDirectory() {
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull())).thenReturn(completed(true));
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
+				.thenReturn(completed(true));
 		ArgumentCaptor<Function<WorkMetadata, Path>> directory = directoryCaptor();
 
 		service.process(claim, NOW);
 
-		verify(ingestService).ingest(anyString(), directory.capture(), eq(false), isNull());
+		verify(ingestService).ingest(anyString(), directory.capture(), eq(false), isNull(),
+				eq(claim.metadataSnapshot()));
 		String normalized = directory.getValue().apply(metadata()).toString().replace('\\', '/');
 		assertThat(normalized).contains("work-a");
 	}
@@ -87,7 +107,8 @@ class CollectDownloadServiceTest {
 	void queuedIngestIsRetriedInsteadOfBeingMarkedSuccessful() {
 		IngestResult queued = new IngestResult(DownloadResult.Status.QUEUED, null, metadata(), null,
 				"aria2 accepted", Path.of("staging"));
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull())).thenReturn(queued);
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
+				.thenReturn(queued);
 
 		service.process(claim, NOW);
 
@@ -98,7 +119,7 @@ class CollectDownloadServiceTest {
 
 	@Test
 	void oneNetworkFailureSchedulesOnlyThatItemForRetry() {
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
 				.thenThrow(new WorkMetadataValidationException(
 						"Douyin download failed", new IOException("unexpected end of stream")));
 
@@ -128,7 +149,7 @@ class CollectDownloadServiceTest {
 	@Test
 	void cooldownDuringIngestDefersWithoutConsumingRetryBudget() {
 		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
 				.thenThrow(new DouyinGlobalCooldownException("Douyin global cooldown is active", retryAt));
 
 		service.process(claim, NOW);
@@ -143,7 +164,7 @@ class CollectDownloadServiceTest {
 		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
 		var f2 = new DouyinWorkFetchException("F2_UPSTREAM_SOFT_BLOCK", "empty detail response",
 				"REMOTE_API", true, false, 200, "APIRetryExhaustedError");
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
 				.thenThrow(new DouyinGlobalCooldownException("empty detail response", retryAt, true, f2));
 
 		service.process(claim, NOW);
@@ -157,7 +178,7 @@ class CollectDownloadServiceTest {
 	void unavailableRemoteWorkStopsAutomaticRetryWithoutChangingOtherItems() {
 		var cause = new DouyinWorkFetchException("F2_WORK_UNAVAILABLE", "Douyin work is no longer available",
 				"REMOTE_API", false, false, 404, "HTTPStatusError");
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
 				.thenThrow(new WorkMetadataValidationException("Douyin parsing failed", cause));
 
 		service.process(claim, NOW);
@@ -171,7 +192,7 @@ class CollectDownloadServiceTest {
 	void temporaryRemoteResponseUsesTypedRetryCodeInsteadOfNetworkIo() {
 		var cause = new DouyinWorkFetchException("F2_UPSTREAM_RESPONSE_ERROR", "Douyin response was invalid",
 				"REMOTE_API", true, false, null, "APIResponseError");
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
 				.thenThrow(new WorkMetadataValidationException("Douyin parsing failed", cause));
 
 		service.process(claim, NOW);
@@ -182,7 +203,7 @@ class CollectDownloadServiceTest {
 
 	@Test
 	void permanentSchemaValidationFailsOnlyTheClaimedItem() {
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
 				.thenThrow(new WorkMetadataValidationException("formal platform work ID is required"));
 
 		service.process(claim, NOW);
@@ -194,7 +215,7 @@ class CollectDownloadServiceTest {
 
 	@Test
 	void blockedWorkIsSkippedWithoutConsumingRetryBudget() {
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull()))
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
 				.thenThrow(new WorkMetadataValidationException("work is blocked: douyin/work-a"));
 
 		service.process(claim, NOW);
@@ -218,7 +239,8 @@ class CollectDownloadServiceTest {
 	@Test
 	void databaseCompletionFailureRetriesTheClaimWithDatabaseCode() {
 		IngestResult result = completed(true);
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull())).thenReturn(result);
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
+				.thenReturn(result);
 		org.mockito.Mockito.doThrow(new TransientDataAccessResourceException("database is locked"))
 				.when(transaction).complete(claim, result, NOW);
 
@@ -239,22 +261,25 @@ class CollectDownloadServiceTest {
 	@Test
 	void auditRepairForcesExistingWorkThroughReplacementIngest() {
 		CollectDownloadClaim audit = new CollectDownloadClaim(3, 10, 7, "收藏作者", "douyin", "work-a",
-				"video", "AUDIT_REPAIR", 1, 1, 4, "worker:audit");
+				"video", "AUDIT_REPAIR", 1, 1, 4, "worker:audit", claim.metadataSnapshot());
 		IngestResult result = completed(false);
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(true), isNull())).thenReturn(result);
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(true), isNull(), eq(claim.metadataSnapshot())))
+				.thenReturn(result);
 
 		service.process(audit, NOW);
 
-		verify(ingestService).ingest(eq("https://www.douyin.com/video/work-a"), anyDirectory(), eq(true), isNull());
+		verify(ingestService).ingest(eq("https://www.douyin.com/video/work-a"), anyDirectory(), eq(true), isNull(),
+				eq(claim.metadataSnapshot()));
 		verify(transaction).complete(audit, result, NOW);
 	}
 
 	@Test
 	void manuallyRetriedAuditStillForcesReplacementIngest() {
 		CollectDownloadClaim audit = new CollectDownloadClaim(3, 10, 7, "收藏作者", "douyin", "work-a",
-				"video", "MANUAL_RETRY_AUDIT_REPAIR", 1, 1, 4, "worker:audit");
+				"video", "MANUAL_RETRY_AUDIT_REPAIR", 1, 1, 4, "worker:audit", claim.metadataSnapshot());
 		IngestResult result = completed(false);
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(true), isNull())).thenReturn(result);
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(true), isNull(), eq(claim.metadataSnapshot())))
+				.thenReturn(result);
 
 		service.process(audit, NOW);
 
@@ -264,7 +289,8 @@ class CollectDownloadServiceTest {
 	@Test
 	void staleCompletionDoesNotConsumeAnotherDownloadAttempt() {
 		IngestResult result = completed(true);
-		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull())).thenReturn(result);
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
+				.thenReturn(result);
 		org.mockito.Mockito.doThrow(new IllegalStateException(
 				"Collection download item 1 was not RUNNING during transition to COMPLETED"))
 				.when(transaction).complete(claim, result, NOW);
@@ -277,7 +303,7 @@ class CollectDownloadServiceTest {
 
 	private CollectDownloadClaim claim(String workId) {
 		return new CollectDownloadClaim(1, 10, 7, "收藏作者", "douyin", workId, "video", "NEW", 1, 1, 4,
-				"worker:lease");
+				"worker:lease", "{\"aweme_detail\":{\"aweme_id\":\"" + workId + "\"}}");
 	}
 
 	private IngestResult completed(boolean created) {

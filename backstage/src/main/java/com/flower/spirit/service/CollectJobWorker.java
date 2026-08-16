@@ -30,6 +30,7 @@ import com.flower.spirit.utils.SqliteErrors;
 public class CollectJobWorker {
 
 	private static final Logger logger = LoggerFactory.getLogger(CollectJobWorker.class);
+	private static final long AUTHOR_LIST_SOFT_BLOCK_RETRY_SECONDS = 300;
 
 	private final CollectQueueTransaction transaction;
 	private final CollectRunService collectRunService;
@@ -293,8 +294,10 @@ public class CollectJobWorker {
 	private long retryDelaySeconds(Throwable error) {
 		if (error instanceof CollectFetchException fetchError) {
 			String errorCode = fetchError.getErrorCode();
+			if ("F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)) {
+				return AUTHOR_LIST_SOFT_BLOCK_RETRY_SECONDS;
+			}
 			if ("F2_UPSTREAM_RATE_LIMIT".equals(errorCode)
-					|| "F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)
 					|| "F2_COOKIE_OR_VERIFY_REQUIRED".equals(errorCode)) {
 				return cooldownRetryDelaySeconds(platformCookieService.douyinGlobalCooldownRemainingMillis());
 			}

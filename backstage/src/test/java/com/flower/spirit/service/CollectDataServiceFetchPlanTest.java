@@ -103,6 +103,29 @@ class CollectDataServiceFetchPlanTest {
 	}
 
 	@Test
+	void incrementalPlanKeepsKnownSnapshotPendingWorkForLegacyQueueHydration() {
+		CollectDataEntity task = postTask(new java.util.Date());
+		when(taskDao.findById(7)).thenReturn(Optional.of(task));
+		when(queryService.findKnownWorkIds(7)).thenReturn(Set.of("known-pending"));
+		when(queryService.findSnapshotPendingWorkIds(7)).thenReturn(Set.of("known-pending"));
+		when(fetchService.fetch(any())).thenReturn(envelope(
+				List.of(work("known-pending", "100", "video")), Set.of(), "KNOWN_BOUNDARY"));
+
+		service.executeQueuedCollectTask(7, 901L, CollectTriggerType.SCHEDULED);
+
+		ArgumentCaptor<List<CollectRunFetchedItem>> items = listCaptor();
+		verify(runService).storeFetchPlan(org.mockito.ArgumentMatchers.eq(901L),
+				org.mockito.ArgumentMatchers.eq(7), items.capture(), org.mockito.ArgumentMatchers.eq(1),
+				org.mockito.ArgumentMatchers.eq("KNOWN_BOUNDARY"), any(), any());
+		assertThat(items.getValue()).singleElement().satisfies(item -> {
+			assertThat(item.workId()).isEqualTo("known-pending");
+			assertThat(item.decision()).isEqualTo("EXISTING");
+			assertThat(item.processState()).isEqualTo("SKIPPED_EXISTING");
+			assertThat(item.metadataSnapshot()).contains("\"aweme_id\":\"known-pending\"");
+		});
+	}
+
+	@Test
 	void postFetchModeUsesInitialAndAuditInputs() {
 		CollectDataEntity task = postTask(null);
 		task.setOmaxcur(35);

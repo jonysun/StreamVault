@@ -159,7 +159,7 @@ class CollectQueueTransactionTest {
 	}
 
 	@Test
-	void activeDownloadCandidateIsStoredAsSkippedWithoutGeneration() throws Exception {
+	void activeLegacyDownloadIsHydratedAndCurrentObservationIsStoredAsSkipped() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
 			createSchema(jdbc);
@@ -172,14 +172,23 @@ class CollectQueueTransactionTest {
 			jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
 					+ "VALUES(99, 7, 'SCHEDULED', 'COMPLETED', ?)", java.sql.Timestamp.from(now));
 			jdbc.update("INSERT INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, decision, process_state, "
-					+ "queue_generation, attempt_count, max_attempts, created_at, updated_at) "
-					+ "VALUES(99, 1, 'douyin', 'same-work', 'NEW', 'RUNNING', 'FETCH_DOWNLOAD_V1', 0, 4, ?, ?)",
+					+ "queue_generation, attempt_count, max_attempts, error_code, created_at, updated_at) "
+					+ "VALUES(99, 1, 'douyin', 'same-work', 'NEW', 'RETRY_WAIT', 'FETCH_DOWNLOAD_V1', 3, 4, "
+					+ "'LIST_SNAPSHOT_PENDING', ?, ?)",
 					java.sql.Timestamp.from(now), java.sql.Timestamp.from(now));
 
 			transaction.storeFetchPlan(queued.runId(), 7, List.of(new CollectRunFetchedItem(1, "douyin", "same-work",
-					"author", "name", "title", "100", "video", "NEW", "QUEUED")), "NO_MORE",
+					"author", "name", "title", "100", "video", "EXISTING", "SKIPPED_EXISTING",
+					"{\"aweme_detail\":{\"aweme_id\":\"same-work\"}}")), "NO_MORE",
 					new CollectRunFetchedItem.FetchWatermark("100", "same-work", 1, 0, "0"), now.plusSeconds(3));
 
+			assertThat(jdbc.queryForMap("SELECT process_state, attempt_count, error_code, metadata_snapshot "
+					+ "FROM biz_collect_run_item WHERE run_id=99"))
+					.containsEntry("process_state", "QUEUED")
+					.containsEntry("attempt_count", 0)
+					.containsEntry("error_code", null);
+			assertThat(jdbc.queryForObject("SELECT metadata_snapshot FROM biz_collect_run_item WHERE run_id=99",
+					String.class)).contains("\"aweme_id\":\"same-work\"");
 			assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE run_id = ?",
 					String.class, queued.runId())).isEqualTo("SKIPPED_EXISTING_ACTIVE_DOWNLOAD");
 			assertThat(jdbc.queryForObject("SELECT queue_generation FROM biz_collect_run_item WHERE run_id = ?",
@@ -275,6 +284,111 @@ class CollectQueueTransactionTest {
 	}
 
 	@Test
+	void runningLegacyDownloadHydrationPreservesLeaseAndProcessingState() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-16T08:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout) VALUES(7, 'done', '9', '8')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("fetch-worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+			jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
+					+ "VALUES(99, 7, 'SCHEDULED', 'COMPLETED', ?)", java.sql.Timestamp.from(now));
+			jdbc.update("INSERT INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, decision, "
+					+ "process_state, queue_generation, error_code, attempt_count, max_attempts, locked_by, locked_at, "
+					+ "created_at, updated_at) VALUES(99, 1, 'douyin', 'running-work', 'NEW', 'RUNNING', "
+					+ "'FETCH_DOWNLOAD_V1', 'OLD_ERROR', 2, 4, 'download-lease', ?, ?, ?)",
+					java.sql.Timestamp.from(now.plusSeconds(1)), java.sql.Timestamp.from(now),
+					java.sql.Timestamp.from(now));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(new CollectRunFetchedItem(1, "douyin",
+					"running-work", "author", "name", "title", "100", "video", "EXISTING", "SKIPPED_EXISTING",
+					"{\"aweme_detail\":{\"aweme_id\":\"running-work\"}}")), 1, "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark("100", "running-work", 1, 0, "0"), null,
+					now.plusSeconds(3));
+
+			assertThat(jdbc.queryForMap("SELECT process_state, attempt_count, error_code, locked_by, "
+					+ "metadata_snapshot FROM biz_collect_run_item WHERE run_id=99"))
+					.containsEntry("process_state", "RUNNING")
+					.containsEntry("attempt_count", 2)
+					.containsEntry("error_code", "OLD_ERROR")
+					.containsEntry("locked_by", "download-lease");
+			assertThat(jdbc.queryForObject("SELECT metadata_snapshot FROM biz_collect_run_item WHERE run_id=99",
+					String.class)).contains("\"aweme_id\":\"running-work\"");
+		}
+	}
+
+	@Test
+	void completeVerificationFinalizesOnlyPendingSnapshotItems() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-16T06:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout) VALUES(7, 'done', '9', '8')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+			jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
+					+ "VALUES(99, 7, 'SCHEDULED', 'COMPLETED', ?)", java.sql.Timestamp.from(now));
+			jdbc.update("INSERT INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, decision, "
+					+ "process_state, queue_generation, error_code, attempt_count, max_attempts, created_at, updated_at) "
+					+ "VALUES(99, 1, 'douyin', 'missing-work', 'NEW', 'RETRY_WAIT', 'FETCH_DOWNLOAD_V1', "
+					+ "'LIST_SNAPSHOT_PENDING', 0, 4, ?, ?)", java.sql.Timestamp.from(now),
+					java.sql.Timestamp.from(now));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(), 0, "NO_MORE",
+					new CollectRunFetchedItem.FetchWatermark(null, null, 2, 0, "0"),
+					new CollectBackfillProgress("author", "0", true, false, 2, now.plusSeconds(3)),
+					now.plusSeconds(3));
+
+			assertThat(jdbc.queryForMap("SELECT process_state, error_code, finished_at FROM "
+					+ "biz_collect_run_item WHERE run_id=99"))
+					.containsEntry("process_state", "SKIPPED_REMOTE_MISSING")
+					.containsEntry("error_code", "REMOTE_LIST_MISSING");
+			assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_run_event WHERE run_id=? "
+					+ "AND event_code='SKIPPED_REMOTE_MISSING'", Integer.class, queued.runId())).isEqualTo(1);
+		}
+	}
+
+	@Test
+	void listedWorkWithoutDownloadSnapshotFinalizesMatchingSnapshotPendingItemAsBlocked() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-08-16T07:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus, count, carriedout) VALUES(7, 'done', '9', '8')");
+			CollectEnqueueResult queued = transaction.enqueue(7, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+			jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
+					+ "VALUES(99, 7, 'SCHEDULED', 'COMPLETED', ?)", java.sql.Timestamp.from(now));
+			jdbc.update("INSERT INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, decision, "
+					+ "process_state, queue_generation, error_code, attempt_count, max_attempts, created_at, updated_at) "
+					+ "VALUES(99, 1, 'douyin', 'blocked-work', 'NEW', 'RETRY_WAIT', 'FETCH_DOWNLOAD_V1', "
+					+ "'LIST_SNAPSHOT_PENDING', 0, 4, ?, ?)", java.sql.Timestamp.from(now),
+					java.sql.Timestamp.from(now));
+
+			transaction.storeFetchPlan(queued.runId(), 7, List.of(new CollectRunFetchedItem(1, "douyin",
+					"blocked-work", "author", "name", "title", "100", "video", "EXISTING", "SKIPPED_EXISTING")),
+					1, "NO_MORE", new CollectRunFetchedItem.FetchWatermark("100", "blocked-work", 1, 0, "0"),
+					null, now.plusSeconds(3));
+
+			assertThat(jdbc.queryForMap("SELECT process_state, error_code, metadata_snapshot FROM "
+					+ "biz_collect_run_item WHERE run_id=99"))
+					.containsEntry("process_state", "SKIPPED_BLOCKED")
+					.containsEntry("error_code", "WORK_BLOCKED")
+					.containsEntry("metadata_snapshot", null);
+		}
+	}
+
+	@Test
 	void backfillProgressIsStoredWithTheFetchPlanAndRollsBackOnPlanFailure() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
@@ -333,6 +447,13 @@ class CollectQueueTransactionTest {
 			CollectJobClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
 			transaction.transition(claim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
 					now.plusSeconds(2));
+			jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, state, created_at) "
+					+ "VALUES(99, 7, 'SCHEDULED', 'COMPLETED', ?)", java.sql.Timestamp.from(now));
+			jdbc.update("INSERT INTO biz_collect_run_item(run_id, ordinal, platform_key, work_id, decision, "
+					+ "process_state, queue_generation, error_code, attempt_count, max_attempts, created_at, updated_at) "
+					+ "VALUES(99, 1, 'douyin', 'account-missing-work', 'NEW', 'RETRY_WAIT', "
+					+ "'FETCH_DOWNLOAD_V1', 'LIST_SNAPSHOT_PENDING', 0, 4, ?, ?)",
+					java.sql.Timestamp.from(now), java.sql.Timestamp.from(now));
 
 			transaction.storeFetchPlan(queued.runId(), 7, List.of(), 0, "ACCOUNT_DEACTIVATED",
 					new CollectRunFetchedItem.FetchWatermark(null, null, 0, 0, "0"), null,
@@ -345,6 +466,9 @@ class CollectQueueTransactionTest {
 					.containsEntry("taskstatus", "已删号")
 					.containsEntry("remote_account_state", "DEACTIVATED")
 					.containsEntry("remote_account_reason", "ACCOUNT_DEACTIVATED");
+			assertThat(jdbc.queryForMap("SELECT process_state, error_code FROM biz_collect_run_item WHERE run_id=99"))
+					.containsEntry("process_state", "SKIPPED_REMOTE_MISSING")
+					.containsEntry("error_code", "REMOTE_LIST_MISSING");
 		}
 	}
 

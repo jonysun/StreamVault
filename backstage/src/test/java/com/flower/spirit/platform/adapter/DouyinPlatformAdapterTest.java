@@ -186,8 +186,8 @@ class DouyinPlatformAdapterTest {
 		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
 		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("");
-		when(cookies.isDouyinGlobalCooldownActive()).thenReturn(true);
-		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		when(cookies.isDouyinGlobalRiskCooldownActive()).thenReturn(true);
+		when(cookies.douyinGlobalRiskCooldownRetryAt(any())).thenReturn(retryAt);
 		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies,
 				new FakeGateway("{}", "https://www.douyin.com/video/1"));
 
@@ -206,7 +206,7 @@ class DouyinPlatformAdapterTest {
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
 		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
 		when(cookies.isRiskSignal("HTTP 403")).thenReturn(true);
-		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		when(cookies.douyinGlobalRiskCooldownRetryAt(any())).thenReturn(retryAt);
 		FakeGateway gateway = new FakeGateway(resource("video.json"),
 				"https://www.douyin.com/video/7300000000000000001") {
 			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
@@ -230,7 +230,7 @@ class DouyinPlatformAdapterTest {
 		Instant retryAt = Instant.parse("2026-08-10T08:00:05Z");
 		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
-		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		when(cookies.douyinGlobalRiskCooldownRetryAt(any())).thenReturn(retryAt);
 		FakeGateway gateway = new FakeGateway("{}", "https://www.douyin.com/video/7300000000000000001");
 		gateway.fetchError = new DouyinWorkFetchException("F2_UPSTREAM_RATE_LIMIT", "rate limited",
 				"REMOTE_API", true, true, 429, "HTTPStatusError");
@@ -245,6 +245,26 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void detailSoftBackoffRejectsOnlyDetailFetchBeforeCallingGateway() {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		Instant retryAt = Instant.parse("2026-08-16T01:00:05Z");
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
+		when(cookies.isDouyinDetailSoftBackoffActive()).thenReturn(true);
+		when(cookies.douyinDetailSoftBackoffRetryAt(any())).thenReturn(retryAt);
+		FakeGateway gateway = new FakeGateway(resourceUnchecked("video.json"),
+				"https://www.douyin.com/video/7300000000000000001");
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+
+		assertThatThrownBy(() -> adapter.parse(new WorkParseRequest("input",
+				"https://www.douyin.com/video/7300000000000000001", false)))
+				.isInstanceOf(DouyinGlobalCooldownException.class)
+				.extracting(error -> ((DouyinGlobalCooldownException) error).retryAt())
+				.isEqualTo(retryAt);
+		assertThat(gateway.fetchCalls).isZero();
+	}
+
+	@Test
 	void explicitRateLimitDuringDownloadRaisesCooldownSignal() throws Exception {
 		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		Instant retryAt = Instant.parse("2026-08-10T08:00:05Z");
@@ -252,7 +272,7 @@ class DouyinPlatformAdapterTest {
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
 		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
 		when(cookies.isRiskSignal("media request failed with HTTP 429")).thenReturn(true);
-		when(cookies.douyinGlobalCooldownRetryAt(any())).thenReturn(retryAt);
+		when(cookies.douyinGlobalRiskCooldownRetryAt(any())).thenReturn(retryAt);
 		FakeGateway gateway = new FakeGateway(resource("video.json"),
 				"https://www.douyin.com/video/7300000000000000001") {
 			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
@@ -291,6 +311,14 @@ class DouyinPlatformAdapterTest {
 		try (var stream = getClass().getResourceAsStream("/platform/douyin/" + name)) {
 			if (stream == null) throw new IOException("fixture not found: " + name);
 			return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+		}
+	}
+
+	private String resourceUnchecked(String name) {
+		try {
+			return resource(name);
+		} catch (IOException error) {
+			throw new IllegalStateException(error);
 		}
 	}
 
