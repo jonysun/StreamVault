@@ -56,6 +56,20 @@ public class CollectRunQueryService {
 		return Collections.unmodifiableSet(result);
 	}
 
+	public Set<String> findSnapshotPendingWorkIds(int taskId) {
+		LinkedHashSet<String> result = new LinkedHashSet<>();
+		addNonblank(result, jdbcTemplate.queryForList(
+				"SELECT i.work_id FROM biz_collect_run_item i "
+						+ "JOIN biz_collect_run r ON r.id = i.run_id "
+						+ "WHERE r.collect_task_id = ? AND i.queue_generation = 'FETCH_DOWNLOAD_V1' "
+						+ "AND i.process_state IN ('QUEUED','RUNNING','RETRY_WAIT') "
+						+ "AND i.error_code = 'LIST_SNAPSHOT_PENDING' "
+						+ "AND (i.metadata_snapshot IS NULL OR TRIM(i.metadata_snapshot) = '') "
+						+ "ORDER BY i.id ASC",
+				String.class, taskId));
+		return Collections.unmodifiableSet(result);
+	}
+
 	public boolean needsAuditRequeue(int taskId, String platformKey, String workId, String mediaType) {
 		Integer activeDownloads = jdbcTemplate.queryForObject(
 				"SELECT COUNT(*) FROM biz_collect_run_item i "

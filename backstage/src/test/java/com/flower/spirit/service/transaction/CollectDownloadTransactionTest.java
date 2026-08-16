@@ -43,6 +43,79 @@ class CollectDownloadTransactionTest {
 	private static final Instant NOW = Instant.parse("2026-07-27T06:00:00Z");
 
 	@Test
+	void claimPrefersReadySnapshotsBeforeLegacyItems() throws Exception {
+		try (AnnotationConfigApplicationContext context = context(databasePath())) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			insertTaskAndRun(jdbc, 10, 100, "author");
+			insertItem(jdbc, 1, 100, 1, "QUEUED", "FETCH_DOWNLOAD_V1", "NEW", 0, 4, NOW, "legacy");
+			insertItem(jdbc, 2, 100, 9, "QUEUED", "FETCH_DOWNLOAD_V1", "NEW", 0, 4, NOW, "ready");
+			jdbc.update("UPDATE biz_collect_run_item SET metadata_snapshot = ? WHERE id = 2",
+					"{\"aweme_detail\":{\"aweme_id\":\"ready\"}}");
+
+			CollectDownloadClaim claim = context.getBean(CollectDownloadTransaction.class)
+					.claimNext("worker", NOW);
+
+			assertThat(claim.id()).isEqualTo(2L);
+			assertThat(claim.metadataSnapshot()).contains("\"aweme_id\":\"ready\"");
+		}
+	}
+
+	@Test
+	void legacyClaimWaitsForSnapshotWithoutConsumingAttemptAndResetsBackfill() throws Exception {
+		try (AnnotationConfigApplicationContext context = context(databasePath())) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			insertTaskAndRun(jdbc, 10, 100, "author");
+			jdbc.update("UPDATE biz_collect_data SET backfill_cursor='800', backfill_complete=1, "
+					+ "backfill_verifying=0, backfill_clean_passes=2 WHERE id=10");
+			insertItem(jdbc, 1, 100, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 2, 4, NOW, "legacy-a");
+			insertItem(jdbc, 2, 100, 2, "QUEUED", "FETCH_DOWNLOAD_V1", "NEW", 0, 4, NOW, "legacy-b");
+			CollectDownloadClaim claim = new CollectDownloadClaim(1, 100, 10, "author", "douyin", "legacy-a",
+					"video", "NEW", 1, 2, 4, "worker");
+			Instant retryAt = NOW.plusSeconds(900);
+
+			int pending = context.getBean(CollectDownloadTransaction.class)
+					.deferForSnapshotRefresh(claim, retryAt, NOW.plusSeconds(1));
+
+			assertThat(pending).isEqualTo(2);
+			assertThat(row(jdbc, 1)).containsEntry("process_state", "RETRY_WAIT")
+					.containsEntry("attempt_count", 1)
+					.containsEntry("error_code", CollectDownloadTransaction.SNAPSHOT_PENDING);
+			assertThat(row(jdbc, 2)).containsEntry("process_state", "RETRY_WAIT")
+					.containsEntry("attempt_count", 0)
+					.containsEntry("error_code", CollectDownloadTransaction.SNAPSHOT_PENDING);
+			assertThat(jdbc.queryForMap("SELECT backfill_cursor, backfill_complete, backfill_verifying, "
+					+ "backfill_clean_passes FROM biz_collect_data WHERE id=10"))
+					.containsEntry("backfill_cursor", "0")
+					.containsEntry("backfill_complete", 0)
+					.containsEntry("backfill_verifying", 1)
+					.containsEntry("backfill_clean_passes", 0);
+		}
+	}
+
+	@Test
+	void runningLegacyFailureRequeuesWhenSnapshotArrivedAfterClaim() throws Exception {
+		try (AnnotationConfigApplicationContext context = context(databasePath())) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			insertTaskAndRun(jdbc, 10, 100, "author");
+			insertItem(jdbc, 1, 100, 1, "RUNNING", "FETCH_DOWNLOAD_V1", "NEW", 4, 4, NOW, "work");
+			jdbc.update("UPDATE biz_collect_run_item SET metadata_snapshot=? WHERE id=1",
+					"{\"aweme_detail\":{\"aweme_id\":\"work\"}}");
+			CollectDownloadClaim claim = new CollectDownloadClaim(1, 100, 10, "author", "douyin", "work",
+					"video", "NEW", 1, 4, 4, "worker");
+
+			assertThat(context.getBean(CollectDownloadTransaction.class)
+					.retryAfterSnapshotHydration(claim, NOW.plusSeconds(1))).isTrue();
+
+			assertThat(row(jdbc, 1)).containsEntry("process_state", "QUEUED")
+					.containsEntry("attempt_count", 0);
+			assertThat(row(jdbc, 1).get("locked_by")).isNull();
+		}
+	}
+
+	@Test
 	void claimsOnlyNewGenerationAndOrdersManualThenOrdinal() throws Exception {
 		try (AnnotationConfigApplicationContext context = context(databasePath())) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
@@ -356,7 +429,10 @@ class CollectDownloadTransactionTest {
 	}
 
 	private void createSchema(JdbcTemplate jdbc) {
-		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, carriedout TEXT)");
+		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, carriedout TEXT, "
+				+ "backfill_cursor TEXT, backfill_complete INTEGER NOT NULL DEFAULT 0, "
+				+ "backfill_verifying INTEGER NOT NULL DEFAULT 0, backfill_clean_passes INTEGER NOT NULL DEFAULT 0, "
+				+ "backfill_verified_at TIMESTAMP)");
 		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, collect_task_id INTEGER NOT NULL)");
 		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, "
 				+ "ordinal INTEGER NOT NULL, platform_key TEXT NOT NULL, work_id TEXT NOT NULL, media_type TEXT, "

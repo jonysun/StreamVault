@@ -66,7 +66,8 @@ class CollectPipelineIntegrationTest {
 		try (AnnotationConfigApplicationContext context = context(dataSource, jdbc)) {
 			CollectQueueTransaction fetch = context.getBean(CollectQueueTransaction.class);
 			CollectDownloadTransaction downloads = context.getBean(CollectDownloadTransaction.class);
-			CollectDownloadService downloadService = new CollectDownloadService(ingestService, downloads, writes);
+			CollectDownloadService downloadService = new CollectDownloadService(ingestService, downloads, writes,
+					mock(CollectEnqueueService.class));
 
 			authorARun = completeFetch(fetch, 10, BASE, List.of(
 					fetched(1, "A1", "author-a"), fetched(2, "A2", "author-a")));
@@ -108,7 +109,8 @@ class CollectPipelineIntegrationTest {
 		// Recreate the transaction objects to model a process restart before stale-lock recovery.
 		try (AnnotationConfigApplicationContext restarted = context(dataSource, jdbc)) {
 			CollectDownloadTransaction downloads = restarted.getBean(CollectDownloadTransaction.class);
-			CollectDownloadService downloadService = new CollectDownloadService(ingestService, downloads, writes);
+			CollectDownloadService downloadService = new CollectDownloadService(ingestService, downloads, writes,
+					mock(CollectEnqueueService.class));
 			assertThat(downloads.recoverStale(BASE.plusSeconds(150), BASE.plusSeconds(200))).isEqualTo(1);
 			CollectDownloadClaim recovered = downloads.claimNext("restarted-worker", BASE.plusSeconds(201));
 			assertThat(recovered.workId()).isEqualTo("RECOVER-1");
@@ -148,13 +150,14 @@ class CollectPipelineIntegrationTest {
 
 	private CollectRunFetchedItem fetched(int ordinal, String workId, String authorUid) {
 		return new CollectRunFetchedItem(ordinal, "douyin", workId, authorUid, authorUid,
-				"work " + workId, String.valueOf(1_000 - ordinal), "video", "NEW", "QUEUED");
+				"work " + workId, String.valueOf(1_000 - ordinal), "video", "NEW", "QUEUED",
+				"{\"aweme_detail\":{\"aweme_id\":\"" + workId + "\"}}");
 	}
 
 	@SuppressWarnings("unchecked")
 	private WorkIngestService fakeIngestService(JdbcTemplate jdbc, Map<String, Integer> attempts) {
 		WorkIngestService service = mock(WorkIngestService.class);
-		when(service.ingest(anyString(), any(Function.class), eq(false), isNull())).thenAnswer(invocation -> {
+		when(service.ingest(anyString(), any(Function.class), eq(false), isNull(), anyString())).thenAnswer(invocation -> {
 			String source = invocation.getArgument(0);
 			String workId = source.substring(source.lastIndexOf('/') + 1);
 			int attempt = attempts.merge(workId, 1, Integer::sum);

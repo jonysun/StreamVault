@@ -1630,7 +1630,7 @@ public class CollectDataService {
 			return;
 		}
 		if (f2cmd != null && f2cmd.contains("F2_UPSTREAM_SOFT_BLOCK")) {
-			platformCookieService.reportSoftBlock(platform, "F2_UPSTREAM_SOFT_BLOCK");
+			logger.warn("[F2] upstream soft block platform={} scope=AUTHOR_LIST cooldownApplied=false", platform);
 		} else if (platformCookieService.isRiskSignal(f2cmd)) {
 			platformCookieService.reportRisk(platform, cookie, previewOutput(f2cmd));
 		}
@@ -2287,7 +2287,7 @@ public class CollectDataService {
 				backfillComplete, backfillVerifying, backfillCleanPasses, cookie);
 		DouyinFetchEnvelope envelope;
 		try (DouyinF2RequestCoordinator.Permit ignored = douyinF2RequestCoordinator.acquire()) {
-			if (platformCookieService.isDouyinGlobalCooldownActive()) {
+			if (platformCookieService.isDouyinGlobalRiskCooldownActive()) {
 				throw new CollectFetchException("F2_COOKIE_COOLDOWN",
 						"Douyin global cooldown is active; fetch deferred before launching F2");
 			}
@@ -2296,7 +2296,8 @@ public class CollectDataService {
 				platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
 			} catch (CollectFetchException error) {
 				if ("F2_UPSTREAM_SOFT_BLOCK".equals(error.getErrorCode())) {
-					platformCookieService.reportSoftBlock(Global.platform.douyin.name(), error.getErrorCode());
+					logger.warn("[F2] upstream soft block platform=douyin scope=AUTHOR_LIST "
+							+ "cooldownApplied=false code={}", error.getErrorCode());
 				} else if (isDouyinRiskError(error.getErrorCode())) {
 					platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, error.getErrorCode());
 				}
@@ -2309,13 +2310,15 @@ public class CollectDataService {
 		}
 		DouyinFetchMode planningMode = mode == DouyinFetchMode.AUDIT || backfillVerifying
 				? DouyinFetchMode.AUDIT : mode;
+		Set<String> snapshotPendingIds = collectRunQueryService.findSnapshotPendingWorkIds(task.getId());
 		DouyinFetchEnvelope planningEnvelope = planningMode == DouyinFetchMode.AUDIT
-				? envelope : selectedEnvelope(envelope, batchLimit);
+				? envelope : selectedEnvelope(envelope, batchLimit, snapshotPendingIds);
 		List<CollectRunFetchedItem> plan = buildFetchPlan(task, planningEnvelope, planningMode);
 		if (mode != DouyinFetchMode.AUDIT && backfillVerifying) {
 			Set<String> newWorkIds = planningEnvelope.newWorkIds() == null
 					? Set.of() : planningEnvelope.newWorkIds();
 			plan = plan.stream().filter(item -> "QUEUED".equals(item.processState())
+					|| snapshotPendingIds.contains(item.workId())
 					|| ("BLOCKED".equals(item.decision()) && newWorkIds.contains(item.workId())))
 					.toList();
 		}
@@ -2336,9 +2339,12 @@ public class CollectDataService {
 		}
 	}
 
-	private DouyinFetchEnvelope selectedEnvelope(DouyinFetchEnvelope envelope, int batchLimit) {
+	private DouyinFetchEnvelope selectedEnvelope(DouyinFetchEnvelope envelope, int batchLimit,
+			Set<String> snapshotPendingIds) {
 		Set<String> selectedIds = envelope.newWorkIds() == null ? Set.of() : envelope.newWorkIds();
-		Set<String> uniqueSelectedIds = new java.util.LinkedHashSet<>();
+		Set<String> pendingIds = snapshotPendingIds == null ? Set.of() : snapshotPendingIds;
+		Set<String> includedIds = new java.util.LinkedHashSet<>();
+		Set<String> selectedNewIds = new java.util.LinkedHashSet<>();
 		List<JSONObject> selectedItems = new ArrayList<>();
 		int limit = Math.max(0, batchLimit);
 		for (int index = 0; index < envelope.items().size(); index++) {
@@ -2348,11 +2354,13 @@ public class CollectDataService {
 				throw new CollectFetchException("UPSTREAM_SCHEMA_ERROR",
 						"作品列表第 " + (index + 1) + " 项缺少 aweme_id");
 			}
-			if (selectedItems.size() < limit && selectedIds.contains(workId) && uniqueSelectedIds.add(workId)) {
+			boolean selectedNewItem = selectedNewIds.size() < limit && selectedIds.contains(workId);
+			if ((selectedNewItem || pendingIds.contains(workId)) && includedIds.add(workId)) {
 				selectedItems.add(item);
+				if (selectedNewItem) selectedNewIds.add(workId);
 			}
 		}
-		return new DouyinFetchEnvelope(List.copyOf(selectedItems), Collections.unmodifiableSet(uniqueSelectedIds),
+		return new DouyinFetchEnvelope(List.copyOf(selectedItems), Collections.unmodifiableSet(selectedNewIds),
 				envelope.outcome(), envelope.pagesFetched(),
 				envelope.emptyPages(), envelope.lastCursor(), envelope.backfillCursor(),
 				envelope.backfillComplete(), envelope.backfillVerifying(), envelope.backfillCleanPasses(),
@@ -2428,11 +2436,12 @@ public class CollectDataService {
 				decision = "EXISTING";
 				processState = "SKIPPED_EXISTING";
 			}
+			boolean canSupplySnapshot = !"BLOCKED".equals(decision) && !"DUPLICATE_OBSERVATION".equals(decision);
 			result.add(new CollectRunFetchedItem(index + 1, "douyin", workId,
 					firstNotBlank(item.getString("uid"),
 							firstNotBlank(item.getString("sec_uid"), item.getString("author_uid"))),
 					item.getString("nickname"), item.getString("desc"), item.getString("create_time"), mediaType,
-					decision, processState, "QUEUED".equals(processState) ? downloadSnapshot(item) : null));
+					decision, processState, canSupplySnapshot ? downloadSnapshot(item) : null));
 		}
 		return List.copyOf(result);
 	}

@@ -96,9 +96,13 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		}
 		String cookie = requireCookie("single_work_parse");
 		try (DouyinF2RequestCoordinator.Permit ignored = requestCoordinator.acquire()) {
-			if (cookieService.isDouyinGlobalCooldownActive()) {
+			if (cookieService.isDouyinGlobalRiskCooldownActive()) {
 				throw new DouyinGlobalCooldownException("Douyin global cooldown is active",
-						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+						cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
+			}
+			if (cookieService.isDouyinDetailSoftBackoffActive()) {
+				throw new DouyinGlobalCooldownException("Douyin detail endpoint soft backoff is active",
+						cookieService.douyinDetailSoftBackoffRetryAt(Duration.ofSeconds(5)));
 			}
 			String resolvedUrl = gateway.resolve(request.getUrl());
 			String inputWorkId = DouUtil.extractWorkId(resolvedUrl);
@@ -110,14 +114,14 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				raw = gateway.fetch(inputWorkId, cookie);
 			} catch (DouyinWorkFetchException e) {
 				if ("F2_UPSTREAM_SOFT_BLOCK".equals(e.errorCode())) {
-					cookieService.reportSoftBlock("douyin", e.errorCode());
+					cookieService.reportDetailSoftBlock("douyin", e.errorCode());
 					throw new DouyinGlobalCooldownException(e.getMessage(),
-							cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)), true, e);
+							cookieService.douyinDetailSoftBackoffRetryAt(Duration.ofSeconds(5)), true, e);
 				}
 				if (e.cooldownApplied()) {
 					cookieService.reportRisk("\u6296\u97f3", cookie, e.errorCode());
 					throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "parsing"),
-							cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)), true, e);
+							cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)), true, e);
 				}
 				throw new WorkMetadataValidationException("Douyin parsing failed: " + e.errorCode(), e);
 			}
@@ -130,7 +134,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		} catch (IOException e) {
 			if (reportRisk(cookie, e.getMessage(), "parse request failed")) {
 				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "parsing"),
-						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+						cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
 			}
 			throw new WorkMetadataValidationException("Douyin parsing failed", e);
 		} catch (WorkMetadataValidationException e) {
@@ -193,7 +197,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 					if (reportRisk(cookie, error.getMessage(), "cover download request failed")) {
 						throw new DouyinGlobalCooldownException(
 								riskFailureMessage(error.getMessage(), "cover download"),
-								cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+								cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
 					}
 				}
 			}
@@ -205,7 +209,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		} catch (IOException e) {
 			if (reportRisk(cookie, e.getMessage(), "download request failed")) {
 				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "download"),
-						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+						cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
 			}
 			throw new WorkMetadataValidationException("Douyin download failed", e);
 		}
@@ -339,9 +343,9 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		}
 		String cookie = cookieService.currentDouyinCookie(purpose);
 		if (cookie == null || cookie.trim().isEmpty()) {
-			if (cookieService.isDouyinGlobalCooldownActive()) {
+			if (cookieService.isDouyinGlobalRiskCooldownActive()) {
 				throw new DouyinGlobalCooldownException("Douyin global cooldown is active",
-						cookieService.douyinGlobalCooldownRetryAt(Duration.ofSeconds(5)));
+						cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
 			}
 			throw new WorkMetadataValidationException("Douyin cookie is not configured");
 		}

@@ -83,7 +83,7 @@ public class PlatformCookieService {
 
 	public String selectCookie(String platform, String strategy, String cookiePool, String legacyCookie, String purpose) {
 		String safePlatform = canonicalPlatform(platform);
-		if (DOUYIN_PLATFORM_KEY.equals(safePlatform) && isDouyinGlobalCooldownActive()) {
+		if (DOUYIN_PLATFORM_KEY.equals(safePlatform) && isDouyinGlobalRiskCooldownActive()) {
 			return "";
 		}
 		List<String> cookies = parseCookiePool(cookiePool, legacyCookie);
@@ -104,7 +104,7 @@ public class PlatformCookieService {
 			successAt.remove(riskKey(safePlatform, cookie));
 			douyinGlobalRiskStartedAtMs.accumulateAndGet(now, Math::max);
 			long cooldownMs = douyinRiskCooldownMillis();
-			logger.warn("platform global risk cooldown platform={} reason={} cooldownMs={}", safePlatform, reason,
+			logger.warn("platform cooldown platform={} scope=GLOBAL_RISK reason={} cooldownMs={}", safePlatform, reason,
 					cooldownMs);
 			return;
 		}
@@ -121,13 +121,19 @@ public class PlatformCookieService {
 		// Recording evidence must not cancel a newer risk cooldown.
 	}
 
-	/** Records a confirmed repeated empty F2 response without treating it as an authentication failure. */
-	public void reportSoftBlock(String platform, String reason) {
+	/** Records a confirmed repeated empty detail response without treating it as an authentication failure. */
+	public void reportDetailSoftBlock(String platform, String reason) {
 		if (!DOUYIN_PLATFORM_KEY.equals(canonicalPlatform(platform))) return;
 		long now = System.currentTimeMillis();
 		douyinGlobalSoftBlockStartedAtMs.accumulateAndGet(now, Math::max);
-		logger.warn("platform global soft backoff platform={} reason={} cooldownMs={}", DOUYIN_PLATFORM_KEY,
+		logger.warn("platform cooldown platform={} scope=DETAIL_API reason={} cooldownMs={}", DOUYIN_PLATFORM_KEY,
 				reason, DOUYIN_SOFT_BLOCK_COOLDOWN_MS);
+	}
+
+	/** @deprecated use {@link #reportDetailSoftBlock(String, String)} for detail endpoint evidence. */
+	@Deprecated
+	public void reportSoftBlock(String platform, String reason) {
+		reportDetailSoftBlock(platform, reason);
 	}
 
 	public boolean hasRecentSuccess(String platform, String cookie, Duration maxAge) {
@@ -154,10 +160,13 @@ public class PlatformCookieService {
 		Map<String, Object> status = new HashMap<>();
 		long now = System.currentTimeMillis();
 		if (DOUYIN_PLATFORM_KEY.equals(safePlatform)) {
-			long remainingMs = douyinGlobalCooldownRemainingMillis(now);
+			long remainingMs = douyinGlobalRiskCooldownRemainingMillis(now);
+			long detailRemainingMs = douyinDetailSoftBackoffRemainingMillis(now);
 			status.put("cooling", remainingMs > 0 ? 1 : 0);
 			status.put("cooldownMinutes", douyinRiskCooldownMinutes());
 			status.put("remainingMs", remainingMs);
+			status.put("detailCooling", detailRemainingMs > 0 ? 1 : 0);
+			status.put("detailRemainingMs", detailRemainingMs);
 			return status;
 		}
 		purgeExpiredRisks(now);
@@ -173,16 +182,43 @@ public class PlatformCookieService {
 	}
 
 	public boolean isDouyinGlobalCooldownActive() {
-		return douyinGlobalCooldownRemainingMillis() > 0;
+		return isDouyinGlobalRiskCooldownActive();
 	}
 
 	public long douyinGlobalCooldownRemainingMillis() {
-		return douyinGlobalCooldownRemainingMillis(System.currentTimeMillis());
+		return douyinGlobalRiskCooldownRemainingMillis();
 	}
 
 	public Instant douyinGlobalCooldownRetryAt(Duration safetyBuffer) {
+		return douyinGlobalRiskCooldownRetryAt(safetyBuffer);
+	}
+
+	public boolean isDouyinGlobalRiskCooldownActive() {
+		return douyinGlobalRiskCooldownRemainingMillis() > 0;
+	}
+
+	public long douyinGlobalRiskCooldownRemainingMillis() {
+		return douyinGlobalRiskCooldownRemainingMillis(System.currentTimeMillis());
+	}
+
+	public Instant douyinGlobalRiskCooldownRetryAt(Duration safetyBuffer) {
 		long now = System.currentTimeMillis();
-		long deadline = Math.max(now, douyinGlobalCooldownUntilEpochMillis());
+		long deadline = Math.max(now, douyinGlobalRiskCooldownUntilEpochMillis());
+		long bufferMs = safetyBuffer == null ? 0 : Math.max(0, safetyBuffer.toMillis());
+		return Instant.ofEpochMilli(deadline).plusMillis(bufferMs);
+	}
+
+	public boolean isDouyinDetailSoftBackoffActive() {
+		return douyinDetailSoftBackoffRemainingMillis() > 0;
+	}
+
+	public long douyinDetailSoftBackoffRemainingMillis() {
+		return douyinDetailSoftBackoffRemainingMillis(System.currentTimeMillis());
+	}
+
+	public Instant douyinDetailSoftBackoffRetryAt(Duration safetyBuffer) {
+		long now = System.currentTimeMillis();
+		long deadline = Math.max(now, douyinDetailSoftBackoffUntilEpochMillis());
 		long bufferMs = safetyBuffer == null ? 0 : Math.max(0, safetyBuffer.toMillis());
 		return Instant.ofEpochMilli(deadline).plusMillis(bufferMs);
 	}
@@ -233,16 +269,22 @@ public class PlatformCookieService {
 		return isBlank(canonical) ? "unknown" : canonical;
 	}
 
-	private long douyinGlobalCooldownRemainingMillis(long now) {
-		return Math.max(0, douyinGlobalCooldownUntilEpochMillis() - now);
+	private long douyinGlobalRiskCooldownRemainingMillis(long now) {
+		return Math.max(0, douyinGlobalRiskCooldownUntilEpochMillis() - now);
 	}
 
-	private long douyinGlobalCooldownUntilEpochMillis() {
+	private long douyinGlobalRiskCooldownUntilEpochMillis() {
 		long strongStartedAt = douyinGlobalRiskStartedAtMs.get();
+		return strongStartedAt <= 0 ? 0 : strongStartedAt + douyinRiskCooldownMillis();
+	}
+
+	private long douyinDetailSoftBackoffRemainingMillis(long now) {
+		return Math.max(0, douyinDetailSoftBackoffUntilEpochMillis() - now);
+	}
+
+	private long douyinDetailSoftBackoffUntilEpochMillis() {
 		long softStartedAt = douyinGlobalSoftBlockStartedAtMs.get();
-		long strongDeadline = strongStartedAt <= 0 ? 0 : strongStartedAt + douyinRiskCooldownMillis();
-		long softDeadline = softStartedAt <= 0 ? 0 : softStartedAt + DOUYIN_SOFT_BLOCK_COOLDOWN_MS;
-		return Math.max(strongDeadline, softDeadline);
+		return softStartedAt <= 0 ? 0 : softStartedAt + DOUYIN_SOFT_BLOCK_COOLDOWN_MS;
 	}
 
 	private long douyinRiskCooldownMillis() {
