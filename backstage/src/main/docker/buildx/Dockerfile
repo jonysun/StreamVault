@@ -13,7 +13,7 @@ FROM eclipse-temurin:17-jre
 
 ENV TZ=Asia/Shanghai
 ENV SPRING_PROFILES_ACTIVE=docker
-ARG YT_DLP_VERSION=2026.07.04
+ARG YT_DLP_VERSION=2026.08.19
 ARG YT_DLP_DOWNLOAD_BASE=https://github.com/yt-dlp/yt-dlp/releases
 
 # 安装运行时依赖（ffmpeg + 基础工具）
