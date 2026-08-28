@@ -37,7 +37,7 @@
         .status-RETRY_WAIT { background:#fff2d8; color:#94691a; }
         .status-COMPLETED { background:#e6f3e9; color:#29743a; }
         .status-FAILED { background:#f9e4e4; color:#a72f2f; }
-        .status-SKIPPED_EXISTING,.status-SKIPPED_BLOCKED,.status-SKIPPED_EXISTING_ACTIVE_DOWNLOAD { background:#f0f0f0; color:#666; }
+        .status-SKIPPED_EXISTING,.status-SKIPPED_BLOCKED,.status-SKIPPED_REMOTE_MISSING,.status-SKIPPED_EXISTING_ACTIVE_DOWNLOAD { background:#f0f0f0; color:#666; }
         .source-chip { display:inline-block; padding:3px 6px; border:1px solid #d8dde2; border-radius:4px; font-size:11px; color:#59636d; }
         .error-text { color:#a72f2f; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .icon-action { width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
@@ -95,6 +95,7 @@
                     </div>
                     <div class="download-actions" style="padding:10px 16px;border-bottom:1px solid #edf0f2;">
                         <button class="btn btn-sm btn-outline-primary" type="button" id="retrySelected" disabled><i class="mdi mdi-replay"></i> 重试所选失败任务</button>
+                        <button class="btn btn-sm btn-outline-danger" type="button" id="blockSelected" disabled><i class="mdi mdi-cancel"></i> 删除并拉黑所选</button>
                         <button class="btn btn-sm btn-outline-danger" type="button" id="hideSelected" disabled style="display:none;"><i class="mdi mdi-delete-outline"></i> 清除所选记录</button>
                     </div>
                     <div class="table-wrap">
@@ -138,7 +139,7 @@
         const state = { view:'active', page:0, pageSize:25, totalPages:0, rows:[], paused:false, timer:null, selectedKeys:new Set() };
         const labels = {
             RUNNING:'正在下载', QUEUED:'等待下载', RETRY_WAIT:'等待重试', COMPLETED:'已完成', FAILED:'失败',
-            CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽',
+            CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽', SKIPPED_REMOTE_MISSING:'远端已删除',
             SKIPPED_EXISTING_ACTIVE_DOWNLOAD:'活动任务已存在'
         };
         const sourceLabels = { COLLECT:'收藏下载', SINGLE_LINK:'单链接', YOUTUBE_COLLECTION:'YouTube 合辑' };
@@ -185,6 +186,7 @@
             $('#downloadRows').on('click', '.retry-item', function() { retryKeys([$(this).data('key')]); });
             $('#downloadRows').on('click', '.show-detail', function() { showDetail($(this).data('key')); });
             $('#retrySelected').on('click', function() { retryKeys(selectedKeys(true)); });
+            $('#blockSelected').on('click', blockSelected);
             $('#hideSelected').on('click', hideSelectedHistory);
             document.addEventListener('visibilitychange', scheduleRefresh);
         }
@@ -243,13 +245,14 @@
                 const title = item.title || item.task_name || item.work_id || item.source_url || '未命名任务';
                 const subtitle = item.task_name && item.title ? item.task_name + ' · ' + (item.author || item.work_id || '')
                     : (item.author || item.work_id || item.source_url || '');
+                const sourceLink = item.source_url ? '<div class="download-meta"><a href="'+attr(item.source_url)+'" target="_blank" rel="noopener">打开原始链接</a></div>' : '';
                 const time = state.view === 'history' ? (item.completed_at || item.sort_at || item.created_at)
                     : (item.started_at || item.available_at || item.created_at);
                 const position = state.page * state.pageSize + index + 1;
                 return '<tr>'
                     + '<td><input type="checkbox" class="row-select" data-key="'+attr(key)+'" data-failed="'+canRetry+'" '+(selectable?'':'disabled')+checked+'></td>'
                     + '<td>' + position + '</td>'
-                    + '<td><div class="download-title" title="'+attr(title)+'">'+html(title)+'</div><div class="download-meta" title="'+attr(subtitle)+'">'+html(subtitle)+'</div></td>'
+                    + '<td><div class="download-title" title="'+attr(title)+'">'+html(title)+'</div><div class="download-meta" title="'+attr(subtitle)+'">'+html(subtitle)+'</div>'+sourceLink+'</td>'
                     + '<td><span class="source-chip">'+html(sourceLabels[item.sourceType] || item.sourceType || '未知')+'</span></td>'
                     + '<td><span class="status-badge status-'+attr(item.state)+'">'+html(labels[item.state] || item.state)+'</span></td>'
                     + '<td>'+number(item.attempt_count)+' / '+number(item.max_attempts)+'</td>'
@@ -282,6 +285,7 @@
         }
         function updateBulkButtons() {
             $('#retrySelected').prop('disabled', selectedKeys(true).length === 0);
+            $('#blockSelected').prop('disabled', state.view !== 'active' || selectedKeys(false).length === 0);
             $('#hideSelected').prop('disabled', selectedKeys(false).length === 0);
         }
         function syncSelectAll() {
@@ -308,6 +312,16 @@
                 $.ajax({ url:'/admin/api/download-center/history/hide', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys}) })
                     .done(function(response){ clearSelection(); layer.msg(response.message || '记录已清除'); loadItems(); })
                     .fail(function(){ layer.msg('清除失败'); });
+                layer.close(index);
+            });
+        }
+        function blockSelected() {
+            const keys = selectedKeys(false).filter(function(key){ return String(key).indexOf('COLLECT:') === 0; });
+            if (!keys.length) { layer.msg('请选择收藏下载项'); return; }
+            layer.confirm('删除所选队列项并加入现有作品黑名单？已有媒体文件不会删除。', function(index) {
+                $.ajax({ url:'/admin/api/download-center/delete-and-block', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys}) })
+                    .done(function(response){ clearSelection(); layer.msg(response.message || '已删除并拉黑'); refreshAll(); })
+                    .fail(function(){ layer.msg('删除并拉黑失败'); });
                 layer.close(index);
             });
         }

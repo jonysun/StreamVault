@@ -59,7 +59,7 @@ public class ApplicationReadinessGate {
             return;
         }
         for (String table : java.util.List.of("biz_video", "biz_runtime_control", "biz_collect_run",
-                "biz_collect_run_item", "biz_job_queue")) {
+                "biz_collect_run_item", "biz_job_queue", "biz_hls_queue")) {
             if (schemaInspector.columns(table).isEmpty()) {
                 throw new IllegalStateException("Database schema is missing required table: " + table);
             }

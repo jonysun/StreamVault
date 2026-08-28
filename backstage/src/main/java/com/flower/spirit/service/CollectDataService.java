@@ -2341,6 +2341,12 @@ public class CollectDataService {
 				envelope.outcome(), newestWatermark(envelope), progress);
 		if (terminalAccountUnavailable) {
 			quartzTaskService.removeTaskSchedule(task.getId());
+			String stateText = "ACCOUNT_BANNED".equals(envelope.outcome()) ? "可能原作者被封禁" : "可能原作者已删号";
+			String notice = "收藏任务已自动停用：" + valueOrEmpty(task.getTaskname()) + "\n"
+					+ stateText + "\n作者UID: " + currentSourceId + "\n请在后台确认后恢复或删除任务。";
+			logger.warn("[CollectTask] remote account unavailable taskId={} taskName={} state={} sourceId={}",
+					task.getId(), task.getTaskname(), envelope.outcome(), currentSourceId);
+			sendNotify.sendMessage("StreamVault 收藏任务异常", notice);
 		}
 	}
 

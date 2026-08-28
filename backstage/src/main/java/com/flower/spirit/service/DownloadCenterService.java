@@ -22,13 +22,15 @@ public class DownloadCenterService {
 
 	private static final Set<String> ACTIVE_STATES = Set.of("QUEUED", "RUNNING", "RETRY_WAIT");
 	private static final Set<String> HISTORY_STATES = Set.of("COMPLETED", "FAILED", "CANCELLED",
-			"SKIPPED_EXISTING", "SKIPPED_BLOCKED", "SKIPPED_EXISTING_ACTIVE_DOWNLOAD");
+			"SKIPPED_EXISTING", "SKIPPED_BLOCKED", "SKIPPED_REMOTE_MISSING", "SKIPPED_EXISTING_ACTIVE_DOWNLOAD");
 	private static final Set<String> SOURCES = Set.of("ALL", "COLLECT", "SINGLE_LINK", "YOUTUBE_COLLECTION");
 	private final JdbcTemplate jdbcTemplate;
 	private final DirectDownloadQueueService directDownloadQueueService;
 	private final CollectRunService collectRunService;
 	private final RuntimeControlService runtimeControlService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
+	@org.springframework.beans.factory.annotation.Autowired(required = false)
+	private BlockedWorkService blockedWorkService;
 
 	public DownloadCenterService(JdbcTemplate jdbcTemplate, DirectDownloadQueueService directDownloadQueueService,
 			CollectRunService collectRunService, RuntimeControlService runtimeControlService,
@@ -100,6 +102,7 @@ public class DownloadCenterService {
 		RecordKey key = parseKey(recordKey);
 		if ("DIRECT".equals(key.source())) return directDownloadQueueService.retry(key.id());
 		if ("COLLECT".equals(key.source())) {
+			if (isBlockedCollectionItem(key.id())) return false;
 			collectRunService.retryDownloadItem(key.id());
 			return true;
 		}
@@ -117,6 +120,51 @@ public class DownloadCenterService {
 			}
 		}
 		return retried;
+	}
+
+	private boolean isBlockedCollectionItem(long itemId) {
+		if (blockedWorkService == null) return false;
+		List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+				"SELECT platform_key, work_id FROM biz_collect_run_item WHERE id=? AND queue_generation='FETCH_DOWNLOAD_V1'", itemId);
+		if (rows.isEmpty()) return false;
+		Map<String, Object> row = rows.get(0);
+		return blockedWorkService.isBlocked(String.valueOf(row.get("platform_key")),
+				String.valueOf(row.get("work_id")), "video");
+	}
+
+	/** Remove selected collection records from the visible queue and reuse the existing work blacklist. */
+	public int deleteAndBlock(List<String> recordKeys) {
+		if (recordKeys == null || recordKeys.isEmpty()) return 0;
+		return databaseWriteExecutor.execute("download-delete-and-block", () -> {
+			int changed = 0;
+			for (String value : recordKeys.stream().filter(java.util.Objects::nonNull).distinct().limit(200).toList()) {
+				RecordKey key = parseKey(value);
+				if (!"COLLECT".equals(key.source())) continue;
+				List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+						"SELECT platform_key, work_id, title_snapshot, nickname_snapshot FROM biz_collect_run_item "
+						+ "WHERE id=? AND queue_generation='FETCH_DOWNLOAD_V1'", key.id());
+				if (rows.isEmpty()) continue;
+				Map<String, Object> row = rows.get(0);
+				String platform = String.valueOf(row.getOrDefault("platform_key", ""));
+				String workId = String.valueOf(row.getOrDefault("work_id", ""));
+				if (platform.isBlank() || workId.isBlank()) continue;
+				if (blockedWorkService != null) {
+					blockedWorkService.blockWork(platform, workId, "video",
+							String.valueOf(row.getOrDefault("title_snapshot", "")),
+							String.valueOf(row.getOrDefault("nickname_snapshot", "")), null,
+							"douyin".equalsIgnoreCase(platform) ? "https://www.douyin.com/video/" + workId : null,
+							"用户从下载中心删除并拉黑");
+				}
+				changed += jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='SKIPPED_BLOCKED', "
+						+ "available_at=NULL, locked_by=NULL, locked_at=NULL, finished_at=CURRENT_TIMESTAMP, "
+						+ "error_code='WORK_BLOCKED', error_message='用户从下载中心删除并拉黑', updated_at=CURRENT_TIMESTAMP "
+						+ "WHERE queue_generation='FETCH_DOWNLOAD_V1' AND platform_key=? AND work_id=? "
+						+ "AND process_state IN ('QUEUED','RETRY_WAIT','FAILED')", platform, workId);
+				changed += jdbcTemplate.update("INSERT INTO biz_download_history_hidden(record_key, source_type, source_id, hidden_at) "
+						+ "VALUES (?, 'COLLECT', ?, CURRENT_TIMESTAMP) ON CONFLICT(record_key) DO NOTHING", value, key.id());
+			}
+			return changed;
+		});
 	}
 
 	public int hideHistory(List<String> recordKeys) {
@@ -143,7 +191,7 @@ public class DownloadCenterService {
 					+ "AND state IN ('COMPLETED','FAILED','CANCELLED')";
 		} else {
 			sql = "SELECT COUNT(*) FROM biz_collect_run_item WHERE id=? AND queue_generation='FETCH_DOWNLOAD_V1' "
-					+ "AND process_state IN ('COMPLETED','FAILED','CANCELLED','SKIPPED_EXISTING','SKIPPED_BLOCKED',"
+					+ "AND process_state IN ('COMPLETED','FAILED','CANCELLED','SKIPPED_EXISTING','SKIPPED_BLOCKED','SKIPPED_REMOTE_MISSING',"
 					+ "'SKIPPED_EXISTING_ACTIVE_DOWNLOAD')";
 		}
 		Integer count = jdbcTemplate.queryForObject(sql, Integer.class, key.id());
@@ -154,7 +202,9 @@ public class DownloadCenterService {
 		StringBuilder sql = new StringBuilder("SELECT 'COLLECT:' || CAST(i.id AS VARCHAR) AS record_key, "
 				+ "'COLLECT' AS source_kind, i.id AS raw_id, COALESCE(t.taskname,'') AS task_name, "
 				+ "COALESCE(i.title_snapshot,'') AS title, COALESCE(i.nickname_snapshot,'') AS author, "
-				+ "COALESCE(i.platform_key,'') AS platform, COALESCE(i.work_id,'') AS work_id, '' AS source_url, "
+				+ "COALESCE(i.platform_key,'') AS platform, COALESCE(i.work_id,'') AS work_id, "
+				+ "CASE WHEN LOWER(COALESCE(i.platform_key,''))='douyin' AND COALESCE(i.work_id,'')<>'' "
+				+ "THEN 'https://www.douyin.com/video/' || i.work_id ELSE '' END AS source_url, "
 				+ "i.process_state AS state, i.attempt_count AS attempt_count, i.max_attempts AS max_attempts, "
 				+ "i.available_at AS available_at, i.started_at AS started_at, i.finished_at AS completed_at, "
 				+ "COALESCE(i.error_code,'') AS error_code, COALESCE(i.error_message,'') AS error_message, "
