@@ -174,32 +174,19 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		}
 		String cookie = requireCookie("single_work_download");
 		try {
-			List<WorkMediaResource> downloaded = new ArrayList<>();
-			for (WorkMediaResource source : metadata.getMediaResources()) {
-				if (source.getType() == WorkMediaResource.Type.AUDIO) continue;
-				String extension = extension(source);
-				Path target = request.getOutputDirectory().resolve(safeName(metadata.getWorkId())
-						+ "-index-" + source.getOrder() + "." + extension);
-				Path local = gateway.download(source, target, cookie);
-				downloaded.add(new WorkMediaResource(source.getOrder(), source.getType(), source.getSourceUrl(),
-						local, extension, source.getRequestHeaders()));
-			}
-			if (metadata.getContentType() == WorkContentType.VIDEO && metadata.getCoverUrl() != null
-					&& !metadata.getCoverUrl().isBlank()) {
-				try {
-					WorkMediaResource coverSource = resource(downloaded.size(), WorkMediaResource.Type.IMAGE,
-							metadata.getCoverUrl(), "jpg");
-					Path cover = request.getOutputDirectory().resolve(safeName(metadata.getWorkId()) + ".jpg");
-					Path local = gateway.download(coverSource, cover, cookie);
-					downloaded.add(new WorkMediaResource(coverSource.getOrder(), WorkMediaResource.Type.IMAGE,
-							metadata.getCoverUrl(), local, "jpg", coverSource.getRequestHeaders()));
-				} catch (IOException error) {
-					if (reportRisk(cookie, error.getMessage())) {
-						throw new DouyinGlobalCooldownException(
-								riskFailureMessage(error.getMessage(), "cover download"),
-								cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
-					}
-				}
+			List<WorkMediaResource> downloaded;
+			try {
+				downloaded = downloadResources(metadata, request, cookie);
+			} catch (IOException firstError) {
+				if (!isHttp404(firstError)) throw firstError;
+				logger.warn("[DouyinMedia] stale media URL returned 404 workId={} sourceUrl={}; refreshing detail once",
+						metadata.getWorkId(), safeUrl(metadata.getSourceUrl()));
+				String refreshedRaw = gateway.fetch(metadata.getWorkId(), cookie);
+				WorkMetadata refreshed = parseRaw(refreshedRaw, metadata.getWorkId(), metadata.getOriginalAddress(),
+						metadata.getSourceUrl());
+				logger.info("[DouyinMedia] detail refreshed after 404 workId={} resources={}", metadata.getWorkId(),
+						refreshed.getMediaResources().size());
+				downloaded = downloadResources(refreshed, request, cookie);
 			}
 			if (downloaded.isEmpty()) {
 				throw new WorkMetadataValidationException("Douyin work has no downloadable visual media");
@@ -213,6 +200,52 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			}
 			throw new WorkMetadataValidationException("Douyin download failed", e);
 		}
+	}
+
+	private List<WorkMediaResource> downloadResources(WorkMetadata metadata, WorkDownloadRequest request,
+			String cookie) throws IOException {
+		List<WorkMediaResource> downloaded = new ArrayList<>();
+		for (WorkMediaResource source : metadata.getMediaResources()) {
+			if (source.getType() == WorkMediaResource.Type.AUDIO) continue;
+			String extension = extension(source);
+			Path target = request.getOutputDirectory().resolve(safeName(metadata.getWorkId())
+					+ "-index-" + source.getOrder() + "." + extension);
+			Path local = gateway.download(source, target, cookie);
+			downloaded.add(new WorkMediaResource(source.getOrder(), source.getType(), source.getSourceUrl(),
+				local, extension, source.getRequestHeaders()));
+		}
+		if (metadata.getContentType() == WorkContentType.VIDEO && metadata.getCoverUrl() != null
+				&& !metadata.getCoverUrl().isBlank()) {
+			try {
+				WorkMediaResource coverSource = resource(downloaded.size(), WorkMediaResource.Type.IMAGE,
+						metadata.getCoverUrl(), "jpg");
+				Path cover = request.getOutputDirectory().resolve(safeName(metadata.getWorkId()) + ".jpg");
+				Path local = gateway.download(coverSource, cover, cookie);
+				downloaded.add(new WorkMediaResource(coverSource.getOrder(), WorkMediaResource.Type.IMAGE,
+						metadata.getCoverUrl(), local, "jpg", coverSource.getRequestHeaders()));
+			} catch (IOException error) {
+				if (isHttp404(error)) {
+					logger.info("[DouyinMedia] cover URL unavailable workId={} status=404", metadata.getWorkId());
+				} else if (reportRisk(cookie, error.getMessage())) {
+					throw new DouyinGlobalCooldownException(
+							riskFailureMessage(error.getMessage(), "cover download"),
+							cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
+				}
+			}
+		}
+		return downloaded;
+	}
+
+	private boolean isHttp404(IOException error) {
+		String message = error == null || error.getMessage() == null ? ""
+				: error.getMessage().toLowerCase(java.util.Locale.ROOT);
+		return message.contains("http 404") || message.contains("http/1.1 404") || message.contains("status=404");
+	}
+
+	private String safeUrl(String value) {
+		if (value == null) return null;
+		int query = value.indexOf('?');
+		return query < 0 ? value : value.substring(0, query) + "?[redacted]";
 	}
 
 	@Override

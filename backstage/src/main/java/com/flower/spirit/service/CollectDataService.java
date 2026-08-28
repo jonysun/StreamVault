@@ -344,15 +344,42 @@ public class CollectDataService {
 
 
 	public AjaxEntity deleteCollectData(CollectDataEntity collectDataEntity) {
+		return deleteCollectData(collectDataEntity, "CANCEL_QUEUE");
+	}
+
+	public AjaxEntity deleteCollectData(CollectDataEntity collectDataEntity, String queuePolicy) {
 		try {
 			if (quartzTaskService.isTaskRunning(collectDataEntity.getId())) {
 				return new AjaxEntity(Global.ajax_uri_error, "任务正在执行中，请稍后再试", null);
 			}
 			quartzTaskService.deleteTask(collectDataEntity.getId());
-			collectDataDetailService.deleteDataid(collectDataEntity.getId());
-			collectdDataDao.deleteById(collectDataEntity.getId());
-
-			return new AjaxEntity(Global.ajax_success, "操作成功", null);
+			String policy = queuePolicy == null ? "CANCEL_QUEUE" : queuePolicy.trim().toUpperCase(Locale.ROOT);
+			if (!Set.of("DELETE_ALL", "KEEP_QUEUE", "CANCEL_QUEUE").contains(policy)) {
+				return new AjaxEntity(Global.ajax_uri_error, "删除策略无效", null);
+			}
+			if ("KEEP_QUEUE".equals(policy)) {
+				jdbcTemplate.update("UPDATE biz_collect_data SET taskenabled='N', taskstatus='已删除（保留下载队列）' WHERE id=?",
+						collectDataEntity.getId());
+				return new AjaxEntity(Global.ajax_success, "任务已停用，下载队列和已下载作品已保留", Map.of("queuePolicy", policy));
+			}
+			// Keep the task shell while runs/items exist so download-center joins remain valid.
+			// Only non-running queue entries are cancelled; an active worker keeps its lease.
+			jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='CANCELLED', available_at=NULL, "
+					+ "locked_by=NULL, locked_at=NULL, finished_at=CURRENT_TIMESTAMP, error_code='TASK_DELETED', "
+					+ "error_message='收藏任务已删除，队列已取消', updated_at=CURRENT_TIMESTAMP WHERE queue_generation='FETCH_DOWNLOAD_V1' "
+					+ "AND run_id IN (SELECT id FROM biz_collect_run WHERE collect_task_id=?) "
+					+ "AND process_state IN ('QUEUED','RETRY_WAIT','FAILED')", collectDataEntity.getId());
+			jdbcTemplate.update("UPDATE biz_collect_data SET taskenabled='N', taskstatus=? WHERE id=?",
+					"DELETE_ALL".equals(policy) ? "已删除（已下载记录清理）" : "已删除（已下载记录保留）", collectDataEntity.getId());
+			if ("DELETE_ALL".equals(policy)) {
+				collectDataDetailService.deleteDataid(collectDataEntity.getId());
+			}
+			// The shell is needed only for KEEP_QUEUE. Once the queue is cancelled,
+			// remove the task row so it no longer appears as an active collection task.
+			jdbcTemplate.update("DELETE FROM biz_collect_data WHERE id=?", collectDataEntity.getId());
+			return new AjaxEntity(Global.ajax_success,
+					"DELETE_ALL".equals(policy) ? "任务及其下载记录已清理（媒体文件按共享引用保留）" : "任务已删除，队列已取消，已下载作品已保留",
+					Map.of("queuePolicy", policy));
 		} catch (Exception e) {
 			logger.error("删除失败：{}", collectDataEntity.getTaskname(), e);
 			return new AjaxEntity(Global.ajax_uri_error, "删除失败", null);

@@ -2,6 +2,8 @@ package com.flower.spirit.Interceptor;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +58,13 @@ public class LoginInterceptor implements HandlerInterceptor {
         // 其他路径：必须用户登录
         else {
             logger.warn("需要登录: {}", uri);
+            if (uri.startsWith("/admin/api/")) {
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write(new ObjectMapper().writeValueAsString(
+                        Map.of("resCode", "401", "message", "登录已失效，请重新登录")));
+                return false;
+            }
             response.sendRedirect("/admin/login");
             return false;
         }

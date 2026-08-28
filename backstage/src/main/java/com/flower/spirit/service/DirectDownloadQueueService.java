@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import java.time.Instant;
+import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
@@ -54,5 +55,22 @@ public class DirectDownloadQueueService {
 	public boolean retry(long jobId) {
 		return databaseWriteExecutor.execute("direct-download-retry",
 				() -> transaction.requeue(jobId, Instant.now()));
+	}
+
+	public int manualRetryItems(List<Long> ids) {
+		return databaseWriteExecutor.execute("direct-download-manual-retry-batch",
+				() -> transaction.manualRetryItems(ids, Instant.now()));
+	}
+	public int moveToRetry(List<Long> ids, Instant at) {
+		return databaseWriteExecutor.execute("direct-download-manual-retry-wait",
+				() -> transaction.moveToRetry(ids, at, Instant.now()));
+	}
+	public int markFailed(List<Long> ids, String reason) {
+		return databaseWriteExecutor.execute("direct-download-manual-fail",
+				() -> transaction.markFailed(ids, reason, Instant.now()));
+	}
+	public int cancel(List<Long> ids) {
+		return databaseWriteExecutor.execute("direct-download-manual-cancel",
+				() -> transaction.cancel(ids, Instant.now()));
 	}
 }

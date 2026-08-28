@@ -618,9 +618,16 @@
 	function deleteProcesses(){
 		$('.deleteProcesses').click(function () {
 			var id = $(this).attr('data-id');
-			layer.confirm("删除任务会造成任务失败建议无执行任务时再删除！是否删除", function(index){
-				//调用接口删除
-				$.get("/admin/api/deleteCollectData?id="+id,function(res){
+			layer.open({type:1, title:'删除收藏任务', area:['440px','auto'], content:'<div style="padding:18px;">'
+				+'<p>请选择删除范围。运行中的下载不会被强制中断。</p>'
+				+'<select id="collectDeletePolicy" class="form-control">'
+				+'<option value="CANCEL_QUEUE">删除任务和队列，保留已下载</option>'
+				+'<option value="KEEP_QUEUE">删除任务，保留队列和已下载</option>'
+				+'<option value="DELETE_ALL">删除所有（清理该任务下载记录；共享作品保留）</option>'
+				+'</select><div style="margin-top:16px;text-align:right;"><button id="collectDeleteConfirm" class="btn btn-danger">确认删除</button></div></div>',
+			btn:[], success:function(layero, index){ $('#collectDeleteConfirm').on('click', function(){
+				var policy=$('#collectDeletePolicy').val();
+				$.get("/admin/api/deleteCollectData?id="+id+'&queuePolicy='+encodeURIComponent(policy),function(res){
 					if(res.resCode =="000001"){
 						layer.msg(res.message)
 						setTimeout(function(){
@@ -629,9 +636,9 @@
 					}else{
 						layer.alert(res.message);
 					}
-				})
+				}).fail(function(){ layer.msg('删除请求失败'); });
 				layer.close(index);
-			});
+			}); }});
 		})
 
 	}

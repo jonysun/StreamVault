@@ -70,6 +70,7 @@ import com.flower.spirit.service.ProcessHistoryService;
 import com.flower.spirit.service.RuntimeControlService;
 import com.flower.spirit.service.ApplicationReadinessGate;
 import com.flower.spirit.service.RuntimeControlSnapshot;
+import com.flower.spirit.service.PlatformCookieService;
 import com.flower.spirit.service.RuntimeJobQueryService;
 import com.flower.spirit.service.SystemService;
 import com.flower.spirit.service.TikTokConfigService;
@@ -196,6 +197,9 @@ public class AdminController {
 
 	@Autowired
 	private DouyinCookieHealthService douyinCookieHealthService;
+
+	@Autowired
+	private PlatformCookieService platformCookieService;
 
 	@Autowired
 	private DouyinAuthorReconciliationService douyinAuthorReconciliationService;
@@ -593,8 +597,9 @@ public class AdminController {
 	 * @return
 	 */
 	@GetMapping(value = "/deleteCollectData")
-	public AjaxEntity deleteCollectData(CollectDataEntity collectDataEntity,HttpServletRequest request) {
-		return collectDataService.deleteCollectData(collectDataEntity);
+	public AjaxEntity deleteCollectData(CollectDataEntity collectDataEntity,
+			@RequestParam(defaultValue = "CANCEL_QUEUE") String queuePolicy, HttpServletRequest request) {
+		return collectDataService.deleteCollectData(collectDataEntity, queuePolicy);
 	}
 	/**
 	 * 新建收藏夹信息
@@ -881,6 +886,26 @@ public class AdminController {
 		} catch (RuntimeException error) {
 			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
 		}
+	}
+
+	@PostMapping("/download-center/transition")
+	public AjaxEntity transitionDownloadCenterItems(@RequestBody Map<String, Object> request) {
+		try {
+			@SuppressWarnings("unchecked")
+			List<String> keys = (List<String>) request.get("recordKeys");
+			String action = String.valueOf(request.getOrDefault("action", ""));
+			return new AjaxEntity(Global.ajax_success, "下载队列已更新", downloadCenterService.transition(keys, action));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
+	@PostMapping("/douyin/clear-global-cooldown")
+	public AjaxEntity clearDouyinGlobalCooldown(HttpServletRequest request) {
+		UserEntity user = (UserEntity) request.getSession().getAttribute(Global.user_session_key);
+		String operator = user == null ? "unknown" : String.valueOf(user.getUsername());
+		return new AjaxEntity(Global.ajax_success, "已解除一次抖音全局风控冷却",
+				platformCookieService.clearDouyinGlobalCooldown(operator));
 	}
 
 	@PostMapping("/download-center/delete-and-block")

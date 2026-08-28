@@ -455,6 +455,7 @@
                                         <div class="cookie-toolbar">
                                             <button type="button" class="btn btn-info btn-sm" onclick="openDouyinCookieEditor(-1)"><i class="mdi mdi-plus" style="margin-right: 2px;"></i>新增Cookie</button>
                                             <button type="button" class="btn btn-info btn-sm" onclick="checkDouyinCookies()"><i class="mdi mdi-refresh" style="margin-right: 2px;"></i>检测有效性</button>
+                                            <button type="button" class="btn btn-warning btn-sm" onclick="clearDouyinGlobalCooldown()"><i class="mdi mdi-shield-off-outline" style="margin-right: 2px;"></i>解除全局风控</button>
                                             <button type="button" class="btn btn-default btn-sm" onclick="openDouyinCookieBulkEditor()">批量编辑</button>
                                         </div>
                                         <div class="cookie-table-wrap">
@@ -974,6 +975,15 @@
                 layer.close(loading);
                 layer.msg('检测失败');
             }
+        });
+    }
+
+    function clearDouyinGlobalCooldown(){
+        layer.confirm('仅解除当前进程的一次抖音全局冷却，不修改 Cookie，也不会发起远端请求。继续吗？', function(index){
+            $.ajax({url:'/admin/api/douyin/clear-global-cooldown', type:'POST'})
+                .done(function(res){ layer.msg(res.message || '已解除全局风控'); })
+                .fail(function(xhr){ layer.msg(xhr.status === 401 ? '登录已失效，请重新登录' : '解除失败'); });
+            layer.close(index);
         });
     }
 

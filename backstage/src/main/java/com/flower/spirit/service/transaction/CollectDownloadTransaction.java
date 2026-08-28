@@ -302,4 +302,67 @@ public class CollectDownloadTransaction {
 			String workId, String mediaType, String decision, int ordinal, int attemptCount, int maxAttempts,
 			String metadataSnapshot) {
 	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int manualRetryItems(List<Long> itemIds, Instant now) {
+		if (itemIds == null || itemIds.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now);
+		int changed = 0;
+		for (Long id : itemIds) {
+			if (id == null) continue;
+			changed += jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='QUEUED', "
+					+ "decision=CASE WHEN decision LIKE '%AUDIT_REPAIR%' THEN 'MANUAL_RETRY_AUDIT_REPAIR' ELSE 'MANUAL_RETRY' END, "
+					+ "attempt_count=0, available_at=?, locked_by=NULL, locked_at=NULL, finished_at=NULL, "
+					+ "error_code=NULL, error_message=NULL, error_detail=NULL, updated_at=? "
+					+ "WHERE id=? AND queue_generation=? AND process_state IN ('FAILED','RETRY_WAIT','QUEUED')",
+				ts, ts, id, QUEUE_GENERATION);
+		}
+		return changed;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int moveToRetry(List<Long> itemIds, Instant availableAt, Instant now) {
+		if (itemIds == null || itemIds.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now), retryAt = Timestamp.from(availableAt);
+		int changed = 0;
+		for (Long id : itemIds) {
+			if (id == null) continue;
+			changed += jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='RETRY_WAIT', available_at=?, "
+					+ "locked_by=NULL, locked_at=NULL, finished_at=NULL, error_code='MANUAL_RETRY_WAIT', "
+					+ "error_message='用户手动移入等待重试', error_detail=NULL, updated_at=? WHERE id=? "
+					+ "AND queue_generation=? AND process_state IN ('FAILED','RETRY_WAIT','QUEUED')",
+					retryAt, ts, id, QUEUE_GENERATION);
+		}
+		return changed;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int markFailed(List<Long> itemIds, String reason, Instant now) {
+		if (itemIds == null || itemIds.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now);
+		int changed = 0;
+		for (Long id : itemIds) {
+			if (id == null) continue;
+			changed += jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='FAILED', available_at=NULL, "
+					+ "locked_by=NULL, locked_at=NULL, finished_at=?, error_code='MANUAL_FAILED', error_message=?, "
+					+ "error_detail=NULL, updated_at=? WHERE id=? AND queue_generation=? "
+					+ "AND process_state IN ('QUEUED','RETRY_WAIT','FAILED')", ts, truncate(reason, 2048), ts, id, QUEUE_GENERATION);
+		}
+		return changed;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int cancel(List<Long> itemIds, Instant now) {
+		if (itemIds == null || itemIds.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now);
+		int changed = 0;
+		for (Long id : itemIds) {
+			if (id == null) continue;
+			changed += jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='CANCELLED', available_at=NULL, "
+					+ "locked_by=NULL, locked_at=NULL, finished_at=?, error_code='CANCELLED_BY_USER', "
+					+ "error_message='用户取消下载队列', error_detail=NULL, updated_at=? WHERE id=? AND queue_generation=? "
+					+ "AND process_state IN ('QUEUED','RETRY_WAIT','FAILED')", ts, ts, id, QUEUE_GENERATION);
+		}
+		return changed;
+	}
 }
