@@ -128,4 +128,24 @@ public class CollectRunService {
 		return databaseWriteExecutor.execute("collect-download-retry-failed",
 				() -> downloadTransaction.retryFailedRun(runId, Instant.now()));
 	}
+
+	public int manualRetryDownloads(List<Long> itemIds) {
+		return databaseWriteExecutor.execute("collect-download-manual-retry-batch",
+				() -> downloadTransaction.manualRetryItems(itemIds, Instant.now()));
+	}
+
+	public int moveDownloadsToRetry(List<Long> itemIds, Instant availableAt) {
+		return databaseWriteExecutor.execute("collect-download-manual-retry-wait",
+				() -> downloadTransaction.moveToRetry(itemIds, availableAt, Instant.now()));
+	}
+
+	public int markDownloadsFailed(List<Long> itemIds, String reason) {
+		return databaseWriteExecutor.execute("collect-download-manual-fail",
+				() -> downloadTransaction.markFailed(itemIds, reason, Instant.now()));
+	}
+
+	public int cancelDownloads(List<Long> itemIds) {
+		return databaseWriteExecutor.execute("collect-download-manual-cancel",
+				() -> downloadTransaction.cancel(itemIds, Instant.now()));
+	}
 }

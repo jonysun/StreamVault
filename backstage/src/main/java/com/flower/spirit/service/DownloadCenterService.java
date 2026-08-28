@@ -10,8 +10,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.time.Duration;
+import java.util.HashSet;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSONObject;
@@ -19,6 +23,7 @@ import com.flower.spirit.database.DatabaseWriteExecutor;
 
 @Service
 public class DownloadCenterService {
+	private static final Logger logger = LoggerFactory.getLogger(DownloadCenterService.class);
 
 	private static final Set<String> ACTIVE_STATES = Set.of("QUEUED", "RUNNING", "RETRY_WAIT");
 	private static final Set<String> HISTORY_STATES = Set.of("COMPLETED", "FAILED", "CANCELLED",
@@ -29,17 +34,27 @@ public class DownloadCenterService {
 	private final CollectRunService collectRunService;
 	private final RuntimeControlService runtimeControlService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
+	private final CollectEnqueueService collectEnqueueService;
 	@org.springframework.beans.factory.annotation.Autowired(required = false)
 	private BlockedWorkService blockedWorkService;
 
 	public DownloadCenterService(JdbcTemplate jdbcTemplate, DirectDownloadQueueService directDownloadQueueService,
 			CollectRunService collectRunService, RuntimeControlService runtimeControlService,
-			DatabaseWriteExecutor databaseWriteExecutor) {
+			DatabaseWriteExecutor databaseWriteExecutor, CollectEnqueueService collectEnqueueService) {
 		this.jdbcTemplate = jdbcTemplate;
 		this.directDownloadQueueService = directDownloadQueueService;
 		this.collectRunService = collectRunService;
 		this.runtimeControlService = runtimeControlService;
 		this.databaseWriteExecutor = databaseWriteExecutor;
+		this.collectEnqueueService = collectEnqueueService;
+	}
+
+	/** Compatibility constructor for isolated service tests. */
+	public DownloadCenterService(JdbcTemplate jdbcTemplate, DirectDownloadQueueService directDownloadQueueService,
+			CollectRunService collectRunService, RuntimeControlService runtimeControlService,
+			DatabaseWriteExecutor databaseWriteExecutor) {
+		this(jdbcTemplate, directDownloadQueueService, collectRunService, runtimeControlService,
+				databaseWriteExecutor, null);
 	}
 
 	public Map<String, Object> summary() {
@@ -120,6 +135,41 @@ public class DownloadCenterService {
 			}
 		}
 		return retried;
+	}
+
+	public Map<String, Object> transition(List<String> recordKeys, String action) {
+		if (recordKeys == null) return Map.of("changed", 0, "skipped", 0);
+		String normalized = action == null ? "" : action.trim().toUpperCase(Locale.ROOT);
+		List<Long> collect = new ArrayList<>(), direct = new ArrayList<>();
+		int skipped = 0;
+		for (String value : recordKeys.stream().filter(java.util.Objects::nonNull).distinct().limit(200).toList()) {
+			try {
+				RecordKey key = parseKey(value);
+				if ("COLLECT".equals(key.source())) collect.add(key.id());
+				else direct.add(key.id());
+			} catch (IllegalArgumentException e) { skipped++; }
+		}
+		int changed = 0;
+		switch (normalized) {
+		case "RETRY" -> {
+			Set<Integer> refreshTasks = new HashSet<>();
+			if (!collect.isEmpty()) {
+				String placeholders = String.join(",", collect.stream().map(id -> "?").toList());
+				List<Integer> taskIds = jdbcTemplate.queryForList("SELECT DISTINCT r.collect_task_id FROM biz_collect_run_item i "
+						+ "JOIN biz_collect_run r ON r.id=i.run_id WHERE i.id IN (" + placeholders + ") "
+						+ "AND i.error_code='LIST_SNAPSHOT_PENDING'", Integer.class, collect.toArray());
+				refreshTasks.addAll(taskIds);
+			}
+			changed += collectRunService.manualRetryDownloads(collect); changed += directDownloadQueueService.manualRetryItems(direct);
+			for (Integer taskId : refreshTasks) try { if (collectEnqueueService != null) collectEnqueueService.enqueueSnapshotRefresh(taskId); }
+			catch (RuntimeException error) { logger.warn("manual snapshot refresh enqueue failed taskId={}", taskId, error); }
+		}
+		case "RETRY_WAIT" -> { Instant at = Instant.now().plus(Duration.ofMinutes(5)); changed += collectRunService.moveDownloadsToRetry(collect, at); changed += directDownloadQueueService.moveToRetry(direct, at); }
+		case "FAILED" -> { changed += collectRunService.markDownloadsFailed(collect, "用户手动标记失败"); changed += directDownloadQueueService.markFailed(direct, "用户手动标记失败"); }
+		case "CANCEL" -> { changed += collectRunService.cancelDownloads(collect); changed += directDownloadQueueService.cancel(direct); }
+		default -> throw new IllegalArgumentException("Unsupported download action: " + action);
+		}
+		return Map.of("changed", changed, "skipped", skipped);
 	}
 
 	private boolean isBlockedCollectionItem(long itemId) {

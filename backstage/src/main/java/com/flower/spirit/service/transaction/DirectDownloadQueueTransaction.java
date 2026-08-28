@@ -153,6 +153,54 @@ public class DirectDownloadQueueTransaction {
 				JobType.DIRECT_DOWNLOAD.name()) == 1;
 	}
 
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int manualRetryItems(List<Long> ids, Instant now) {
+		if (ids == null || ids.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now); int changed = 0;
+		for (Long id : ids) if (id != null) {
+			changed += jdbcTemplate.update("UPDATE biz_job_queue SET state='QUEUED', attempt_count=0, available_at=?, "
+					+ "locked_by=NULL, locked_at=NULL, last_error_code=NULL, last_error_message=NULL, updated_at=? "
+					+ "WHERE id=? AND job_type=? AND state IN ('FAILED','RETRY_WAIT','QUEUED')", ts, ts, id, JobType.DIRECT_DOWNLOAD.name());
+		}
+		return changed;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int moveToRetry(List<Long> ids, Instant availableAt, Instant now) {
+		if (ids == null || ids.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now), retryAt = Timestamp.from(availableAt); int changed = 0;
+		for (Long id : ids) if (id != null) {
+			changed += jdbcTemplate.update("UPDATE biz_job_queue SET state='RETRY_WAIT', available_at=?, locked_by=NULL, "
+					+ "locked_at=NULL, last_error_code='MANUAL_RETRY_WAIT', last_error_message='用户手动移入等待重试', updated_at=? "
+					+ "WHERE id=? AND job_type=? AND state IN ('FAILED','RETRY_WAIT','QUEUED')", retryAt, ts, id, JobType.DIRECT_DOWNLOAD.name());
+		}
+		return changed;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int markFailed(List<Long> ids, String reason, Instant now) {
+		if (ids == null || ids.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now); int changed = 0;
+		for (Long id : ids) if (id != null) {
+			changed += jdbcTemplate.update("UPDATE biz_job_queue SET state='FAILED', available_at=NULL, locked_by=NULL, locked_at=NULL, "
+					+ "last_error_code='MANUAL_FAILED', last_error_message=?, updated_at=? WHERE id=? AND job_type=? "
+					+ "AND state IN ('FAILED','RETRY_WAIT','QUEUED')", truncate(reason, 2048), ts, id, JobType.DIRECT_DOWNLOAD.name());
+		}
+		return changed;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int cancel(List<Long> ids, Instant now) {
+		if (ids == null || ids.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now); int changed = 0;
+		for (Long id : ids) if (id != null) {
+			changed += jdbcTemplate.update("UPDATE biz_job_queue SET state='CANCELLED', available_at=NULL, locked_by=NULL, locked_at=NULL, "
+					+ "last_error_code='CANCELLED_BY_USER', last_error_message='用户取消下载队列', updated_at=? WHERE id=? "
+					+ "AND job_type=? AND state IN ('FAILED','RETRY_WAIT','QUEUED')", ts, id, JobType.DIRECT_DOWNLOAD.name());
+		}
+		return changed;
+	}
+
 	private void assertUpdated(int updated, long jobId) {
 		if (updated != 1) throw new IllegalStateException("Direct download job state changed concurrently: " + jobId);
 	}

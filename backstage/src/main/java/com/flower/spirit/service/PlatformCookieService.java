@@ -287,6 +287,17 @@ public class PlatformCookieService {
 		return Math.max(0, douyinGlobalRiskCooldownUntilEpochMillis() - now);
 	}
 
+	/** Clears only the in-memory global Douyin cooldown; configured cookies are unchanged. */
+	public Map<String, Object> clearDouyinGlobalCooldown(String operator) {
+		long previousRisk = douyinGlobalRiskStartedAtMs.getAndSet(0);
+		long previousSoft = douyinGlobalSoftBlockStartedAtMs.getAndSet(0);
+		logger.warn("platform cooldown manually cleared platform={} operator={} hadRisk={} hadDetailBackoff={}",
+				DOUYIN_PLATFORM_KEY, operator == null || operator.isBlank() ? "unknown" : operator, previousRisk > 0,
+				previousSoft > 0);
+		return Map.of("cleared", true, "hadGlobalRiskCooldown", previousRisk > 0,
+				"hadDetailBackoff", previousSoft > 0);
+	}
+
 	private long douyinGlobalRiskCooldownUntilEpochMillis() {
 		long strongStartedAt = douyinGlobalRiskStartedAtMs.get();
 		return strongStartedAt <= 0 ? 0 : strongStartedAt + douyinRiskCooldownMillis();
