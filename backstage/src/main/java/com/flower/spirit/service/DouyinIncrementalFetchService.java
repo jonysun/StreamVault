@@ -123,7 +123,9 @@ public class DouyinIncrementalFetchService {
 		if (!(diagnostics instanceof JSONObject object) || object.isEmpty()) {
 			return message;
 		}
-		String diagnosticText = bounded(JSON.toJSONString(object), 1000);
+		// Python already bounds individual evidence fields. Keep the serialized object
+		// intact here; truncating JSON can hide the upstream response and make it invalid.
+		String diagnosticText = JSON.toJSONString(object);
 		if (diagnosticText.isBlank()) {
 			return message;
 		}

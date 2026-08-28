@@ -31,6 +31,8 @@ public class CollectDownloadService {
 	private final CollectDownloadTransaction transaction;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final CollectEnqueueService collectEnqueueService;
+	@org.springframework.beans.factory.annotation.Autowired(required = false)
+	private BlockedWorkService blockedWorkService;
 	private static final Duration SNAPSHOT_REFRESH_WAIT = Duration.ofMinutes(15);
 
 	public CollectDownloadService(WorkIngestService workIngestService, CollectDownloadTransaction transaction,
@@ -52,6 +54,12 @@ public class CollectDownloadService {
 		IngestResult result;
 		try {
 			validateClaim(claim);
+			if (blockedWorkService != null && blockedWorkService.isBlocked(claim.platformKey(), claim.workId(), "video")) {
+				transaction.skipBlocked(claim, "作品已在黑名单中，跳过下载", now);
+				logger.info("[CollectDownload] skipped blocked work itemId={} runId={} platform={} workId={}",
+						claim.id(), claim.runId(), claim.platformKey(), claim.workId());
+				return;
+			}
 			if (claim.metadataSnapshot() == null || claim.metadataSnapshot().isBlank()) {
 				deferForSnapshotRefresh(claim, now);
 				return;
@@ -193,8 +201,12 @@ public class CollectDownloadService {
 		if (error instanceof CollectDownloadException download) return download;
 		DouyinWorkFetchException workFetch = findCause(error, DouyinWorkFetchException.class);
 		if (workFetch != null) {
+			String message = workFetch.getMessage();
+			if ("F2_WORK_UNAVAILABLE".equals(workFetch.errorCode())) {
+				message = valueOr(message, "Douyin work is no longer available") + "；可能服务器端已删除或媒体地址已失效";
+			}
 			return new CollectDownloadException(workFetch.errorCode(), workFetch.retryable(),
-					workFetch.getMessage() + "; " + workFetch.diagnostics().summary(), error);
+					valueOr(message, "Douyin work metadata request failed") + "; " + workFetch.diagnostics().summary(), error);
 		}
 		String root = rootCauseMessage(error);
 		String normalized = root.toLowerCase(Locale.ROOT);

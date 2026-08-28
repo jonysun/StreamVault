@@ -72,7 +72,9 @@ public class ApiController {
 		try {
 			submission = analysisService.submitProcessingVideos(token, video, sourceType, title, author, batchId);
 		} catch (Exception e) {
-			logger.error("线程中异常 先打印 不一定有用 标记");
+			logger.error("Download submission failed video={} sourceType={} batchId={}", safeUrl(video), sourceType, batchId, e);
+			return new AjaxEntity(Global.ajax_uri_error, "提交下载失败: "
+					+ (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()), null);
 		}
 		return analysisService.applySubmission(
 				new AjaxEntity(Global.ajax_success, "已提交,等待系统处理", ""), submission);
@@ -85,6 +87,8 @@ public class ApiController {
 			submission = analysisService.submitProcessingVideos(token, video);
 		} catch (Exception e) {
 			logger.error("Download submission failed", e);
+			return new AjaxEntity(Global.ajax_uri_error, "提交下载失败: "
+					+ (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()), null);
 		}
 		return analysisService.applySubmission(
 				new AjaxEntity(Global.ajax_success, "已提交，等待系统处理", ""), submission);
@@ -196,5 +200,11 @@ public class ApiController {
 	@CrossOrigin
 	public AjaxEntity directData(String token, String video) {
 		return analysisService.directData(token,video,"http");
+	}
+
+	private String safeUrl(String value) {
+		if (value == null) return null;
+		int query = value.indexOf('?');
+		return query < 0 ? value : value.substring(0, query) + "?[redacted]";
 	}
 }

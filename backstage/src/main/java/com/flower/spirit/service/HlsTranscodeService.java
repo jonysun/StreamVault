@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.common.AjaxEntity;
@@ -57,6 +59,9 @@ public class HlsTranscodeService {
 	@Autowired(required = false)
 	private ApplicationReadinessGate readinessGate;
 
+	@Autowired(required = false)
+	private JdbcTemplate jdbcTemplate;
+
 	private final Object stateLock = new Object();
 	private final Deque<Integer> queue = new ArrayDeque<>();
 	private final Set<Integer> dedupe = new HashSet<>();
@@ -69,6 +74,7 @@ public class HlsTranscodeService {
 	private volatile long lastFailAt = 0L;
 	private volatile String lastError = "";
 	private volatile boolean shuttingDown = false;
+	private volatile boolean persistentQueueUnavailable = false;
 
 	public AjaxEntity enqueueByIds(String idsCsv) {
 		if (idsCsv == null || idsCsv.trim().isEmpty()) {
@@ -189,6 +195,7 @@ public class HlsTranscodeService {
 	}
 
 	private List<Integer> reserveAvailableJobs() {
+		if (persistentQueueEnabled()) return reservePersistentJobs();
 		List<Integer> reserved = new ArrayList<>();
 		synchronized (stateLock) {
 			if (shuttingDown) {
@@ -211,8 +218,10 @@ public class HlsTranscodeService {
 	private void runReservedJob(Integer id, boolean forceRun) {
 		try {
 			transcodeOne(id);
+			markPersistentCompleted(id);
 		} catch (Exception e) {
 			markFailure(id, e.getMessage(), e);
+			markPersistentFailure(id, e);
 		} finally {
 			releaseReservedJob(id, false);
 			processQueueTick(forceRun);
@@ -220,6 +229,14 @@ public class HlsTranscodeService {
 	}
 
 	private void releaseReservedJob(Integer id, boolean requeue) {
+		if (persistentQueueEnabled() && requeue) {
+			try {
+				jdbcTemplate.update("UPDATE biz_hls_queue SET state='QUEUED', locked_by=NULL, locked_at=NULL, "
+						+ "available_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE video_id=? AND state='RUNNING'", id);
+			} catch (DataAccessException error) {
+				logger.error("[HLS] persistent requeue failed id={}", id, error);
+			}
+		}
 		synchronized (stateLock) {
 			runningVideoIds.remove(id);
 			if (requeue && !shuttingDown && !dedupe.contains(id)) {
@@ -230,12 +247,28 @@ public class HlsTranscodeService {
 	}
 
 	public int queueSize() {
+		if (persistentQueueEnabled()) {
+			try {
+				Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM biz_hls_queue WHERE state IN ('QUEUED','RETRY_WAIT')", Integer.class);
+				return count == null ? 0 : count;
+			} catch (DataAccessException error) {
+				logger.warn("[HLS] persistent queue count unavailable, using memory fallback: {}", error.getMessage());
+			}
+		}
 		synchronized (stateLock) {
 			return queue.size();
 		}
 	}
 
 	public Set<Integer> queuedIdsSnapshot() {
+		if (persistentQueueEnabled()) {
+			try {
+				return new LinkedHashSet<>(jdbcTemplate.query("SELECT video_id FROM biz_hls_queue WHERE state IN ('QUEUED','RETRY_WAIT') ORDER BY available_at, video_id",
+						(rs, rowNum) -> rs.getInt(1)));
+			} catch (DataAccessException error) {
+				logger.warn("[HLS] persistent queue snapshot unavailable: {}", error.getMessage());
+			}
+		}
 		synchronized (stateLock) {
 			return new HashSet<>(dedupe);
 		}
@@ -266,6 +299,14 @@ public class HlsTranscodeService {
 	}
 
 	public boolean cancelQueued(Integer id) {
+		if (persistentQueueEnabled()) {
+			try {
+				return jdbcTemplate.update("UPDATE biz_hls_queue SET state='CANCELLED', locked_by=NULL, locked_at=NULL, updated_at=CURRENT_TIMESTAMP "
+						+ "WHERE video_id=? AND state IN ('QUEUED','RETRY_WAIT')", id) == 1;
+			} catch (DataAccessException error) {
+				logger.warn("[HLS] persistent cancel unavailable id={}: {}", id, error.getMessage());
+			}
+		}
 		synchronized (stateLock) {
 			if (id == null || runningVideoIds.contains(id)) {
 				return false;
@@ -277,6 +318,14 @@ public class HlsTranscodeService {
 	}
 
 	public boolean beginVideoDeletion(Integer id) {
+		if (persistentQueueEnabled()) {
+			try {
+				if (jdbcTemplate.update("UPDATE biz_hls_queue SET state='CANCELLED', locked_by=NULL, locked_at=NULL, updated_at=CURRENT_TIMESTAMP "
+						+ "WHERE video_id=? AND state IN ('QUEUED','RETRY_WAIT')", id) > 0) return true;
+			} catch (DataAccessException error) {
+				logger.warn("[HLS] persistent deletion reservation unavailable id={}: {}", id, error.getMessage());
+			}
+		}
 		synchronized (stateLock) {
 			if (id == null || runningVideoIds.contains(id) || deletingVideoIds.contains(id)) {
 				return false;
@@ -295,10 +344,9 @@ public class HlsTranscodeService {
 	}
 
 	public AjaxEntity stats() {
-		int queued;
+		int queued = queueSize();
 		Set<Integer> runningIds;
 		synchronized (stateLock) {
-			queued = queue.size();
 			runningIds = new LinkedHashSet<>(runningVideoIds);
 		}
 		java.util.Map<String, Object> map = new java.util.HashMap<>();
@@ -317,6 +365,7 @@ public class HlsTranscodeService {
 		map.put("lastSuccessAt", lastSuccessAt);
 		map.put("lastFailAt", lastFailAt);
 		map.put("lastError", lastError);
+		map.put("queueBackend", persistentQueueEnabled() ? "postgresql" : "memory");
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", map);
 	}
 
@@ -343,6 +392,7 @@ public class HlsTranscodeService {
 	}
 
 	private boolean enqueue(Integer id, boolean forceRebuild) {
+		if (persistentQueueEnabled()) return enqueuePersistent(id, forceRebuild);
 		synchronized (stateLock) {
 			if (id == null || shuttingDown || dedupe.contains(id) || runningVideoIds.contains(id)
 					|| deletingVideoIds.contains(id)) {
@@ -366,6 +416,87 @@ public class HlsTranscodeService {
 			dedupe.add(id);
 			queue.offerLast(id);
 			return true;
+		}
+	}
+
+	private boolean persistentQueueEnabled() {
+		return jdbcTemplate != null && !persistentQueueUnavailable;
+	}
+
+	private boolean enqueuePersistent(Integer id, boolean forceRebuild) {
+		if (id == null || shuttingDown || deletingVideoIds.contains(id)) return false;
+		Optional<VideoDataEntity> optional = videoDataDao.findById(id);
+		if (optional.isEmpty()) return false;
+		VideoDataEntity video = optional.get();
+		if (!allowPrivacy(video) || (!forceRebuild && hasHls(video))) return false;
+		try {
+			String state = null;
+			try {
+				state = jdbcTemplate.queryForObject("SELECT state FROM biz_hls_queue WHERE video_id=?", String.class, id);
+			} catch (org.springframework.dao.EmptyResultDataAccessException ignored) {
+				// First enqueue for this video.
+			}
+			if ("RUNNING".equals(state) || "QUEUED".equals(state) || "RETRY_WAIT".equals(state)) return false;
+			if (forceRebuild) clearHlsArtifacts(video);
+			return jdbcTemplate.update("INSERT INTO biz_hls_queue(video_id,state,attempt_count,max_attempts,available_at,created_at,updated_at) "
+					+ "VALUES (?, 'QUEUED', 0, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+					+ "ON CONFLICT(video_id) DO UPDATE SET state='QUEUED', attempt_count=0, available_at=CURRENT_TIMESTAMP, "
+					+ "locked_by=NULL, locked_at=NULL, last_error=NULL, updated_at=CURRENT_TIMESTAMP", id) > 0;
+		} catch (DataAccessException error) {
+			persistentQueueUnavailable = true;
+			logger.error("[HLS] persistent queue unavailable; enqueue retained only in compatibility mode id={}", id, error);
+			return false;
+		}
+	}
+
+	private List<Integer> reservePersistentJobs() {
+		List<Integer> reserved = new ArrayList<>();
+		if (shuttingDown) return reserved;
+		try {
+			jdbcTemplate.update("UPDATE biz_hls_queue SET state='RETRY_WAIT', locked_by=NULL, locked_at=NULL, "
+					+ "available_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE state='RUNNING' "
+					+ "AND locked_at < CURRENT_TIMESTAMP - INTERVAL '30 minutes'");
+			int capacity = Math.max(1, Global.hlsConcurrency);
+			while (reserved.size() < capacity) {
+				List<Integer> candidates = jdbcTemplate.query("SELECT video_id FROM biz_hls_queue WHERE state IN ('QUEUED','RETRY_WAIT') "
+						+ "AND (available_at IS NULL OR available_at <= CURRENT_TIMESTAMP) AND attempt_count < max_attempts "
+						+ "ORDER BY available_at NULLS FIRST, created_at, video_id LIMIT 1", (rs, rowNum) -> rs.getInt(1));
+				if (candidates.isEmpty()) break;
+				Integer id = candidates.get(0);
+				String lock = "hls:" + UUID.randomUUID();
+				int updated = jdbcTemplate.update("UPDATE biz_hls_queue SET state='RUNNING', attempt_count=attempt_count+1, locked_by=?, "
+						+ "locked_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE video_id=? AND state IN ('QUEUED','RETRY_WAIT') "
+						+ "AND attempt_count < max_attempts", lock, id);
+				if (updated == 1) {
+					synchronized (stateLock) { runningVideoIds.add(id); }
+					reserved.add(id);
+				}
+			}
+		} catch (DataAccessException error) {
+			persistentQueueUnavailable = true;
+			logger.error("[HLS] persistent queue reservation failed", error);
+		}
+		return reserved;
+	}
+
+	private void markPersistentCompleted(Integer id) {
+		if (!persistentQueueEnabled()) return;
+		try {
+			jdbcTemplate.update("UPDATE biz_hls_queue SET state='COMPLETED', locked_by=NULL, locked_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE video_id=?", id);
+		} catch (DataAccessException error) {
+			logger.warn("[HLS] failed to persist completion id={}: {}", id, error.getMessage());
+		}
+	}
+
+	private void markPersistentFailure(Integer id, Exception error) {
+		if (!persistentQueueEnabled()) return;
+		String detail = boundedDiagnostic(error == null ? null : error.getMessage());
+		try {
+			jdbcTemplate.update("UPDATE biz_hls_queue SET state=CASE WHEN attempt_count < max_attempts THEN 'RETRY_WAIT' ELSE 'FAILED' END, "
+					+ "available_at=CASE WHEN attempt_count < max_attempts THEN CURRENT_TIMESTAMP + INTERVAL '5 minutes' ELSE NULL END, "
+					+ "locked_by=NULL, locked_at=NULL, last_error=?, updated_at=CURRENT_TIMESTAMP WHERE video_id=?", detail, id);
+		} catch (DataAccessException dbError) {
+			logger.warn("[HLS] failed to persist failure id={}: {}", id, dbError.getMessage());
 		}
 	}
 

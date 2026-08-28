@@ -883,6 +883,16 @@ public class AdminController {
 		}
 	}
 
+	@PostMapping("/download-center/delete-and-block")
+	public AjaxEntity deleteAndBlockDownloadCenterItems(@RequestBody Map<String, List<String>> request) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "下载项已删除并加入黑名单",
+					Map.of("blocked", downloadCenterService.deleteAndBlock(request.get("recordKeys"))));
+		} catch (RuntimeException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
 	@PostMapping("/runtime-controls/pause-all")
 	public AjaxEntity pauseAllRuntimeTasks(@RequestBody(required = false) Map<String, Object> body,
 			HttpServletRequest request) {
