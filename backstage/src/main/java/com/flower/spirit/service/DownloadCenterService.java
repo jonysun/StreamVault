@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.HashSet;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,7 @@ public class DownloadCenterService {
 	@org.springframework.beans.factory.annotation.Autowired(required = false)
 	private BlockedWorkService blockedWorkService;
 
+	@Autowired
 	public DownloadCenterService(JdbcTemplate jdbcTemplate, DirectDownloadQueueService directDownloadQueueService,
 			CollectRunService collectRunService, RuntimeControlService runtimeControlService,
 			DatabaseWriteExecutor databaseWriteExecutor, CollectEnqueueService collectEnqueueService) {
