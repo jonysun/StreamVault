@@ -144,6 +144,11 @@ public class CollectRunService {
 				() -> downloadTransaction.markFailed(itemIds, reason, Instant.now()));
 	}
 
+	public int markDownloadsRemoteMissing(List<Long> itemIds) {
+		return databaseWriteExecutor.execute("collect-download-manual-remote-missing",
+				() -> downloadTransaction.markRemoteMissing(itemIds, Instant.now()));
+	}
+
 	public int cancelDownloads(List<Long> itemIds) {
 		return databaseWriteExecutor.execute("collect-download-manual-cancel",
 				() -> downloadTransaction.cancel(itemIds, Instant.now()));

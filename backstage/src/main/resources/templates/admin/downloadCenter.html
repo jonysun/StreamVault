@@ -94,10 +94,11 @@
                         <button class="btn btn-primary" type="button" id="searchButton"><i class="mdi mdi-magnify"></i> 查询</button>
                     </div>
                     <div class="download-actions" style="padding:10px 16px;border-bottom:1px solid #edf0f2;">
-                        <button class="btn btn-sm btn-outline-primary" type="button" id="retrySelected" disabled><i class="mdi mdi-replay"></i> 立即重试</button>
+                        <button class="btn btn-sm btn-outline-primary" type="button" id="retrySelected" disabled><i class="mdi mdi-replay"></i> 重试所选失败任务</button>
                         <button class="btn btn-sm btn-outline-warning" type="button" id="waitSelected" disabled><i class="mdi mdi-clock-outline"></i> 移入等待重试</button>
                         <button class="btn btn-sm btn-outline-danger" type="button" id="failSelected" disabled><i class="mdi mdi-alert-outline"></i> 标记失败</button>
                         <button class="btn btn-sm btn-outline-secondary" type="button" id="cancelSelected" disabled><i class="mdi mdi-close-circle-outline"></i> 取消队列</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" id="remoteMissingSelected" disabled><i class="mdi mdi-cloud-off-outline"></i> 标记远端已删除</button>
                         <button class="btn btn-sm btn-outline-danger" type="button" id="blockSelected" disabled><i class="mdi mdi-cancel"></i> 删除并拉黑所选</button>
                         <button class="btn btn-sm btn-outline-danger" type="button" id="hideSelected" disabled style="display:none;"><i class="mdi mdi-delete-outline"></i> 清除所选记录</button>
                     </div>
@@ -192,6 +193,7 @@
             $('#waitSelected').on('click', function() { transitionSelected('RETRY_WAIT'); });
             $('#failSelected').on('click', function() { transitionSelected('FAILED'); });
             $('#cancelSelected').on('click', function() { transitionSelected('CANCEL'); });
+            $('#remoteMissingSelected').on('click', markRemoteMissingSelected);
             $('#blockSelected').on('click', blockSelected);
             $('#hideSelected').on('click', hideSelectedHistory);
             document.addEventListener('visibilitychange', scheduleRefresh);
@@ -272,7 +274,7 @@
         function renderStateFilter() {
             const options = state.view === 'active'
                 ? [ ['ALL','全部状态'],['RUNNING','正在下载'],['QUEUED','等待下载'],['RETRY_WAIT','等待重试'] ]
-                : [ ['ALL','全部状态'],['COMPLETED','已完成'],['FAILED','失败'],['CANCELLED','已取消'],['SKIPPED_EXISTING','已跳过'] ];
+                : [ ['ALL','全部状态'],['COMPLETED','已完成'],['FAILED','失败'],['CANCELLED','已取消'],['SKIPPED_EXISTING','已跳过'],['SKIPPED_REMOTE_MISSING','远端已删除'] ];
             $('#stateFilter').html(options.map(function(option) { return '<option value="'+option[0]+'">'+option[1]+'</option>'; }).join(''));
         }
         function togglePause() {
@@ -287,9 +289,18 @@
                 return state.selectedKeys.has(key) && (!failedOnly || item.state === 'FAILED');
             }).map(function(item) { return item.record_key; });
         }
+        function remoteMissingKeys() {
+            return state.rows.filter(function(item) {
+                return state.selectedKeys.has(String(item.record_key || ''))
+                    && item.source_kind === 'COLLECT'
+                    && ['QUEUED','RETRY_WAIT'].indexOf(item.state) >= 0
+                    && item.error_code === 'LIST_SNAPSHOT_PENDING';
+            }).map(function(item) { return item.record_key; });
+        }
         function updateBulkButtons() {
             $('#retrySelected').prop('disabled', state.view !== 'active' || selectedKeys(false).length === 0);
             $('#waitSelected,#failSelected,#cancelSelected').prop('disabled', state.view !== 'active' || selectedKeys(false).length === 0);
+            $('#remoteMissingSelected').prop('disabled', state.view !== 'active' || remoteMissingKeys().length === 0);
             $('#blockSelected').prop('disabled', state.view !== 'active' || selectedKeys(false).length === 0);
             $('#hideSelected').prop('disabled', selectedKeys(false).length === 0);
         }
@@ -314,6 +325,18 @@
             $.ajax({ url:'/admin/api/download-center/transition', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys,action:action}) })
                 .done(function(response){ clearSelection(); layer.msg(response.message || '已重新排队'); refreshAll(); })
                 .fail(apiFailure);
+        }
+        function markRemoteMissingSelected() {
+            const keys = remoteMissingKeys();
+            if (!keys.length) return;
+            layer.confirm('确认将选中的 ' + keys.length + ' 个待刷新作者列表作品标记为“远端已删除”并移入历史记录吗？<br>'
+                + '<span style="color:#a72f2f;">这是人工确认，不是系统自动检测结论；不会删除本地媒体文件。</span>', function(index) {
+                $.ajax({ url:'/admin/api/download-center/transition', type:'POST', contentType:'application/json',
+                    data:JSON.stringify({recordKeys:keys,action:'MARK_REMOTE_MISSING'}) })
+                    .done(function(response){ clearSelection(); layer.msg(response.message || '已标记远端已删除'); refreshAll(); })
+                    .fail(apiFailure);
+                layer.close(index);
+            });
         }
         function hideSelectedHistory() {
             const keys = selectedKeys(false);

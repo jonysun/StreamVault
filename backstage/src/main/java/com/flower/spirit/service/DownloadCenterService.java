@@ -168,6 +168,11 @@ public class DownloadCenterService {
 		}
 		case "RETRY_WAIT" -> { Instant at = Instant.now().plus(Duration.ofMinutes(5)); changed += collectRunService.moveDownloadsToRetry(collect, at); changed += directDownloadQueueService.moveToRetry(direct, at); }
 		case "FAILED" -> { changed += collectRunService.markDownloadsFailed(collect, "用户手动标记失败"); changed += directDownloadQueueService.markFailed(direct, "用户手动标记失败"); }
+		case "MARK_REMOTE_MISSING" -> {
+			int requested = collect.size() + direct.size();
+			changed += collectRunService.markDownloadsRemoteMissing(collect);
+			skipped += requested - changed;
+		}
 		case "CANCEL" -> { changed += collectRunService.cancelDownloads(collect); changed += directDownloadQueueService.cancel(direct); }
 		default -> throw new IllegalArgumentException("Unsupported download action: " + action);
 		}
