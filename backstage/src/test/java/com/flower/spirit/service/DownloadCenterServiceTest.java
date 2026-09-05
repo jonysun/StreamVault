@@ -8,12 +8,15 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.sqlite.SQLiteDataSource;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
+import com.flower.spirit.service.transaction.CollectDownloadTransaction;
+import com.flower.spirit.service.transaction.CollectQueueTransaction;
 
 class DownloadCenterServiceTest {
 
@@ -46,13 +49,47 @@ class DownloadCenterServiceTest {
 				.containsEntry("source_url", "https://youtu.be/x");
 	}
 
+	@Test
+	void marksOnlySnapshotPendingCollectionItemsAsRemoteMissing() throws Exception {
+		JdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id,taskname) VALUES(4,'Favorite author')");
+		jdbc.update("INSERT INTO biz_collect_run(id,collect_task_id) VALUES(9,4)");
+		jdbc.update("INSERT INTO biz_collect_run_item(id,run_id,platform_key,work_id,decision,process_state,attempt_count,max_attempts,"
+				+ "error_code,queue_generation,created_at,updated_at) VALUES"
+				+ "(90,9,'douyin','pending','EXISTING','RETRY_WAIT',0,4,'LIST_SNAPSHOT_PENDING','FETCH_DOWNLOAD_V1',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),"
+				+ "(91,9,'douyin','failed','EXISTING','FAILED',1,4,'LIST_SNAPSHOT_PENDING','FETCH_DOWNLOAD_V1',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)");
+
+		CollectDownloadTransaction transaction = new CollectDownloadTransaction(jdbc);
+		DatabaseWriteExecutor writes = new DatabaseWriteExecutor() {
+			@Override
+			public <T> T execute(String operation, Supplier<T> action) {
+				return action.get();
+			}
+		};
+		CollectRunService runs = new CollectRunService(mock(CollectQueueTransaction.class), transaction, writes);
+		DownloadCenterService service = new DownloadCenterService(jdbc, mock(DirectDownloadQueueService.class),
+				runs, mock(RuntimeControlService.class), writes);
+
+		Map<String, Object> result = service.transition(List.of("COLLECT:90", "COLLECT:91", "DIRECT:20"),
+				"MARK_REMOTE_MISSING");
+
+		assertThat(result).containsEntry("changed", 1).containsEntry("skipped", 2);
+		assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE id=90", String.class))
+				.isEqualTo("SKIPPED_REMOTE_MISSING");
+		assertThat(jdbc.queryForObject("SELECT error_code FROM biz_collect_run_item WHERE id=90", String.class))
+				.isEqualTo("REMOTE_LIST_MISSING");
+		assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE id=91", String.class))
+				.isEqualTo("FAILED");
+	}
+
 	private void createSchema(JdbcTemplate jdbc) {
 		jdbc.execute("CREATE TABLE biz_collect_data(id INTEGER PRIMARY KEY,taskname TEXT)");
 		jdbc.execute("CREATE TABLE biz_collect_run(id INTEGER PRIMARY KEY,collect_task_id INTEGER)");
 		jdbc.execute("CREATE TABLE biz_collect_run_item(id INTEGER PRIMARY KEY,run_id INTEGER,platform_key TEXT,"+
 				"work_id TEXT,nickname_snapshot TEXT,title_snapshot TEXT,decision TEXT,process_state TEXT,"+
 				"attempt_count INTEGER,max_attempts INTEGER,available_at DATETIME,started_at DATETIME,"+
-				"finished_at DATETIME,error_code TEXT,error_message TEXT,queue_generation TEXT,created_at DATETIME,"+
+				"finished_at DATETIME,locked_by TEXT,locked_at DATETIME,error_code TEXT,error_message TEXT,error_detail TEXT,metadata_snapshot TEXT,queue_generation TEXT,created_at DATETIME,"+
 				"updated_at DATETIME)");
 		jdbc.execute("CREATE TABLE biz_job_queue(id INTEGER PRIMARY KEY,job_type TEXT,dedupe_key TEXT,payload TEXT,"+
 				"state TEXT,priority INTEGER,available_at DATETIME,attempt_count INTEGER,max_attempts INTEGER,"+

@@ -128,7 +128,7 @@ class AdminTemplateScriptSanityTest {
 		String common = template("include/common.html");
 
 		assertThat(center).contains("/admin/api/download-center/summary", "/admin/api/download-center/items",
-				"/admin/api/download-center/retry-batch", "/admin/api/download-center/history/hide",
+				"/admin/api/download-center/transition", "/admin/api/download-center/history/hide",
 				"/admin/api/setBackgroundTaskPause", "YOUTUBE_COLLECTION", "SINGLE_LINK", "COLLECT",
 				"当前任务", "历史记录", "重试所选失败任务", "清除所选记录", "selectedKeys", "clearSelection",
 				"syncSelectAll");

@@ -352,6 +352,23 @@ public class CollectDownloadTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int markRemoteMissing(List<Long> itemIds, Instant now) {
+		if (itemIds == null || itemIds.isEmpty()) return 0;
+		Timestamp ts = Timestamp.from(now);
+		int changed = 0;
+		for (Long id : itemIds) {
+			if (id == null) continue;
+			changed += jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='SKIPPED_REMOTE_MISSING', "
+					+ "available_at=NULL, locked_by=NULL, locked_at=NULL, finished_at=?, "
+					+ "error_code='REMOTE_LIST_MISSING', error_message='用户确认：作品可能已被服务器端删除', "
+					+ "metadata_snapshot=NULL, updated_at=? WHERE id=? AND queue_generation=? "
+					+ "AND error_code='LIST_SNAPSHOT_PENDING' AND process_state IN ('QUEUED','RETRY_WAIT')",
+				ts, ts, id, QUEUE_GENERATION);
+		}
+		return changed;
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public int cancel(List<Long> itemIds, Instant now) {
 		if (itemIds == null || itemIds.isEmpty()) return 0;
 		Timestamp ts = Timestamp.from(now);
