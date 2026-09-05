@@ -293,10 +293,9 @@
             if (state.allMatching) return state.rows.filter(function(item) {
                 return !state.excludedKeys.has(String(item.record_key || '')) && (!failedOnly || item.state === 'FAILED');
             }).map(function(item) { return item.record_key; });
-            return state.rows.filter(function(item) {
-                const key = String(item.record_key || '');
-                return state.selectedKeys.has(key) && (!failedOnly || item.state === 'FAILED');
-            }).map(function(item) { return item.record_key; });
+            // Keep explicit selections across pages and refreshes. Server-side transitions
+            // re-check the current state, so a stale/non-failed key is safely skipped.
+            return Array.from(state.selectedKeys);
         }
         function remoteMissingKeys() {
             return state.rows.filter(function(item) {
@@ -310,13 +309,13 @@
             const selectedCount = state.allMatching ? state.totalElements - state.excludedKeys.size : selectedKeys(false).length;
             const retryAllowed = state.allMatching
                 ? (state.view === 'history' && ['ALL','FAILED'].indexOf($('#stateFilter').val()) >= 0)
-                : selectedKeys(true).length > 0;
+                : selectedKeys(false).length > 0;
             $('#retrySelected').prop('disabled', !retryAllowed || selectedCount <= 0);
             $('#waitSelected,#failSelected,#cancelSelected').prop('disabled', state.view !== 'active' || selectedCount <= 0);
             const refreshEligible = state.allMatching
                 ? (state.view === 'active' && $('#sourceFilter').val() === 'COLLECT'
                     && ['ALL','QUEUED','RETRY_WAIT'].indexOf($('#stateFilter').val()) >= 0)
-                : remoteMissingKeys().length > 0;
+                : (remoteMissingKeys().length > 0 || (selectedKeys(false).length > 0 && $('#sourceFilter').val() === 'COLLECT'));
             $('#remoteMissingSelected').prop('disabled', state.view !== 'active' || !refreshEligible);
             $('#refreshAuthorSelected').prop('disabled', state.view !== 'active' || !refreshEligible);
             $('#blockSelected').prop('disabled', state.view !== 'active' || selectedCount <= 0);
