@@ -891,13 +891,24 @@ public class AdminController {
 	@PostMapping("/download-center/transition")
 	public AjaxEntity transitionDownloadCenterItems(@RequestBody Map<String, Object> request) {
 		try {
-			@SuppressWarnings("unchecked")
-			List<String> keys = (List<String>) request.get("recordKeys");
+			List<String> keys = stringList(request.get("recordKeys"));
+			List<String> excludedKeys = stringList(request.get("excludedKeys"));
 			String action = String.valueOf(request.getOrDefault("action", ""));
-			return new AjaxEntity(Global.ajax_success, "下载队列已更新", downloadCenterService.transition(keys, action));
+			boolean allMatching = Boolean.TRUE.equals(request.get("allMatching"));
+			String view = request.get("view") == null ? null : String.valueOf(request.get("view"));
+			String source = request.get("source") == null ? null : String.valueOf(request.get("source"));
+			String state = request.get("state") == null ? null : String.valueOf(request.get("state"));
+			String keyword = request.get("keyword") == null ? null : String.valueOf(request.get("keyword"));
+			return new AjaxEntity(Global.ajax_success, "下载队列已更新",
+					downloadCenterService.transition(keys, action, allMatching, excludedKeys, view, source, state, keyword));
 		} catch (RuntimeException error) {
 			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
 		}
+	}
+
+	private List<String> stringList(Object value) {
+		if (!(value instanceof List<?> list)) return List.of();
+		return list.stream().filter(String.class::isInstance).map(String.class::cast).toList();
 	}
 
 	@PostMapping("/douyin/clear-global-cooldown")

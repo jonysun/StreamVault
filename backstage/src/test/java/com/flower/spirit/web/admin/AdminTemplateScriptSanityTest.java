@@ -130,8 +130,8 @@ class AdminTemplateScriptSanityTest {
 		assertThat(center).contains("/admin/api/download-center/summary", "/admin/api/download-center/items",
 				"/admin/api/download-center/transition", "/admin/api/download-center/history/hide",
 				"/admin/api/setBackgroundTaskPause", "YOUTUBE_COLLECTION", "SINGLE_LINK", "COLLECT",
-				"当前任务", "历史记录", "重试所选失败任务", "清除所选记录", "selectedKeys", "clearSelection",
-				"syncSelectAll");
+				"当前任务", "历史记录", "重试所选失败任务", "刷新作者列表", "清除所选记录", "selectedKeys",
+				"allMatching", "excludedKeys", "clearSelection", "syncSelectAll");
 		assertThat(common).contains("href=\"/admin/downloadCenter\"", "mdi mdi-download")
 				.doesNotContain("mdi-download-circle-outline");
 	}

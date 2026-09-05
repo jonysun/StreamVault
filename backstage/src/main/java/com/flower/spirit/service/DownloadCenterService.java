@@ -11,7 +11,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.time.Duration;
-import java.util.HashSet;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +24,7 @@ import com.flower.spirit.database.DatabaseWriteExecutor;
 @Service
 public class DownloadCenterService {
 	private static final Logger logger = LoggerFactory.getLogger(DownloadCenterService.class);
+	private static final int MAX_EXPLICIT_BATCH = 200;
 
 	private static final Set<String> ACTIVE_STATES = Set.of("QUEUED", "RUNNING", "RETRY_WAIT");
 	private static final Set<String> HISTORY_STATES = Set.of("COMPLETED", "FAILED", "CANCELLED",
@@ -140,11 +140,26 @@ public class DownloadCenterService {
 	}
 
 	public Map<String, Object> transition(List<String> recordKeys, String action) {
-		if (recordKeys == null) return Map.of("changed", 0, "skipped", 0);
+		return transition(recordKeys, action, false, List.of(), null, null, null, null);
+	}
+
+	/**
+	 * Applies an action to explicit records or to every record matching the current
+	 * download-center filters. The latter is used by the UI's cross-page select-all.
+	 */
+	public Map<String, Object> transition(List<String> recordKeys, String action, boolean allMatching,
+			List<String> excludedKeys, String view, String source, String state, String keyword) {
+		List<String> resolvedKeys = allMatching
+				? matchingRecordKeys(view, source, state, keyword)
+				: normalizeRecordKeys(recordKeys);
+		Set<String> excluded = excludedKeys == null ? Set.of() : Set.copyOf(excludedKeys);
+		if (allMatching && !excluded.isEmpty()) resolvedKeys = resolvedKeys.stream()
+				.filter(key -> !excluded.contains(key)).toList();
+		if (resolvedKeys.isEmpty()) return Map.of("changed", 0, "skipped", 0, "selected", 0);
 		String normalized = action == null ? "" : action.trim().toUpperCase(Locale.ROOT);
 		List<Long> collect = new ArrayList<>(), direct = new ArrayList<>();
 		int skipped = 0;
-		for (String value : recordKeys.stream().filter(java.util.Objects::nonNull).distinct().limit(200).toList()) {
+		for (String value : resolvedKeys) {
 			try {
 				RecordKey key = parseKey(value);
 				if ("COLLECT".equals(key.source())) collect.add(key.id());
@@ -154,17 +169,7 @@ public class DownloadCenterService {
 		int changed = 0;
 		switch (normalized) {
 		case "RETRY" -> {
-			Set<Integer> refreshTasks = new HashSet<>();
-			if (!collect.isEmpty()) {
-				String placeholders = String.join(",", collect.stream().map(id -> "?").toList());
-				List<Integer> taskIds = jdbcTemplate.queryForList("SELECT DISTINCT r.collect_task_id FROM biz_collect_run_item i "
-						+ "JOIN biz_collect_run r ON r.id=i.run_id WHERE i.id IN (" + placeholders + ") "
-						+ "AND i.error_code='LIST_SNAPSHOT_PENDING'", Integer.class, collect.toArray());
-				refreshTasks.addAll(taskIds);
-			}
 			changed += collectRunService.manualRetryDownloads(collect); changed += directDownloadQueueService.manualRetryItems(direct);
-			for (Integer taskId : refreshTasks) try { if (collectEnqueueService != null) collectEnqueueService.enqueueSnapshotRefresh(taskId); }
-			catch (RuntimeException error) { logger.warn("manual snapshot refresh enqueue failed taskId={}", taskId, error); }
 		}
 		case "RETRY_WAIT" -> { Instant at = Instant.now().plus(Duration.ofMinutes(5)); changed += collectRunService.moveDownloadsToRetry(collect, at); changed += directDownloadQueueService.moveToRetry(direct, at); }
 		case "FAILED" -> { changed += collectRunService.markDownloadsFailed(collect, "用户手动标记失败"); changed += directDownloadQueueService.markFailed(direct, "用户手动标记失败"); }
@@ -173,10 +178,69 @@ public class DownloadCenterService {
 			changed += collectRunService.markDownloadsRemoteMissing(collect);
 			skipped += requested - changed;
 		}
+		case "REFRESH_AUTHOR_LIST" -> {
+			if (collect.isEmpty()) {
+				return Map.of("changed", 0, "skipped", resolvedKeys.size(), "selected", resolvedKeys.size(),
+						"refreshEnqueued", 0);
+			}
+			String placeholders = String.join(",", collect.stream().map(id -> "?").toList());
+			List<Integer> taskIds = jdbcTemplate.queryForList("SELECT DISTINCT r.collect_task_id FROM biz_collect_run_item i "
+					+ "JOIN biz_collect_run r ON r.id=i.run_id WHERE i.id IN (" + placeholders + ") "
+					+ "AND i.queue_generation='FETCH_DOWNLOAD_V1' AND i.process_state IN ('QUEUED','RETRY_WAIT') "
+					+ "AND i.error_code='LIST_SNAPSHOT_PENDING'", Integer.class, collect.toArray());
+			int refreshEnqueued = 0;
+			for (Integer taskId : taskIds) {
+				try {
+					CollectEnqueueResult result = collectEnqueueService == null ? null
+							: collectEnqueueService.enqueueSnapshotRefresh(taskId);
+					if (result != null && !result.skippedUnsupported() && !result.skippedPaused()) {
+						changed += jdbcTemplate.update("UPDATE biz_collect_run_item SET process_state='QUEUED', "
+								+ "available_at=CURRENT_TIMESTAMP, locked_by=NULL, locked_at=NULL, finished_at=NULL, "
+								+ "error_code=NULL, error_message=NULL, error_detail=NULL, updated_at=CURRENT_TIMESTAMP "
+								+ "WHERE id IN (" + placeholders + ") AND run_id IN "
+								+ "(SELECT id FROM biz_collect_run WHERE collect_task_id=?) "
+								+ "AND queue_generation='FETCH_DOWNLOAD_V1' AND process_state IN ('QUEUED','RETRY_WAIT') "
+								+ "AND error_code='LIST_SNAPSHOT_PENDING'", appendArgs(collect, taskId));
+						refreshEnqueued++;
+					}
+				} catch (RuntimeException error) {
+					logger.warn("manual snapshot refresh enqueue failed taskId={}", taskId, error);
+				}
+			}
+			return Map.of("changed", changed, "skipped", Math.max(0, resolvedKeys.size() - changed),
+					"selected", resolvedKeys.size(), "refreshEnqueued", refreshEnqueued);
+		}
 		case "CANCEL" -> { changed += collectRunService.cancelDownloads(collect); changed += directDownloadQueueService.cancel(direct); }
 		default -> throw new IllegalArgumentException("Unsupported download action: " + action);
 		}
-		return Map.of("changed", changed, "skipped", skipped);
+		return Map.of("changed", changed, "skipped", skipped, "selected", resolvedKeys.size());
+	}
+
+	private Object[] appendArgs(List<Long> ids, Integer taskId) {
+		Object[] args = new Object[ids.size() + 1];
+		for (int i = 0; i < ids.size(); i++) args[i] = ids.get(i);
+		args[ids.size()] = taskId;
+		return args;
+	}
+
+	private List<String> normalizeRecordKeys(List<String> recordKeys) {
+		if (recordKeys == null) return List.of();
+		return recordKeys.stream().filter(java.util.Objects::nonNull).distinct().limit(MAX_EXPLICIT_BATCH).toList();
+	}
+
+	public List<String> matchingRecordKeys(String view, String source, String state, String keyword) {
+		boolean active = !"history".equalsIgnoreCase(view);
+		String normalizedSource = normalizeSource(source);
+		String normalizedState = normalizeState(state, active);
+		List<Object> args = new ArrayList<>();
+		List<String> branches = new ArrayList<>();
+		if ("ALL".equals(normalizedSource) || "COLLECT".equals(normalizedSource))
+			branches.add(collectBranch(active, normalizedState, keyword, args));
+		if (!"COLLECT".equals(normalizedSource))
+			branches.add(directBranch(active, normalizedSource, normalizedState, keyword, args));
+		if (branches.isEmpty()) return List.of();
+		return jdbcTemplate.queryForList("SELECT record_key FROM (" + String.join(" UNION ALL ", branches)
+				+ ") download_items", String.class, args.toArray());
 	}
 
 	private boolean isBlockedCollectionItem(long itemId) {
