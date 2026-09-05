@@ -99,6 +99,7 @@
                         <button class="btn btn-sm btn-outline-danger" type="button" id="failSelected" disabled><i class="mdi mdi-alert-outline"></i> 标记失败</button>
                         <button class="btn btn-sm btn-outline-secondary" type="button" id="cancelSelected" disabled><i class="mdi mdi-close-circle-outline"></i> 取消队列</button>
                         <button class="btn btn-sm btn-outline-secondary" type="button" id="remoteMissingSelected" disabled><i class="mdi mdi-cloud-off-outline"></i> 标记远端已删除</button>
+                        <button class="btn btn-sm btn-outline-info" type="button" id="refreshAuthorSelected" disabled><i class="mdi mdi-account-sync-outline"></i> 刷新作者列表</button>
                         <button class="btn btn-sm btn-outline-danger" type="button" id="blockSelected" disabled><i class="mdi mdi-cancel"></i> 删除并拉黑所选</button>
                         <button class="btn btn-sm btn-outline-danger" type="button" id="hideSelected" disabled style="display:none;"><i class="mdi mdi-delete-outline"></i> 清除所选记录</button>
                     </div>
@@ -140,7 +141,7 @@
 <script src="../static/js/layer/layer.js"></script>
 <script>
     (function() {
-        const state = { view:'active', page:0, pageSize:25, totalPages:0, rows:[], paused:false, timer:null, selectedKeys:new Set() };
+        const state = { view:'active', page:0, pageSize:25, totalPages:0, totalElements:0, rows:[], paused:false, timer:null, selectedKeys:new Set(), allMatching:false, excludedKeys:new Set() };
         const labels = {
             RUNNING:'正在下载', QUEUED:'等待下载', RETRY_WAIT:'等待重试', COMPLETED:'已完成', FAILED:'失败',
             CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽', SKIPPED_REMOTE_MISSING:'远端已删除',
@@ -173,17 +174,22 @@
             $('#pauseButton').on('click', togglePause);
             $('#selectAll').on('change', function() {
                 const checked = this.checked;
+                state.allMatching = checked;
+                state.excludedKeys.clear();
+                state.selectedKeys.clear();
                 $('.row-select:not(:disabled)').each(function() {
                     const key = String($(this).attr('data-key') || '');
                     $(this).prop('checked', checked);
-                    if (checked) state.selectedKeys.add(key); else state.selectedKeys.delete(key);
+                    if (checked) state.selectedKeys.add(key);
                 });
                 syncSelectAll();
                 updateBulkButtons();
             });
             $('#downloadRows').on('change', '.row-select', function() {
                 const key = String($(this).attr('data-key') || '');
-                if (this.checked) state.selectedKeys.add(key); else state.selectedKeys.delete(key);
+                if (state.allMatching) {
+                    if (this.checked) state.excludedKeys.delete(key); else state.excludedKeys.add(key);
+                } else if (this.checked) state.selectedKeys.add(key); else state.selectedKeys.delete(key);
                 syncSelectAll();
                 updateBulkButtons();
             });
@@ -194,6 +200,7 @@
             $('#failSelected').on('click', function() { transitionSelected('FAILED'); });
             $('#cancelSelected').on('click', function() { transitionSelected('CANCEL'); });
             $('#remoteMissingSelected').on('click', markRemoteMissingSelected);
+            $('#refreshAuthorSelected').on('click', function() { transitionSelected('REFRESH_AUTHOR_LIST'); });
             $('#blockSelected').on('click', blockSelected);
             $('#hideSelected').on('click', hideSelectedHistory);
             document.addEventListener('visibilitychange', scheduleRefresh);
@@ -230,6 +237,7 @@
                 const data = response.record || {};
                 state.rows = Array.isArray(data.content) ? data.content : [];
                 state.totalPages = number(data.totalPages);
+                state.totalElements = number(data.totalElements);
                 renderRows();
                 $('#pageSummary').text('共 ' + number(data.totalElements) + ' 条');
                 $('#pageText').text('第 ' + (state.page + 1) + ' / ' + Math.max(1,state.totalPages) + ' 页');
@@ -240,14 +248,12 @@
         }
 
         function renderRows() {
-            const visibleKeys = new Set(state.rows.map(function(item) { return String(item.record_key || ''); }));
-            state.selectedKeys = new Set(Array.from(state.selectedKeys).filter(function(key) { return visibleKeys.has(key); }));
             $('#emptyState').toggle(state.rows.length === 0);
             $('#downloadRows').html(state.rows.map(function(item,index) {
                 const key = item.record_key || '';
                 const canRetry = item.state === 'FAILED';
                 const selectable = state.view === 'history' || ['RUNNING','QUEUED','RETRY_WAIT','FAILED'].indexOf(item.state) >= 0;
-                const checked = state.selectedKeys.has(String(key)) ? ' checked' : '';
+                const checked = (state.allMatching ? !state.excludedKeys.has(String(key)) : state.selectedKeys.has(String(key))) ? ' checked' : '';
                 const title = item.title || item.task_name || item.work_id || item.source_url || '未命名任务';
                 const subtitle = item.task_name && item.title ? item.task_name + ' · ' + (item.author || item.work_id || '')
                     : (item.author || item.work_id || item.source_url || '');
@@ -284,6 +290,9 @@
                 .fail(function(){ layer.msg('操作失败'); }).always(function(){ $('#pauseButton').prop('disabled', false); });
         }
         function selectedKeys(failedOnly) {
+            if (state.allMatching) return state.rows.filter(function(item) {
+                return !state.excludedKeys.has(String(item.record_key || '')) && (!failedOnly || item.state === 'FAILED');
+            }).map(function(item) { return item.record_key; });
             return state.rows.filter(function(item) {
                 const key = String(item.record_key || '');
                 return state.selectedKeys.has(key) && (!failedOnly || item.state === 'FAILED');
@@ -298,32 +307,46 @@
             }).map(function(item) { return item.record_key; });
         }
         function updateBulkButtons() {
-            $('#retrySelected').prop('disabled', state.view !== 'active' || selectedKeys(false).length === 0);
-            $('#waitSelected,#failSelected,#cancelSelected').prop('disabled', state.view !== 'active' || selectedKeys(false).length === 0);
-            $('#remoteMissingSelected').prop('disabled', state.view !== 'active' || remoteMissingKeys().length === 0);
-            $('#blockSelected').prop('disabled', state.view !== 'active' || selectedKeys(false).length === 0);
-            $('#hideSelected').prop('disabled', selectedKeys(false).length === 0);
+            const selectedCount = state.allMatching ? state.totalElements - state.excludedKeys.size : selectedKeys(false).length;
+            const retryAllowed = state.allMatching
+                ? (state.view === 'history' && ['ALL','FAILED'].indexOf($('#stateFilter').val()) >= 0)
+                : selectedKeys(true).length > 0;
+            $('#retrySelected').prop('disabled', !retryAllowed || selectedCount <= 0);
+            $('#waitSelected,#failSelected,#cancelSelected').prop('disabled', state.view !== 'active' || selectedCount <= 0);
+            const refreshEligible = state.allMatching
+                ? (state.view === 'active' && $('#sourceFilter').val() === 'COLLECT'
+                    && ['ALL','QUEUED','RETRY_WAIT'].indexOf($('#stateFilter').val()) >= 0)
+                : remoteMissingKeys().length > 0;
+            $('#remoteMissingSelected').prop('disabled', state.view !== 'active' || !refreshEligible);
+            $('#refreshAuthorSelected').prop('disabled', state.view !== 'active' || !refreshEligible);
+            $('#blockSelected').prop('disabled', state.view !== 'active' || selectedCount <= 0);
+            $('#hideSelected').prop('disabled', selectedCount <= 0);
         }
         function syncSelectAll() {
             const boxes = $('.row-select:not(:disabled)');
             const checked = boxes.filter(':checked').length;
-            $('#selectAll').prop('checked', boxes.length > 0 && checked === boxes.length)
-                .prop('indeterminate', checked > 0 && checked < boxes.length);
+            $('#selectAll').prop('checked', state.allMatching || (boxes.length > 0 && checked === boxes.length))
+                .prop('indeterminate', state.allMatching ? state.excludedKeys.size > 0 : checked > 0 && checked < boxes.length);
         }
         function clearSelection() {
             state.selectedKeys.clear();
+            state.excludedKeys.clear();
+            state.allMatching = false;
             $('#selectAll').prop('checked', false).prop('indeterminate', false);
             updateBulkButtons();
         }
         function retryKeys(keys) {
-            if (!keys.length) return;
+            if (!keys.length && !state.allMatching) return;
             transitionKeys(keys, 'RETRY');
         }
         function transitionSelected(action) { transitionKeys(selectedKeys(false), action); }
         function transitionKeys(keys, action) {
-            if (!keys.length) return;
-            $.ajax({ url:'/admin/api/download-center/transition', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys,action:action}) })
-                .done(function(response){ clearSelection(); layer.msg(response.message || '已重新排队'); refreshAll(); })
+            const allMatching = state.allMatching;
+            if (!allMatching && !keys.length) return;
+            const payload = { recordKeys:allMatching ? [] : keys, excludedKeys:Array.from(state.excludedKeys), allMatching:allMatching,
+                view:state.view, source:$('#sourceFilter').val(), state:$('#stateFilter').val(), keyword:$('#keywordFilter').val(), action:action };
+            $.ajax({ url:'/admin/api/download-center/transition', type:'POST', contentType:'application/json', data:JSON.stringify(payload) })
+                .done(function(response){ clearSelection(); layer.msg(response.message || '下载队列已更新'); refreshAll(); })
                 .fail(apiFailure);
         }
         function markRemoteMissingSelected() {

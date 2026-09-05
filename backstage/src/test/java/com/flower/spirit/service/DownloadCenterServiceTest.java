@@ -2,6 +2,8 @@ package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -79,6 +81,55 @@ class DownloadCenterServiceTest {
 				.isEqualTo("SKIPPED_REMOTE_MISSING");
 		assertThat(jdbc.queryForObject("SELECT error_code FROM biz_collect_run_item WHERE id=90", String.class))
 				.isEqualTo("REMOTE_LIST_MISSING");
+		assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE id=91", String.class))
+				.isEqualTo("FAILED");
+	}
+
+	@Test
+	void allMatchingHistorySelectionRetriesOnlyFailedFilteredRecords() throws Exception {
+		JdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id,taskname) VALUES(4,'Favorite author')");
+		jdbc.update("INSERT INTO biz_collect_run(id,collect_task_id) VALUES(9,4)");
+		jdbc.update("INSERT INTO biz_collect_run_item(id,run_id,platform_key,work_id,decision,process_state,attempt_count,max_attempts,error_code,queue_generation,created_at,updated_at) VALUES"
+				+ "(90,9,'douyin','done','EXISTING','COMPLETED',1,4,NULL,'FETCH_DOWNLOAD_V1',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),"
+				+ "(91,9,'douyin','failed','EXISTING','FAILED',1,4,'MEDIA_ERROR','FETCH_DOWNLOAD_V1',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)");
+		CollectRunService runs = mock(CollectRunService.class);
+		DownloadCenterService service = new DownloadCenterService(jdbc, mock(DirectDownloadQueueService.class),
+				runs, mock(RuntimeControlService.class), mock(DatabaseWriteExecutor.class));
+
+		service.transition(List.of(), "RETRY", true, List.of(), "history", "COLLECT", "FAILED", null);
+
+		verify(runs).manualRetryDownloads(List.of(91L));
+	}
+
+	@Test
+	void refreshAuthorListRequeuesOnlyPendingCollectionItems() throws Exception {
+		JdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id,taskname) VALUES(4,'Favorite author')");
+		jdbc.update("INSERT INTO biz_collect_run(id,collect_task_id) VALUES(9,4)");
+		jdbc.update("INSERT INTO biz_collect_run_item(id,run_id,platform_key,work_id,decision,process_state,attempt_count,max_attempts,error_code,queue_generation,created_at,updated_at) VALUES"
+				+ "(90,9,'douyin','pending','EXISTING','RETRY_WAIT',0,4,'LIST_SNAPSHOT_PENDING','FETCH_DOWNLOAD_V1',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),"
+				+ "(91,9,'douyin','done','EXISTING','FAILED',1,4,'MEDIA_ERROR','FETCH_DOWNLOAD_V1',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)");
+		CollectEnqueueService enqueue = mock(CollectEnqueueService.class);
+		when(enqueue.enqueueSnapshotRefresh(4)).thenReturn(new CollectEnqueueResult(11L, 12L,
+				CollectRunState.QUEUED, true, false));
+		DatabaseWriteExecutor writes = new DatabaseWriteExecutor() {
+			@Override
+			public <T> T execute(String operation, Supplier<T> action) { return action.get(); }
+		};
+		DownloadCenterService service = new DownloadCenterService(jdbc, mock(DirectDownloadQueueService.class),
+				mock(CollectRunService.class), mock(RuntimeControlService.class), writes, enqueue);
+
+		Map<String, Object> result = service.transition(List.of("COLLECT:90", "COLLECT:91"),
+				"REFRESH_AUTHOR_LIST");
+
+		assertThat(result).containsEntry("changed", 1).containsEntry("refreshEnqueued", 1);
+		assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE id=90", String.class))
+				.isEqualTo("QUEUED");
+		assertThat(jdbc.queryForObject("SELECT error_code FROM biz_collect_run_item WHERE id=90", String.class))
+				.isNull();
 		assertThat(jdbc.queryForObject("SELECT process_state FROM biz_collect_run_item WHERE id=91", String.class))
 				.isEqualTo("FAILED");
 	}
