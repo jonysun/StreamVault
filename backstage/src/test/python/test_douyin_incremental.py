@@ -1674,6 +1674,114 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("F2_UPSTREAM_SOFT_BLOCK", error.error_code)
 
+    def test_request_evidence_records_request_header_and_cookie_key_names(self):
+        module, _ = self._load_command_module({}, [])
+
+        class Request:
+            headers = {
+                "User-Agent": "browser-secret",
+                "X-Request-ID": "request-secret",
+                "Cookie": "sessionid=session-secret; UIFID_TEMP=device-secret; msToken=token-secret",
+            }
+
+        class Response:
+            content = b"blocked"
+            headers = {"content-type": "text/plain"}
+            status_code = 403
+            request = Request()
+
+        evidence = module._request_evidence(Response())
+
+        self.assertEqual(
+            ["cookie", "user-agent", "x-request-id"],
+            evidence["requestHeaderNames"],
+        )
+        self.assertEqual(
+            ["msToken", "sessionid", "UIFID_TEMP"],
+            evidence["cookieKeyNames"],
+        )
+        serialized = json.dumps(evidence)
+        for secret in ("browser-secret", "request-secret", "session-secret", "device-secret", "token-secret"):
+            self.assertNotIn(secret, serialized)
+
+    def test_douyin_headers_add_argus_and_uifid_from_cookie(self):
+        module, _ = self._load_command_module({}, [])
+
+        headers = module._douyin_headers(
+            "sessionid=session-secret; UIFID_TEMP=temp-device; UIFID=logged-device"
+        )
+
+        self.assertEqual("1", headers["x-tt-argus"])
+        self.assertEqual("logged-device", headers["uifid"])
+        self.assertNotIn("session-secret", json.dumps(headers))
+
+    def test_douyin_headers_falls_back_to_uifid_temp_and_preserves_configured_values(self):
+        module, _ = self._load_command_module({}, [])
+
+        headers = module._douyin_headers(
+            "UIFID_TEMP=temp-device",
+            {"X-TT-Argus": "browser-argus", "UIFID": "configured-uifid"},
+        )
+
+        self.assertEqual("browser-argus", headers["X-TT-Argus"])
+        self.assertEqual("configured-uifid", headers["UIFID"])
+        self.assertEqual(1, sum(name.casefold() == "x-tt-argus" for name in headers))
+        self.assertEqual(1, sum(name.casefold() == "uifid" for name in headers))
+
+    def test_request_evidence_uses_client_metadata_without_response(self):
+        module, _ = self._load_command_module({}, [])
+
+        class Client:
+            headers = {"User-Agent": "browser-secret", "Referer": "referer-secret"}
+            cookies = {"uifid": "device-secret", "ttwid": "ttwid-secret"}
+
+        evidence = module._request_evidence(
+            error=RuntimeError("network-secret"),
+            client=Client(),
+        )
+
+        self.assertEqual(
+            ["referer", "user-agent"],
+            evidence["requestHeaderNames"],
+        )
+        self.assertEqual(["ttwid", "uifid"], evidence["cookieKeyNames"])
+        serialized = json.dumps(evidence)
+        for secret in ("browser-secret", "referer-secret", "device-secret", "ttwid-secret", "network-secret"):
+            self.assertNotIn(secret, serialized)
+
+    def test_empty_http_response_message_identifies_author_list_endpoint(self):
+        module, _ = self._load_command_module({}, [])
+
+        error = module._request_error(
+            RuntimeError("retry exhausted"),
+            "request failed",
+            {
+                "lastPage": {
+                    "lastRequest": {
+                        "statusCode": 200,
+                        "errorKind": "EMPTY_RESPONSE",
+                    }
+                }
+            },
+        )
+
+        self.assertIn("author-work endpoint", str(error))
+        self.assertNotIn("single-work detail endpoint", str(error))
+
+        work_error = module._request_error(
+            RuntimeError("retry exhausted"),
+            "request failed",
+            {
+                "lastRequest": {
+                    "statusCode": 200,
+                    "errorKind": "EMPTY_RESPONSE",
+                }
+            },
+            work=True,
+        )
+
+        self.assertIn("single-work detail endpoint", str(work_error))
+
     async def test_empty_http_response_uses_one_confirmation_retry(self):
         module, _ = self._load_command_module({}, [])
 

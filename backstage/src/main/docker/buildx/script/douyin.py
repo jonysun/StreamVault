@@ -48,7 +48,7 @@ _BANNED_ACCOUNT_MARKERS = (
     "用户已封禁", "用户被封禁", "该用户已被封禁",
 )
 _SENSITIVE_COOKIE_PATTERN = re.compile(
-    r"(?i)(sessionid(?:_ss)?|msToken|ttwid|odin_tt|passport_csrf_token)=([^;\s]+)"
+    r"(?i)(sessionid(?:_ss)?|msToken|ttwid|odin_tt|passport_csrf_token|UIFID(?:_TEMP)?)=([^;\s]+)"
 )
 _PAGE_DELAY_ENV = "STREAMVAULT_DOUYIN_PAGE_DELAY_SECONDS"
 _DEFAULT_PAGE_DELAY_SECONDS = 0.75
@@ -158,7 +158,79 @@ def _safe_request_identity(endpoint):
     }
 
 
-def _request_evidence(response=None, *, attempt=0, error_kind="", error=None, duration_ms=0):
+def _header_names(headers):
+    if not headers:
+        return []
+    try:
+        names = headers.keys()
+    except AttributeError:
+        return []
+    return sorted(
+        {str(name).strip().lower() for name in names if str(name).strip()},
+    )
+
+
+def _header_value(headers, name):
+    if not headers:
+        return ""
+    try:
+        value = headers.get(name)
+    except AttributeError:
+        return ""
+    if value is not None:
+        return str(value)
+    try:
+        for key, value in headers.items():
+            if str(key).strip().lower() == name.lower():
+                return str(value)
+    except AttributeError:
+        pass
+    return ""
+
+
+def _cookie_key_names(cookie_header):
+    names = set()
+    for part in str(cookie_header or "").split(";"):
+        key, separator, _value = part.partition("=")
+        if separator and key.strip():
+            names.add(key.strip())
+    return names
+
+
+def _client_cookie_key_names(cookies):
+    if not cookies:
+        return set()
+    try:
+        return {str(key).strip() for key in cookies.keys() if str(key).strip()}
+    except AttributeError:
+        pass
+    jar = getattr(cookies, "jar", None)
+    if jar is None:
+        return set()
+    try:
+        return {str(cookie.name).strip() for cookie in jar if str(cookie.name).strip()}
+    except (AttributeError, TypeError):
+        return set()
+
+
+def _request_metadata(response=None, client=None):
+    request = getattr(response, "request", None) if response is not None else None
+    request_headers = getattr(request, "headers", None)
+    if not request_headers:
+        request_headers = getattr(client, "headers", None)
+    cookie_names = _cookie_key_names(_header_value(request_headers, "cookie"))
+    cookie_names.update(
+        _client_cookie_key_names(getattr(client, "cookies", None))
+    )
+    return {
+        "requestHeaderNames": _header_names(request_headers),
+        "cookieKeyNames": sorted(cookie_names, key=lambda name: (name.casefold(), name)),
+    }
+
+
+def _request_evidence(
+    response=None, *, attempt=0, error_kind="", error=None, duration_ms=0, client=None
+):
     content = b""
     if response is not None:
         try:
@@ -167,7 +239,7 @@ def _request_evidence(response=None, *, attempt=0, error_kind="", error=None, du
             content = b""
     headers = getattr(response, "headers", {}) or {}
     status_code = getattr(response, "status_code", None)
-    return {
+    evidence = {
         "attempt": int(attempt) + 1,
         "responseType": type(response).__name__ if response is not None else "NoneType",
         "statusCode": status_code,
@@ -178,6 +250,8 @@ def _request_evidence(response=None, *, attempt=0, error_kind="", error=None, du
         "exceptionType": type(error).__name__ if error is not None else None,
         "durationMs": max(0, int(duration_ms)),
     }
+    evidence.update(_request_metadata(response, client))
+    return evidence
 
 
 class InstrumentedDouyinCrawler(DouyinCrawler):
@@ -207,7 +281,10 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
             try:
                 response = await self.aclient.get(endpoint, follow_redirects=True)
                 evidence = _request_evidence(
-                    response, attempt=attempt, duration_ms=(time.monotonic() - started_at) * 1000
+                    response,
+                    attempt=attempt,
+                    duration_ms=(time.monotonic() - started_at) * 1000,
+                    client=self.aclient,
                 )
                 content = response.content or b""
                 if not content.strip():
@@ -252,7 +329,8 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
             except httpx.TimeoutException as error:
                 evidence = _request_evidence(
                     attempt=attempt, error_kind="TIMEOUT", error=error,
-                    duration_ms=(time.monotonic() - started_at) * 1000
+                    duration_ms=(time.monotonic() - started_at) * 1000,
+                    client=self.aclient,
                 )
                 self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
@@ -261,7 +339,8 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
             except httpx.ProxyError as error:
                 evidence = _request_evidence(
                     attempt=attempt, error_kind="NETWORK_ERROR", error=error,
-                    duration_ms=(time.monotonic() - started_at) * 1000
+                    duration_ms=(time.monotonic() - started_at) * 1000,
+                    client=self.aclient,
                 )
                 self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
@@ -270,7 +349,8 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
             except httpx.NetworkError as error:
                 evidence = _request_evidence(
                     attempt=attempt, error_kind="NETWORK_ERROR", error=error,
-                    duration_ms=(time.monotonic() - started_at) * 1000
+                    duration_ms=(time.monotonic() - started_at) * 1000,
+                    client=self.aclient,
                 )
                 self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
@@ -279,7 +359,8 @@ class InstrumentedDouyinCrawler(DouyinCrawler):
             except httpx.RequestError as error:
                 evidence = _request_evidence(
                     attempt=attempt, error_kind="NETWORK_ERROR", error=error,
-                    duration_ms=(time.monotonic() - started_at) * 1000
+                    duration_ms=(time.monotonic() - started_at) * 1000,
+                    client=self.aclient,
                 )
                 self._record_request_evidence(evidence, endpoint)
                 raise UpstreamRequestEvidenceError(
@@ -353,7 +434,8 @@ def _request_error(error, safe_message, diagnostics, *, work=False):
     if error_kind == "EMPTY_RESPONSE":
         return UpstreamFetchError(
             "F2_UPSTREAM_SOFT_BLOCK",
-            "Douyin single-work detail endpoint repeatedly returned an empty HTTP response",
+            "Douyin single-work detail endpoint repeatedly returned an empty HTTP response"
+            if work else "Douyin author-work endpoint repeatedly returned an empty HTTP response",
             diagnostics,
             exception_type,
             "EMPTY_HTTP_RESPONSE",
@@ -456,14 +538,42 @@ def _work_unavailable_evidence(value):
     ))
 
 
+def _cookie_value(cookie, *names):
+    values = {}
+    for part in str(cookie or "").split(";"):
+        key, separator, value = part.partition("=")
+        if separator and key.strip() and value.strip():
+            values.setdefault(key.strip().casefold(), value.strip())
+    for name in names:
+        if values.get(name.casefold()):
+            return values[name.casefold()]
+    return ""
+
+
+def _douyin_headers(cookie, headers=None):
+    """Add the Douyin gateway headers introduced by F2 issue #443."""
+    merged = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 "
+        "Safari/537.36 Edg/130.0.0.0",
+        "Referer": "https://www.douyin.com/",
+        # The current gateway checks presence; F2 uses this temporary value.
+        "x-tt-argus": "1",
+    }
+    uifid = _cookie_value(cookie, "UIFID", "UIFID_TEMP")
+    if uifid:
+        merged["uifid"] = uifid
+    for key, value in (headers or {}).items():
+        existing = next((name for name in merged if name.casefold() == str(key).casefold()), None)
+        if existing is not None:
+            merged.pop(existing)
+        merged[key] = value
+    return merged
+
+
 def douyin_kwargs(cookie):
     return {
-        "headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 "
-            "Safari/537.36 Edg/130.0.0.0",
-            "Referer": "https://www.douyin.com/",
-        },
+        "headers": _douyin_headers(cookie),
         "timeout": 10,
         "cookie": cookie,
         "proxies": {"http": None, "https": None},
@@ -1097,6 +1207,7 @@ async def fetch_video(cookie: str, aweme_id: str):
         "proxies": {"http": None, "https": None},
     }
     
+    kwargs["headers"] = _douyin_headers(cookie, kwargs.get("headers"))
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     
@@ -1124,6 +1235,7 @@ async def fetch_post_data(cookie: str, aweme_id: str, output_file: str):
         "proxies": {"http": None, "https": None},
     }
     
+    kwargs["headers"] = _douyin_headers(cookie, kwargs.get("headers"))
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     
@@ -1191,6 +1303,7 @@ async def fetch_user_like_videos(cookie: str, uid: str, maxc: str, output_file: 
         "cookie": cookie,
         "proxies": {"http": None, "https": None},
     }
+    kwargs["headers"] = _douyin_headers(cookie, kwargs.get("headers"))
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     all_videos = []
@@ -1225,6 +1338,7 @@ async def fetch_user_post_videos(cookie: str, uid: str, maxc: str, output_file: 
         "cookie": cookie,
         "proxies": {"http": None, "https": None},
     }
+    kwargs["headers"] = _douyin_headers(cookie, kwargs.get("headers"))
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     all_videos = []
@@ -1262,6 +1376,7 @@ async def fetch_user_collects(cookie: str):
         "cookie": cookie,
         "proxies": {"http": None, "https": None},
     }
+    kwargs["headers"] = _douyin_headers(cookie, kwargs.get("headers"))
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     all_collects = []
@@ -1354,6 +1469,7 @@ async def fetch_user_collects_videos(cookie: str, cid: str, maxc:str, output_fil
         "cookie": cookie,
         "proxies": {"http": None, "https": None},
     }
+    kwargs["headers"] = _douyin_headers(cookie, kwargs.get("headers"))
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     all_videos = []
@@ -1394,6 +1510,7 @@ async def fetch_user_feed_videos(cookie: str, sec_user_id: str, output_file: str
         "cookie": cookie,
         "proxies": {"http": None, "https": None},
     }
+    kwargs["headers"] = _douyin_headers(cookie, kwargs.get("headers"))
     handler = DouyinHandler(kwargs)
     setattr(handler, "enable_bark", False)
     all_videos = []

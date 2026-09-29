@@ -10,6 +10,7 @@ import com.alibaba.fastjson.JSONObject;
 public final class DouyinF2Diagnostics {
 
 	private static final int MAX_ATTEMPTS = 2;
+	private static final int MAX_NAME_COUNT = 64;
 	private final String method;
 	private final String origin;
 	private final String path;
@@ -64,7 +65,8 @@ public final class DouyinF2Diagnostics {
 				+ ",empty=" + last.bodyEmpty + ",bodyLength=" + last.bodyLength
 				+ ",contentType=" + value(last.contentType, "none") + ",errorKind="
 				+ value(last.errorKind, "none") + ",exception=" + value(last.exceptionType, "none")
-				+ ",durationMs=" + last.durationMs + "}";
+				+ ",durationMs=" + last.durationMs + ",requestHeaders=" + last.requestHeaderNames
+				+ ",cookieKeys=" + last.cookieKeyNames + "}";
 	}
 
 	private static String text(JSONObject value, String key, int max) {
@@ -80,23 +82,38 @@ public final class DouyinF2Diagnostics {
 		return value;
 	}
 
+	private static List<String> names(JSONArray values) {
+		List<String> result = new ArrayList<>();
+		if (values == null) return result;
+		for (int i = 0; i < values.size() && result.size() < MAX_NAME_COUNT; i++) {
+			String value = values.getString(i);
+			if (value != null && value.matches("[A-Za-z0-9_$.-]{1,80}")) result.add(value);
+		}
+		return result;
+	}
+
 	private static String value(Object value, String fallback) { return value == null || value.toString().isBlank() ? fallback : value.toString(); }
 
 	private static final class Attempt {
 		private final int attempt; private final Integer statusCode; private final boolean bodyEmpty;
 		private final long bodyLength; private final String contentType; private final String errorKind;
 		private final String exceptionType; private final long durationMs;
+		private final List<String> requestHeaderNames; private final List<String> cookieKeyNames;
 		private Attempt(int attempt, Integer statusCode, boolean bodyEmpty, long bodyLength, String contentType,
-				String errorKind, String exceptionType, long durationMs) {
+				String errorKind, String exceptionType, long durationMs, List<String> requestHeaderNames,
+				List<String> cookieKeyNames) {
 			this.attempt = attempt; this.statusCode = statusCode; this.bodyEmpty = bodyEmpty; this.bodyLength = bodyLength;
 			this.contentType = contentType; this.errorKind = errorKind; this.exceptionType = exceptionType; this.durationMs = durationMs;
+			this.requestHeaderNames = List.copyOf(requestHeaderNames);
+			this.cookieKeyNames = List.copyOf(cookieKeyNames);
 		}
 		private static Attempt from(JSONObject value) {
 			Integer status = value.getInteger("statusCode");
 			if (status != null && (status < 100 || status > 599)) status = null;
 			return new Attempt(clamp(value.getInteger("attempt"), 1, 99), status, Boolean.TRUE.equals(value.getBoolean("bodyEmpty")),
 					clamp(value.getLong("bodyLength"), 0, 50_000_000), text(value, "contentType", 120),
-					text(value, "errorKind", 80), text(value, "exceptionType", 120), clamp(value.getLong("durationMs"), 0, 300_000));
+					text(value, "errorKind", 80), text(value, "exceptionType", 120), clamp(value.getLong("durationMs"), 0, 300_000),
+					names(value.getJSONArray("requestHeaderNames")), names(value.getJSONArray("cookieKeyNames")));
 		}
 		private static int clamp(Integer value, int min, int max) { return value == null ? min : Math.max(min, Math.min(max, value)); }
 		private static long clamp(Long value, long min, long max) { return value == null ? min : Math.max(min, Math.min(max, value)); }

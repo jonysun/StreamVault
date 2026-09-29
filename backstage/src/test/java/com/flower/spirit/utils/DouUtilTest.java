@@ -52,9 +52,12 @@ class DouUtilTest {
 						+ "\"signedQueryPresent\":true},\"requestAttempts\":[{\"attempt\":1,\"statusCode\":200,"
 						+ "\"bodyEmpty\":true,\"bodyLength\":0,\"contentType\":\"application/json\","
 						+ "\"errorKind\":\"EMPTY_RESPONSE\",\"exceptionType\":\"APIRetryExhaustedError\","
-						+ "\"durationMs\":12,\"cookie\":\"sessionid=secret\"}]}}");
+						+ "\"durationMs\":12,\"requestHeaderNames\":[\"cookie\",\"user-agent\"],"
+						+ "\"cookieKeyNames\":[\"sessionid\",\"UIFID_TEMP\"],"
+						+ "\"cookie\":\"sessionid=secret\"}]}}");
 
 		assertThat(error.diagnostics().summary()).contains("/aweme/v1/web/aweme/detail/", "EMPTY_RESPONSE",
-				"aweme_id", "X-Bogus").doesNotContain("secret", "sessionid=");
+				"aweme_id", "X-Bogus", "cookie", "user-agent", "sessionid", "UIFID_TEMP")
+				.doesNotContain("secret", "sessionid=");
 	}
 }
