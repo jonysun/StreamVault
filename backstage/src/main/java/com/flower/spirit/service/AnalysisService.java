@@ -109,6 +109,9 @@ public class AnalysisService {
 	private PlatformResolver platformResolver;
 
 	@Autowired
+	private DouyinDataProviderService douyinDataProviderService;
+
+	@Autowired
 	private PlatformAdapterProperties platformAdapterProperties;
 
 	@Autowired
@@ -858,11 +861,15 @@ public class AnalysisService {
 	}
 
 	public void dyvideo(String platform, String video, Integer historyId) throws Exception {
-		String cookie = platformCookieService.currentDouyinCookie("single_video");
-		if (null != cookie && !cookie.equals("")) {
-			Map<String, String> downVideo = DouUtil.downVideo(video, historyId, cookie);
+		boolean dtkMode = douyinDataProviderService != null && douyinDataProviderService.isDtkOnly();
+		boolean autoMode = douyinDataProviderService != null && douyinDataProviderService.isAuto();
+		String cookie = dtkMode ? "" : platformCookieService.currentDouyinCookie("single_video");
+		if (dtkMode || autoMode || (null != cookie && !cookie.equals(""))) {
+			Map<String, String> downVideo = dtkMode || autoMode
+					? douyinDataProviderService.fetchDirect(video, cookie)
+					: DouUtil.downVideo(video, historyId, cookie);
 			if(downVideo!= null) {
-				platformCookieService.reportSuccess("抖音", cookie);
+				if (!dtkMode && !autoMode) platformCookieService.reportSuccess("抖音", cookie);
 				this.putRecord(downVideo.get("awemeid"), downVideo.get("desc"), downVideo.get("videoplay"),
 						downVideo.get("cover"), platform, video, downVideo.get("type"), cookie, downVideo);
 				System.gc();
@@ -873,7 +880,7 @@ public class AnalysisService {
 				}
 			}
 			if (downVideo == null) {
-				platformCookieService.reportRisk("抖音", cookie, "single video parse failed");
+				if (!dtkMode && !autoMode) platformCookieService.reportRisk("抖音", cookie, "single video parse failed");
 				throw new IOException("Douyin single video parser returned no media");
 			}
 		} else {
@@ -1130,13 +1137,17 @@ public class AnalysisService {
 			
 			// 3. 如果是抖音平台，使用 DouUtil
 			if (platform.equals("抖音")) {
-				String cookie = platformCookieService.currentDouyinCookie("direct_parse");
-				Map<String, String> douData = DouUtil.downVideo(url, null, cookie);
+				boolean dtkMode = douyinDataProviderService != null && douyinDataProviderService.isDtkOnly();
+				boolean autoMode = douyinDataProviderService != null && douyinDataProviderService.isAuto();
+				String cookie = dtkMode ? "" : platformCookieService.currentDouyinCookie("direct_parse");
+				Map<String, String> douData = dtkMode || autoMode
+						? douyinDataProviderService.fetchDirect(url, cookie)
+						: DouUtil.downVideo(url, null, cookie);
 				if (douData == null) {
-					platformCookieService.reportRisk("抖音", cookie, "direct parse failed");
+					if (!dtkMode && !autoMode) platformCookieService.reportRisk("抖音", cookie, "direct parse failed");
 					return new AjaxEntity(Global.ajax_uri_error, "解析失败", null);
 				}
-				platformCookieService.reportSuccess("抖音", cookie);
+				if (!dtkMode && !autoMode) platformCookieService.reportSuccess("抖音", cookie);
 				
 				result.put("platform", "抖音");
 				result.put("videoUrl", douData.get("videoplay"));

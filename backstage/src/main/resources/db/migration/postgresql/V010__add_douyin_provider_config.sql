@@ -1,0 +1,5 @@
+ALTER TABLE biz_config ADD COLUMN douyin_provider VARCHAR(16) NOT NULL DEFAULT 'F2';
+ALTER TABLE biz_config ADD COLUMN dtk_base_url VARCHAR(512) NOT NULL DEFAULT '';
+ALTER TABLE biz_config ADD COLUMN dtk_api_key VARCHAR(512) NOT NULL DEFAULT '';
+ALTER TABLE biz_config ADD COLUMN dtk_timeout_ms VARCHAR(16) NOT NULL DEFAULT '15000';
+ALTER TABLE biz_config ADD COLUMN dtk_detail_refresh_enabled VARCHAR(1) NOT NULL DEFAULT '1';

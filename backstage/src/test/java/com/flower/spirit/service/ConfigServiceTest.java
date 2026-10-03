@@ -29,6 +29,9 @@ class ConfigServiceTest {
 		assertThat(config.getF2logfullonerror()).isEqualTo("1");
 		assertThat(config.getCollecttaskintervalms()).isEqualTo("3000");
 		assertThat(config.getHlssegmentseconds()).isEqualTo("4");
+		assertThat(config.getDouyinProvider()).isEqualTo("F2");
+		assertThat(config.getDtkTimeoutMs()).isEqualTo("15000");
+		assertThat(config.getDtkDetailRefreshEnabled()).isEqualTo("1");
 		verify(dao).save(config);
 	}
 }

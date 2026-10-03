@@ -28,6 +28,14 @@ class TikTokConfigServiceTest {
 	}
 
 	@Test
+	void nullStoredRetrySettingDefaultsToEnabled() {
+		TikTokConfigDao dao = mock(TikTokConfigDao.class);
+		when(dao.findAll()).thenReturn(List.of(new TikTokConfigEntity()));
+
+		assertThat(service(dao).isAuthorListSoftBlockAutoRetryEnabled()).isTrue();
+	}
+
+	@Test
 	void acceptedCooldownBoundsArePersisted() {
 		for (int minutes : List.of(1, 1440)) {
 			TikTokConfigDao dao = mock(TikTokConfigDao.class);
@@ -51,6 +59,19 @@ class TikTokConfigServiceTest {
 			assertThat(service.updateTikTokConfig(entity).getResCode()).isEqualTo(Global.ajax_uri_error);
 			verify(dao, never()).save(entity);
 		}
+	}
+
+	@Test
+	void omittedRetrySettingPreservesStoredValue() {
+		TikTokConfigDao dao = mock(TikTokConfigDao.class);
+		TikTokConfigEntity stored = new TikTokConfigEntity();
+		stored.setAuthorListSoftBlockAutoRetryEnabled(false);
+		when(dao.findAll()).thenReturn(List.of(stored));
+		TikTokConfigEntity update = new TikTokConfigEntity();
+		update.setRiskCooldownMinutes(10);
+
+		assertThat(service(dao).updateTikTokConfig(update).getResCode()).isEqualTo(Global.ajax_success);
+		assertThat(update.getAuthorListSoftBlockAutoRetryEnabled()).isFalse();
 	}
 
 	private TikTokConfigService service(TikTokConfigDao dao) {

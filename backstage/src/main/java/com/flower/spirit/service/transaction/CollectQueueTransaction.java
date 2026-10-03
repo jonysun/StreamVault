@@ -77,11 +77,11 @@ public class CollectQueueTransaction {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public CollectJobClaim claimNext(String workerId, Instant now) {
 		List<JobRow> due = jdbcTemplate.query(
-				"SELECT id, payload, attempt_count, max_attempts FROM biz_job_queue "
+				"SELECT id, payload, attempt_count, max_attempts, last_error_code FROM biz_job_queue "
 						+ "WHERE job_type = ? AND state IN ('QUEUED','RETRY_WAIT') AND available_at <= ? "
 						+ "ORDER BY priority ASC, available_at ASC, id ASC LIMIT 1",
 				(rs, rowNum) -> new JobRow(rs.getLong("id"), rs.getString("payload"),
-						rs.getInt("attempt_count"), rs.getInt("max_attempts")),
+						rs.getInt("attempt_count"), rs.getInt("max_attempts"), rs.getString("last_error_code")),
 				JobType.COLLECT_FETCH.name(), Timestamp.from(now));
 		if (due.isEmpty()) {
 			return null;
@@ -97,7 +97,7 @@ public class CollectQueueTransaction {
 		JSONObject payload = JSONObject.parseObject(candidate.payload());
 		return new CollectJobClaim(candidate.id(), payload.getLongValue("runId"), payload.getIntValue("taskId"),
 				CollectTriggerType.valueOf(payload.getString("triggerType")), candidate.attemptCount() + 1,
-				candidate.maxAttempts());
+				candidate.maxAttempts(), candidate.lastErrorCode());
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -381,6 +381,29 @@ public class CollectQueueTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void failDisabledSoftBlockRetry(CollectJobClaim claim, String message, Instant now) {
+		Timestamp timestamp = Timestamp.from(now);
+		int runUpdated = jdbcTemplate.update("UPDATE biz_collect_run SET state = 'FETCH_FAILED', finished_at = ?, "
+				+ "heartbeat_at = ?, error_code = 'F2_UPSTREAM_SOFT_BLOCK', error_message = ? "
+				+ "WHERE id = ? AND state = 'QUEUED'", timestamp, timestamp, truncate(message, 2048), claim.runId());
+		if (runUpdated != 1) {
+			throw new IllegalCollectRunTransitionException(claim.runId(), CollectRunState.QUEUED,
+					CollectRunState.FETCH_FAILED);
+		}
+		int jobUpdated = jdbcTemplate.update("UPDATE biz_job_queue SET state = 'FAILED', locked_by = NULL, "
+				+ "locked_at = NULL, last_error_code = 'F2_UPSTREAM_SOFT_BLOCK', last_error_message = ?, "
+				+ "updated_at = ? WHERE id = ? AND state = 'RUNNING'",
+				truncate(message, 2048), timestamp, claim.jobId());
+		if (jobUpdated != 1) {
+			throw new IllegalStateException("Collect job " + claim.jobId()
+					+ " was not RUNNING during retry suppression");
+		}
+		jdbcTemplate.update("UPDATE biz_collect_data SET taskstatus = ?, endtime = ? WHERE id = ?", "抓取失败",
+				timestamp.toString(), claim.taskId());
+		appendEvent(claim.runId(), "ERROR", "FETCH_FAILED", "F2_UPSTREAM_SOFT_BLOCK", message, null, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public int recoverStale(Instant staleBefore, Instant now) {
 		List<JobRow> staleJobs = jdbcTemplate.query("SELECT id, payload, attempt_count, max_attempts "
 				+ "FROM biz_job_queue WHERE job_type = ? AND state = 'RUNNING' AND (locked_at IS NULL OR locked_at < ?)",
@@ -614,7 +637,10 @@ public class CollectQueueTransaction {
 		return value == null || value.isBlank() ? fallback : value;
 	}
 
-	private record JobRow(long id, String payload, int attemptCount, int maxAttempts) {
+	private record JobRow(long id, String payload, int attemptCount, int maxAttempts, String lastErrorCode) {
+		private JobRow(long id, String payload, int attemptCount, int maxAttempts) {
+			this(id, payload, attemptCount, maxAttempts, null);
+		}
 	}
 
 	private record RunCounts(int fetched, int planned, int inserted, int skipped, int failed) {

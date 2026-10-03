@@ -106,6 +106,16 @@ public class ConfigEntity implements Serializable {
 
 	private String douyinapiurls; // 抖音解析API URL列表（多行）
 
+	private String douyinProvider; // F2, DTK or AUTO
+
+	private String dtkBaseUrl;
+
+	private String dtkApiKey;
+
+	private String dtkTimeoutMs;
+
+	private String dtkDetailRefreshEnabled;
+
 	public Integer getId() {
 		return id;
 	}
@@ -417,6 +427,17 @@ public class ConfigEntity implements Serializable {
 	public void setDouyinapiurls(String douyinapiurls) {
 		this.douyinapiurls = douyinapiurls;
 	}
+
+	public String getDouyinProvider() { return douyinProvider; }
+	public void setDouyinProvider(String douyinProvider) { this.douyinProvider = douyinProvider; }
+	public String getDtkBaseUrl() { return dtkBaseUrl; }
+	public void setDtkBaseUrl(String dtkBaseUrl) { this.dtkBaseUrl = dtkBaseUrl; }
+	public String getDtkApiKey() { return dtkApiKey; }
+	public void setDtkApiKey(String dtkApiKey) { this.dtkApiKey = dtkApiKey; }
+	public String getDtkTimeoutMs() { return dtkTimeoutMs; }
+	public void setDtkTimeoutMs(String dtkTimeoutMs) { this.dtkTimeoutMs = dtkTimeoutMs; }
+	public String getDtkDetailRefreshEnabled() { return dtkDetailRefreshEnabled; }
+	public void setDtkDetailRefreshEnabled(String dtkDetailRefreshEnabled) { this.dtkDetailRefreshEnabled = dtkDetailRefreshEnabled; }
 
 	// public String getYtdlpargs() {
 	// 	return ytdlpargs;

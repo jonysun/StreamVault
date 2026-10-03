@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
@@ -265,6 +266,83 @@ class CollectJobWorkerTest {
 					"Douyin author-work endpoint repeatedly returned an empty HTTP response", 300L);
 			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
 			verify(runService, never()).failJob(any(), anyString(), anyString());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void disabledSoftBlockRetryMakesCurrentFailureTerminal() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		TikTokConfigService configService = mock(TikTokConfigService.class);
+		CollectJobClaim claim = new CollectJobClaim(3255L, 5004L, 14,
+				CollectTriggerType.SCHEDULED, 1, 3);
+		when(dataService.isCollectTaskEnabled(14)).thenReturn(true);
+		when(runService.currentState(5004L)).thenReturn(CollectRunState.FETCHING);
+		when(configService.isAuthorListSoftBlockAutoRetryEnabled()).thenReturn(false);
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_UPSTREAM_SOFT_BLOCK", "empty response"))
+				.when(dataService).executeQueuedCollectTask(14, 5004L, CollectTriggerType.SCHEDULED);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+		ReflectionTestUtils.setField(worker, "tikTokConfigService", configService);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService, never()).retryOrFail(any(), anyString(), anyString(), org.mockito.ArgumentMatchers.anyLong());
+			verify(runService).failJob(claim, "F2_UPSTREAM_SOFT_BLOCK",
+					"作者列表软拦截自动重试已关闭；上游错误：empty response");
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void disabledSoftBlockRetrySkipsAlreadyQueuedRetryBeforeFetching() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		TikTokConfigService configService = mock(TikTokConfigService.class);
+		CollectJobClaim claim = new CollectJobClaim(3256L, 5005L, 15,
+				CollectTriggerType.RETRY, 2, 3, "F2_UPSTREAM_SOFT_BLOCK");
+		when(dataService.isCollectTaskEnabled(15)).thenReturn(true);
+		when(configService.isAuthorListSoftBlockAutoRetryEnabled()).thenReturn(false);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, mock(PlatformCookieService.class), passthroughWrites(), 1);
+		ReflectionTestUtils.setField(worker, "tikTokConfigService", configService);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).failDisabledSoftBlockRetry(claim,
+					"作者列表软拦截自动重试已关闭，未再次请求");
+			verify(dataService, never()).executeQueuedCollectTask(anyInt(), anyLong(), any());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void disabledSoftBlockRetryDoesNotChangeOtherFailureRetries() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		TikTokConfigService configService = mock(TikTokConfigService.class);
+		CollectJobClaim claim = new CollectJobClaim(3257L, 5006L, 16,
+				CollectTriggerType.SCHEDULED, 1, 3);
+		when(dataService.isCollectTaskEnabled(16)).thenReturn(true);
+		when(runService.currentState(5006L)).thenReturn(CollectRunState.FETCHING);
+		when(configService.isAuthorListSoftBlockAutoRetryEnabled()).thenReturn(false);
+		when(runService.retryOrFail(claim, "F2_AUTH_OR_VERIFY_SUSPECTED", "login suspected", 300L))
+				.thenReturn(new CollectEnqueueResult(5007L, 3257L, CollectRunState.QUEUED, true, false));
+		org.mockito.Mockito.doThrow(new CollectFetchException("F2_AUTH_OR_VERIFY_SUSPECTED", "login suspected"))
+				.when(dataService).executeQueuedCollectTask(16, 5006L, CollectTriggerType.SCHEDULED);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, mock(PlatformCookieService.class), passthroughWrites(), 1);
+		ReflectionTestUtils.setField(worker, "tikTokConfigService", configService);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).retryOrFail(claim, "F2_AUTH_OR_VERIFY_SUSPECTED", "login suspected", 300L);
+			verify(runService, never()).failDisabledSoftBlockRetry(any(), anyString());
 		} finally {
 			worker.shutdown();
 		}

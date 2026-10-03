@@ -2,6 +2,7 @@ import warnings
 warnings.simplefilter("ignore")
 
 import asyncio
+import hashlib
 import sys
 import argparse
 import json
@@ -557,6 +558,15 @@ def _douyin_headers(cookie, headers=None):
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 "
         "Safari/537.36 Edg/130.0.0.0",
         "Referer": "https://www.douyin.com/",
+        "Origin": "https://www.douyin.com",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        "sec-ch-ua": '"Chromium";v="130", "Microsoft Edge";v="130", "Not_A Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
         # The current gateway checks presence; F2 uses this temporary value.
         "x-tt-argus": "1",
     }
@@ -569,6 +579,18 @@ def _douyin_headers(cookie, headers=None):
             merged.pop(existing)
         merged[key] = value
     return merged
+
+
+def _uifid_source(cookie):
+    if _cookie_value(cookie, "UIFID"):
+        return "UIFID"
+    if _cookie_value(cookie, "UIFID_TEMP"):
+        return "UIFID_TEMP"
+    return "none"
+
+
+def _cookie_fingerprint(cookie):
+    return hashlib.sha256(str(cookie or "").encode("utf-8")).hexdigest()[:12]
 
 
 def douyin_kwargs(cookie):
@@ -1110,18 +1132,22 @@ def _emit_fetch_error(error, cookie):
         "F2_UPSTREAM_RATE_LIMIT",
         "F2_COOKIE_OR_VERIFY_REQUIRED",
     )
+    diagnostics = {
+        "classificationReason": error.classification_reason,
+        "confidence": error.confidence,
+        **error.diagnostics,
+        "exceptionType": error.exception_type,
+        "faultDomain": fault_domain,
+        "retryable": retryable,
+        "cooldownApplied": cooldown_applied,
+    }
+    if isinstance(error.diagnostics, dict) and isinstance(error.diagnostics.get("lastPage"), dict):
+        diagnostics["cookieFingerprint"] = _cookie_fingerprint(cookie)
+        diagnostics["uifidSource"] = _uifid_source(cookie)
     payload = {
         "errorCode": error.error_code,
         "message": error.safe_message,
-        "diagnostics": {
-            "classificationReason": error.classification_reason,
-            "confidence": error.confidence,
-            **error.diagnostics,
-            "exceptionType": error.exception_type,
-            "faultDomain": fault_domain,
-            "retryable": retryable,
-            "cooldownApplied": cooldown_applied,
-        },
+        "diagnostics": diagnostics,
     }
     rendered = json.dumps(payload, ensure_ascii=False)
     rendered = _redact_cookie(rendered, cookie)
@@ -1403,6 +1429,11 @@ async def fetch_user_collects(cookie: str):
                 message = str(raw_data.get("status_msg") or raw_data.get("message") or "")
                 status, category = _classify_cookie_probe_error(message)
                 probe.update(probeStatus=status, listState="UNAVAILABLE", errorCategory=category)
+                upstream_message = _bounded_status_text(
+                    raw_data.get("status_msg") or raw_data.get("message"), cookie
+                )
+                if upstream_message:
+                    probe["upstreamMessage"] = upstream_message
                 break
             if "collects_list" not in raw_data:
                 probe.update(listState="MISSING", errorCategory="UPSTREAM_SCHEMA")

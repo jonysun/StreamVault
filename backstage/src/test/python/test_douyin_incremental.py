@@ -1,6 +1,7 @@
 import json
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import io
 import os
@@ -1196,6 +1197,26 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("UPSTREAM_SCHEMA", payload["errorCategory"])
         self.assertNotIn("Traceback", stdout.getvalue())
 
+    async def test_cookie_probe_includes_redacted_upstream_status_message(self):
+        cookie = "sessionid=session-secret; UIFID=device-secret-123"
+        module, _ = self._load_command_module(
+            {}, [], [{
+                "status_code": 8,
+                "status_msg": "risk control for sessionid=session-secret and device-secret-123",
+            }]
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            await module.fetch_user_collects(cookie)
+
+        payload = self._probe_payload(stdout.getvalue())
+        self.assertEqual("8", payload["upstreamStatus"])
+        self.assertIn("upstreamMessage", payload)
+        self.assertIn("***masked***", payload["upstreamMessage"])
+        self.assertNotIn("session-secret", stdout.getvalue())
+        self.assertNotIn("device-secret-123", stdout.getvalue())
+
     async def test_cookie_probe_accepts_an_empty_collection_array(self):
         module, _ = self._load_command_module(
             {}, [], [{"status_code": 0, "collects_list": []}]
@@ -1714,6 +1735,36 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("1", headers["x-tt-argus"])
         self.assertEqual("logged-device", headers["uifid"])
         self.assertNotIn("session-secret", json.dumps(headers))
+
+    def test_author_list_error_reports_cookie_fingerprint_and_uifid_source(self):
+        module, _ = self._load_command_module({}, [])
+        cases = (
+            ("sessionid=session-secret; UIFID=device-secret-123", "UIFID"),
+            ("sessionid=session-secret; UIFID_TEMP=temp-secret-123", "UIFID_TEMP"),
+            ("sessionid=session-secret", "none"),
+        )
+
+        for cookie, expected_source in cases:
+            with self.subTest(expected_source=expected_source):
+                error = module.FetchCommandError(
+                    "F2_UPSTREAM_SOFT_BLOCK",
+                    "Douyin author-work endpoint returned an empty response",
+                    {"lastPage": {"lastRequest": {"statusCode": 200}}},
+                )
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    module._emit_fetch_error(error, cookie)
+
+                payload = self._error_payload(stderr.getvalue())
+                diagnostics = payload["diagnostics"]
+                self.assertEqual(expected_source, diagnostics["uifidSource"])
+                self.assertEqual(
+                    hashlib.sha256(cookie.encode("utf-8")).hexdigest()[:12],
+                    diagnostics["cookieFingerprint"],
+                )
+                self.assertNotIn("session-secret", stderr.getvalue())
+                self.assertNotIn("device-secret-123", stderr.getvalue())
+                self.assertNotIn("temp-secret-123", stderr.getvalue())
 
     def test_douyin_headers_falls_back_to_uifid_temp_and_preserves_configured_values(self):
         module, _ = self._load_command_module({}, [])

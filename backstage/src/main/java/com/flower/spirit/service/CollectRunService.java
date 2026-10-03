@@ -38,6 +38,13 @@ public class CollectRunService {
 		});
 	}
 
+	public void failDisabledSoftBlockRetry(CollectJobClaim claim, String message) {
+		databaseWriteExecutor.execute("collect-run-fail-disabled-soft-block-retry", () -> {
+			transaction.failDisabledSoftBlockRetry(claim, message, Instant.now());
+			return null;
+		});
+	}
+
 	public void deferForCooldown(CollectJobClaim claim, Instant availableAt, String reason) {
 		databaseWriteExecutor.execute("collect-run-defer-cooldown", () -> {
 			transaction.deferForCooldown(claim, availableAt, reason, Instant.now());

@@ -35,6 +35,11 @@ public class TikTokConfigService {
 	}
 
 	public AjaxEntity updateTikTokConfig(TikTokConfigEntity tikTokConfigEntity) {
+		if (tikTokConfigEntity.getAuthorListSoftBlockAutoRetryEnabled() == null) {
+			Boolean current = tikTokConfigDao.findAll().stream().findFirst()
+					.map(TikTokConfigEntity::getAuthorListSoftBlockAutoRetryEnabled).orElse(null);
+			tikTokConfigEntity.setAuthorListSoftBlockAutoRetryEnabled(current == null || current);
+		}
 		Integer cooldownMinutes = tikTokConfigEntity.getRiskCooldownMinutes();
 		if (cooldownMinutes == null) {
 			tikTokConfigEntity.setRiskCooldownMinutes(DEFAULT_RISK_COOLDOWN_MINUTES);
@@ -57,6 +62,11 @@ public class TikTokConfigService {
 		return configured == null || configured < MIN_RISK_COOLDOWN_MINUTES
 				|| configured > MAX_RISK_COOLDOWN_MINUTES
 				? DEFAULT_RISK_COOLDOWN_MINUTES : configured;
+	}
+
+	public boolean isAuthorListSoftBlockAutoRetryEnabled() {
+		Boolean configured = getData().getAuthorListSoftBlockAutoRetryEnabled();
+		return configured == null || configured;
 	}
 
 	private String firstCookie(String pool) {

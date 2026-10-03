@@ -15,14 +15,23 @@ public class DouyinF2RequestCoordinator {
 		return new Permit();
 	}
 
+	public Permit noopPermit() {
+		return new Permit(false);
+	}
+
 	public final class Permit implements AutoCloseable {
 		private boolean closed;
+		private final boolean releasesLock;
+
+		private Permit() { this(true); }
+		private Permit(boolean releasesLock) { this.releasesLock = releasesLock; }
+
 
 		@Override
 		public void close() {
 			if (!closed) {
 				closed = true;
-				lock.unlock();
+				if (releasesLock) lock.unlock();
 			}
 		}
 	}

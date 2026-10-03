@@ -109,7 +109,9 @@ class AdminTemplateScriptSanityTest {
 		String config = template("config.html");
 
 		assertThat(config).contains("tiktokriskcooldownminutes", "min=\"1\"", "max=\"1440\"",
-				"option['riskCooldownMinutes']", "tiktok.riskCooldownMinutes");
+				"option['riskCooldownMinutes']", "tiktok.riskCooldownMinutes",
+				"tiktokSoftBlockAutoRetry", "option['authorListSoftBlockAutoRetryEnabled']",
+				"tiktok.authorListSoftBlockAutoRetryEnabled == null || tiktok.authorListSoftBlockAutoRetryEnabled");
 	}
 
 	@Test

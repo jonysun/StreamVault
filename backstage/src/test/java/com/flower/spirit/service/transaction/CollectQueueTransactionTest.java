@@ -550,8 +550,50 @@ class CollectQueueTransactionTest {
 			assertThat(jdbc.queryForObject("SELECT carriedout FROM biz_collect_data WHERE id = 8", String.class))
 					.isEqualTo("20");
 			assertThat(transaction.claimNext("test-worker", now.plus(30, ChronoUnit.MINUTES))).isNull();
-			assertThat(transaction.claimNext("test-worker", now.plus(2, ChronoUnit.HOURS)).runId())
-					.isEqualTo(retry.runId());
+			CollectJobClaim retryClaim = transaction.claimNext("test-worker", now.plus(2, ChronoUnit.HOURS));
+			assertThat(retryClaim.runId()).isEqualTo(retry.runId());
+			assertThat(retryClaim.lastErrorCode()).isEqualTo("COOKIE_EXPIRED");
+		}
+	}
+
+	@Test
+	void disabledSoftBlockRetryAtomicallyFailsQueuedRunAndReleasesClaimedJob() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			Instant now = Instant.parse("2026-10-03T02:00:00Z");
+			jdbc.update("INSERT INTO biz_collect_data(id, taskstatus) VALUES(42, 'queued')");
+			CollectEnqueueResult queued = transaction.enqueue(42, CollectTriggerType.SCHEDULED, 20, now, 100, 3);
+			CollectJobClaim firstClaim = transaction.claimNext("worker", now.plusSeconds(1));
+			transaction.transition(firstClaim.runId(), CollectRunState.QUEUED, CollectRunState.FETCHING,
+					now.plusSeconds(2));
+			transaction.failRun(firstClaim.runId(), CollectRunState.FETCHING, CollectRunState.FETCH_FAILED,
+					"F2_UPSTREAM_SOFT_BLOCK", "empty response", "diagnostics", now.plusSeconds(3));
+			CollectEnqueueResult retry = transaction.retryOrFailJob(firstClaim, "F2_UPSTREAM_SOFT_BLOCK",
+					"empty response", now.plusSeconds(10), now.plusSeconds(4));
+			CollectJobClaim retryClaim = transaction.claimNext("worker", now.plusSeconds(10));
+
+			assertThat(retryClaim.lastErrorCode()).isEqualTo("F2_UPSTREAM_SOFT_BLOCK");
+			transaction.failDisabledSoftBlockRetry(retryClaim, "作者列表软拦截自动重试已关闭，未再次请求",
+					now.plusSeconds(11));
+
+			assertThat(jdbc.queryForMap("SELECT state, error_code, error_message, finished_at FROM biz_collect_run "
+					+ "WHERE id = ?", retry.runId()))
+					.containsEntry("state", "FETCH_FAILED")
+					.containsEntry("error_code", "F2_UPSTREAM_SOFT_BLOCK")
+					.containsEntry("error_message", "作者列表软拦截自动重试已关闭，未再次请求");
+			assertThat(jdbc.queryForMap("SELECT state, locked_by, locked_at, last_error_code, last_error_message "
+					+ "FROM biz_job_queue WHERE id = ?", queued.jobId()))
+					.containsEntry("state", "FAILED")
+					.containsEntry("locked_by", null)
+					.containsEntry("locked_at", null)
+					.containsEntry("last_error_code", "F2_UPSTREAM_SOFT_BLOCK")
+					.containsEntry("last_error_message", "作者列表软拦截自动重试已关闭，未再次请求");
+			assertThat(jdbc.queryForObject("SELECT taskstatus FROM biz_collect_data WHERE id = 42", String.class))
+					.isEqualTo("抓取失败");
+			assertThat(jdbc.queryForObject("SELECT event_code FROM biz_collect_run_event WHERE run_id = ? "
+					+ "AND event_code = 'FETCH_FAILED'", String.class, retry.runId())).isEqualTo("FETCH_FAILED");
 		}
 	}
 

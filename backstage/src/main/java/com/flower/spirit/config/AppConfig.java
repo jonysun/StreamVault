@@ -63,6 +63,14 @@ public class AppConfig {
 			Global.useragent = data.getUseragent();
 		}
 		Global.douyinApiUrls = data.getDouyinapiurls() == null ? "" : data.getDouyinapiurls();
+		String provider = data.getDouyinProvider();
+		Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
+				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+		Global.dtkBaseUrl = data.getDtkBaseUrl() == null ? "" : data.getDtkBaseUrl().trim();
+		Global.dtkApiKey = data.getDtkApiKey() == null ? "" : data.getDtkApiKey().trim();
+		try { Global.dtkTimeoutMs = Math.max(1000, Integer.parseInt(data.getDtkTimeoutMs())); }
+		catch (RuntimeException ignored) { Global.dtkTimeoutMs = 15000; }
+		Global.dtkDetailRefreshEnabled = !"0".equals(data.getDtkDetailRefreshEnabled());
 		BiliConfigEntity bili = biliConfigService.getData();
 		Global.bilicookies =bili.getBilicookies();
 		if(null != bili.getBigmember() && bili.getBigmember().equals("是")) {

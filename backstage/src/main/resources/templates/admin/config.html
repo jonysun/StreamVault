@@ -203,6 +203,18 @@
 									<label>抖音解析API URL列表 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('每行一个API Base URL或完整接口URL。会依次尝试 /api/hybrid/video_data?url=... 和 /api/douyin/web/handler_user_profile?...，不需要配置token。支持占位符 {url}、{sec_uid}、{unique_id}。')"></i></label>
 									<textarea class="form-control" id="douyinapiurls" name="douyinapiurls" rows="4" placeholder="例如：https://example.com" th:text="${config.douyinapiurls}"></textarea>
 								</div>
+								<div class="form-group">
+									<label>抖音数据源</label>
+									<select class="form-control" id="douyinProvider" name="douyinProvider">
+										<option value="F2" th:selected="${config.douyinProvider} eq 'F2'">F2（本地 Cookie）</option>
+										<option value="DTK" th:selected="${config.douyinProvider} eq 'DTK'">Douyin_TikTok_Download_API</option>
+										<option value="AUTO" th:selected="${config.douyinProvider} eq 'AUTO'">自动切换（F2 故障转移到 DTK）</option>
+									</select>
+								</div>
+								<div class="form-group"><label>DTK Base URL</label><input class="form-control" id="dtkBaseUrl" name="dtkBaseUrl" th:value="${config.dtkBaseUrl}" placeholder="例如 https://demo.douyin.wtf"></div>
+								<div class="form-group"><label>DTK API Key</label><input class="form-control" id="dtkApiKey" name="dtkApiKey" type="password" autocomplete="new-password" placeholder="留空保持现有 Key 不变"></div>
+								<div class="form-group"><label>DTK 请求超时(ms)</label><input class="form-control" id="dtkTimeoutMs" name="dtkTimeoutMs" type="number" min="1000" th:value="${config.dtkTimeoutMs}"></div>
+								<div class="form-group"><label>DTK 详情刷新</label><select class="form-control" id="dtkDetailRefreshEnabled" name="dtkDetailRefreshEnabled"><option value="1" th:selected="${config.dtkDetailRefreshEnabled} eq '1'">启用</option><option value="0" th:selected="${config.dtkDetailRefreshEnabled} eq '0'">禁用</option></select></div>
                             </div>
                         </div>
                     </div>
@@ -485,6 +497,12 @@
                                     <div class="form-group">
                                         <label>抖音全局风控冷却（分钟）</label>
                                         <input type="number" class="form-control tiktokriskcooldownminutes" min="1" max="1440" step="1" th:value="${tiktok.riskCooldownMinutes != null ? tiktok.riskCooldownMinutes : 10}" />
+                                    </div>
+                                    <div class="form-group">
+                                        <div class="custom-control custom-switch">
+                                            <input type="checkbox" class="custom-control-input tiktokSoftBlockAutoRetry" id="tiktokSoftBlockAutoRetry" th:checked="${tiktok.authorListSoftBlockAutoRetryEnabled == null || tiktok.authorListSoftBlockAutoRetryEnabled}" />
+                                            <label class="custom-control-label" for="tiktokSoftBlockAutoRetry">作者列表软拦截自动重试</label>
+                                        </div>
                                     </div>
                                     <div class="form-group">
                                         <button class="btn btn-primary saveTikTokConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
@@ -1057,6 +1075,11 @@
               option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
               option['collectitemintervalms'] = $("#collectitemintervalms").val();
 			  option['douyinapiurls'] = $("#douyinapiurls").val();
+			  option['douyinProvider'] = $("#douyinProvider").val();
+			  option['dtkBaseUrl'] = $("#dtkBaseUrl").val();
+			  option['dtkApiKey'] = $("#dtkApiKey").val();
+			  option['dtkTimeoutMs'] = $("#dtkTimeoutMs").val();
+			  option['dtkDetailRefreshEnabled'] = $("#dtkDetailRefreshEnabled").val();
               option['mediahomemode'] = $("#mediahomemode").val();
               option['mediafeedmuted'] = $("#mediafeedmuted").val();
               option['mediafeedsource'] = $("#mediafeedsource").val();
@@ -1121,6 +1144,7 @@
             option['cookies'] = firstNonEmptyLine(cookiepool);
             option['cookiestrategy'] = $('.tiktokcookiestrategy').val();
             option['riskCooldownMinutes'] = $('.tiktokriskcooldownminutes').val();
+            option['authorListSoftBlockAutoRetryEnabled'] = $('.tiktokSoftBlockAutoRetry').is(':checked');
             option['analysisserver'] = analysisserver;
             $.post("/admin/api/updateTikTokConfig",option,function(data,status){
                 if(data.resCode =="000001"){
@@ -1254,6 +1278,11 @@
             option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
             option['collectitemintervalms'] = $("#collectitemintervalms").val();
 			option['douyinapiurls'] = $("#douyinapiurls").val();
+			option['douyinProvider'] = $("#douyinProvider").val();
+			option['dtkBaseUrl'] = $("#dtkBaseUrl").val();
+			option['dtkApiKey'] = $("#dtkApiKey").val();
+			option['dtkTimeoutMs'] = $("#dtkTimeoutMs").val();
+			option['dtkDetailRefreshEnabled'] = $("#dtkDetailRefreshEnabled").val();
             option['mediahomemode'] = $("#mediahomemode").val();
             option['mediafeedmuted'] = $("#mediafeedmuted").val();
             option['mediafeedsource'] = $("#mediafeedsource").val();

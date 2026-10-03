@@ -34,6 +34,9 @@ public class TikTokConfigEntity implements Serializable {
 
 	@Column(name = "risk_cooldown_minutes")
 	private Integer riskCooldownMinutes;
+
+	@Column(name = "author_list_soft_block_auto_retry_enabled")
+	private Boolean authorListSoftBlockAutoRetryEnabled;
 	
 	/**
 	 * 解析server
@@ -78,6 +81,14 @@ public class TikTokConfigEntity implements Serializable {
 
 	public void setRiskCooldownMinutes(Integer riskCooldownMinutes) {
 		this.riskCooldownMinutes = riskCooldownMinutes;
+	}
+
+	public Boolean getAuthorListSoftBlockAutoRetryEnabled() {
+		return authorListSoftBlockAutoRetryEnabled;
+	}
+
+	public void setAuthorListSoftBlockAutoRetryEnabled(Boolean authorListSoftBlockAutoRetryEnabled) {
+		this.authorListSoftBlockAutoRetryEnabled = authorListSoftBlockAutoRetryEnabled;
 	}
 
 	public String getAnalysisserver() {

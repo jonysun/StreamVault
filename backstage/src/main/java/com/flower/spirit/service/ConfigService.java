@@ -66,6 +66,13 @@ public class ConfigService {
 		if (cfg.getDouyinapiurls() == null) {
 			cfg.setDouyinapiurls("");
 		}
+		if (cfg.getDouyinProvider() == null || cfg.getDouyinProvider().trim().isEmpty()) {
+			cfg.setDouyinProvider("F2");
+		}
+		if (cfg.getDtkBaseUrl() == null) cfg.setDtkBaseUrl("");
+		if (cfg.getDtkApiKey() == null) cfg.setDtkApiKey("");
+		if (cfg.getDtkTimeoutMs() == null || cfg.getDtkTimeoutMs().trim().isEmpty()) cfg.setDtkTimeoutMs("15000");
+		if (cfg.getDtkDetailRefreshEnabled() == null || cfg.getDtkDetailRefreshEnabled().trim().isEmpty()) cfg.setDtkDetailRefreshEnabled("1");
 		if (cfg.getVideolistsortfield() == null || cfg.getVideolistsortfield().trim().isEmpty()) {
 			cfg.setVideolistsortfield("id");
 		}
@@ -124,7 +131,11 @@ public class ConfigService {
 		
 		List<ConfigEntity> list =  configDao.findAll();
 		ConfigEntity configData = list.isEmpty() ? new ConfigEntity() : list.get(0);
+		String existingDtkApiKey = configData.getDtkApiKey();
 		BeanUtil.copyPropertiesIgnoreCase(configEntity,configData);
+		if (configEntity.getDtkApiKey() == null || configEntity.getDtkApiKey().trim().isEmpty()) {
+			configData.setDtkApiKey(existingDtkApiKey);
+		}
 		configDao.save(configData);
 		Global.apptoken =configEntity.getApptoken();
 		if(configEntity.getGeneratenfo()!= null && configEntity.getGeneratenfo().equals("1")) {
@@ -257,6 +268,17 @@ public class ConfigService {
 			}
 		}
 		Global.douyinApiUrls = configEntity.getDouyinapiurls() == null ? "" : configEntity.getDouyinapiurls();
+		String provider = configData.getDouyinProvider();
+		Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
+				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+		Global.dtkBaseUrl = configData.getDtkBaseUrl() == null ? "" : configData.getDtkBaseUrl().trim();
+		Global.dtkApiKey = configData.getDtkApiKey() == null ? "" : configData.getDtkApiKey().trim();
+		try {
+			Global.dtkTimeoutMs = Math.max(1000, Integer.parseInt(configData.getDtkTimeoutMs()));
+		} catch (RuntimeException ignored) {
+			Global.dtkTimeoutMs = 15000;
+		}
+		Global.dtkDetailRefreshEnabled = !"0".equals(configData.getDtkDetailRefreshEnabled());
 		Global.videoListSortField = normalizeVideoListSortField(configEntity.getVideolistsortfield());
 		Global.videoListSortOrder = normalizeSortOrder(configEntity.getVideolistsortorder());
 		Global.graphicListSortField = normalizeGraphicListSortField(configEntity.getGraphiclistsortfield());

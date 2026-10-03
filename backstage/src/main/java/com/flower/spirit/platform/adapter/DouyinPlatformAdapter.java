@@ -28,6 +28,7 @@ import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.platform.WorkParseRequest;
 import com.flower.spirit.service.PlatformCookieService;
 import com.flower.spirit.service.DouyinF2RequestCoordinator;
+import com.flower.spirit.service.DouyinDataProviderService;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.EmbyMetadataGenerator;
@@ -41,24 +42,36 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	private final PlatformCookieService cookieService;
 	private final Gateway gateway;
 	private final DouyinF2RequestCoordinator requestCoordinator;
+	private final DouyinDataProviderService dataProviderService;
 	private final ThreadLocal<String> operationCookie = new ThreadLocal<>();
 
-	@Autowired
 	public DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService,
 			DouyinF2RequestCoordinator requestCoordinator) {
-		this(resolver, cookieService, systemGateway(), requestCoordinator);
+		this(resolver, cookieService, systemGateway(), requestCoordinator, null);
 	}
 
 	DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService, Gateway gateway) {
-		this(resolver, cookieService, gateway, new DouyinF2RequestCoordinator());
+		this(resolver, cookieService, gateway, new DouyinF2RequestCoordinator(), null);
 	}
 
 	DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService, Gateway gateway,
 			DouyinF2RequestCoordinator requestCoordinator) {
+		this(resolver, cookieService, gateway, requestCoordinator, null);
+	}
+
+	@Autowired
+	public DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService,
+			DouyinF2RequestCoordinator requestCoordinator, DouyinDataProviderService dataProviderService) {
+		this(resolver, cookieService, systemGateway(), requestCoordinator, dataProviderService);
+	}
+
+	DouyinPlatformAdapter(PlatformResolver resolver, PlatformCookieService cookieService, Gateway gateway,
+			DouyinF2RequestCoordinator requestCoordinator, DouyinDataProviderService dataProviderService) {
 		this.resolver = java.util.Objects.requireNonNull(resolver, "resolver");
 		this.cookieService = java.util.Objects.requireNonNull(cookieService, "cookieService");
 		this.gateway = java.util.Objects.requireNonNull(gateway, "gateway");
 		this.requestCoordinator = java.util.Objects.requireNonNull(requestCoordinator, "requestCoordinator");
+		this.dataProviderService = dataProviderService;
 	}
 
 	@Override
@@ -75,6 +88,8 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 
 	@Override
 	public OperationScope openOperationScope(String purpose) {
+		if (dataProviderService != null && (dataProviderService.isDtkOnly()
+				|| (dataProviderService.isAuto() && !cookieService.hasConfiguredDouyinCookie()))) return OperationScope.NOOP;
 		String previous = operationCookie.get();
 		if (previous != null && !previous.isBlank()) return OperationScope.NOOP;
 		String cookie = requireCookie(purpose == null || purpose.isBlank() ? "work_operation" : purpose);
@@ -92,6 +107,37 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			} catch (RuntimeException error) {
 				logger.warn("[DouyinSnapshot] rejected list snapshot workId={} reason={}; falling back to detail request",
 						requestWorkId, error.getMessage());
+			}
+		}
+		if (dataProviderService != null && (dataProviderService.isDtkOnly() || dataProviderService.isAuto())) {
+			String inputWorkId = DouUtil.extractWorkId(request.getUrl());
+			if (inputWorkId == null || inputWorkId.isBlank()) {
+				throw new WorkMetadataValidationException("Douyin input does not contain a video or note work ID");
+			}
+			try {
+				if (dataProviderService.isDtkOnly()) {
+					return parseRaw(dataProviderService.current().fetchWorkData(inputWorkId), inputWorkId,
+							request.getInput(), request.getUrl());
+				}
+				if (!cookieService.hasConfiguredDouyinCookie()) {
+					return parseRaw(dataProviderService.fetchDtkWorkData(inputWorkId), inputWorkId,
+							request.getInput(), request.getUrl());
+				}
+				String cookie = requireCookie("single_work_parse");
+				try {
+					String resolvedUrl = gateway.resolve(request.getUrl());
+					String resolvedWorkId = DouUtil.extractWorkId(resolvedUrl);
+					String raw = gateway.fetch(resolvedWorkId == null ? inputWorkId : resolvedWorkId, cookie);
+					return parseRaw(raw, inputWorkId, request.getInput(), resolvedUrl);
+				} catch (RuntimeException | IOException f2Error) {
+					if (!dataProviderService.shouldFailover(f2Error)) throw f2Error;
+					logger.warn("[DouyinProvider] failover operation=WORK_DETAIL from=F2 to=DTK reason={}",
+							f2Error.getMessage());
+					return parseRaw(dataProviderService.fetchDtkWorkData(inputWorkId), inputWorkId,
+							request.getInput(), request.getUrl());
+				}
+			} catch (RuntimeException error) {
+				throw new WorkMetadataValidationException("Douyin DTK parsing failed", error);
 			}
 		}
 		String cookie = requireCookie("single_work_parse");
@@ -172,16 +218,32 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		if (!"douyin".equals(metadata.getPlatformKey())) {
 			throw new WorkMetadataValidationException("Douyin adapter cannot download another platform work");
 		}
-		String cookie = requireCookie("single_work_download");
+		boolean dtkMode = dataProviderService != null && dataProviderService.isDtkOnly();
+		boolean autoMode = dataProviderService != null && dataProviderService.isAuto();
+		boolean useDtk = dtkMode || (autoMode && !cookieService.hasConfiguredDouyinCookie());
+		String cookie = useDtk ? "" : requireCookie("single_work_download");
 		try {
 			List<WorkMediaResource> downloaded;
 			try {
 				downloaded = downloadResources(metadata, request, cookie);
 			} catch (IOException firstError) {
 				if (!isHttp404(firstError)) throw firstError;
+				if (useDtk && !com.flower.spirit.config.Global.dtkDetailRefreshEnabled) throw firstError;
 				logger.warn("[DouyinMedia] stale media URL returned 404 workId={} sourceUrl={}; refreshing detail once",
 						metadata.getWorkId(), safeUrl(metadata.getSourceUrl()));
-				String refreshedRaw = gateway.fetch(metadata.getWorkId(), cookie);
+				String refreshedRaw;
+				if (useDtk) {
+					refreshedRaw = dataProviderService.current().fetchWorkData(metadata.getWorkId());
+				} else {
+					try {
+						refreshedRaw = gateway.fetch(metadata.getWorkId(), cookie);
+					} catch (IOException | RuntimeException f2Error) {
+						if (!autoMode || !dataProviderService.shouldFailover(f2Error)) throw f2Error;
+						logger.warn("[DouyinProvider] failover operation=MEDIA_REFRESH from=F2 to=DTK reason={}",
+							f2Error.getMessage());
+						refreshedRaw = dataProviderService.fetchDtkWorkData(metadata.getWorkId());
+					}
+				}
 				WorkMetadata refreshed = parseRaw(refreshedRaw, metadata.getWorkId(), metadata.getOriginalAddress(),
 						metadata.getSourceUrl());
 				logger.info("[DouyinMedia] detail refreshed after 404 workId={} resources={}", metadata.getWorkId(),

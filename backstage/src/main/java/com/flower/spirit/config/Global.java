@@ -198,6 +198,16 @@ public class Global {
 
 	public static String douyinApiUrls = "";
 
+	public static String douyinProvider = "F2";
+
+	public static String dtkBaseUrl = "";
+
+	public static String dtkApiKey = "";
+
+	public static int dtkTimeoutMs = 15000;
+
+	public static boolean dtkDetailRefreshEnabled = true;
+
 	@Value("${file.save}")
 	public void setSavefile(String value) {
 		Global.savefile = value;

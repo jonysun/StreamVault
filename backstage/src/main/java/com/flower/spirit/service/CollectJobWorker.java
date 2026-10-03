@@ -41,6 +41,8 @@ public class CollectJobWorker {
 	private final long fetchMinIntervalMs;
 	@Autowired(required = false)
 	private ApplicationReadinessGate readinessGate;
+	@Autowired(required = false)
+	private TikTokConfigService tikTokConfigService;
 	private final String workerId = "sqlite-collect-" + UUID.randomUUID();
 	private final AtomicBoolean running = new AtomicBoolean(false);
 	private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
@@ -151,6 +153,13 @@ public class CollectJobWorker {
 						claim.runId(), claim.taskId());
 				return;
 			}
+			if (isDisabledSoftBlockRetry(claim)) {
+				String reason = "作者列表软拦截自动重试已关闭，未再次请求";
+				collectRunService.failDisabledSoftBlockRetry(claim, reason);
+				logger.info("[CollectWorker] soft-block retry suppressed jobId={} runId={} taskId={}",
+						claim.jobId(), claim.runId(), claim.taskId());
+				return;
+			}
 			if (platformCookieService.isDouyinGlobalCooldownActive()) {
 				deferForCooldown(claim, "F2_COOKIE_COOLDOWN", "Douyin global cooldown started after queue claim");
 				return;
@@ -222,20 +231,25 @@ public class CollectJobWorker {
 					+ "taskId={} code={}", claim.jobId(), claim.runId(), claim.taskId(), errorCode);
 			return;
 		}
+		boolean softBlockRetryDisabled = "F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)
+				&& !isAuthorListSoftBlockAutoRetryEnabled();
+		String failureMessage = softBlockRetryDisabled
+				? "作者列表软拦截自动重试已关闭；上游错误：" + message : message;
 		try {
-			collectRunService.fail(claim.runId(), expected, failedState, errorCode, message, stackSummary(error));
+			collectRunService.fail(claim.runId(), expected, failedState, errorCode, failureMessage,
+					stackSummary(error));
 		} catch (RuntimeException terminalWriteError) {
 			logger.error("[CollectRunTerminalWrite] failed runId={} jobId={} taskId={} targetState={} "
 					+ "originalCode={} originalMessage={}", claim.runId(), claim.jobId(), claim.taskId(), failedState,
 					errorCode, message, terminalWriteError);
 			return;
 		}
-		if (isNonRetryable(errorCode)) {
+		if (isNonRetryable(errorCode) || softBlockRetryDisabled) {
 			try {
-				collectRunService.failJob(claim, errorCode, message);
+				collectRunService.failJob(claim, errorCode, failureMessage);
 				logger.error("[CollectWorker] terminal failure jobId={} runId={} taskId={} code={} "
 						+ "faultDomain={} retryable=false cooldownApplied=false root={}", claim.jobId(), claim.runId(),
-						claim.taskId(), errorCode, faultDomain(errorCode), message);
+						claim.taskId(), errorCode, faultDomain(errorCode), failureMessage);
 			} catch (RuntimeException queueWriteError) {
 				logger.error("[CollectJobTerminalWrite] failed jobId={} runId={} taskId={} errorCode={} root={}",
 						claim.jobId(), claim.runId(), claim.taskId(), errorCode, message, queueWriteError);
@@ -261,6 +275,16 @@ public class CollectJobWorker {
 			logger.error("[CollectJobTerminalWrite] failed jobId={} runId={} taskId={} errorCode={} root={}",
 					claim.jobId(), claim.runId(), claim.taskId(), errorCode, message, queueWriteError);
 		}
+	}
+
+	private boolean isDisabledSoftBlockRetry(CollectJobClaim claim) {
+		return claim.triggerType() == CollectTriggerType.RETRY
+				&& "F2_UPSTREAM_SOFT_BLOCK".equals(claim.lastErrorCode())
+				&& !isAuthorListSoftBlockAutoRetryEnabled();
+	}
+
+	private boolean isAuthorListSoftBlockAutoRetryEnabled() {
+		return tikTokConfigService == null || tikTokConfigService.isAuthorListSoftBlockAutoRetryEnabled();
 	}
 
 	private static boolean isExpectedDouyinRisk(String errorCode) {

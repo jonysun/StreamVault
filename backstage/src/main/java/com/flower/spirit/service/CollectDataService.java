@@ -128,6 +128,9 @@ public class CollectDataService {
 	private DouyinIncrementalFetchService douyinIncrementalFetchService;
 
 	@Autowired
+	private DouyinDataProviderService douyinDataProviderService;
+
+	@Autowired
 	private DouyinF2RequestCoordinator douyinF2RequestCoordinator = new DouyinF2RequestCoordinator();
 
 	@Autowired
@@ -2256,6 +2259,11 @@ public class CollectDataService {
 				executeIncrementalPostFetch(task, runId, triggerType);
 			} else if (address.startsWith("like") || address.startsWith("fav-")
 					|| address.startsWith("recommend")) {
+				if (douyinDataProviderService != null && (douyinDataProviderService.isDtkOnly()
+						|| douyinDataProviderService.isAuto())) {
+					throw new CollectFetchException("DTK_UNSUPPORTED_SOURCE",
+							"DTK 当前仅支持作者作品列表，不支持该收藏来源");
+				}
 				executeBoundedLegacyFetchAndPlan(task, runId);
 			} else {
 				throw new CollectFetchException("INVALID_SOURCE", "收藏任务地址格式不受支持");
@@ -2271,8 +2279,10 @@ public class CollectDataService {
 	}
 
 	private void executeIncrementalPostFetch(CollectDataEntity task, long runId, CollectTriggerType triggerType) {
-		String cookie = platformCookieService.currentDouyinCookie("collect_worker");
-		if (cookie == null || cookie.isBlank()) {
+		boolean dtkMode = douyinDataProviderService != null && douyinDataProviderService.isDtkOnly();
+		boolean autoMode = douyinDataProviderService != null && douyinDataProviderService.isAuto();
+		String cookie = dtkMode ? null : platformCookieService.currentDouyinCookie("collect_worker");
+		if (!dtkMode && !autoMode && (cookie == null || cookie.isBlank())) {
 			if (platformCookieService.hasConfiguredDouyinCookie()) {
 				throw new CollectFetchException("F2_COOKIE_COOLDOWN",
 						"All configured Douyin Cookies are cooling down");
@@ -2313,24 +2323,27 @@ public class CollectDataService {
 				maxPages, emptyPageLimit, mode, batchLimit, backfillCursor,
 				backfillComplete, backfillVerifying, backfillCleanPasses, cookie);
 		DouyinFetchEnvelope envelope;
-		try (DouyinF2RequestCoordinator.Permit ignored = douyinF2RequestCoordinator.acquire()) {
-			if (platformCookieService.isDouyinGlobalRiskCooldownActive()) {
+		try (DouyinF2RequestCoordinator.Permit ignored = dtkMode ? douyinF2RequestCoordinator.noopPermit()
+				: douyinF2RequestCoordinator.acquire()) {
+			if (!dtkMode && !autoMode && platformCookieService.isDouyinGlobalRiskCooldownActive()) {
 				throw new CollectFetchException("F2_COOKIE_COOLDOWN",
 						"Douyin global cooldown is active; fetch deferred before launching F2");
 			}
 			try {
-				envelope = douyinIncrementalFetchService.fetch(request);
-				platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
+				envelope = dtkMode || autoMode
+						? douyinDataProviderService.fetchAuthorWorks(request)
+						: douyinIncrementalFetchService.fetch(request);
+				if (!dtkMode && !autoMode) platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
 			} catch (CollectFetchException error) {
-				logger.warn("[F2] event=F2_FETCH_FAILURE endpoint=AUTHOR_LIST code={} faultDomain={} "
-						+ "cooldownScope={} evidence={}", error.getErrorCode(),
+				logger.warn("[DouyinProvider] provider={} event=AUTHOR_LIST_FAILURE code={} faultDomain={} "
+						+ "cooldownScope={} evidence={}", dtkMode ? "DTK" : autoMode ? "AUTO" : "F2", error.getErrorCode(),
 						douyinFetchFaultDomain(error.getErrorCode()),
 						isDouyinRiskError(error.getErrorCode()) ? "GLOBAL_RISK" : "TASK_ONLY",
 						error.getMessage());
 				if ("F2_UPSTREAM_SOFT_BLOCK".equals(error.getErrorCode())) {
 					logger.warn("[F2] upstream soft block platform=douyin scope=AUTHOR_LIST "
 							+ "cooldownApplied=false code={}", error.getErrorCode());
-				} else if (isDouyinRiskError(error.getErrorCode())) {
+				} else if (!dtkMode && !autoMode && isDouyinRiskError(error.getErrorCode())) {
 					platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, error.getErrorCode());
 				}
 				throw error;
