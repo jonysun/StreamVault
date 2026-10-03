@@ -242,12 +242,17 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				} else {
 					try {
 						refreshedRaw = gateway.fetch(metadata.getWorkId(), cookie);
-					} catch (IOException | RuntimeException f2Error) {
-						if (!autoMode || !dataProviderService.shouldFailover(f2Error)) throw f2Error;
-						logger.warn("[DouyinProvider] failover operation=MEDIA_REFRESH from=F2 to=DTK reason={}",
-							f2Error.getMessage());
-						refreshedRaw = dataProviderService.fetchDtkWorkData(metadata.getWorkId());
-					}
+						} catch (IOException f2Error) {
+							if (!autoMode) throw f2Error;
+							logger.warn("[DouyinProvider] failover operation=MEDIA_REFRESH from=F2 to=DTK reason={}",
+								f2Error.getMessage());
+							refreshedRaw = dataProviderService.fetchDtkWorkData(metadata.getWorkId());
+						} catch (RuntimeException f2Error) {
+							if (!autoMode || !dataProviderService.shouldFailover(f2Error)) throw f2Error;
+							logger.warn("[DouyinProvider] failover operation=MEDIA_REFRESH from=F2 to=DTK reason={}",
+								f2Error.getMessage());
+							refreshedRaw = dataProviderService.fetchDtkWorkData(metadata.getWorkId());
+						}
 				}
 				WorkMetadata refreshed = parseRaw(refreshedRaw, metadata.getWorkId(), metadata.getOriginalAddress(),
 						metadata.getSourceUrl());
