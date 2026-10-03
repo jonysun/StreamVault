@@ -228,11 +228,28 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private JSONObject coerceDetail(JSONObject source) {
 		JSONObject detail = new JSONObject(true);
 		detail.putAll(source);
-		if (detail.getString("aweme_id") == null) detail.put("aweme_id",
-				firstText(source, "id", "awemeId", "video_id", "videoId", "item_id", "itemId"));
-		if (detail.getString("desc") == null) detail.put("desc", firstText(source, "title", "description"));
+		if (blank(detail.getString("aweme_id"))) detail.put("aweme_id",
+				firstText(source, "id", "awemeId", "video_id", "videoId", "item_id", "itemId", "content_id", "contentId"));
+		if (blank(detail.getString("desc"))) detail.put("desc", firstText(source, "title", "description"));
+		if (blank(detail.getString("create_time"))) detail.put("create_time",
+				firstText(source, "created_at", "createdAt", "publish_time", "publishTime"));
 		if (detail.getJSONObject("author") == null && source.getJSONObject("user") != null) {
 			detail.put("author", source.getJSONObject("user"));
+		}
+		JSONObject author = detail.getJSONObject("author");
+		if (author != null) {
+			String uid = firstText(author, "uid", "id", "user_id", "userId");
+			String secUid = firstText(author, "sec_uid", "secUserId", "sec_user_id");
+			String nickname = firstText(author, "nickname", "name", "username", "unique_id");
+			String uniqueId = firstText(author, "unique_id", "uniqueId", "username");
+			if (blank(detail.getString("uid"))) detail.put("uid", uid);
+			if (blank(detail.getString("sec_uid"))) detail.put("sec_uid", secUid);
+			if (blank(detail.getString("nickname"))) detail.put("nickname", nickname);
+			if (blank(detail.getString("unique_id"))) detail.put("unique_id", uniqueId);
+			if (blank(author.getString("uid"))) author.put("uid", uid);
+			if (blank(author.getString("sec_uid"))) author.put("sec_uid", secUid);
+			if (blank(author.getString("nickname"))) author.put("nickname", nickname);
+			if (blank(author.getString("unique_id"))) author.put("unique_id", uniqueId);
 		}
 		if (detail.getJSONObject("video") == null && source.getJSONArray("video_play_addr") != null) {
 			JSONObject video = new JSONObject(true);
@@ -241,7 +258,51 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			video.put("play_addr", play);
 			detail.put("video", video);
 		}
+		normalizeDtkMedia(detail, source);
 		return detail;
+	}
+
+	private void normalizeDtkMedia(JSONObject detail, JSONObject source) {
+		Object media = source.get("media");
+		if (media == null) return;
+		List<JSONObject> entries = new ArrayList<>();
+		if (media instanceof JSONObject object) entries.add(object);
+		if (media instanceof JSONArray array) {
+			for (Object value : array) if (value instanceof JSONObject object) entries.add(object);
+		}
+		if (entries.isEmpty()) return;
+		JSONArray images = detail.getJSONArray("images");
+		if (images == null) images = new JSONArray();
+		for (JSONObject entry : entries) {
+			String url = firstText(entry, "url", "download_url", "downloadUrl", "play_url", "playUrl",
+					"src", "source_url", "sourceUrl");
+			String type = firstText(entry, "type", "kind", "media_type", "mediaType");
+			if (blank(url)) {
+				JSONObject nested = entry.getJSONObject("video");
+				url = firstText(nested, "url", "download_url", "play_url");
+			}
+			if (blank(url)) continue;
+			boolean video = "video".equalsIgnoreCase(type) || "mp4".equalsIgnoreCase(entry.getString("ext"))
+					|| url.toLowerCase(java.util.Locale.ROOT).contains(".mp4");
+			if (video && detail.getJSONArray("video_play_addr") == null) {
+				JSONArray urls = new JSONArray();
+				urls.add(url);
+				detail.put("video_play_addr", urls);
+				JSONObject videoObject = detail.getJSONObject("video");
+				if (videoObject == null) videoObject = new JSONObject(true);
+				JSONObject play = new JSONObject(true);
+				play.put("url_list", urls);
+				videoObject.put("play_addr", play);
+				detail.put("video", videoObject);
+			} else if (!video) {
+				JSONObject image = new JSONObject(true);
+				JSONArray urls = new JSONArray();
+				urls.add(url);
+				image.put("url_list", urls);
+				images.add(image);
+			}
+		}
+		if (!images.isEmpty()) detail.put("images", images);
 	}
 
 	private JSONObject normalizeDetail(JSONObject source) {
@@ -276,6 +337,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	}
 
 	private String firstText(JSONObject source, String... keys) {
+		if (source == null) return null;
 		for (String key : keys) {
 			String value = source.getString(key);
 			if (!blank(value)) return value;
@@ -313,7 +375,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 
 	private boolean hasWorkId(JSONObject object) {
 		return object != null && !blank(firstText(object, "aweme_id", "awemeId", "id", "video_id", "videoId",
-				"item_id", "itemId"));
+				"item_id", "itemId", "content_id", "contentId"));
 	}
 
 	private String schemaDiagnostics(JSONObject response, JSONObject item) {
