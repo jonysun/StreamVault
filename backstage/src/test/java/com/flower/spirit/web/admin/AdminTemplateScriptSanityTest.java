@@ -121,7 +121,8 @@ class AdminTemplateScriptSanityTest {
 		assertThat(home).contains("downloadTaskProgress", "activeDownloadList", "waitingDownloadList",
 				"loadDownloadQueueState", "runningItems", "waitingItems", "downloadTasks",
 				"queueCount", "fetchQueue", "downloadQueue", "markDownloadQueueError",
-				"markTaskStatusError");
+				"markTaskStatusError", "collectFetchQueueList", "activeCollectFetchCount",
+				"waitingCollectFetchCount", "renderCollectFetchQueue", "collectFetchRow");
 	}
 
 	@Test

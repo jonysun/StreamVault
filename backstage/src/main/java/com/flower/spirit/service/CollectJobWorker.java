@@ -301,7 +301,7 @@ public class CollectJobWorker {
 	private static boolean isNonRetryable(String errorCode) {
 		return "INVALID_AUTHOR_ID".equals(errorCode) || "INVALID_SOURCE".equals(errorCode)
 				|| "UNSUPPORTED_PERSISTENT_FETCH".equals(errorCode) || "COOKIE_MISSING".equals(errorCode)
-				|| "F2_PROTOCOL_ERROR".equals(errorCode);
+				|| "F2_PROTOCOL_ERROR".equals(errorCode) || "DTK_UPSTREAM_SCHEMA".equals(errorCode);
 	}
 
 	static String faultDomain(String errorCode) {

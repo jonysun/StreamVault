@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,15 @@ class DtkDouyinDataProviderTest {
 			exchange.sendResponseHeaders(200, body.length);
 			try (var output = exchange.getResponseBody()) { output.write(body); }
 		});
+		server.createContext("/api/v1/douyin/user/posts", exchange -> {
+			byte[] body = ("{\"code\":200,\"message\":\"success\",\"data\":{"
+					+ "\"aweme_list\":[{\"aweme_id\":\"456\",\"desc\":\"post\","
+					+ "\"video\":{\"play_addr\":{\"url_list\":[\"https://media.example/post.mp4\"]}}}],"
+					+ "\"max_cursor\":\"20\",\"has_more\":0}}")
+					.getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
 		server.start();
 		baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
 		Global.dtkBaseUrl = baseUrl;
@@ -73,5 +83,16 @@ class DtkDouyinDataProviderTest {
 	void unwrapsOfficialEnvelopeForWorkData() {
 		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("123");
 		assertThat(raw).contains("\"aweme_detail\"", "\"aweme_id\":\"123\"");
+	}
+
+	@Test
+	void acceptsAwemeListAuthorEnvelopeAndNumericHasMore() {
+		DtkDouyinDataProvider provider = new DtkDouyinDataProvider(HttpClient.newHttpClient());
+		DouyinFetchEnvelope result = provider.fetchAuthorWorks(new DouyinFetchRequest(
+				"sec-user", Set.of(), null, 0, 1, 1, DouyinFetchMode.INITIAL, 10, ""));
+
+		assertThat(result.items()).singleElement().extracting(item -> item.getString("aweme_id"))
+				.isEqualTo("456");
+		assertThat(result.backfillComplete()).isTrue();
 	}
 }

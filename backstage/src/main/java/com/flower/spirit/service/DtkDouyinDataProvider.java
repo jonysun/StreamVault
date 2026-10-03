@@ -28,6 +28,7 @@ import com.flower.spirit.config.Global;
 public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private static final Logger logger = LoggerFactory.getLogger(DtkDouyinDataProvider.class);
 	private final HttpClient client;
+	private static final List<String> ITEM_ARRAY_KEYS = List.of("items", "aweme_list", "list", "posts", "works");
 
 	public DtkDouyinDataProvider() {
 		this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
@@ -58,20 +59,28 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			JSONObject response = get("/api/v1/douyin/user/posts", "sec_user_id", request.secUserId(),
 					"cursor", cursor, "count", "50", "wait", waitSeconds());
 			JSONObject data = payload(response);
-			JSONArray rawItems = array(data, "items");
-			if (rawItems == null) rawItems = array(response, "items");
-			if (rawItems == null) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 作者列表缺少 data.items");
+			JSONArray rawItems = findItemArray(response, 0);
+			if (rawItems == null) {
+				throw new CollectFetchException("DTK_UPSTREAM_SCHEMA",
+						"DTK 作者列表缺少作品数组 " + schemaDiagnostics(response, null));
+			}
 			for (int i = 0; i < rawItems.size(); i++) {
-				JSONObject normalized = normalizeItem(rawItems.getJSONObject(i));
+				Object rawItem = rawItems.get(i);
+				JSONObject item = rawItem instanceof JSONObject value ? value : null;
+				JSONObject normalized = normalizeItem(item);
 				String id = normalized.getString("aweme_id");
-				if (blank(id)) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 作品项缺少 aweme_id");
+				if (blank(id)) {
+					throw new CollectFetchException("DTK_UPSTREAM_SCHEMA",
+							"DTK 作品项缺少 aweme_id " + schemaDiagnostics(response, item));
+				}
 				items.add(normalized);
 				if (!known.contains(id)) newIds.add(id);
 				if (request.maxItems() > 0 && newIds.size() >= request.maxItems()) break;
 			}
 			pages++;
-			String next = text(data, "cursor");
+			String next = firstText(data, "cursor", "max_cursor", "next_cursor", "nextCursor");
 			if (blank(next)) next = text(response, "cursor");
+			if (blank(next)) next = firstText(response, "max_cursor", "next_cursor", "nextCursor");
 			JSONObject meta = object(response, "meta");
 			JSONObject metaCursor = object(meta, "cursor");
 			if (blank(next)) next = text(metaCursor, "next");
@@ -177,6 +186,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	}
 
 	private JSONObject normalizeItem(JSONObject item) {
+		if (item == null) return new JSONObject(true);
 		JSONObject detail = findDetail(item);
 		if (detail == null) detail = item;
 		detail = normalizeDetail(detail);
@@ -204,15 +214,22 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				return coerceDetail(data);
 			}
 		}
-		if (object.getString("aweme_id") != null) return normalizeDetail(object);
-		return object.getString("id") != null || object.getJSONObject("video") != null
+		if (hasWorkId(object)) return normalizeDetail(object);
+		for (String key : List.of("aweme", "aweme_info", "item", "work", "post")) {
+			JSONObject nested = object.getJSONObject(key);
+			if (nested != null && (hasWorkId(nested) || nested.getJSONObject("video") != null)) {
+				return normalizeDetail(nested);
+			}
+		}
+		return object.getJSONObject("video") != null
 				|| object.getJSONArray("video_play_addr") != null ? normalizeDetail(coerceDetail(object)) : null;
 	}
 
 	private JSONObject coerceDetail(JSONObject source) {
 		JSONObject detail = new JSONObject(true);
 		detail.putAll(source);
-		if (detail.getString("aweme_id") == null) detail.put("aweme_id", firstText(source, "id", "awemeId"));
+		if (detail.getString("aweme_id") == null) detail.put("aweme_id",
+				firstText(source, "id", "awemeId", "video_id", "videoId", "item_id", "itemId"));
 		if (detail.getString("desc") == null) detail.put("desc", firstText(source, "title", "description"));
 		if (detail.getJSONObject("author") == null && source.getJSONObject("user") != null) {
 			detail.put("author", source.getJSONObject("user"));
@@ -279,6 +296,52 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		return data == null ? response : data;
 	}
 
+	private JSONArray findItemArray(Object value, int depth) {
+		if (value == null || depth > 4) return null;
+		if (value instanceof JSONObject object) {
+			for (String key : ITEM_ARRAY_KEYS) {
+				JSONArray candidate = object.getJSONArray(key);
+				if (candidate != null) return candidate;
+			}
+			for (String key : List.of("data", "result", "response", "payload")) {
+				JSONArray nested = findItemArray(object.get(key), depth + 1);
+				if (nested != null) return nested;
+			}
+		}
+		return null;
+	}
+
+	private boolean hasWorkId(JSONObject object) {
+		return object != null && !blank(firstText(object, "aweme_id", "awemeId", "id", "video_id", "videoId",
+				"item_id", "itemId"));
+	}
+
+	private String schemaDiagnostics(JSONObject response, JSONObject item) {
+		JSONObject diagnostics = new JSONObject(true);
+		diagnostics.put("topLevelKeys", response == null ? List.of() : response.keySet());
+		Object data = response == null ? null : response.get("data");
+		diagnostics.put("dataType", data == null ? "null" : data.getClass().getSimpleName());
+		diagnostics.put("arrayCandidates", response == null ? List.of() : arrayCandidates(response, 0));
+		diagnostics.put("itemKeys", item == null ? List.of() : item.keySet());
+		if (response != null) {
+			diagnostics.put("code", firstText(response, "code", "status_code"));
+			diagnostics.put("message", firstText(response, "message", "status_msg"));
+			diagnostics.put("success", response.get("success"));
+		}
+		return diagnostics.toJSONString();
+	}
+
+	private List<String> arrayCandidates(JSONObject object, int depth) {
+		if (object == null || depth > 3) return List.of();
+		Set<String> result = new LinkedHashSet<>();
+		for (String key : ITEM_ARRAY_KEYS) if (object.getJSONArray(key) != null) result.add(key);
+		for (String key : List.of("data", "result", "response", "payload")) {
+			Object nested = object.get(key);
+			if (nested instanceof JSONObject child) result.addAll(arrayCandidates(child, depth + 1));
+		}
+		return List.copyOf(result);
+	}
+
 	private String waitSeconds() {
 		return String.valueOf(Math.max(1, Math.min(25, Global.dtkTimeoutMs / 1000)));
 	}
@@ -289,9 +352,14 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	}
 
 	private JSONObject object(JSONObject o, String key) { return o == null ? null : o.getJSONObject(key); }
-	private JSONArray array(JSONObject o, String key) { return o == null ? null : o.getJSONArray(key); }
 	private String text(JSONObject o, String key) { return o == null ? null : o.getString(key); }
-	private boolean bool(JSONObject o, String key) { return o != null && Boolean.TRUE.equals(o.getBoolean(key)); }
+	private boolean bool(JSONObject o, String key) {
+		if (o == null) return false;
+		Object value = o.get(key);
+		if (value instanceof Boolean flag) return flag;
+		if (value instanceof Number number) return number.intValue() != 0;
+		return value != null && ("1".equals(value.toString()) || "true".equalsIgnoreCase(value.toString()));
+	}
 	private boolean blank(String value) { return value == null || value.trim().isEmpty(); }
 	private String trimSlash(String value) { return value == null ? "" : value.replaceAll("/+$", ""); }
 }

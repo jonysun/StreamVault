@@ -933,8 +933,18 @@
                                 <div class="task-status-grid" id="taskStatusGrid">
                                     <div class="task-status-block">正在加载后台任务状态...</div>
                                 </div>
-                                <div class="runtime-pipeline">
-                                    <section class="runtime-pipeline-section">
+				<div class="runtime-pipeline">
+					<section class="runtime-pipeline-section">
+						<div class="runtime-pipeline-heading">
+							<span><i class="mdi mdi-cloud-search-outline"></i> 收藏抓取队列</span>
+							<span><span class="badge badge-info">运行 <span id="activeCollectFetchCount">0</span></span>
+								<span class="badge badge-warning">排队/重试 <span id="waitingCollectFetchCount">0</span></span></span>
+						</div>
+						<div class="runtime-pipeline-list" id="collectFetchQueueList">
+							<div class="runtime-row-meta">暂无收藏抓取任务</div>
+						</div>
+					</section>
+					<section class="runtime-pipeline-section">
                                         <div class="runtime-pipeline-heading">
                                             <span><i class="mdi mdi-chart-timeline-variant"></i> 收藏任务下载进度</span>
                                         </div>
@@ -1415,6 +1425,7 @@
 			const jobs = data.jobs || {};
 			const fetchQueue = jobs.fetchQueue || {};
 			const downloadQueue = jobs.downloadQueue || {};
+			renderCollectFetchQueue(jobs);
 			const fetchRunning = queueCount(fetchQueue, 'RUNNING', (jobs.running || []).length);
 			const fetchWaiting = queueCount(fetchQueue, 'QUEUED', 0)
 					+ queueCount(fetchQueue, 'RETRY_WAIT', (jobs.queued || []).length);
@@ -1472,6 +1483,50 @@
 				html += '</div>';
 			});
 			$('#downloadTaskProgress').html(html);
+		}
+
+		function renderCollectFetchQueue(jobs) {
+			jobs = jobs || {};
+			const running = (Array.isArray(jobs.running) ? jobs.running : []).filter(function(item) {
+				return item.jobType === 'COLLECT_FETCH';
+			});
+			const queued = (Array.isArray(jobs.queued) ? jobs.queued : []).filter(function(item) {
+				return item.jobType === 'COLLECT_FETCH';
+			});
+			const failed = (Array.isArray(jobs.recentFailed) ? jobs.recentFailed : []).filter(function(item) {
+				return item.jobType === 'COLLECT_FETCH';
+			}).slice(0, 3);
+			const counts = jobs.fetchQueue || {};
+			$('#activeCollectFetchCount').text(queueCount(counts, 'RUNNING', running.length));
+			$('#waitingCollectFetchCount').text(queueCount(counts, 'QUEUED', 0)
+					+ queueCount(counts, 'RETRY_WAIT', queued.length));
+			if (!running.length && !queued.length && !failed.length) {
+				$('#collectFetchQueueList').html('<div class="runtime-row-meta">暂无收藏抓取任务</div>');
+				return;
+			}
+			let html = '';
+			running.forEach(function(item) { html += collectFetchRow(item, '正在抓取', 'mdi-play-circle-outline', false); });
+			queued.forEach(function(item, index) {
+				const retry = item.state === 'RETRY_WAIT';
+				html += collectFetchRow(item, retry ? '等待重试' : '排队中 #' + (index + 1),
+					retry ? 'mdi-clock-alert-outline' : 'mdi-timer-sand', true);
+			});
+			failed.forEach(function(item) { html += collectFetchRow(item, '最近失败', 'mdi-alert-circle-outline', false); });
+			$('#collectFetchQueueList').html(html);
+		}
+
+		function collectFetchRow(item, stateText, icon, includeSchedule) {
+			item = item || {};
+			const title = item.taskName || ('收藏任务 #' + numberText(item.taskId));
+			let meta = 'Job #' + numberText(item.jobId) + ' · Run #' + numberText(item.runId)
+					+ ' · 尝试 ' + numberText(item.attemptCount) + '/' + numberText(item.maxAttempts);
+			if (item.runState) meta += ' · ' + item.runState;
+			if (includeSchedule && item.state === 'RETRY_WAIT') meta += ' · 下次 ' + runtimeTimeText(item.availableAt);
+			if (item.errorCode) meta += ' · ' + item.errorCode;
+			return '<div class="runtime-pipeline-row"><div class="runtime-row-title"><i class="mdi ' + icon
+				+ '"></i> ' + escapeRecentlyHtml(title) + ' <span class="badge badge-light">'
+				+ escapeRecentlyHtml(stateText) + '</span></div><div class="runtime-row-meta">'
+				+ escapeRecentlyHtml(meta) + '</div></div>';
 		}
 
 		function renderDownloadQueueState(data) {

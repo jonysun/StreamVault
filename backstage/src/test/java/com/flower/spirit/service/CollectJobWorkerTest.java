@@ -272,6 +272,29 @@ class CollectJobWorkerTest {
 	}
 
 	@Test
+	void dtkSchemaFailureIsTerminalUntilTheAdapterIsUpdated() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		CollectJobClaim claim = new CollectJobClaim(4301L, 6401L, 14,
+				CollectTriggerType.RETRY, 1, 3);
+		when(dataService.isCollectTaskEnabled(14)).thenReturn(true);
+		when(runService.currentState(6401L)).thenReturn(CollectRunState.FETCHING);
+		org.mockito.Mockito.doThrow(new CollectFetchException("DTK_UPSTREAM_SCHEMA",
+				"DTK 作品项缺少 aweme_id"))
+				.when(dataService).executeQueuedCollectTask(14, 6401L, CollectTriggerType.RETRY);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, mock(PlatformCookieService.class), passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).failJob(claim, "DTK_UPSTREAM_SCHEMA", "DTK 作品项缺少 aweme_id");
+			verify(runService, never()).retryOrFail(any(), anyString(), anyString(), anyLong());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
 	void disabledSoftBlockRetryMakesCurrentFailureTerminal() {
 		CollectRunService runService = mock(CollectRunService.class);
 		CollectDataService dataService = mock(CollectDataService.class);
