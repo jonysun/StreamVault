@@ -176,6 +176,28 @@ class PostgresqlDeploymentContractTest {
 	}
 
 	@Test
+	void douyinProviderConfigUsesExplicitPostgresqlColumnMappings() throws Exception {
+		Path migrationRoot = Path.of("src", "main", "resources", "db", "migration", "postgresql");
+		String migration = Files.readString(migrationRoot.resolve(
+				"V010__add_douyin_provider_config.sql"), StandardCharsets.UTF_8);
+		String entity = Files.readString(Path.of("src", "main", "java", "com", "flower", "spirit",
+				"entity", "ConfigEntity.java"), StandardCharsets.UTF_8).replace("\r\n", "\n");
+
+		assertThat(migration).contains(
+				"ADD COLUMN douyin_provider",
+				"ADD COLUMN dtk_base_url",
+				"ADD COLUMN dtk_api_key",
+				"ADD COLUMN dtk_timeout_ms",
+				"ADD COLUMN dtk_detail_refresh_enabled");
+		assertThat(entity).contains(
+				"@Column(name = \"douyin_provider\")\n\tprivate String douyinProvider;",
+				"@Column(name = \"dtk_base_url\")\n\tprivate String dtkBaseUrl;",
+				"@Column(name = \"dtk_api_key\")\n\tprivate String dtkApiKey;",
+				"@Column(name = \"dtk_timeout_ms\")\n\tprivate String dtkTimeoutMs;",
+				"@Column(name = \"dtk_detail_refresh_enabled\")\n\tprivate String dtkDetailRefreshEnabled;");
+	}
+
+	@Test
 	void collectDownloadsCanPersistAForwardOnlyMetadataSnapshot() throws Exception {
 		Path migrationRoot = Path.of("src", "main", "resources", "db", "migration", "postgresql");
 		String baseline = Files.readString(migrationRoot.resolve("V001__baseline.sql"), StandardCharsets.UTF_8);

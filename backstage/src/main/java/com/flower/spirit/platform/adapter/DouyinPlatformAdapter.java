@@ -129,13 +129,9 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 					String resolvedWorkId = DouUtil.extractWorkId(resolvedUrl);
 					String raw = gateway.fetch(resolvedWorkId == null ? inputWorkId : resolvedWorkId, cookie);
 					return parseRaw(raw, inputWorkId, request.getInput(), resolvedUrl);
-				} catch (IOException f2Error) {
-					logger.warn("[DouyinProvider] failover operation=WORK_DETAIL from=F2 to=DTK reason={}",
-							f2Error.getMessage());
-					return parseRaw(dataProviderService.fetchDtkWorkData(inputWorkId), inputWorkId,
-							request.getInput(), request.getUrl());
-				} catch (RuntimeException f2Error) {
-					if (!dataProviderService.shouldFailover(f2Error)) throw f2Error;
+				} catch (Exception f2Error) {
+					if (f2Error instanceof RuntimeException runtimeError
+							&& !dataProviderService.shouldFailover(runtimeError)) throw runtimeError;
 					logger.warn("[DouyinProvider] failover operation=WORK_DETAIL from=F2 to=DTK reason={}",
 							f2Error.getMessage());
 					return parseRaw(dataProviderService.fetchDtkWorkData(inputWorkId), inputWorkId,

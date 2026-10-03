@@ -3,6 +3,7 @@ package com.flower.spirit.entity;
 import java.io.Serializable;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.Column;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -106,14 +107,19 @@ public class ConfigEntity implements Serializable {
 
 	private String douyinapiurls; // 抖音解析API URL列表（多行）
 
+	@Column(name = "douyin_provider")
 	private String douyinProvider; // F2, DTK or AUTO
 
+	@Column(name = "dtk_base_url")
 	private String dtkBaseUrl;
 
+	@Column(name = "dtk_api_key")
 	private String dtkApiKey;
 
+	@Column(name = "dtk_timeout_ms")
 	private String dtkTimeoutMs;
 
+	@Column(name = "dtk_detail_refresh_enabled")
 	private String dtkDetailRefreshEnabled;
 
 	public Integer getId() {
