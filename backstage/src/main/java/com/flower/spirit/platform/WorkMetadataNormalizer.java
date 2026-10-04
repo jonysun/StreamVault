@@ -10,11 +10,15 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
 @Component
 public class WorkMetadataNormalizer {
+	private static final Pattern DOUYIN_PATH_ID = Pattern.compile("/(?:video|note)/([0-9]{8,25})(?:/|\\?|$)");
+	private static final Pattern DOUYIN_MODAL_ID = Pattern.compile("(?:[?&](?:modal_id|aweme_id|item_id)=)([0-9]{8,25})(?:&|$)");
 
 	private static final DateTimeFormatter OUTPUT_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 	private static final DateTimeFormatter COMPACT_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -49,7 +53,7 @@ public class WorkMetadataNormalizer {
 				.platformKey(metadata.getPlatformKey())
 				.platformDisplayName(resolveDisplayName(metadata))
 				.supportTier(metadata.getSupportTier())
-				.workId(metadata.getWorkId())
+				.workId(normalizeWorkId(metadata.getPlatformKey(), metadata.getWorkId()))
 				.contentType(metadata.getContentType())
 				.title(metadata.getTitle())
 				.description(metadata.getDescription())
@@ -66,6 +70,28 @@ public class WorkMetadataNormalizer {
 				.mediaResources(metadata.getMediaResources())
 				.rawMetadata(metadata.getRawMetadata())
 				.build();
+	}
+
+	/**
+	 * F2 and DTK both identify a Douyin work by aweme_id, but direct responses may
+	 * contain a full /video/{id} URL or an alias such as content_id. Persist only
+	 * the canonical numeric ID so the two providers share one identity.
+	 */
+	private String normalizeWorkId(String platformKey, String workId) {
+		if (!hasText(workId) || !PlatformCatalog.findByAlias(platformKey)
+				.map(definition -> "douyin".equals(definition.getKey())).orElse(false)) {
+			return hasText(workId) ? workId.trim() : null;
+		}
+		String value = workId.trim();
+		if (value.matches("\\d+")) return value;
+		Matcher pathMatcher = DOUYIN_PATH_ID.matcher(value);
+		if (pathMatcher.find()) return pathMatcher.group(1);
+		Matcher queryMatcher = DOUYIN_MODAL_ID.matcher(value);
+		if (queryMatcher.find()) return queryMatcher.group(1);
+		// Preserve an opaque provider value when it is not an explicit Douyin ID.
+		// Missing or malformed IDs are rejected by the provider/adapter contract;
+		// this normalizer must never invent one from arbitrary text.
+		return value;
 	}
 
 	public String normalizePublishTime(String value) {

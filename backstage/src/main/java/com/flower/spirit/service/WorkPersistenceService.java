@@ -48,7 +48,7 @@ public class WorkPersistenceService {
 	}
 
 	@Transactional
-	public PersistenceResult persist(WorkMetadata input) {
+	public synchronized PersistenceResult persist(WorkMetadata input) {
 		WorkMetadata metadata = normalizer.normalize(input);
 		deduplicationService.assertNotBlocked(metadata);
 		ExistingWork existing = deduplicationService.findExisting(metadata).orElse(null);

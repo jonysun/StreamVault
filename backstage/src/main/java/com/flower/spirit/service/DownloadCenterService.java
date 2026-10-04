@@ -1,11 +1,14 @@
 package com.flower.spirit.service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,6 +22,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.flower.spirit.database.DatabaseWriteExecutor;
 
 @Service
@@ -36,6 +41,8 @@ public class DownloadCenterService {
 	private final RuntimeControlService runtimeControlService;
 	private final DatabaseWriteExecutor databaseWriteExecutor;
 	private final CollectEnqueueService collectEnqueueService;
+	@Autowired(required = false)
+	private MediaPathService mediaPathService;
 	@org.springframework.beans.factory.annotation.Autowired(required = false)
 	private BlockedWorkService blockedWorkService;
 
@@ -112,6 +119,119 @@ public class DownloadCenterService {
 		result.put("pageSize", safeSize);
 		result.put("totalElements", total);
 		result.put("totalPages", total == 0 ? 0 : (total + safeSize - 1) / safeSize);
+		return result;
+	}
+
+	/** A compact author-level view for the collection download screen. */
+	public Map<String, Object> collectAuthors(String keyword, int page, int pageSize) {
+		int safePage = Math.max(0, page);
+		int safeSize = Math.min(Math.max(1, pageSize), 100);
+		String filter = "";
+		List<Object> args = new ArrayList<>();
+		if (keyword != null && !keyword.isBlank()) {
+			filter = " AND LOWER(COALESCE(t.taskname,'') || ' ' || COALESCE(i.nickname_snapshot,'') || ' ' || COALESCE(i.author_uid,'')) LIKE ?";
+			args.add("%" + keyword.trim().toLowerCase(Locale.ROOT) + "%");
+		}
+		String base = "WITH latest AS (SELECT r.collect_task_id AS task_id, COALESCE(t.taskname,'') AS task_name, "
+				+ "i.nickname_snapshot AS author, i.author_uid, i.work_id, i.process_state, i.updated_at, i.created_at, "
+				+ "ROW_NUMBER() OVER (PARTITION BY r.collect_task_id,i.work_id ORDER BY COALESCE(i.updated_at,i.created_at) DESC,i.id DESC) AS rn "
+				+ "FROM biz_collect_run_item i JOIN biz_collect_run r ON r.id=i.run_id "
+				+ "LEFT JOIN biz_collect_data t ON t.id=r.collect_task_id "
+				+ "WHERE i.queue_generation='FETCH_DOWNLOAD_V1'" + filter + ") "
+				+ "SELECT task_id, MAX(task_name) AS task_name, COALESCE(NULLIF(MAX(author),''),'未知作者') AS author, "
+				+ "COALESCE(NULLIF(MAX(author_uid),''),'') AS author_uid, COUNT(*) AS total_count, "
+				+ "SUM(CASE WHEN process_state IN ('COMPLETED','SKIPPED_EXISTING','SKIPPED_EXISTING_ACTIVE_DOWNLOAD') THEN 1 ELSE 0 END) AS downloaded_count, "
+				+ "SUM(CASE WHEN process_state IN ('QUEUED','RUNNING','RETRY_WAIT') THEN 1 ELSE 0 END) AS pending_count, "
+				+ "SUM(CASE WHEN process_state='FAILED' THEN 1 ELSE 0 END) AS failed_count, "
+				+ "SUM(CASE WHEN process_state='SKIPPED_REMOTE_MISSING' THEN 1 ELSE 0 END) AS remote_missing_count, "
+				+ "MAX(COALESCE(updated_at,created_at)) AS last_activity FROM latest WHERE rn=1 GROUP BY task_id";
+		List<Map<String, Object>> all = jdbcTemplate.queryForList(base
+				+ " ORDER BY last_activity DESC, task_id DESC", args.toArray());
+		int from = Math.min(safePage * safeSize, all.size());
+		int to = Math.min(from + safeSize, all.size());
+		List<Map<String, Object>> rows = from >= to ? List.of() : all.subList(from, to);
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("content", rows);
+		result.put("page", safePage);
+		result.put("pageSize", safeSize);
+		result.put("totalElements", all.size());
+		result.put("totalPages", all.isEmpty() ? 0 : (all.size() + safeSize - 1) / safeSize);
+		return result;
+	}
+
+	/** Returns the latest known work for one collection task with a user-facing status. */
+	public Map<String, Object> collectAuthorWorks(int taskId, int page, int pageSize) {
+		int safePage = Math.max(0, page);
+		int safeSize = Math.min(Math.max(1, pageSize), 100);
+		List<Map<String, Object>> raw = jdbcTemplate.queryForList(
+				"SELECT i.id, i.work_id, i.platform_key, i.author_uid, i.nickname_snapshot, i.title_snapshot, "
+				+ "i.publish_time, i.media_type, i.process_state, i.error_code, i.error_message, "
+				+ "i.updated_at, i.created_at FROM biz_collect_run_item i JOIN biz_collect_run r ON r.id=i.run_id "
+				+ "WHERE r.collect_task_id=? AND i.queue_generation='FETCH_DOWNLOAD_V1' "
+				+ "ORDER BY COALESCE(i.updated_at,i.created_at) DESC, i.id DESC", taskId);
+		Map<String, Map<String, Object>> latest = new LinkedHashMap<>();
+		for (Map<String, Object> row : raw) {
+			String workId = text(row.get("work_id"));
+			if (workId != null) latest.putIfAbsent(workId, row);
+		}
+		List<Map<String, Object>> all = new ArrayList<>();
+		for (Map<String, Object> row : latest.values()) all.add(toAuthorWork(row));
+		int from = Math.min(safePage * safeSize, all.size());
+		int to = Math.min(from + safeSize, all.size());
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("content", from >= to ? List.of() : all.subList(from, to));
+		result.put("page", safePage);
+		result.put("pageSize", safeSize);
+		result.put("totalElements", all.size());
+		result.put("totalPages", all.isEmpty() ? 0 : (all.size() + safeSize - 1) / safeSize);
+		return result;
+	}
+
+	/** Detailed links for one queue record. Remote links are only exposed while retained in its snapshot. */
+	public Map<String, Object> detail(String recordKey) {
+		RecordKey key = parseKey(recordKey);
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("recordKey", recordKey);
+		if ("COLLECT".equals(key.source())) {
+			List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+					"SELECT i.work_id,i.platform_key,i.title_snapshot,i.nickname_snapshot,i.process_state,"
+					+ "i.media_type,i.metadata_snapshot,i.error_code,i.error_message FROM biz_collect_run_item i "
+					+ "WHERE i.id=? AND i.queue_generation='FETCH_DOWNLOAD_V1'", key.id());
+			if (rows.isEmpty()) throw new IllegalArgumentException("下载记录不存在");
+			Map<String, Object> row = rows.get(0);
+			String workId = text(row.get("work_id"));
+			String platform = text(row.get("platform_key"));
+			result.put("title", text(row.get("title_snapshot")));
+			result.put("author", text(row.get("nickname_snapshot")));
+			result.put("state", text(row.get("process_state")));
+			result.put("mediaType", text(row.get("media_type")));
+			result.put("sourceUrl", douyinSourceUrl(platform, workId));
+			result.put("errorCode", text(row.get("error_code")));
+			result.put("errorMessage", text(row.get("error_message")));
+			addStoredMedia(result, platform, workId);
+			result.put("remoteMediaUrls", extractSnapshotUrls(text(row.get("metadata_snapshot"))));
+			return result;
+		}
+		List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+				"SELECT payload,state,last_error_code,last_error_message FROM biz_job_queue "
+				+ "WHERE id=? AND job_type='DIRECT_DOWNLOAD'", key.id());
+		if (rows.isEmpty()) throw new IllegalArgumentException("下载记录不存在");
+		Map<String, Object> row = rows.get(0);
+		JSONObject payload = parseJson(text(row.get("payload")));
+		result.put("title", payload == null ? null : payload.getString("title"));
+		result.put("author", payload == null ? null : payload.getString("author"));
+		result.put("state", text(row.get("state")));
+		result.put("sourceUrl", payload == null ? null : payload.getString("sourceUrl"));
+		result.put("errorCode", text(row.get("last_error_code")));
+		result.put("errorMessage", text(row.get("last_error_message")));
+		List<String> directMedia = new ArrayList<>();
+		if (payload != null) {
+			for (String field : List.of("downloadUrl", "download_url", "mediaUrl", "media_url", "playUrl", "play_url")) {
+				String value = payload.getString(field);
+				if (value != null && !value.isBlank()) directMedia.add(value);
+			}
+		}
+		result.put("remoteMediaUrls", directMedia.stream().distinct().toList());
 		return result;
 	}
 
@@ -401,6 +521,186 @@ public class DownloadCenterService {
 		}
 		row.remove("payload");
 	}
+
+	private Map<String, Object> toAuthorWork(Map<String, Object> row) {
+		String platform = text(row.get("platform_key"));
+		String workId = text(row.get("work_id"));
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("id", row.get("id"));
+		result.put("recordKey", "COLLECT:" + String.valueOf(row.get("id")));
+		result.put("workId", workId);
+		result.put("platformKey", platform);
+		result.put("authorUid", text(row.get("author_uid")));
+		result.put("author", text(row.get("nickname_snapshot")));
+		result.put("title", text(row.get("title_snapshot")));
+		result.put("publishTime", row.get("publish_time"));
+		result.put("mediaType", text(row.get("media_type")));
+		String processState = text(row.get("process_state"));
+		LocalMedia media = findLocalMedia(platform, workId);
+		String status = userWorkStatus(processState, media.exists(), media.remoteMissing());
+		result.put("processState", processState);
+		result.put("status", status);
+		result.put("statusText", statusText(status));
+		result.put("sourceUrl", douyinSourceUrl(platform, workId));
+		result.put("localUrls", media.urls());
+		result.put("errorCode", text(row.get("error_code")));
+		result.put("errorMessage", text(row.get("error_message")));
+		return result;
+	}
+
+	private String userWorkStatus(String processState, boolean localExists, boolean remoteMissing) {
+		if (remoteMissing || "SKIPPED_REMOTE_MISSING".equals(processState)) return "REMOTE_MISSING";
+		if (localExists) return "DOWNLOADED";
+		return switch (processState == null ? "" : processState) {
+		case "RUNNING" -> "DOWNLOADING";
+		case "QUEUED" -> "QUEUED";
+		case "RETRY_WAIT" -> "RETRY_WAIT";
+		case "FAILED" -> "FAILED";
+		case "COMPLETED", "SKIPPED_EXISTING", "SKIPPED_EXISTING_ACTIVE_DOWNLOAD" -> "LOCAL_MISSING";
+		default -> "NOT_DOWNLOADED";
+		};
+	}
+
+	private String statusText(String status) {
+		return switch (status) {
+		case "DOWNLOADED" -> "已下载";
+		case "DOWNLOADING" -> "下载中";
+		case "QUEUED" -> "排队中";
+		case "RETRY_WAIT" -> "等待重试";
+		case "FAILED" -> "下载失败";
+		case "REMOTE_MISSING" -> "服务端已删除";
+		case "LOCAL_MISSING" -> "本地文件已删除";
+		default -> "未下载";
+		};
+	}
+
+	private LocalMedia findLocalMedia(String platform, String workId) {
+		if (workId == null) return new LocalMedia(false, false, List.of());
+		List<Map<String, Object>> videos = jdbcTemplate.queryForList(
+				"SELECT videoaddr,videounrealaddr FROM biz_video WHERE videoid=? AND "
+				+ "(platformkey=? OR (?='douyin' AND videoplatform IN ('抖音','douyin'))) ORDER BY id DESC LIMIT 1",
+				workId, platform == null ? "" : platform, platform == null ? "" : platform);
+		if (!videos.isEmpty()) {
+			Map<String, Object> row = videos.get(0);
+			String local = text(row.get("videoaddr"));
+			boolean exists = localFileExists(local);
+			String publicUrl = text(row.get("videounrealaddr"));
+			return new LocalMedia(exists, false, publicUrl == null ? List.of() : List.of(publicUrl));
+		}
+		List<Map<String, Object>> graphics = jdbcTemplate.queryForList(
+				"SELECT images FROM biz_graphic_content WHERE videoid=? AND "
+				+ "(platformkey=? OR (?='douyin' AND platform IN ('抖音','douyin'))) ORDER BY id DESC LIMIT 1",
+				workId, platform == null ? "" : platform, platform == null ? "" : platform);
+		if (!graphics.isEmpty()) {
+			List<String> urls = parseStringArray(text(graphics.get(0).get("images")));
+			return new LocalMedia(!urls.isEmpty() && urls.stream().allMatch(this::localFileExists), false, urls);
+		}
+		return new LocalMedia(false, false, List.of());
+	}
+
+	private boolean localFileExists(String value) {
+		if (value == null || value.isBlank()) return false;
+		try {
+			Path path = mediaPathService == null ? Path.of(value).toAbsolutePath().normalize()
+					: mediaPathService.requireOwnedLocalPath(value);
+			return Files.isRegularFile(path) && Files.size(path) > 0;
+		} catch (Exception ignored) {
+			return false;
+		}
+	}
+
+	private void addStoredMedia(Map<String, Object> result, String platform, String workId) {
+		LocalMedia media = findLocalMedia(platform, workId);
+		result.put("localUrls", media.urls());
+		result.put("localAvailable", media.exists());
+	}
+
+	private List<String> extractSnapshotUrls(String raw) {
+		JSONObject root = parseJson(raw);
+		if (root == null) return List.of();
+		JSONObject detail = root.getJSONObject("aweme_detail");
+		if (detail == null) detail = root;
+		LinkedHashSet<String> urls = new LinkedHashSet<>();
+		addUrlArray(urls, detail.getJSONArray("video_play_addr"));
+		JSONObject video = detail.getJSONObject("video");
+		if (video != null) {
+			addUrlObject(urls, video.getJSONObject("play_addr"));
+			addUrlObject(urls, video.getJSONObject("download_addr"));
+		}
+		JSONArray images = detail.getJSONArray("images");
+		if (images != null) for (Object value : images) if (value instanceof JSONObject image) {
+			addUrlObject(urls, image);
+		}
+		// DTK responses may wrap media as {media:{video:{url,urls:[...]}}}
+		// instead of the F2 aweme_detail shape. Walk only URL-named fields so
+		// diagnostics and unrelated metadata are not exposed as media links.
+		collectSnapshotUrls(detail, urls);
+		return List.copyOf(urls);
+	}
+
+	private void collectSnapshotUrls(Object value, Set<String> urls) {
+		if (value instanceof JSONObject object) {
+			for (Map.Entry<String, Object> entry : object.entrySet()) {
+				String key = entry.getKey();
+				Object nested = entry.getValue();
+				if (isMediaUrlKey(key)) {
+					if (nested instanceof JSONArray array) addUrlArray(urls, array);
+					else if (nested != null && !String.valueOf(nested).isBlank()) urls.add(String.valueOf(nested));
+				}
+				if (nested instanceof JSONObject || nested instanceof JSONArray) collectSnapshotUrls(nested, urls);
+			}
+		} else if (value instanceof JSONArray array) {
+			for (Object nested : array) collectSnapshotUrls(nested, urls);
+		}
+	}
+
+	private boolean isMediaUrlKey(String key) {
+		if (key == null) return false;
+		return Set.of("url", "urls", "url_list", "download_url", "downloadUrl", "play_url",
+				"playUrl", "video_url", "videoUrl", "source_url", "sourceUrl", "src", "no_watermark",
+				"noWatermark", "no_watermark_url").contains(key);
+	}
+
+	private void addUrlObject(Set<String> urls, JSONObject object) {
+		if (object == null) return;
+		addUrlArray(urls, object.getJSONArray("url_list"));
+		addUrlArray(urls, object.getJSONArray("urls"));
+		String url = object.getString("url");
+		if (url != null && !url.isBlank()) urls.add(url);
+	}
+
+	private void addUrlArray(Set<String> urls, JSONArray values) {
+		if (values == null) return;
+		for (Object value : values) if (value != null && !String.valueOf(value).isBlank()) urls.add(String.valueOf(value));
+	}
+
+	private List<String> parseStringArray(String raw) {
+		if (raw == null || raw.isBlank()) return List.of();
+		try {
+			JSONArray values = JSON.parseArray(raw);
+			List<String> result = new ArrayList<>();
+			if (values != null) for (Object value : values) if (value != null && !String.valueOf(value).isBlank()) result.add(String.valueOf(value));
+			return result;
+		} catch (RuntimeException ignored) {
+			return List.of();
+		}
+	}
+
+	private JSONObject parseJson(String raw) {
+		if (raw == null || raw.isBlank()) return null;
+		try { return JSONObject.parseObject(raw); } catch (RuntimeException ignored) { return null; }
+	}
+
+	private String douyinSourceUrl(String platform, String workId) {
+		return "douyin".equalsIgnoreCase(platform) && workId != null && !workId.isBlank()
+				? "https://www.douyin.com/video/" + workId : null;
+	}
+
+	private String text(Object value) {
+		return value == null || String.valueOf(value).isBlank() ? null : String.valueOf(value);
+	}
+
+	private record LocalMedia(boolean exists, boolean remoteMissing, List<String> urls) {}
 
 	private void mergeCounts(Map<String, Long> target, String sql) {
 		for (Map<String, Object> row : jdbcTemplate.queryForList(sql)) {

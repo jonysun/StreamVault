@@ -857,6 +857,30 @@ public class AdminController {
 				downloadCenterService.items(view, source, state, keyword, page, pageSize));
 	}
 
+	@GetMapping("/download-center/collect-authors")
+	public AjaxEntity downloadCenterCollectAuthors(@RequestParam(required = false) String keyword,
+			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int pageSize) {
+		return new AjaxEntity(Global.ajax_success, "Collection authors loaded",
+				downloadCenterService.collectAuthors(keyword, page, pageSize));
+	}
+
+	@GetMapping("/download-center/collect-author-works")
+	public AjaxEntity downloadCenterCollectAuthorWorks(@RequestParam int taskId,
+			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int pageSize) {
+		return new AjaxEntity(Global.ajax_success, "Collection works loaded",
+				downloadCenterService.collectAuthorWorks(taskId, page, pageSize));
+	}
+
+	@GetMapping("/download-center/detail")
+	public AjaxEntity downloadCenterDetail(@RequestParam String recordKey) {
+		try {
+			return new AjaxEntity(Global.ajax_success, "Download detail loaded",
+					downloadCenterService.detail(recordKey));
+		} catch (IllegalArgumentException error) {
+			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
+		}
+	}
+
 	@PostMapping("/download-center/retry")
 	public AjaxEntity retryDownloadCenterItem(@RequestParam String recordKey) {
 		try {

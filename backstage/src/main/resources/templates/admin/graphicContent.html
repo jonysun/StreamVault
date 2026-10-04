@@ -782,7 +782,12 @@
 				<!-- 分页 -->
 				<div class="mt-4">
 					<div class="col-12">
-						<div class="d-flex justify-content-center">
+						<div class="d-flex justify-content-between align-items-center flex-wrap" style="gap:12px;">
+							<label class="mb-0" style="white-space:nowrap;">每页显示
+								<select id="graphicPageSize" class="form-control form-control-sm d-inline-block" style="width:auto;margin:0 4px;">
+									<option value="15">15</option><option value="30">30</option><option value="60">60</option><option value="100">100</option>
+								</select> 条
+							</label>
 							<ul id="pager" class="pagination">
 								<!-- 分页控件 -->
 							</ul>
@@ -862,7 +867,7 @@ $(function(){
 });
 
 // 当前页面参数
-var currentPage = 1;
+var currentPage = 0;
 var pageSize = 15;
 var searchParams = {};
 var selectedGraphicIds = new Set();
@@ -893,7 +898,7 @@ function bindSearchEvents() {
 	// 搜索按钮点击事件
 	$('#searchBtn').click(function() {
 		console.log('执行搜索操作');
-		currentPage = 1; // 重置页码
+		currentPage = 0;
 		collectSearchParams();
 		loadGraphicContentList();
 	});
@@ -906,7 +911,7 @@ function bindSearchEvents() {
 	});
 	bindGraphicAuthorMultiSelect();
 	$('#graphicAuthorExtra').on('input', function(){
-		currentPage = 1;
+		currentPage = 0;
 		collectSearchParams();
 		loadGraphicContentList();
 	});
@@ -939,8 +944,13 @@ function bindGraphicAuthorMultiSelect() {
 			selectedGraphicAuthors.delete(author);
 		}
 		updateSelectedGraphicAuthorsText();
-		currentPage = 1;
+		currentPage = 0;
 		collectSearchParams();
+		loadGraphicContentList();
+	});
+	$('#graphicPageSize').on('change', function(){
+		pageSize = Math.max(1, parseInt($(this).val(), 10) || 15);
+		currentPage = 0;
 		loadGraphicContentList();
 	});
 }
@@ -1003,7 +1013,7 @@ function collectSearchParams() {
 		publishEnd: $('#publishEndFilter').val(),
 		sortField: $('#sortFieldFilter').val(),
 		sortOrder: $('#sortOrderFilter').val(),
-		pageNo: currentPage, // 前后端页码都从1开始，直接传递
+		pageNo: currentPage,
 		pageSize: pageSize
 	};
 	console.log('搜索参数:', searchParams);
@@ -1882,37 +1892,25 @@ function copyToClipboard(text) {
  */
 function renderPagination(pageData) {
 	console.log('渲染分页信息:', pageData);
-	
-	var totalPages = pageData.page.totalPages || 1;
-	var currentPageNum = (pageData.page.number || 0) + 1; // 后端返回从0开始，前端显示从1开始，需要加1
-	var totalElements = pageData.page.totalElements || 0;
-	
-	if (totalPages <= 1) {
-		$('#pager').html('');
-		return;
-	}
-	
+	var page = pageData.page || {};
+	var totalPages = Math.max(1, page.totalPages || 1);
+	var currentPageNum = (page.number || 0) + 1;
+	var totalElements = page.totalElements || 0;
 	var html = '';
-	
-	// 上一页
-	if (currentPageNum > 1) {
-		html += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${currentPageNum - 1})">上一页</a></li>`;
-	}
-	
+	var firstDisabled = currentPageNum <= 1 ? ' disabled' : '';
+	html += `<li class="page-item${firstDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(0)">首页</a></li>`;
+	html += `<li class="page-item${firstDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${Math.max(0, currentPageNum - 2)})">上一页</a></li>`;
 	// 页码
 	var startPage = Math.max(1, currentPageNum - 2);
 	var endPage = Math.min(totalPages, currentPageNum + 2);
 	
 	for (var i = startPage; i <= endPage; i++) {
 		var activeClass = i === currentPageNum ? 'active' : '';
-		html += `<li class="page-item ${activeClass}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${i})">${i}</a></li>`;
+		html += `<li class="page-item ${activeClass}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${i - 1})">${i}</a></li>`;
 	}
-	
-	// 下一页
-	if (currentPageNum < totalPages) {
-		html += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${currentPageNum + 1})">下一页</a></li>`;
-	}
-	
+	var lastDisabled = currentPageNum >= totalPages ? ' disabled' : '';
+	html += `<li class="page-item${lastDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${Math.min(totalPages - 1, currentPageNum)})">下一页</a></li>`;
+	html += `<li class="page-item${lastDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${totalPages - 1})">末页</a></li>`;
 	// 总数信息
 	html += `<li class="page-item disabled"><span class="page-link">共 ${totalElements} 条</span></li>`;
 	
@@ -1924,7 +1922,7 @@ function renderPagination(pageData) {
  */
 function goToPage(pageNum) {
 	console.log('跳转到页码:', pageNum);
-	currentPage = pageNum;
+	currentPage = Math.max(0, parseInt(pageNum, 10) || 0);
 	loadGraphicContentList();
 }
 

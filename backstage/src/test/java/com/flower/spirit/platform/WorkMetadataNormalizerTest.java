@@ -48,6 +48,31 @@ class WorkMetadataNormalizerTest {
 	}
 
 	@Test
+	void canonicalizesDouyinVideoUrlsToAwemeId() {
+		WorkMetadata input = WorkMetadata.builder()
+				.platform(PlatformCatalog.requireByKey("douyin"))
+				.workId("https://www.douyin.com/video/7345678901234567890?modal_id=7345678901234567890&dy_q=1791084487")
+				.contentType(WorkContentType.VIDEO)
+				.mediaResources(List.of(videoResource()))
+				.build();
+
+		assertThat(normalizer.normalize(input).getWorkId()).isEqualTo("7345678901234567890");
+	}
+
+	@Test
+	void doesNotInventDouyinIdFromOpaqueProviderText() {
+		WorkMetadata input = WorkMetadata.builder()
+				.platform(PlatformCatalog.requireByKey("douyin"))
+				.workId("provider-item-7345678901234567890-signed")
+				.contentType(WorkContentType.VIDEO)
+				.mediaResources(List.of(videoResource()))
+				.build();
+
+		assertThat(normalizer.normalize(input).getWorkId())
+				.isEqualTo("provider-item-7345678901234567890-signed");
+	}
+
+	@Test
 	void leavesMissingOptionalMetadataEmptyWithoutFallbacks() {
 		WorkMetadata normalized = normalizer.normalize(formalMetadata(null, "work-1", videoResource()));
 

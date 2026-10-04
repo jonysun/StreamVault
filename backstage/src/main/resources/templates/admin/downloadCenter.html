@@ -36,8 +36,13 @@
         .status-QUEUED { background:#e9eef6; color:#3f5f84; }
         .status-RETRY_WAIT { background:#fff2d8; color:#94691a; }
         .status-COMPLETED { background:#e6f3e9; color:#29743a; }
-        .status-FAILED { background:#f9e4e4; color:#a72f2f; }
         .status-SKIPPED_EXISTING,.status-SKIPPED_BLOCKED,.status-SKIPPED_REMOTE_MISSING,.status-SKIPPED_EXISTING_ACTIVE_DOWNLOAD { background:#f0f0f0; color:#666; }
+        .status-REMOTE_MISSING { background:#f0f0f0; color:#666; }
+        .status-DOWNLOADED { background:#e6f3e9; color:#29743a; }
+        .status-DOWNLOADING { background:#dff3ec; color:#147d64; }
+        .status-QUEUED,.status-RETRY_WAIT { background:#fff2d8; color:#94691a; }
+        .status-FAILED { background:#f9e4e4; color:#a72f2f; }
+        .status-LOCAL_MISSING,.status-NOT_DOWNLOADED { background:#f0f0f0; color:#666; }
         .source-chip { display:inline-block; padding:3px 6px; border:1px solid #d8dde2; border-radius:4px; font-size:11px; color:#59636d; }
         .error-text { color:#a72f2f; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .icon-action { width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
@@ -81,6 +86,7 @@
                     <div class="download-tabs">
                         <button type="button" class="download-tab active" data-view="active">当前任务</button>
                         <button type="button" class="download-tab" data-view="history">历史记录</button>
+                        <button type="button" class="download-tab" data-view="authors">收藏作者</button>
                     </div>
                     <div class="filter-row">
                         <select class="form-control" id="sourceFilter" title="下载来源">
@@ -128,6 +134,33 @@
                             <button class="btn btn-sm btn-default" id="nextPage" title="下一页"><i class="mdi mdi-chevron-right"></i></button>
                         </div>
                     </div>
+                    <div id="collectAuthorsPanel" style="display:none;padding:16px;">
+                        <div class="filter-row" style="padding:0 0 12px 0;">
+                            <input class="form-control" id="authorKeywordFilter" type="search" placeholder="搜索作者或收藏任务">
+                            <button class="btn btn-primary" type="button" id="authorSearchButton"><i class="mdi mdi-magnify"></i> 查询</button>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="table download-table"><thead><tr>
+                                <th>作者 / 任务</th><th>作品</th><th>已下载</th><th>未下载</th><th>远端已删除</th><th>失败</th><th>最近活动</th><th>操作</th>
+                            </tr></thead><tbody id="collectAuthorRows"></tbody></table>
+                            <div class="empty-state" id="collectAuthorEmpty" style="display:none;">暂无收藏作者记录</div>
+                        </div>
+                        <div class="download-footer">
+                            <span id="collectAuthorSummary">共 0 条</span>
+                            <div class="page-controls">
+                                <button class="btn btn-sm btn-default" id="collectAuthorPrev" title="上一页"><i class="mdi mdi-chevron-left"></i></button>
+                                <span id="collectAuthorPage">第 1 / 1 页</span>
+                                <button class="btn btn-sm btn-default" id="collectAuthorNext" title="下一页"><i class="mdi mdi-chevron-right"></i></button>
+                            </div>
+                        </div>
+                        <div id="collectAuthorWorksPanel" style="display:none;margin-top:18px;">
+                            <h5 id="collectAuthorWorksTitle">作者作品</h5>
+                            <div class="table-wrap"><table class="table download-table"><thead><tr>
+                                <th>作品</th><th>类型</th><th>发布时间</th><th>状态</th><th>操作</th>
+                            </tr></thead><tbody id="collectAuthorWorkRows"></tbody></table></div>
+                            <div class="download-footer"><span id="collectWorkSummary">共 0 条</span><div class="page-controls"><button class="btn btn-sm btn-default" id="collectWorkPrev">上一页</button><span id="collectWorkPage">第 1 / 1 页</span><button class="btn btn-sm btn-default" id="collectWorkNext">下一页</button></div></div>
+                        </div>
+                    </div>
                 </section>
             </div>
         </main>
@@ -141,7 +174,7 @@
 <script src="../static/js/layer/layer.js"></script>
 <script>
     (function() {
-        const state = { view:'active', page:0, pageSize:25, totalPages:0, totalElements:0, rows:[], paused:false, timer:null, selectedKeys:new Set(), allMatching:false, excludedKeys:new Set() };
+        const state = { view:'active', page:0, pageSize:25, totalPages:0, totalElements:0, rows:[], paused:false, timer:null, selectedKeys:new Set(), allMatching:false, excludedKeys:new Set(), authorPage:0, authorTotalPages:0, selectedTaskId:null, workPage:0, workTotalPages:0 };
         const labels = {
             RUNNING:'正在下载', QUEUED:'等待下载', RETRY_WAIT:'等待重试', COMPLETED:'已完成', FAILED:'失败',
             CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽', SKIPPED_REMOTE_MISSING:'远端已删除',
@@ -162,6 +195,10 @@
                 state.page = 0;
                 $('.download-tab').removeClass('active');
                 $(this).addClass('active');
+                const authors = state.view === 'authors';
+                $('#collectAuthorsPanel').toggle(authors);
+                $('.filter-row:first, .download-actions[style], .table-wrap, .download-footer').not('#collectAuthorsPanel *').toggle(!authors);
+                if (authors) { loadAuthors(); return; }
                 $('#hideSelected').toggle(state.view === 'history');
                 renderStateFilter();
                 loadItems();
@@ -171,6 +208,14 @@
             $('#sourceFilter,#stateFilter').on('change', function() { clearSelection(); state.page=0; loadItems(); });
             $('#previousPage').on('click', function() { if (state.page > 0) { clearSelection(); state.page--; loadItems(); } });
             $('#nextPage').on('click', function() { if (state.page + 1 < state.totalPages) { clearSelection(); state.page++; loadItems(); } });
+            $('#authorSearchButton').on('click', function() { state.authorPage=0; loadAuthors(); });
+            $('#authorKeywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { state.authorPage=0; loadAuthors(); } });
+            $('#collectAuthorPrev').on('click', function() { if (state.authorPage > 0) { state.authorPage--; loadAuthors(); } });
+            $('#collectAuthorNext').on('click', function() { if (state.authorPage + 1 < state.authorTotalPages) { state.authorPage++; loadAuthors(); } });
+            $('#collectAuthorRows').on('click', '.author-works', function() { state.selectedTaskId = $(this).data('task-id'); state.workPage=0; loadAuthorWorks($(this).data('task-id'), $(this).data('author')); });
+            $('#collectWorkPrev').on('click', function() { if (state.workPage > 0) { state.workPage--; loadAuthorWorks(state.selectedTaskId, $('#collectAuthorWorksTitle').data('author')); } });
+            $('#collectWorkNext').on('click', function() { if (state.workPage + 1 < state.workTotalPages) { state.workPage++; loadAuthorWorks(state.selectedTaskId, $('#collectAuthorWorksTitle').data('author')); } });
+            $('#collectAuthorWorkRows').on('click', '.work-detail', function() { showWorkDetail($(this).data('record-key')); });
             $('#pauseButton').on('click', togglePause);
             $('#selectAll').on('change', function() {
                 const checked = this.checked;
@@ -206,7 +251,55 @@
             document.addEventListener('visibilitychange', scheduleRefresh);
         }
 
-        function refreshAll() { loadSummary(); loadItems(); }
+        function refreshAll() { loadSummary(); if (state.view === 'authors') loadAuthors(); else loadItems(); }
+
+        function loadAuthors() {
+            $.getJSON('/admin/api/download-center/collect-authors', { keyword:$('#authorKeywordFilter').val(), page:state.authorPage, pageSize:state.pageSize })
+                .done(function(response) {
+                    if (!response || response.resCode !== '000001') return markStale();
+                    const data = response.record || {}, rows = Array.isArray(data.content) ? data.content : [];
+                    state.authorTotalPages = number(data.totalPages);
+                    $('#collectAuthorSummary').text('共 ' + number(data.totalElements) + ' 条');
+                    $('#collectAuthorPage').text('第 ' + (state.authorPage + 1) + ' / ' + Math.max(1, state.authorTotalPages) + ' 页');
+                    $('#collectAuthorPrev').prop('disabled', state.authorPage === 0);
+                    $('#collectAuthorNext').prop('disabled', state.authorPage + 1 >= state.authorTotalPages);
+                    $('#collectAuthorEmpty').toggle(!rows.length);
+                    $('#collectAuthorRows').html(rows.map(function(item) {
+                        return '<tr><td><strong>'+html(item.author || '未知作者')+'</strong><div class="download-meta">'+html(item.task_name || '')+'</div></td>'
+                            + '<td>'+number(item.total_count)+'</td><td>'+number(item.downloaded_count)+'</td><td>'+number(item.pending_count)+'</td>'
+                            + '<td>'+number(item.remote_missing_count)+'</td><td>'+number(item.failed_count)+'</td><td>'+html(timeText(item.last_activity))+'</td>'
+                            + '<td><button class="btn btn-xs btn-primary author-works" data-task-id="'+attr(item.task_id)+'" data-author="'+attr(item.author || '作者')+'">查看作品</button></td></tr>';
+                    }).join(''));
+                }).fail(markStale);
+        }
+
+        function loadAuthorWorks(taskId, author) {
+            state.selectedTaskId = taskId;
+            $('#collectAuthorWorksTitle').text((author || '作者') + ' 的作品').data('author', author || '作者').show();
+            $('#collectAuthorWorksPanel').show();
+            $.getJSON('/admin/api/download-center/collect-author-works', { taskId:taskId, page:state.workPage, pageSize:state.pageSize })
+                .done(function(response) {
+                    if (!response || response.resCode !== '000001') return;
+                    const data = response.record || {}, rows = Array.isArray(data.content) ? data.content : [];
+                    state.workTotalPages = number(data.totalPages);
+                    $('#collectWorkSummary').text('共 ' + number(data.totalElements) + ' 条');
+                    $('#collectWorkPage').text('第 ' + (state.workPage + 1) + ' / ' + Math.max(1,state.workTotalPages) + ' 页');
+                    $('#collectWorkPrev').prop('disabled', state.workPage === 0);
+                    $('#collectWorkNext').prop('disabled', state.workPage + 1 >= state.workTotalPages);
+                    $('#collectAuthorWorkRows').html(rows.map(function(item) {
+                        const statusClass = 'status-' + (item.status || 'NOT_DOWNLOADED');
+                        return '<tr><td><strong>'+html(item.title || item.workId || '未命名作品')+'</strong><div class="download-meta">'+html(item.workId || '')+'</div></td>'
+                            + '<td>'+html(item.mediaType || '--')+'</td><td>'+html(timeText(item.publishTime))+'</td>'
+                            + '<td><span class="status-badge '+statusClass+'">'+html(item.statusText || '未下载')+'</span></td>'
+                            + '<td><button class="btn btn-xs btn-default work-detail" data-record-key="'+attr(item.recordKey || '')+'" title="查看详情"><i class="mdi mdi-information-outline"></i></button></td></tr>';
+                    }).join(''));
+                });
+        }
+
+        function showWorkDetail(recordKey) {
+			if (!recordKey) { layer.msg('该作品暂无下载详情'); return; }
+			showDetail(recordKey);
+		}
         function scheduleRefresh() {
             if (state.timer) clearTimeout(state.timer);
             state.timer = setTimeout(refreshAll, document.hidden ? 15000 : 3000);
@@ -381,16 +474,38 @@
             });
         }
         function showDetail(key) {
-            const item = state.rows.find(function(row){ return row.record_key === key; });
-            if (!item) return;
-            const values = [
-                ['记录',item.record_key],['状态',labels[item.state] || item.state],['来源',sourceLabels[item.sourceType] || item.sourceType],
-                ['标题',item.title],['作者',item.author],['收藏任务',item.task_name],['作品 ID',item.work_id],
-                ['原始链接',item.source_url],['创建时间',timeText(item.created_at)],['开始时间',timeText(item.started_at)],
-                ['完成时间',timeText(item.completed_at)],['错误代码',item.error_code],['错误详情',item.error_message]
-            ];
-            const content = '<ul class="detail-list">'+values.filter(function(row){ return row[1]; }).map(function(row){ return '<li><strong>'+html(row[0])+'</strong><span>'+html(row[1])+'</span></li>'; }).join('')+'</ul>';
-            layer.open({ type:1, title:'下载详情', area:['min(680px, 92vw)','auto'], content:'<div style="padding:16px;">'+content+'</div>' });
+            const item = state.rows.find(function(row){ return row.record_key === key; }) || {};
+            layer.load(1);
+            $.getJSON('/admin/api/download-center/detail', {recordKey:key}).done(function(response) {
+                layer.closeAll('loading');
+                const detail = response && response.resCode === '000001' ? (response.record || {}) : {};
+                const values = [
+                    ['记录',item.record_key],['状态',labels[item.state] || item.state],['来源',sourceLabels[item.sourceType] || item.sourceType],
+                    ['标题',detail.title || item.title],['作者',detail.author || item.author],['收藏任务',item.task_name],['作品 ID',item.work_id],
+                    ['媒体类型',detail.mediaType || item.media_type],
+                    ['创建时间',timeText(item.created_at)],['开始时间',timeText(item.started_at)],['完成时间',timeText(item.completed_at)],
+                    ['错误代码',detail.errorCode || item.error_code],['错误详情',detail.errorMessage || item.error_message]
+                ];
+                let content = '<ul class="detail-list">'+values.filter(function(row){ return row[1]; }).map(function(row){ return '<li><strong>'+html(row[0])+'</strong><span>'+html(row[1])+'</span></li>'; }).join('')+'</ul>';
+                content += '<div style="margin-top:14px;border-top:1px solid #edf0f2;padding-top:12px;">'+linkRow('原始作品链接', detail.sourceUrl || item.source_url, '打开作品')
+                    + linkRow('本地播放/下载地址', detail.localUrls, '打开本地媒体')
+                    + linkRow('临时远程媒体地址', detail.remoteMediaUrls, '打开临时地址') + '</div>';
+                const local = Array.isArray(detail.localUrls) ? detail.localUrls.filter(Boolean) : [];
+                if (detail.mediaType === 'video' && local.length) {
+                    content += '<div style="margin-top:12px;"><strong>本地预览</strong><video controls preload="metadata" style="display:block;width:100%;max-height:420px;margin-top:8px;background:#111;" src="'+attr(local[0])+'"></video></div>';
+                }
+                const remote = Array.isArray(detail.remoteMediaUrls) ? detail.remoteMediaUrls : [];
+                if (remote.length > 1) content += '<div class="download-meta" style="margin-top:8px;">本次媒体地址共 '+remote.length+' 条（临时地址可能过期）</div>';
+                if (!local.length && remote.length) content += '<div class="download-meta" style="margin-top:8px;color:#94691a;">当前没有本地文件；远程地址为临时签名链接，可能已过期。</div>';
+                layer.open({ type:1, title:'下载详情', area:['min(720px, 92vw)','auto'], content:'<div style="padding:16px;">'+content+'</div>' });
+            }).fail(function(){ layer.closeAll('loading'); layer.msg('详情加载失败'); });
+        }
+        function linkRow(label, url, action) {
+            const urls = Array.isArray(url) ? url.filter(Boolean) : (url ? [url] : []);
+            if (!urls.length) return '<div class="download-meta" style="padding:5px 0;"><strong>'+html(label)+'</strong><span style="margin-left:10px;color:#999;">暂无</span></div>';
+            return '<div style="padding:5px 0;"><strong>'+html(label)+'</strong>' + urls.map(function(value, index){
+                return '<div style="word-break:break-all;margin:4px 0;">'+html(value)+' <a class="btn btn-xs btn-primary" href="'+attr(value)+'" target="_blank" rel="noopener">'+html(action)+(urls.length > 1 ? ' '+(index+1) : '')+'</a></div>';
+            }).join('') + '</div>';
         }
         function apiFailure(xhr){ if(xhr && xhr.status === 401){ layer.msg('登录已失效，请重新登录'); setTimeout(function(){ location.href='/admin/login'; },800); } else layer.msg('操作请求失败'); }
         function markStale(xhr){ if(xhr && xhr.status === 401) return apiFailure(xhr); $('#staleNote').show(); scheduleRefresh(); }

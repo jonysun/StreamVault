@@ -62,6 +62,7 @@ public class DatabaseIndexInitializer {
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_videoid ON biz_video(videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_platform_videoid ON biz_video(videoplatform, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_platformkey_videoid ON biz_video(platformkey, videoid)",
+				"CREATE UNIQUE INDEX IF NOT EXISTS uq_biz_video_platformkey_videoid ON biz_video(platformkey, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_author_identity ON biz_video(platformkey, authoruid, secuid)",
 				"CREATE INDEX IF NOT EXISTS idx_biz_video_author_feed "
 						+ "ON biz_video(platformkey, COALESCE(NULLIF(secuid,''), authoruid), publishtime, id)",
@@ -104,6 +105,7 @@ public class DatabaseIndexInitializer {
 						+ "ON biz_job_queue(state, available_at, priority, id)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platform_videoid ON biz_graphic_content(platform, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_platformkey_videoid ON biz_graphic_content(platformkey, videoid)",
+				"CREATE UNIQUE INDEX IF NOT EXISTS uq_biz_graphic_content_platformkey_videoid ON biz_graphic_content(platformkey, videoid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author_identity ON biz_graphic_content(platformkey, authoruid, secuid)",
 				"CREATE INDEX IF NOT EXISTS idx_graphic_content_author_feed "
 						+ "ON biz_graphic_content(platformkey, COALESCE(NULLIF(secuid,''), authoruid), publishtime, id)",
