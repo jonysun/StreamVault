@@ -265,26 +265,58 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private void normalizeDtkMedia(JSONObject detail, JSONObject source) {
 		Object media = source.get("media");
 		if (media == null) return;
+		boolean sourceVideo = isVideoType(firstText(source, "kind", "type", "content_type", "contentType"));
 		List<JSONObject> entries = new ArrayList<>();
-		if (media instanceof JSONObject object) entries.add(object);
+		if (media instanceof JSONObject object) {
+			JSONObject video = object.getJSONObject("video");
+			if (video != null) {
+				video.putIfAbsent("type", "video");
+				entries.add(video);
+			}
+			JSONArray nestedImages = object.getJSONArray("images");
+			if (nestedImages != null) {
+				for (Object value : nestedImages) {
+					if (value instanceof JSONObject image) entries.add(image);
+					else if (value != null && !blank(String.valueOf(value))) {
+						JSONObject image = new JSONObject(true);
+						image.put("url", String.valueOf(value));
+						entries.add(image);
+					}
+				}
+			}
+			if (video == null && nestedImages == null) entries.add(object);
+		}
 		if (media instanceof JSONArray array) {
-			for (Object value : array) if (value instanceof JSONObject object) entries.add(object);
+			for (Object value : array) {
+				if (value instanceof JSONObject object) entries.add(object);
+				else if (value != null && !blank(String.valueOf(value))) {
+					JSONObject image = new JSONObject(true);
+					image.put("url", String.valueOf(value));
+					entries.add(image);
+				}
+			}
 		}
 		if (entries.isEmpty()) return;
 		JSONArray images = detail.getJSONArray("images");
 		if (images == null) images = new JSONArray();
 		for (JSONObject entry : entries) {
-			String url = firstText(entry, "url", "download_url", "downloadUrl", "play_url", "playUrl",
-					"src", "source_url", "sourceUrl");
+			String url = mediaUrl(entry);
+			if (blank(url)) url = firstText(entry, "url", "download_url", "downloadUrl", "play_url", "playUrl",
+					"src", "source_url", "sourceUrl", "no_watermark", "noWatermark", "no_watermark_url",
+					"video_url", "videoUrl");
 			String type = firstText(entry, "type", "kind", "media_type", "mediaType");
+			if (blank(url)) url = mediaUrlFromEntry(entry);
 			if (blank(url)) {
 				JSONObject nested = entry.getJSONObject("video");
-				url = firstText(nested, "url", "download_url", "play_url");
+				url = firstText(nested, "url", "download_url", "play_url", "no_watermark", "noWatermark");
+				if (blank(url)) url = mediaUrlFromEntry(nested);
 			}
 			if (blank(url)) continue;
-			boolean video = "video".equalsIgnoreCase(type) || "mp4".equalsIgnoreCase(entry.getString("ext"))
+			boolean video = sourceVideo || isVideoType(type) || entry.getJSONObject("video") != null
+					|| entry.getJSONObject("play_addr") != null || entry.getJSONObject("download_addr") != null
+					|| "mp4".equalsIgnoreCase(entry.getString("ext"))
 					|| url.toLowerCase(java.util.Locale.ROOT).contains(".mp4");
-			if (video && detail.getJSONArray("video_play_addr") == null) {
+			if (video && !hasPlayableUrl(detail.getJSONArray("video_play_addr"))) {
 				JSONArray urls = new JSONArray();
 				urls.add(url);
 				detail.put("video_play_addr", urls);
@@ -305,19 +337,55 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		if (!images.isEmpty()) detail.put("images", images);
 	}
 
+	private String mediaUrlFromEntry(JSONObject entry) {
+		if (entry == null) return null;
+		String direct = mediaUrl(entry);
+		if (!blank(direct)) return direct;
+		for (String key : List.of("play_addr", "download_addr", "download_url_list", "play_url_list")) {
+			Object value = entry.get(key);
+			if (value instanceof JSONObject object) {
+				String nested = mediaUrl(object);
+				if (!blank(nested)) return nested;
+			} else if (value instanceof JSONArray array) {
+				for (Object item : array) if (item != null && !blank(String.valueOf(item))) return String.valueOf(item);
+			}
+		}
+		return null;
+	}
+
+	private boolean isVideoType(String type) {
+		if (blank(type)) return false;
+		String normalized = type.trim().toLowerCase(java.util.Locale.ROOT);
+		return normalized.equals("video") || normalized.equals("mp4") || normalized.equals("movie")
+				|| normalized.contains("video");
+	}
+
 	private JSONObject normalizeDetail(JSONObject source) {
 		if (source == null) return null;
 		JSONObject detail = coerceDetail(source);
 		JSONObject video = detail.getJSONObject("video");
-		if (detail.getJSONArray("video_play_addr") == null) {
+		if (!hasPlayableUrl(detail.getJSONArray("video_play_addr"))) {
 			String play = mediaUrl(video == null ? null : video.getJSONObject("play_addr"));
-			if (blank(play)) play = firstText(detail, "video_url", "download_url", "play_url");
+			if (blank(play)) play = mediaUrl(video == null ? null : video.getJSONObject("download_addr"));
+			if (blank(play)) play = mediaUrl(video);
+			if (blank(play)) play = firstText(video, "url", "download_url", "downloadUrl", "play_url", "playUrl",
+					"no_watermark", "noWatermark", "video_url", "videoUrl");
+			if (blank(play)) play = firstText(detail, "video_url", "download_url", "play_url", "no_watermark",
+					"noWatermark", "videoUrl");
 			if (!blank(play)) {
 				JSONArray urls = new JSONArray();
 				urls.add(play);
 				detail.put("video_play_addr", urls);
+				if (video == null) video = new JSONObject(true);
+				JSONObject playAddr = video.getJSONObject("play_addr");
+				if (playAddr == null) playAddr = new JSONObject(true);
+				playAddr.put("url_list", urls);
+				video.put("play_addr", playAddr);
+				detail.put("video", video);
 			}
 		}
+		normalizeImages(detail);
+		video = detail.getJSONObject("video");
 		if (detail.getJSONArray("cover") == null) {
 			String cover = mediaUrl(video == null ? null : video.getJSONObject("cover"));
 			if (blank(cover)) cover = firstText(detail, "cover_url", "cover");
@@ -336,6 +404,57 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		return detail;
 	}
 
+	private boolean hasPlayableUrl(JSONArray urls) {
+		if (urls == null || urls.isEmpty()) return false;
+		for (Object value : urls) if (value != null && !blank(String.valueOf(value))) return true;
+		return false;
+	}
+
+	private void normalizeImages(JSONObject detail) {
+		JSONArray raw = detail.getJSONArray("images");
+		if (raw == null || raw.isEmpty()) return;
+		JSONArray normalized = new JSONArray();
+		for (Object value : raw) {
+			if (value instanceof JSONObject image) {
+				JSONObject nestedVideo = image.getJSONObject("video");
+				if (nestedVideo != null) {
+					String play = mediaUrl(nestedVideo.getJSONObject("play_addr"));
+					if (blank(play)) play = mediaUrl(nestedVideo.getJSONObject("download_addr"));
+					if (blank(play)) play = mediaUrl(nestedVideo);
+					if (blank(play)) play = firstText(nestedVideo, "url", "download_url", "downloadUrl",
+							"play_url", "playUrl", "no_watermark", "noWatermark", "video_url", "videoUrl");
+					JSONObject playAddr = nestedVideo.getJSONObject("play_addr");
+					if (!blank(play) && blank(mediaUrl(playAddr))) {
+						if (playAddr == null) playAddr = new JSONObject(true);
+						JSONArray urls = new JSONArray();
+						urls.add(play);
+						playAddr.put("url_list", urls);
+						nestedVideo.put("play_addr", playAddr);
+					}
+					normalized.add(image);
+					continue;
+				}
+				String url = mediaUrl(image);
+				if (blank(url)) url = firstText(image, "download_url", "downloadUrl", "src", "source_url", "sourceUrl");
+				if (!blank(url)) {
+					if (image.getJSONArray("url_list") == null) {
+						JSONArray urls = new JSONArray();
+						urls.add(url);
+						image.put("url_list", urls);
+					}
+					normalized.add(image);
+				}
+			} else if (value != null && !blank(String.valueOf(value))) {
+				JSONObject image = new JSONObject(true);
+				JSONArray urls = new JSONArray();
+				urls.add(String.valueOf(value));
+				image.put("url_list", urls);
+				normalized.add(image);
+			}
+		}
+		detail.put("images", normalized);
+	}
+
 	private String firstText(JSONObject source, String... keys) {
 		if (source == null) return null;
 		for (String key : keys) {
@@ -348,8 +467,37 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private String mediaUrl(JSONObject media) {
 		if (media == null) return null;
 		JSONArray urls = media.getJSONArray("url_list");
-		if (urls == null || urls.isEmpty()) return media.getString("url");
-		return urls.getString(urls.size() - 1);
+		if (urls == null || urls.isEmpty()) urls = media.getJSONArray("urls");
+		if (urls == null || urls.isEmpty()) {
+			Object download = media.get("download_url_list");
+			if (download instanceof JSONObject object) urls = object.getJSONArray("url_list");
+			if (download instanceof JSONArray array) urls = array;
+		}
+		if (urls == null || urls.isEmpty()) {
+			String direct = media.getString("url");
+			return blank(direct) ? null : direct;
+		}
+		String fallback = null;
+		for (int i = 0; i < urls.size(); i++) {
+			String value = urls.getString(i);
+			if (blank(value)) continue;
+			if (fallback == null) fallback = value;
+			if (isPreferredMediaUrl(value)) return value;
+		}
+		return fallback;
+	}
+
+	private boolean isPreferredMediaUrl(String value) {
+		try {
+			URI uri = URI.create(value);
+			if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))) return false;
+			String host = uri.getHost();
+			String path = uri.getPath();
+			return host != null && !("www.douyin.com".equalsIgnoreCase(host)
+					&& path != null && path.startsWith("/aweme/v1/play/"));
+		} catch (RuntimeException error) {
+			return false;
+		}
 	}
 
 	private JSONObject payload(JSONObject response) {

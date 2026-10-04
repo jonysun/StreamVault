@@ -65,6 +65,42 @@ class HttpMediaDownloaderTest {
 		}
 	}
 
+	@Test
+	void rejectsSuccessfulHtmlChallengeBeforePersistingIt() throws Exception {
+		HttpServer server = server(exchange -> {
+			exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+			byte[] body = "<html><body>blocked</body></html>".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
+
+		try {
+			assertThatThrownBy(() -> HttpMediaDownloader.download(url(server), tempDir.resolve("video.mp4"),
+					null, Map.of(), com.flower.spirit.platform.WorkMediaResource.Type.VIDEO))
+					.isInstanceOf(IOException.class).hasMessageContaining("non-media content");
+			assertThat(Files.exists(tempDir.resolve("video.mp4"))).isFalse();
+		} finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
+	void rejectsArgusChallengeWithSuccessfulPlainTextResponse() throws Exception {
+		HttpServer server = server(exchange -> {
+			byte[] body = "Blocked by ArgusSecurityPlugin Uifid Not Found".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
+
+		try {
+			assertThatThrownBy(() -> HttpMediaDownloader.download(url(server), tempDir.resolve("video.mp4"),
+					null, Map.of(), com.flower.spirit.platform.WorkMediaResource.Type.VIDEO))
+					.isInstanceOf(IOException.class).hasMessageContaining("upstream challenge");
+		} finally {
+			server.stop(0);
+		}
+	}
+
 	private HttpServer server(com.sun.net.httpserver.HttpHandler handler) throws IOException {
 		HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/media", handler);

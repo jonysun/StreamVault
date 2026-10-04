@@ -7,6 +7,8 @@ import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.alibaba.fastjson.JSON;
 import com.flower.spirit.dao.GraphicContentDao;
@@ -22,6 +24,7 @@ import com.flower.spirit.service.WorkDeduplicationService.ExistingWork;
 
 @Service
 public class WorkPersistenceService {
+	private static final Logger logger = LoggerFactory.getLogger(WorkPersistenceService.class);
 
 	private final WorkMetadataNormalizer normalizer;
 	private final WorkDeduplicationService deduplicationService;
@@ -153,7 +156,29 @@ public class WorkPersistenceService {
 			entity.setCreatetime(new Date());
 		}
 		GraphicContentEntity saved = graphicContentDao.save(entity);
+		validateGraphicMedia(saved, metadata);
+		logger.info("[WorkPersistence] graphic persisted workId={} id={} created={} mediaCount={}",
+				metadata.getWorkId(), saved.getId(), created, countGraphicMedia(saved.getImages()));
 		return PersistenceResult.graphic(created, saved, metadata.getContentType());
+	}
+
+	private void validateGraphicMedia(GraphicContentEntity entity, WorkMetadata metadata) {
+		int count = countGraphicMedia(entity == null ? null : entity.getImages());
+		if (count == 0) {
+			throw new WorkMetadataValidationException("persisted graphic media paths are empty for work "
+					+ metadata.getWorkId());
+		}
+	}
+
+	private int countGraphicMedia(String rawImages) {
+		if (!hasText(rawImages)) return 0;
+		try {
+			List<String> paths = JSON.parseArray(rawImages, String.class);
+			if (paths == null) return 0;
+			return (int) paths.stream().filter(WorkPersistenceService::hasText).count();
+		} catch (RuntimeException error) {
+			return 0;
+		}
 	}
 
 	private void setGraphicOptionalFields(GraphicContentEntity entity, WorkMetadata metadata) {

@@ -1,5 +1,7 @@
 package com.flower.spirit.service;
 
+import java.io.IOException;
+
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.config.Global;
@@ -79,6 +81,12 @@ public class DouyinDataProviderService {
 	public boolean shouldFailover(Throwable error) {
 		Throwable current = error;
 		while (current != null) {
+			if (current instanceof IOException) {
+				String message = current.getMessage() == null ? "" : current.getMessage().toLowerCase(java.util.Locale.ROOT);
+				if (message.contains("http ") || message.contains("media response")
+						|| message.contains("connection") || message.contains("timed out")
+						|| message.contains("timeout") || message.contains("stream")) return true;
+			}
 			if (current instanceof com.flower.spirit.platform.DouyinGlobalCooldownException cooldown
 					&& cooldown.actualUpstreamFailure()) return true;
 			if (current instanceof com.flower.spirit.platform.DouyinWorkFetchException fetch

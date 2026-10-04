@@ -1,6 +1,7 @@
 package com.flower.spirit.platform.adapter;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -228,33 +229,43 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			try {
 				downloaded = downloadResources(metadata, request, cookie);
 			} catch (IOException firstError) {
-				if (!isHttp404(firstError)) throw firstError;
-				if (useDtk && !com.flower.spirit.config.Global.dtkDetailRefreshEnabled) throw firstError;
-				logger.warn("[DouyinMedia] stale media URL returned 404 workId={} sourceUrl={}; refreshing detail once",
-						metadata.getWorkId(), safeUrl(metadata.getSourceUrl()));
-				String refreshedRaw;
-				if (useDtk) {
-					refreshedRaw = dataProviderService.current().fetchWorkData(metadata.getWorkId());
+				if (autoMode && !useDtk && dataProviderService.shouldFailover(firstError)) {
+					logger.warn("[DouyinProvider] failover operation=MEDIA_DOWNLOAD from=F2 to=DTK workId={} reason={}",
+							metadata.getWorkId(), firstError.getMessage());
+					String refreshedRaw = dataProviderService.fetchDtkWorkData(metadata.getWorkId());
+					WorkMetadata refreshed = parseRaw(refreshedRaw, metadata.getWorkId(), metadata.getOriginalAddress(),
+							metadata.getSourceUrl());
+					cookie = "";
+					downloaded = downloadResources(refreshed, request, cookie);
 				} else {
-					try {
-						refreshedRaw = gateway.fetch(metadata.getWorkId(), cookie);
+					if (!isStaleMediaError(firstError)) throw firstError;
+					if (useDtk && !com.flower.spirit.config.Global.dtkDetailRefreshEnabled) throw firstError;
+					logger.warn("[DouyinMedia] stale or rejected media URL workId={} sourceUrl={}; refreshing detail once reason={}",
+							metadata.getWorkId(), safeUrl(metadata.getSourceUrl()), firstError.getMessage());
+					String refreshedRaw;
+					if (useDtk) {
+						refreshedRaw = dataProviderService.current().fetchWorkData(metadata.getWorkId());
+					} else {
+						try {
+							refreshedRaw = gateway.fetch(metadata.getWorkId(), cookie);
 						} catch (IOException f2Error) {
 							if (!autoMode) throw f2Error;
 							logger.warn("[DouyinProvider] failover operation=MEDIA_REFRESH from=F2 to=DTK reason={}",
-								f2Error.getMessage());
+									f2Error.getMessage());
 							refreshedRaw = dataProviderService.fetchDtkWorkData(metadata.getWorkId());
 						} catch (RuntimeException f2Error) {
 							if (!autoMode || !dataProviderService.shouldFailover(f2Error)) throw f2Error;
 							logger.warn("[DouyinProvider] failover operation=MEDIA_REFRESH from=F2 to=DTK reason={}",
-								f2Error.getMessage());
+									f2Error.getMessage());
 							refreshedRaw = dataProviderService.fetchDtkWorkData(metadata.getWorkId());
 						}
+					}
+					WorkMetadata refreshed = parseRaw(refreshedRaw, metadata.getWorkId(), metadata.getOriginalAddress(),
+							metadata.getSourceUrl());
+					logger.info("[DouyinMedia] detail refreshed after 404 workId={} resources={}", metadata.getWorkId(),
+							refreshed.getMediaResources().size());
+					downloaded = downloadResources(refreshed, request, cookie);
 				}
-				WorkMetadata refreshed = parseRaw(refreshedRaw, metadata.getWorkId(), metadata.getOriginalAddress(),
-						metadata.getSourceUrl());
-				logger.info("[DouyinMedia] detail refreshed after 404 workId={} resources={}", metadata.getWorkId(),
-						refreshed.getMediaResources().size());
-				downloaded = downloadResources(refreshed, request, cookie);
 			}
 			if (downloaded.isEmpty()) {
 				throw new WorkMetadataValidationException("Douyin work has no downloadable visual media");
@@ -262,7 +273,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			cookieService.reportSuccess("抖音", cookie);
 			return DownloadResult.completed(downloaded);
 		} catch (IOException e) {
-			if (reportRisk(cookie, e.getMessage())) {
+			if (cookie != null && !cookie.isBlank() && reportRisk(cookie, e.getMessage())) {
 				throw new DouyinGlobalCooldownException(riskFailureMessage(e.getMessage(), "download"),
 						cookieService.douyinGlobalRiskCooldownRetryAt(Duration.ofSeconds(5)));
 			}
@@ -278,6 +289,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			String extension = extension(source);
 			Path target = request.getOutputDirectory().resolve(safeName(metadata.getWorkId())
 					+ "-index-" + source.getOrder() + "." + extension);
+			logResourceDiagnostic(metadata, source);
 			Path local = gateway.download(source, target, cookie);
 			downloaded.add(new WorkMediaResource(source.getOrder(), source.getType(), source.getSourceUrl(),
 				local, extension, source.getRequestHeaders()));
@@ -288,6 +300,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				WorkMediaResource coverSource = resource(downloaded.size(), WorkMediaResource.Type.IMAGE,
 						metadata.getCoverUrl(), "jpg");
 				Path cover = request.getOutputDirectory().resolve(safeName(metadata.getWorkId()) + ".jpg");
+				logResourceDiagnostic(metadata, coverSource);
 				Path local = gateway.download(coverSource, cover, cookie);
 				downloaded.add(new WorkMediaResource(coverSource.getOrder(), WorkMediaResource.Type.IMAGE,
 						metadata.getCoverUrl(), local, "jpg", coverSource.getRequestHeaders()));
@@ -302,6 +315,30 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			}
 		}
 		return downloaded;
+	}
+
+	private void logResourceDiagnostic(WorkMetadata metadata, WorkMediaResource resource) {
+		String value = resource == null ? null : resource.getSourceUrl();
+		try {
+			URI uri = value == null ? null : URI.create(value);
+			logger.info("[DouyinMedia] resource workId={} order={} type={} urlPresent={} scheme={} host={} "
+					+ "queryPresent={}", metadata.getWorkId(), resource.getOrder(), resource.getType(),
+					value != null && !value.isBlank(), uri == null ? null : uri.getScheme(),
+					uri == null ? null : uri.getHost(), uri != null && uri.getQuery() != null);
+		} catch (RuntimeException error) {
+			logger.warn("[DouyinMedia] resource URL diagnostic failed workId={} order={} type={} reason={}",
+					metadata.getWorkId(), resource.getOrder(), resource.getType(), error.getClass().getSimpleName());
+		}
+	}
+
+	private boolean isStaleMediaError(IOException error) {
+		String message = error == null || error.getMessage() == null ? ""
+				: error.getMessage().toLowerCase(java.util.Locale.ROOT);
+		return message.contains("http 403") || message.contains("http 404") || message.contains("http 410")
+				|| message.contains("http/1.1 403") || message.contains("http/1.1 404")
+				|| message.contains("status=403") || message.contains("status=404")
+				|| message.contains("status=410") || message.contains("upstream challenge")
+				|| message.contains("non-media content") || message.contains("response was empty");
 	}
 
 	private boolean isHttp404(IOException error) {
@@ -349,12 +386,21 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				JSONObject itemVideo = item == null ? null : item.getJSONObject("video");
 				if (itemVideo != null) {
 					String url = mediaUrl(itemVideo.getJSONObject("play_addr"));
-					if (url == null) throw new WorkMetadataValidationException("Douyin mixed item has no video URL");
+					if (url == null) {
+						logger.warn("[DouyinMedia] parsed resource missing workId={} order={} type=VIDEO "
+								+ "videoObjectPresent=true playAddrPresent={}", workId,
+								 i, itemVideo.getJSONObject("play_addr") != null);
+						throw new WorkMetadataValidationException("Douyin mixed item has no video URL");
+					}
 					resources.add(resource(i, WorkMediaResource.Type.VIDEO, url, "mp4"));
 					hasVideoResource = true;
 				} else {
 					String url = mediaUrl(item);
-					if (url == null) throw new WorkMetadataValidationException("Douyin image item has no image URL");
+					if (url == null) {
+						logger.warn("[DouyinMedia] parsed resource missing workId={} order={} type=IMAGE "
+								+ "imageObjectPresent={}", workId, i, item != null);
+						throw new WorkMetadataValidationException("Douyin image item has no image URL");
+					}
 					resources.add(resource(i, WorkMediaResource.Type.IMAGE, url, imageExtension(url)));
 					hasImageResource = true;
 				}
@@ -362,7 +408,14 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		} else {
 			JSONObject video = detail.getJSONObject("video");
 			String url = video == null ? null : mediaUrl(video.getJSONObject("play_addr"));
-			if (url == null) throw new WorkMetadataValidationException("Douyin video has no playable URL");
+			if (url == null) {
+				JSONArray playAddresses = detail.getJSONArray("video_play_addr");
+				logger.warn("[DouyinMedia] parsed resource missing workId={} type=VIDEO videoObjectPresent={} "
+						+ "playAddrPresent={} normalizedPlayAddrCount={}", workId, video != null,
+						video != null && video.getJSONObject("play_addr") != null,
+						playAddresses == null ? 0 : playAddresses.size());
+				throw new WorkMetadataValidationException("Douyin video has no playable URL");
+			}
 			resources.add(resource(0, WorkMediaResource.Type.VIDEO, url, "mp4"));
 			hasVideoResource = true;
 		}
@@ -373,6 +426,8 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		String sourceUrl = contentType == WorkContentType.VIDEO
 				? DouyinSourceUrlUtil.video(workId)
 				: firstText(DouyinSourceUrlUtil.graphic(authorId, workId), DouyinSourceUrlUtil.note(workId));
+		logger.info("[DouyinMedia] parsed workId={} contentType={} resourceCount={} videoResources={} imageResources={}",
+				workId, contentType, resources.size(), hasVideoResource, hasImageResource);
 		return WorkMetadata.builder()
 				.platform(PlatformCatalog.requireByKey("douyin"))
 				.workId(workId)
@@ -412,10 +467,16 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	private String mediaUrl(JSONObject object) {
 		if (object == null) return null;
 		JSONArray urls = object.getJSONArray("url_list");
-		if ((urls == null || urls.isEmpty()) && object.getJSONObject("download_url_list") != null) {
-			urls = object.getJSONObject("download_url_list").getJSONArray("url_list");
+		if (urls == null || urls.isEmpty()) urls = object.getJSONArray("urls");
+		if (urls == null || urls.isEmpty()) {
+			Object download = object.get("download_url_list");
+			if (download instanceof JSONObject value) urls = value.getJSONArray("url_list");
+			if (download instanceof JSONArray value) urls = value;
 		}
-		if (urls == null || urls.isEmpty()) return object.getString("url");
+		if (urls == null || urls.isEmpty()) {
+			String direct = object.getString("url");
+			return direct == null || direct.isBlank() ? null : direct;
+		}
 		for (int i = urls.size() - 1; i >= 0; i--) {
 			String value = urls.getString(i);
 			if (value != null && !value.isBlank()) return value;
@@ -501,7 +562,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			}
 			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
 				return HttpMediaDownloader.download(source.getSourceUrl(), destination, cookie,
-						source.getRequestHeaders());
+						source.getRequestHeaders(), source.getType());
 			}
 		};
 	}

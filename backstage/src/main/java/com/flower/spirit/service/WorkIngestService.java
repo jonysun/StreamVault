@@ -104,7 +104,7 @@ public class WorkIngestService {
 		boolean persisted = false;
 		try {
 			Optional<PersistenceResult> existing = persistenceService.findExisting(metadata);
-			if (existing.isPresent() && !replaceExisting) {
+			if (existing.isPresent() && !replaceExisting && !needsGraphicRepair(existing.get())) {
 				processHistoryService.recordPlatformStage(historyId, "DUPLICATE");
 				if (lastWork) processHistoryService.completePlatformProcess(historyId);
 				return IngestResult.duplicate(historyId, metadata, existing.get());
@@ -140,6 +140,15 @@ public class WorkIngestService {
 			if (!persisted) mediaDownloadService.rollback(download);
 			throw e;
 		}
+	}
+
+	private boolean needsGraphicRepair(PersistenceResult existing) {
+		if (existing == null || existing.contentType() == com.flower.spirit.platform.WorkContentType.VIDEO
+				|| existing.graphic() == null) {
+			return false;
+		}
+		String images = existing.graphic().getImages();
+		return images == null || images.isBlank() || "[]".equals(images.trim());
 	}
 
 	private WorkMetadata copyWithDownloadedResources(WorkMetadata metadata, DownloadOutcome download) {

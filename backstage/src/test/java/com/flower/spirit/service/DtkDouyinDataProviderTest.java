@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.flower.spirit.config.Global;
+import com.alibaba.fastjson.JSONObject;
 import com.sun.net.httpserver.HttpServer;
 
 class DtkDouyinDataProviderTest {
@@ -36,10 +37,20 @@ class DtkDouyinDataProviderTest {
 		server.setExecutor(executor);
 		server.createContext("/api/v1/douyin/video", exchange -> {
 			receivedApiKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
-			byte[] body = ("{\"success\":true,\"data\":{\"aweme_id\":\"123\",\"desc\":\"title\","
-					+ "\"video\":{\"play_addr\":{\"url_list\":[\"https://media.example/video.mp4\"]},"
-					+ "\"cover\":{\"url_list\":[\"https://media.example/cover.jpg\"]}},"
-					+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}")
+			String query = exchange.getRequestURI().getRawQuery();
+			String bodyText = query != null && query.contains("aweme_id=urls-only")
+					? "{\"success\":true,\"data\":{\"aweme_id\":\"urls-only\",\"desc\":\"title\","
+							+ "\"video\":{\"urls\":[\"https://media.example/cdn-video\",\"https://www.douyin.com/aweme/v1/play/?signed=1\"]},"
+							+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}"
+					: query != null && query.contains("aweme_id=no-watermark")
+					? "{\"success\":true,\"data\":{\"aweme_id\":\"no-watermark\",\"desc\":\"title\","
+							+ "\"video\":{\"no_watermark\":\"https://media.example/video-no-extension\"},"
+							+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}"
+					: "{\"success\":true,\"data\":{\"aweme_id\":\"123\",\"desc\":\"title\","
+							+ "\"video\":{\"play_addr\":{\"url_list\":[\"https://media.example/video.mp4\"]},"
+							+ "\"cover\":{\"url_list\":[\"https://media.example/cover.jpg\"]}},"
+							+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}";
+			byte[] body = bodyText
 					.getBytes(StandardCharsets.UTF_8);
 			exchange.sendResponseHeaders(200, body.length);
 			try (var output = exchange.getResponseBody()) { output.write(body); }
@@ -86,6 +97,20 @@ class DtkDouyinDataProviderTest {
 	void unwrapsOfficialEnvelopeForWorkData() {
 		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("123");
 		assertThat(raw).contains("\"aweme_detail\"", "\"aweme_id\":\"123\"");
+	}
+
+	@Test
+	void normalizesNoWatermarkVideoWithoutFileExtension() {
+		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("no-watermark");
+		assertThat(raw).contains("video-no-extension").contains("video_play_addr");
+	}
+
+	@Test
+	void prefersCdnCandidateFromUrlsOverDouyinPlayEndpoint() {
+		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("urls-only");
+		JSONObject detail = JSONObject.parseObject(raw).getJSONObject("aweme_detail");
+		assertThat(detail.getJSONObject("video").getJSONObject("play_addr").getJSONArray("url_list").getString(0))
+				.isEqualTo("https://media.example/cdn-video");
 	}
 
 	@Test

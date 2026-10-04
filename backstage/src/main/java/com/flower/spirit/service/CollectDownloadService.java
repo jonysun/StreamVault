@@ -85,8 +85,10 @@ public class CollectDownloadService {
 				transaction.complete(claim, result, now);
 				return null;
 			});
-			logger.info("[CollectDownload] complete itemId={} runId={} workId={} created={}", claim.id(),
-					claim.runId(), claim.workId(), result.persistence().created());
+			logger.info("[CollectDownload] complete itemId={} runId={} workId={} contentType={} persistenceId={} "
+					+ "created={} resourceCount={}", claim.id(), claim.runId(), claim.workId(),
+					result.persistence().contentType(), result.persistence().id(), result.persistence().created(),
+					result.metadata().getMediaResources() == null ? 0 : result.metadata().getMediaResources().size());
 		} catch (RuntimeException error) {
 			if (isLeaseLost(error)) {
 				logger.warn("[CollectDownload] completion ignored after lease loss itemId={} runId={} workId={} message={}",
@@ -228,7 +230,7 @@ public class CollectDownloadService {
 			return new CollectDownloadException("F2_RUNTIME_ERROR", true, root, error);
 		}
 		if (containsAny(normalized, "no media resources", "no downloadable visual media", "missing or empty",
-				"media is missing or empty", "empty media")) {
+				"media is missing or empty", "empty media", "persisted graphic media paths")) {
 			return new CollectDownloadException("EMPTY_MEDIA", true, root, error);
 		}
 		if (hasCause(error, IllegalStateException.class)) {
