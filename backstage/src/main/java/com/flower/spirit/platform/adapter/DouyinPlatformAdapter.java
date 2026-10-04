@@ -482,6 +482,16 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		return value == null ? null : mediaUrlValue(String.valueOf(value));
 	}
 
+	private String firstText(JSONObject source, String... keys) {
+		if (source == null || keys == null) return null;
+		for (String key : keys) {
+			if (key == null) continue;
+			String value = source.getString(key);
+			if (value != null && !value.isBlank()) return value.trim();
+		}
+		return null;
+	}
+
 	private String mediaUrl(JSONObject object) {
 		if (object == null) return null;
 		JSONArray urls = object.getJSONArray("url_list");
