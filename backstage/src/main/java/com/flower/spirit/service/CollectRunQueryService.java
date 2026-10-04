@@ -143,6 +143,41 @@ public class CollectRunQueryService {
 				.map(this::withStateLabel).toList();
 	}
 
+	/** Global collection-run view used by the dedicated collection monitor page. */
+	public Map<String, Object> overview(int limit) {
+		int safeLimit = Math.min(Math.max(limit, 1), 200);
+		String sql = "SELECT r.id AS \"runId\", r.collect_task_id AS \"taskId\", t.taskname AS \"taskName\", "
+				+ "r.trigger_type AS \"triggerType\", r.state, r.requested_limit AS \"requestedLimit\", "
+				+ "r.fetched_count AS \"fetchedCount\", r.planned_count AS \"plannedCount\", "
+				+ "r.inserted_count AS \"insertedCount\", r.skipped_existing_count AS \"skippedExistingCount\", "
+				+ "r.failed_item_count AS \"failedItemCount\", r.created_at AS \"queuedAt\", "
+				+ "r.started_at AS \"startedAt\", r.heartbeat_at AS \"heartbeatAt\", r.finished_at AS \"finishedAt\", "
+				+ "r.error_code AS \"errorCode\", r.error_message AS \"errorMessage\", "
+				+ "COALESCE((SELECT COUNT(*) FROM biz_collect_run_item i WHERE i.run_id=r.id),0) AS \"itemCount\", "
+				+ "COALESCE((SELECT COUNT(*) FROM biz_collect_run_item i WHERE i.run_id=r.id AND i.process_state IN ('COMPLETED','SKIPPED_EXISTING','SKIPPED_EXISTING_ACTIVE_DOWNLOAD')),0) AS \"completedCount\", "
+				+ "COALESCE((SELECT COUNT(*) FROM biz_collect_run_item i WHERE i.run_id=r.id AND i.process_state='FAILED'),0) AS \"failedCount\", "
+				+ "COALESCE((SELECT COUNT(*) FROM biz_collect_run_item i WHERE i.run_id=r.id AND i.process_state IN ('QUEUED','RUNNING','RETRY_WAIT')),0) AS \"pendingCount\", "
+				+ "(SELECT q.state FROM biz_job_queue q WHERE q.job_type='COLLECT_FETCH' AND q.dedupe_key='collect:' || CAST(r.collect_task_id AS VARCHAR(64)) "
+				+ "ORDER BY q.id DESC LIMIT 1) AS \"jobState\" FROM biz_collect_run r "
+				+ "LEFT JOIN biz_collect_data t ON t.id=r.collect_task_id ORDER BY r.id DESC LIMIT " + safeLimit;
+		List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql).stream().map(this::withStateLabel).toList();
+		Map<String, Object> countRow = jdbcTemplate.queryForMap("SELECT "
+				+ "SUM(CASE WHEN state IN ('QUEUED','FETCHING','PROCESSING') THEN 1 ELSE 0 END) AS active_count, "
+				+ "SUM(CASE WHEN state='COMPLETED' THEN 1 ELSE 0 END) AS completed_count, "
+				+ "SUM(CASE WHEN state IN ('FETCH_FAILED','DB_FAILED','INTERRUPTED') THEN 1 ELSE 0 END) AS failed_count, "
+				+ "SUM(CASE WHEN state='CANCELLED' THEN 1 ELSE 0 END) AS cancelled_count "
+				+ "FROM biz_collect_run");
+		Map<String, Long> counts = new LinkedHashMap<>();
+		counts.put("ACTIVE", numberValue(countRow.get("active_count")));
+		counts.put("COMPLETED", numberValue(countRow.get("completed_count")));
+		counts.put("FAILED", numberValue(countRow.get("failed_count")));
+		counts.put("CANCELLED", numberValue(countRow.get("cancelled_count")));
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("items", rows);
+		result.put("counts", counts);
+		return result;
+	}
+
 	public Map<String, Object> findRun(long runId) {
 		List<Map<String, Object>> rows = jdbcTemplate.queryForList("SELECT r.id AS \"runId\", "
 				+ "r.collect_task_id AS \"taskId\", t.taskname AS \"taskName\", "

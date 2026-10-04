@@ -175,6 +175,11 @@ public class PageController {
 	public String collectDataList(Model model) {
 		return "admin/collectDataList";
 	}
+
+	@RequestMapping(value = "/collectRunMonitor")
+	public String collectRunMonitor() {
+		return "admin/collectRunMonitor";
+	}
 	
 	
 	@RequestMapping(value = "/collectDataDetailList")

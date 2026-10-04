@@ -178,6 +178,13 @@
 			justify-content: space-between;
 			align-items: center;
 		}
+		.graphic-pagination-bar { display:flex; align-items:center; justify-content:flex-end; gap:16px; flex-wrap:nowrap; }
+		.graphic-pagination-size { flex:0 0 auto; order:2; }
+		.graphic-pagination-controls { display:flex; align-items:center; justify-content:flex-end; gap:10px; min-width:0; order:1; }
+		.graphic-pagination-controls .pagination { flex-wrap:nowrap; margin:0; }
+		.graphic-page-jump { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+		.graphic-page-jump input { width:76px; }
+		@media(max-width:900px) { .graphic-pagination-bar { align-items:flex-start; flex-direction:column; } .graphic-pagination-controls { width:100%; justify-content:space-between; margin-left:0; overflow-x:auto; } }
 		
 		/* 移动端卡片内容适配 */
 		@media (max-width: 768px) {
@@ -780,18 +787,23 @@
 				</div>
 
 				<!-- 分页 -->
-				<div class="mt-4">
-					<div class="col-12">
-						<div class="d-flex justify-content-between align-items-center flex-wrap" style="gap:12px;">
-							<label class="mb-0" style="white-space:nowrap;">每页显示
-								<select id="graphicPageSize" class="form-control form-control-sm d-inline-block" style="width:auto;margin:0 4px;">
-									<option value="15">15</option><option value="30">30</option><option value="60">60</option><option value="100">100</option>
-								</select> 条
-							</label>
-							<ul id="pager" class="pagination">
+				<div class="mt-4 graphic-pagination-bar">
+					<div class="graphic-pagination-controls">
+							<ul id="pager" class="pagination mb-0">
 								<!-- 分页控件 -->
 							</ul>
+							<div class="graphic-page-jump">
+								<label for="graphicPageInput" class="sr-only">跳转页码</label>
+								<input id="graphicPageInput" class="form-control form-control-sm" type="number" min="1" inputmode="numeric" placeholder="页码">
+								<button id="graphicPageJump" class="btn btn-sm btn-primary" type="button">跳转</button>
+							</div>
 						</div>
+					<div class="graphic-pagination-size">
+						<label class="mb-0" style="white-space:nowrap;">每页显示
+							<select id="graphicPageSize" class="form-control form-control-sm d-inline-block" style="width:auto;margin:0 4px;">
+								<option value="15">15</option><option value="30">30</option><option value="60">60</option><option value="100">100</option>
+							</select> 条
+						</label>
 					</div>
 				</div>
 
@@ -910,6 +922,11 @@ function bindSearchEvents() {
 		}
 	});
 	bindGraphicAuthorMultiSelect();
+	$('#pager').on('click', '[data-page]', function(event){
+		event.preventDefault();
+		event.stopPropagation();
+		if (!$(this).closest('.page-item').hasClass('disabled')) goToPage($(this).data('page'));
+	});
 	$('#graphicAuthorExtra').on('input', function(){
 		currentPage = 0;
 		collectSearchParams();
@@ -952,6 +969,15 @@ function bindGraphicAuthorMultiSelect() {
 		pageSize = Math.max(1, parseInt($(this).val(), 10) || 15);
 		currentPage = 0;
 		loadGraphicContentList();
+	});
+	$('#graphicPageJump').on('click', function(){
+		jumpToGraphicPage();
+	});
+	$('#graphicPageInput').on('keydown', function(event){
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			jumpToGraphicPage();
+		}
 	});
 }
 
@@ -1896,21 +1922,23 @@ function renderPagination(pageData) {
 	var totalPages = Math.max(1, page.totalPages || 1);
 	var currentPageNum = (page.number || 0) + 1;
 	var totalElements = page.totalElements || 0;
+	$('#pager').data('total-pages', totalPages);
+	$('#graphicPageInput').val(currentPageNum);
 	var html = '';
 	var firstDisabled = currentPageNum <= 1 ? ' disabled' : '';
-	html += `<li class="page-item${firstDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(0)">首页</a></li>`;
-	html += `<li class="page-item${firstDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${Math.max(0, currentPageNum - 2)})">上一页</a></li>`;
+	html += `<li class="page-item${firstDisabled}"><button type="button" class="page-link" data-page="0">首页</button></li>`;
+	html += `<li class="page-item${firstDisabled}"><button type="button" class="page-link" data-page="${Math.max(0, currentPageNum - 2)}">上一页</button></li>`;
 	// 页码
 	var startPage = Math.max(1, currentPageNum - 2);
 	var endPage = Math.min(totalPages, currentPageNum + 2);
 	
 	for (var i = startPage; i <= endPage; i++) {
 		var activeClass = i === currentPageNum ? 'active' : '';
-		html += `<li class="page-item ${activeClass}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${i - 1})">${i}</a></li>`;
+		html += `<li class="page-item ${activeClass}"><button type="button" class="page-link" data-page="${i - 1}">${i}</button></li>`;
 	}
 	var lastDisabled = currentPageNum >= totalPages ? ' disabled' : '';
-	html += `<li class="page-item${lastDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${Math.min(totalPages - 1, currentPageNum)})">下一页</a></li>`;
-	html += `<li class="page-item${lastDisabled}"><a class="page-link" href="javascript:void(0)" onclick="goToPage(${totalPages - 1})">末页</a></li>`;
+	html += `<li class="page-item${lastDisabled}"><button type="button" class="page-link" data-page="${Math.min(totalPages - 1, currentPageNum)}">下一页</button></li>`;
+	html += `<li class="page-item${lastDisabled}"><button type="button" class="page-link" data-page="${totalPages - 1}">末页</button></li>`;
 	// 总数信息
 	html += `<li class="page-item disabled"><span class="page-link">共 ${totalElements} 条</span></li>`;
 	
@@ -1922,7 +1950,19 @@ function renderPagination(pageData) {
  */
 function goToPage(pageNum) {
 	console.log('跳转到页码:', pageNum);
-	currentPage = Math.max(0, parseInt(pageNum, 10) || 0);
+	var totalPages = parseInt($('#pager').data('total-pages'), 10) || 1;
+	currentPage = Math.min(totalPages - 1, Math.max(0, parseInt(pageNum, 10) || 0));
+	loadGraphicContentList();
+}
+
+function jumpToGraphicPage() {
+	var input = parseInt($('#graphicPageInput').val(), 10);
+	var totalPages = parseInt($('#pager').data('total-pages'), 10) || 1;
+	if (!Number.isFinite(input) || input < 1) {
+		layer.msg('请输入有效页码');
+		return;
+	}
+	currentPage = Math.min(totalPages, input) - 1;
 	loadGraphicContentList();
 }
 

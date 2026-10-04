@@ -43,6 +43,8 @@
         .status-QUEUED,.status-RETRY_WAIT { background:#fff2d8; color:#94691a; }
         .status-FAILED { background:#f9e4e4; color:#a72f2f; }
         .status-LOCAL_MISSING,.status-NOT_DOWNLOADED { background:#f0f0f0; color:#666; }
+        .status-BLOCKED { background:#f0f0f0; color:#666; }
+        .status-CANCELLED { background:#f0f0f0; color:#666; }
         .source-chip { display:inline-block; padding:3px 6px; border:1px solid #d8dde2; border-radius:4px; font-size:11px; color:#59636d; }
         .error-text { color:#a72f2f; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .icon-action { width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
@@ -141,7 +143,7 @@
                         </div>
                         <div class="table-wrap">
                             <table class="table download-table"><thead><tr>
-                                <th>作者 / 任务</th><th>作品</th><th>已下载</th><th>未下载</th><th>远端已删除</th><th>失败</th><th>最近活动</th><th>操作</th>
+                                <th>作者 / 任务</th><th>总作品</th><th>已下载</th><th>处理中</th><th>服务端已删除</th><th>失败</th><th>最近活动</th><th>操作</th>
                             </tr></thead><tbody id="collectAuthorRows"></tbody></table>
                             <div class="empty-state" id="collectAuthorEmpty" style="display:none;">暂无收藏作者记录</div>
                         </div>
@@ -174,7 +176,7 @@
 <script src="../static/js/layer/layer.js"></script>
 <script>
     (function() {
-        const state = { view:'active', page:0, pageSize:25, totalPages:0, totalElements:0, rows:[], paused:false, timer:null, selectedKeys:new Set(), allMatching:false, excludedKeys:new Set(), authorPage:0, authorTotalPages:0, selectedTaskId:null, workPage:0, workTotalPages:0 };
+        const state = { view:'active', page:0, pageSize:25, totalPages:0, totalElements:0, rows:[], paused:false, timer:null, selectedKeys:new Set(), allMatching:false, excludedKeys:new Set(), authorPage:0, authorTotalPages:0, selectedTaskId:null, selectedAuthorUid:'', selectedAuthorName:'', workPage:0, workTotalPages:0 };
         const labels = {
             RUNNING:'正在下载', QUEUED:'等待下载', RETRY_WAIT:'等待重试', COMPLETED:'已完成', FAILED:'失败',
             CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽', SKIPPED_REMOTE_MISSING:'远端已删除',
@@ -212,9 +214,9 @@
             $('#authorKeywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { state.authorPage=0; loadAuthors(); } });
             $('#collectAuthorPrev').on('click', function() { if (state.authorPage > 0) { state.authorPage--; loadAuthors(); } });
             $('#collectAuthorNext').on('click', function() { if (state.authorPage + 1 < state.authorTotalPages) { state.authorPage++; loadAuthors(); } });
-            $('#collectAuthorRows').on('click', '.author-works', function() { state.selectedTaskId = $(this).data('task-id'); state.workPage=0; loadAuthorWorks($(this).data('task-id'), $(this).data('author')); });
-            $('#collectWorkPrev').on('click', function() { if (state.workPage > 0) { state.workPage--; loadAuthorWorks(state.selectedTaskId, $('#collectAuthorWorksTitle').data('author')); } });
-            $('#collectWorkNext').on('click', function() { if (state.workPage + 1 < state.workTotalPages) { state.workPage++; loadAuthorWorks(state.selectedTaskId, $('#collectAuthorWorksTitle').data('author')); } });
+            $('#collectAuthorRows').on('click', '.author-works', function() { state.selectedTaskId = $(this).data('task-id'); state.selectedAuthorUid = $(this).data('author-uid') || ''; state.selectedAuthorName = $(this).data('author') || ''; state.workPage=0; loadAuthorWorks(state.selectedAuthorUid, state.selectedAuthorName); });
+            $('#collectWorkPrev').on('click', function() { if (state.workPage > 0) { state.workPage--; loadAuthorWorks(state.selectedAuthorUid, state.selectedAuthorName); } });
+            $('#collectWorkNext').on('click', function() { if (state.workPage + 1 < state.workTotalPages) { state.workPage++; loadAuthorWorks(state.selectedAuthorUid, state.selectedAuthorName); } });
             $('#collectAuthorWorkRows').on('click', '.work-detail', function() { showWorkDetail($(this).data('record-key')); });
             $('#pauseButton').on('click', togglePause);
             $('#selectAll').on('change', function() {
@@ -268,16 +270,15 @@
                         return '<tr><td><strong>'+html(item.author || '未知作者')+'</strong><div class="download-meta">'+html(item.task_name || '')+'</div></td>'
                             + '<td>'+number(item.total_count)+'</td><td>'+number(item.downloaded_count)+'</td><td>'+number(item.pending_count)+'</td>'
                             + '<td>'+number(item.remote_missing_count)+'</td><td>'+number(item.failed_count)+'</td><td>'+html(timeText(item.last_activity))+'</td>'
-                            + '<td><button class="btn btn-xs btn-primary author-works" data-task-id="'+attr(item.task_id)+'" data-author="'+attr(item.author || '作者')+'">查看作品</button></td></tr>';
+                            + '<td><button class="btn btn-xs btn-primary author-works" data-task-id="'+attr(item.task_id)+'" data-author-uid="'+attr(item.author_uid || '')+'" data-author="'+attr(item.author || '作者')+'">查看全部作品</button></td></tr>';
                     }).join(''));
                 }).fail(markStale);
         }
 
-        function loadAuthorWorks(taskId, author) {
-            state.selectedTaskId = taskId;
-            $('#collectAuthorWorksTitle').text((author || '作者') + ' 的作品').data('author', author || '作者').show();
+        function loadAuthorWorks(authorUid, authorName) {
+            $('#collectAuthorWorksTitle').text((authorName || '作者') + ' 的全部作品').data('author', authorName || '作者').show();
             $('#collectAuthorWorksPanel').show();
-            $.getJSON('/admin/api/download-center/collect-author-works', { taskId:taskId, page:state.workPage, pageSize:state.pageSize })
+            $.getJSON('/admin/api/download-center/collect-author-works', { authorUid:authorUid, authorName:authorName, page:state.workPage, pageSize:state.pageSize })
                 .done(function(response) {
                     if (!response || response.resCode !== '000001') return;
                     const data = response.record || {}, rows = Array.isArray(data.content) ? data.content : [];

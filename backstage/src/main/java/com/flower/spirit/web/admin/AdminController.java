@@ -707,6 +707,11 @@ public class AdminController {
 		return collectRunQueryService.findRuns(taskId, limit, afterId);
 	}
 
+	@GetMapping("/collect-runs/overview")
+	public Map<String, Object> collectRunsOverview(@RequestParam(defaultValue = "100") int limit) {
+		return collectRunQueryService.overview(limit);
+	}
+
 	@GetMapping("/collect-runs/{runId}")
 	public Map<String, Object> findCollectRun(@PathVariable long runId) {
 		return collectRunQueryService.findRun(runId);
@@ -865,10 +870,11 @@ public class AdminController {
 	}
 
 	@GetMapping("/download-center/collect-author-works")
-	public AjaxEntity downloadCenterCollectAuthorWorks(@RequestParam int taskId,
+	public AjaxEntity downloadCenterCollectAuthorWorks(@RequestParam(required = false) Integer taskId,
+			@RequestParam(required = false) String authorUid, @RequestParam(required = false) String authorName,
 			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int pageSize) {
 		return new AjaxEntity(Global.ajax_success, "Collection works loaded",
-				downloadCenterService.collectAuthorWorks(taskId, page, pageSize));
+				downloadCenterService.collectAuthorWorks(authorUid, authorName, taskId == null ? 0 : taskId, page, pageSize));
 	}
 
 	@GetMapping("/download-center/detail")

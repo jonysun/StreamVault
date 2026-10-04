@@ -134,17 +134,18 @@ public class DownloadCenterService {
 		}
 		String base = "WITH latest AS (SELECT r.collect_task_id AS task_id, COALESCE(t.taskname,'') AS task_name, "
 				+ "i.nickname_snapshot AS author, i.author_uid, i.work_id, i.process_state, i.updated_at, i.created_at, "
-				+ "ROW_NUMBER() OVER (PARTITION BY r.collect_task_id,i.work_id ORDER BY COALESCE(i.updated_at,i.created_at) DESC,i.id DESC) AS rn "
+				+ "COALESCE(NULLIF(i.author_uid,''), NULLIF(i.nickname_snapshot,''), 'unknown') AS author_key, "
+				+ "ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(i.author_uid,''), NULLIF(i.nickname_snapshot,''), 'unknown'),i.work_id ORDER BY COALESCE(i.updated_at,i.created_at) DESC,i.id DESC) AS rn "
 				+ "FROM biz_collect_run_item i JOIN biz_collect_run r ON r.id=i.run_id "
 				+ "LEFT JOIN biz_collect_data t ON t.id=r.collect_task_id "
 				+ "WHERE i.queue_generation='FETCH_DOWNLOAD_V1'" + filter + ") "
-				+ "SELECT task_id, MAX(task_name) AS task_name, COALESCE(NULLIF(MAX(author),''),'未知作者') AS author, "
-				+ "COALESCE(NULLIF(MAX(author_uid),''),'') AS author_uid, COUNT(*) AS total_count, "
+				+ "SELECT MAX(task_id) AS task_id, MAX(task_name) AS task_name, COALESCE(NULLIF(MAX(author),''),'未知作者') AS author, "
+				+ "COALESCE(NULLIF(MAX(author_uid),''),'') AS author_uid, MAX(author_key) AS author_key, COUNT(*) AS total_count, "
 				+ "SUM(CASE WHEN process_state IN ('COMPLETED','SKIPPED_EXISTING','SKIPPED_EXISTING_ACTIVE_DOWNLOAD') THEN 1 ELSE 0 END) AS downloaded_count, "
 				+ "SUM(CASE WHEN process_state IN ('QUEUED','RUNNING','RETRY_WAIT') THEN 1 ELSE 0 END) AS pending_count, "
 				+ "SUM(CASE WHEN process_state='FAILED' THEN 1 ELSE 0 END) AS failed_count, "
 				+ "SUM(CASE WHEN process_state='SKIPPED_REMOTE_MISSING' THEN 1 ELSE 0 END) AS remote_missing_count, "
-				+ "MAX(COALESCE(updated_at,created_at)) AS last_activity FROM latest WHERE rn=1 GROUP BY task_id";
+				+ "MAX(COALESCE(updated_at,created_at)) AS last_activity FROM latest WHERE rn=1 GROUP BY author_key";
 		List<Map<String, Object>> all = jdbcTemplate.queryForList(base
 				+ " ORDER BY last_activity DESC, task_id DESC", args.toArray());
 		int from = Math.min(safePage * safeSize, all.size());
@@ -161,14 +162,37 @@ public class DownloadCenterService {
 
 	/** Returns the latest known work for one collection task with a user-facing status. */
 	public Map<String, Object> collectAuthorWorks(int taskId, int page, int pageSize) {
+		return collectAuthorWorks(null, null, taskId, page, pageSize);
+	}
+
+	/** Returns the union of all observed works for one author across collection runs. */
+	public Map<String, Object> collectAuthorWorks(String authorUid, String authorName, int taskId, int page, int pageSize) {
 		int safePage = Math.max(0, page);
 		int safeSize = Math.min(Math.max(1, pageSize), 100);
+		String identityFilter;
+		Object[] identityArgs;
+		if (authorUid != null && !authorUid.isBlank()) {
+			if (authorName != null && !authorName.isBlank()) {
+				identityFilter = " AND (i.author_uid=? OR ((i.author_uid IS NULL OR TRIM(i.author_uid)='') "
+						+ "AND i.nickname_snapshot=?))";
+				identityArgs = new Object[] { authorUid.trim(), authorName.trim() };
+			} else {
+				identityFilter = " AND i.author_uid=?";
+				identityArgs = new Object[] { authorUid.trim() };
+			}
+		} else if (authorName != null && !authorName.isBlank()) {
+			identityFilter = " AND (i.author_uid IS NULL OR TRIM(i.author_uid)='') AND i.nickname_snapshot=?";
+			identityArgs = new Object[] { authorName.trim() };
+		} else {
+			identityFilter = " AND r.collect_task_id=?";
+			identityArgs = new Object[] { taskId };
+		}
 		List<Map<String, Object>> raw = jdbcTemplate.queryForList(
 				"SELECT i.id, i.work_id, i.platform_key, i.author_uid, i.nickname_snapshot, i.title_snapshot, "
 				+ "i.publish_time, i.media_type, i.process_state, i.error_code, i.error_message, "
 				+ "i.updated_at, i.created_at FROM biz_collect_run_item i JOIN biz_collect_run r ON r.id=i.run_id "
-				+ "WHERE r.collect_task_id=? AND i.queue_generation='FETCH_DOWNLOAD_V1' "
-				+ "ORDER BY COALESCE(i.updated_at,i.created_at) DESC, i.id DESC", taskId);
+				+ "WHERE i.queue_generation='FETCH_DOWNLOAD_V1' " + identityFilter
+				+ " ORDER BY COALESCE(i.updated_at,i.created_at) DESC, i.id DESC", identityArgs);
 		Map<String, Map<String, Object>> latest = new LinkedHashMap<>();
 		for (Map<String, Object> row : raw) {
 			String workId = text(row.get("work_id"));
@@ -556,6 +580,8 @@ public class DownloadCenterService {
 		case "QUEUED" -> "QUEUED";
 		case "RETRY_WAIT" -> "RETRY_WAIT";
 		case "FAILED" -> "FAILED";
+		case "SKIPPED_BLOCKED" -> "BLOCKED";
+		case "CANCELLED" -> "CANCELLED";
 		case "COMPLETED", "SKIPPED_EXISTING", "SKIPPED_EXISTING_ACTIVE_DOWNLOAD" -> "LOCAL_MISSING";
 		default -> "NOT_DOWNLOADED";
 		};
@@ -569,6 +595,8 @@ public class DownloadCenterService {
 		case "RETRY_WAIT" -> "等待重试";
 		case "FAILED" -> "下载失败";
 		case "REMOTE_MISSING" -> "服务端已删除";
+		case "BLOCKED" -> "已屏蔽";
+		case "CANCELLED" -> "已取消";
 		case "LOCAL_MISSING" -> "本地文件已删除";
 		default -> "未下载";
 		};

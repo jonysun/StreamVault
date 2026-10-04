@@ -457,11 +457,29 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	private String coverUrl(JSONObject detail, JSONArray images) {
 		JSONObject video = detail.getJSONObject("video");
 		if (video != null) {
-			String cover = mediaUrl(video.getJSONObject("cover"));
-			if (cover == null) cover = mediaUrl(video.getJSONObject("origin_cover"));
+			String cover = mediaUrlValue(video.get("cover"));
+			if (cover == null) cover = mediaUrlValue(video.get("origin_cover"));
 			if (cover != null) return cover;
 		}
+		String cover = mediaUrlValue(detail.get("cover"));
+		if (cover == null) cover = mediaUrlValue(detail.get("origin_cover"));
+		if (cover == null) cover = firstText(detail, "cover_url", "coverUrl", "thumbnail", "thumbnail_url");
+		if (cover != null) return cover;
 		return images == null || images.isEmpty() ? null : mediaUrl(images.getJSONObject(0));
+	}
+
+	/** Accepts the equivalent cover shapes returned by F2 and DTK. */
+	private String mediaUrlValue(Object value) {
+		if (value instanceof JSONObject object) return mediaUrl(object);
+		if (value instanceof JSONArray array) {
+			for (int i = array.size() - 1; i >= 0; i--) {
+				String candidate = mediaUrlValue(array.get(i));
+				if (candidate != null) return candidate;
+			}
+			return null;
+		}
+		if (value instanceof String text) return text.isBlank() ? null : text.trim();
+		return value == null ? null : mediaUrlValue(String.valueOf(value));
 	}
 
 	private String mediaUrl(JSONObject object) {

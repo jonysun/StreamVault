@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>收藏爬取记录-StreamVault</title>
+    <th:block th:insert="~{admin/include/header :: metaHeader}"></th:block>
+    <link href="../static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="../static/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="../static/css/style.min.css" rel="stylesheet">
+    <style>
+        .monitor-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; }
+        .monitor-toolbar h4 { margin:0; }
+        .monitor-actions { display:flex; align-items:center; gap:8px; }
+        .monitor-summary { display:grid; grid-template-columns:repeat(4,minmax(130px,1fr)); gap:12px; margin-bottom:16px; }
+        .monitor-stat { background:#fff; border:1px solid #e3e7eb; padding:14px 16px; }
+        .monitor-stat-label { color:#6b7280; font-size:12px; }
+        .monitor-stat-value { font-size:24px; font-weight:600; line-height:1.2; margin-top:6px; }
+        .monitor-stat.active .monitor-stat-value { color:#147d64; }
+        .monitor-stat.failed .monitor-stat-value { color:#a72f2f; }
+        .monitor-panel { background:#fff; border:1px solid #e3e7eb; }
+        .monitor-panel-header { padding:14px 16px; border-bottom:1px solid #edf0f2; display:flex; align-items:center; justify-content:space-between; }
+        .monitor-panel-header h5 { margin:0; }
+        .monitor-table { margin:0; min-width:1120px; }
+        .monitor-table td { vertical-align:middle; }
+        .run-progress { min-width:150px; }
+        .run-progress-track { height:7px; background:#edf0f2; border-radius:4px; overflow:hidden; }
+        .run-progress-value { height:100%; background:#4e8cff; }
+        .run-meta { color:#7a838c; font-size:12px; margin-top:4px; }
+        .run-state { display:inline-block; padding:4px 8px; border-radius:4px; font-size:12px; background:#edf0f2; color:#56606a; }
+        .run-state-active { background:#dff3ec; color:#147d64; }
+        .run-state-retry { background:#fff2d8; color:#94691a; }
+        .run-state-complete { background:#e6f3e9; color:#29743a; }
+        .run-state-failed { background:#f9e4e4; color:#a72f2f; }
+        .run-state-cancelled { background:#f0f0f0; color:#666; }
+        .monitor-empty { padding:48px 20px; text-align:center; color:#7b848d; }
+        @media(max-width:800px) { .monitor-toolbar { align-items:flex-start; flex-direction:column; } .monitor-summary { grid-template-columns:repeat(2,1fr); } }
+    </style>
+</head>
+<body>
+<div class="lyear-layout-web"><div class="lyear-layout-container">
+    <div th:insert="~{admin/include/common :: headermenu}"></div>
+    <main class="lyear-layout-content"><div class="container-fluid">
+        <div class="monitor-toolbar">
+            <div><h4>收藏爬取记录</h4><div class="run-meta">实时查看抓取、入库、下载和历史结果</div></div>
+            <div class="monitor-actions"><span class="run-meta" id="lastUpdated">--</span><button class="btn btn-primary" id="refreshRuns"><i class="mdi mdi-refresh"></i> 刷新</button></div>
+        </div>
+        <div class="monitor-summary">
+            <div class="monitor-stat active"><div class="monitor-stat-label">进行中</div><div class="monitor-stat-value" id="activeCount">0</div></div>
+            <div class="monitor-stat"><div class="monitor-stat-label">已完成</div><div class="monitor-stat-value" id="completedCount">0</div></div>
+            <div class="monitor-stat failed"><div class="monitor-stat-label">失败</div><div class="monitor-stat-value" id="failedCount">0</div></div>
+            <div class="monitor-stat"><div class="monitor-stat-label">已取消</div><div class="monitor-stat-value" id="cancelledCount">0</div></div>
+        </div>
+        <section class="monitor-panel">
+            <div class="monitor-panel-header"><h5>全部收藏任务运行记录</h5><select id="runLimit" class="form-control input-sm" style="width:100px;"><option value="50">50 条</option><option value="100" selected>100 条</option><option value="200">200 条</option></select></div>
+            <div class="table-responsive"><table class="table table-hover monitor-table"><thead><tr><th>任务</th><th>状态</th><th>进度</th><th>抓取结果</th><th>下载结果</th><th>时间</th><th>错误</th><th>操作</th></tr></thead><tbody id="runRows"></tbody></table></div>
+            <div class="monitor-empty" id="runEmpty" style="display:none;">暂无收藏爬取记录</div>
+        </section>
+    </div></main>
+</div></div>
+<script src="../static/js/jquery.min.js"></script><script src="../static/js/bootstrap.min.js"></script><script src="../static/js/main.min.js"></script><script src="../static/js/layer/layer.js"></script>
+<script>
+(function(){
+    function number(value){var n=Number(value);return Number.isFinite(n)?n:0;}
+    function html(value){return String(value == null ? '' : value).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
+    function time(value){if(!value)return '--';var d=new Date(value);return isNaN(d.getTime())?html(value):d.toLocaleString();}
+    function effectiveState(row){var queue=String(row.jobState||'');if(queue==='RETRY_WAIT')return 'RETRY_WAIT';if(queue==='QUEUED'&&['FETCH_FAILED','DB_FAILED','INTERRUPTED'].indexOf(String(row.state||''))>=0)return 'QUEUED';return String(row.state||'');}
+    function stateText(row){var s=effectiveState(row);return s==='RETRY_WAIT'?'等待重试':s==='QUEUED'?'排队中':row.stateLabel||row.state||'--';}
+    function stateClass(row){var s=effectiveState(row);if(['QUEUED','FETCHING','PROCESSING'].indexOf(s)>=0)return 'run-state-active';if(s==='RETRY_WAIT')return 'run-state-retry';if(s==='COMPLETED')return 'run-state-complete';if(['FETCH_FAILED','DB_FAILED','INTERRUPTED'].indexOf(s)>=0)return 'run-state-failed';if(s==='CANCELLED')return 'run-state-cancelled';return '';}
+    function load(){
+        $.getJSON('/admin/api/collect-runs/overview',{limit:$('#runLimit').val()}).done(function(data){
+            var rows=Array.isArray(data.items)?data.items:[], counts=data.counts||{};
+            $('#activeCount').text(number(counts.ACTIVE));$('#completedCount').text(number(counts.COMPLETED));$('#failedCount').text(number(counts.FAILED));$('#cancelledCount').text(number(counts.CANCELLED));
+            $('#lastUpdated').text('更新于 '+new Date().toLocaleTimeString());$('#runEmpty').toggle(!rows.length);
+            $('#runRows').html(rows.map(function(row){var total=Math.max(number(row.itemCount),number(row.plannedCount));var done=number(row.completedCount);var percent=total?Math.min(100,Math.round(done*100/total)):0;var error=[row.errorCode,row.errorMessage].filter(Boolean).join('：');return '<tr><td><strong>'+html(row.taskName||('收藏任务 #'+row.taskId))+'</strong><div class="run-meta">Run #'+html(row.runId)+' · '+html(row.triggerType||'--')+'</div></td><td><span class="run-state '+stateClass(row)+'">'+html(stateText(row))+'</span>'+(row.jobState?' <div class="run-meta">队列：'+html(row.jobState)+'</div>':'')+'</td><td><div class="run-progress"><div>'+done+' / '+total+' ('+percent+'%)</div><div class="run-progress-track"><div class="run-progress-value" style="width:'+percent+'%"></div></div></div></td><td>获取 '+number(row.fetchedCount)+'<div class="run-meta">计划 '+number(row.plannedCount)+' · 新增 '+number(row.insertedCount)+' · 跳过 '+number(row.skippedExistingCount)+'</div></td><td>完成 '+done+'<div class="run-meta">排队/运行 '+number(row.pendingCount)+' · 失败 '+number(row.failedCount)+'</div></td><td><div>'+time(row.startedAt||row.queuedAt)+'</div><div class="run-meta">'+(row.finishedAt?'结束 '+time(row.finishedAt):'心跳 '+time(row.heartbeatAt))+'</div></td><td class="text-danger">'+html(error||'--')+'</td><td><button class="btn btn-xs btn-primary inspect-run" data-id="'+html(row.runId)+'">查看明细</button></td></tr>';}).join(''));
+        }).fail(function(){layer.msg('收藏爬取记录加载失败');});
+    }
+    function showRunDetails(runId){
+        $.when($.getJSON('/admin/api/collect-runs/'+runId),$.getJSON('/admin/api/collect-runs/'+runId+'/items',{decision:'all',limit:100,afterId:0})).done(function(runResponse,itemsResponse){
+            var run=runResponse[0]||{}, items=itemsResponse[0]||{};
+            var rows=Array.isArray(items)?items:[];
+            var content='<div style="padding:16px;"><p><strong>状态：</strong>'+html(run.stateLabel||run.state||'--')+'　<strong>抓取：</strong>'+number(run.fetchedCount)+'　<strong>计划：</strong>'+number(run.plannedCount)+'</p>';
+            content+='<div class="table-responsive"><table class="table table-sm"><thead><tr><th>作品 ID</th><th>标题</th><th>类型</th><th>状态</th><th>错误</th></tr></thead><tbody>';
+            content+=rows.map(function(item){return '<tr><td>'+html(item.workId)+'</td><td>'+html(item.titleSnapshot)+'</td><td>'+html(item.mediaType)+'</td><td>'+html(item.processState)+'</td><td class="text-danger">'+html([item.errorCode,item.errorMessage].filter(Boolean).join('：'))+'</td></tr>';}).join('');
+            content+='</tbody></table></div></div>';
+            layer.open({type:1,title:'收藏运行明细 #'+html(runId),area:['min(1000px,96vw)','80%'],content:content});
+        }).fail(function(){layer.msg('运行明细加载失败');});
+    }
+    $('#refreshRuns,#runLimit').on('click change',load);$('#runRows').on('click','.inspect-run',function(){showRunDetails($(this).data('id'));});load();setInterval(load,5000);
+})();
+</script>
+</body></html>

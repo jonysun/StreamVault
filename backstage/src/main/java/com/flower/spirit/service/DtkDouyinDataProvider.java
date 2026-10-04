@@ -118,8 +118,10 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		JSONObject video = detail.getJSONObject("video");
 		String play = mediaUrl(video == null ? null : video.getJSONObject("play_addr"));
 		if (blank(play)) play = firstText(detail, "video_url", "download_url", "play_url");
-		String cover = mediaUrl(video == null ? null : video.getJSONObject("cover"));
-		if (blank(cover)) cover = firstText(detail, "cover_url", "cover");
+		String cover = mediaUrlValue(video == null ? null : video.get("cover"));
+		if (blank(cover)) cover = mediaUrlValue(video == null ? null : video.get("origin_cover"));
+		if (blank(cover)) cover = mediaUrlValue(detail.get("cover"));
+		if (blank(cover)) cover = firstText(detail, "cover_url", "coverUrl");
 		if (blank(play)) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 直链详情缺少视频地址");
 		HashMap<String, String> result = new HashMap<>();
 		result.put("awemeid", detail.getString("aweme_id"));
@@ -386,9 +388,10 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		}
 		normalizeImages(detail);
 		video = detail.getJSONObject("video");
-		if (detail.getJSONArray("cover") == null) {
+		if (blank(mediaUrlValue(detail.get("cover")))) {
 			String cover = mediaUrl(video == null ? null : video.getJSONObject("cover"));
-			if (blank(cover)) cover = firstText(detail, "cover_url", "cover");
+			if (blank(cover)) cover = mediaUrl(video == null ? null : video.getJSONObject("origin_cover"));
+			if (blank(cover)) cover = firstText(detail, "cover_url", "coverUrl", "thumbnail", "thumbnail_url");
 			if (!blank(cover)) {
 				JSONArray urls = new JSONArray();
 				urls.add(cover);
@@ -485,6 +488,19 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			if (isPreferredMediaUrl(value)) return value;
 		}
 		return fallback;
+	}
+
+	private String mediaUrlValue(Object value) {
+		if (value instanceof JSONObject object) return mediaUrl(object);
+		if (value instanceof JSONArray array) {
+			for (int i = array.size() - 1; i >= 0; i--) {
+				String candidate = mediaUrlValue(array.get(i));
+				if (!blank(candidate)) return candidate;
+			}
+			return null;
+		}
+		if (value instanceof String text) return blank(text) ? null : text.trim();
+		return value == null ? null : mediaUrlValue(String.valueOf(value));
 	}
 
 	private boolean isPreferredMediaUrl(String value) {

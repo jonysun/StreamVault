@@ -64,6 +64,26 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void treatsDtkTopLevelCoverLikeF2VideoCoverAndDownloadsIt() throws Exception {
+		String dtkSnapshot = "{\"aweme_detail\":{\"aweme_id\":\"7300000000000000001\","
+				+ "\"desc\":\"DTK video\",\"video\":{\"play_addr\":{\"url_list\":["
+				+ "\"https://media.example/dtk-video.mp4\"]}},\"cover\":["
+				+ "\"https://media.example/dtk-cover.jpg\"]}}";
+		TestContext context = context(dtkSnapshot,
+				"https://www.douyin.com/video/7300000000000000001");
+
+		WorkMetadata metadata = context.adapter.parse(new WorkParseRequest("input",
+				"https://www.douyin.com/video/7300000000000000001", false));
+		assertThat(metadata.getCoverUrl()).isEqualTo("https://media.example/dtk-cover.jpg");
+
+		DownloadResult result = context.adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
+		assertThat(result.getMediaResources()).extracting(WorkMediaResource::getType)
+				.containsExactly(WorkMediaResource.Type.VIDEO, WorkMediaResource.Type.IMAGE);
+		assertThat(result.getMediaResources()).extracting(item -> item.getLocalPath().getFileName().toString())
+				.containsExactly("7300000000000000001-index-0.mp4", "7300000000000000001.jpg");
+	}
+
+	@Test
 	void parsesValidatedListSnapshotWithoutResolvingOrFetchingSingleWorkDetail() throws Exception {
 		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		FakeGateway gateway = new FakeGateway("remote response must not be used",

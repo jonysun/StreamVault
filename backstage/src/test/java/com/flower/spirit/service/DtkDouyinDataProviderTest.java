@@ -38,7 +38,12 @@ class DtkDouyinDataProviderTest {
 		server.createContext("/api/v1/douyin/video", exchange -> {
 			receivedApiKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
 			String query = exchange.getRequestURI().getRawQuery();
-			String bodyText = query != null && query.contains("aweme_id=urls-only")
+			String bodyText = query != null && query.contains("aweme_id=top-level-cover")
+			? "{\"success\":true,\"data\":{\"aweme_id\":\"top-level-cover\",\"desc\":\"title\","
+					+ "\"video\":{\"play_addr\":{\"url_list\":[\"https://media.example/video.mp4\"]}},"
+					+ "\"cover\":[\"https://media.example/top-level-cover.jpg\"],"
+					+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}"
+			: query != null && query.contains("aweme_id=urls-only")
 					? "{\"success\":true,\"data\":{\"aweme_id\":\"urls-only\",\"desc\":\"title\","
 							+ "\"video\":{\"urls\":[\"https://media.example/cdn-video\",\"https://www.douyin.com/aweme/v1/play/?signed=1\"]},"
 							+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}"
@@ -97,6 +102,12 @@ class DtkDouyinDataProviderTest {
 	void unwrapsOfficialEnvelopeForWorkData() {
 		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("123");
 		assertThat(raw).contains("\"aweme_detail\"", "\"aweme_id\":\"123\"");
+	}
+
+	@Test
+	void preservesTopLevelCoverForUnifiedDouyinDownloadPath() {
+		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("top-level-cover");
+		assertThat(raw).contains("https://media.example/top-level-cover.jpg");
 	}
 
 	@Test
