@@ -93,7 +93,7 @@ public class HongShuExecutor {
 				logger.info(url+"地址已存在,不处理");
 				return;
 			}
-				downImages(images,null, filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
+				downImages(images,null, filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, time, json, saveProcess);
 				return;
 		}
 		if(type.equals("video")) {
@@ -110,12 +110,12 @@ public class HongShuExecutor {
 					logger.info(url+"地址已存在,不处理");
 					return;
 				}
-				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
+				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, time, json, saveProcess);
 				return;
 			}
 			if(h264Data.size()>1) {
 				//数据超 进图文
-				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
+				downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, time, json, saveProcess);
 				return;
 			}
 			if(h264Data.size() == 1) {
@@ -170,7 +170,7 @@ public class HongShuExecutor {
 						return;
 					}
 					//进图文
-					downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, saveProcess);
+					downImages(images, videos,filename, header, keyid, url, title, markroute, desc, nickname, userId, avatar, time, json, saveProcess);
 					return;
 				}
 			}
@@ -179,7 +179,7 @@ public class HongShuExecutor {
 	
 	
 	
-	public void downImages(List<String> images,List<String> videos,String filename,Map<String, String> header,String keyid,String url,String title,String markroute,String desc,String nickname,String userId,String avatar,ProcessHistoryEntity saveProcess) throws IOException {
+	public void downImages(List<String> images,List<String> videos,String filename,Map<String, String> header,String keyid,String url,String title,String markroute,String desc,String nickname,String userId,String avatar,String time,JSONObject json,ProcessHistoryEntity saveProcess) throws IOException {
 		JSONArray imageurl=  new JSONArray();
 		for(int i =0;i<images.size();i++) {
 			 String storage = FileUtil.generateDir(true, Global.platform.rednote.name(), filename, null, null,i);

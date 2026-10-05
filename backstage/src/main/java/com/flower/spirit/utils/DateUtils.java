@@ -126,8 +126,8 @@ public class DateUtils extends org.apache.commons.lang3.time.DateUtils {
 		String value = raw.trim();
 		try {
 			if (value.matches("^\\d{9,13}$")) {
-				long raw = Long.parseLong(value);
-				return formatDateTime(new Date(value.length() >= 12 ? raw : raw * 1000L));
+				long epoch = Long.parseLong(value);
+				return formatDateTime(new Date(value.length() >= 12 ? epoch : epoch * 1000L));
 			}
 			if (value.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}-\\d{2}$")) {
 				String fixed = value.substring(0, 10) + " " + value.substring(11).replace('-', ':');
