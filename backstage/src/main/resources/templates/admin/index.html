@@ -2499,7 +2499,7 @@
         var itemKey = escapeHtml(getFeedItemKey(item));
         var cover = item.cover || '/static/images/noimage.jpg';
         var html = '<div class="feed-item feed-graphic-item" data-private="' + isPrivate + '" data-feed-type="graphic">';
-        html += '<div class="feed-graphic-host" data-current-slide="0" data-cover="' + escapeHtml(cover) + '" data-slides="' + encodeGraphicSlides(slides) + '">';
+        html += '<div class="feed-graphic-host" data-current-slide="0" data-cover="' + escapeHtml(cover) + '" data-audio-url="' + escapeHtml(item.audioUrl || '') + '" data-slides="' + encodeGraphicSlides(slides) + '">';
         html += '<div class="feed-graphic-progress">';
         for (var p = 0; p < Math.max(1, slides.length); p++) {
             html += '<span' + (p === 0 ? ' class="active"' : '') + '></span>';
@@ -2702,6 +2702,7 @@
             updateFeedButtons();
         }
         itemEl.setAttribute('data-graphic-running', '1');
+        startGraphicBgm(itemEl.querySelector('.feed-graphic-host'));
         pauseOtherFeedVideos(null);
         var host = itemEl.querySelector('.feed-graphic-host');
         if (host) {
@@ -2716,9 +2717,29 @@
         }
         itemEl.setAttribute('data-graphic-running', '0');
         clearGraphicSlideshowTimer(itemEl);
+        stopGraphicBgm();
         if (feedActiveVideo && itemEl.contains(feedActiveVideo) && feedPlayerPoolManager) {
             feedPlayerPoolManager.stageAll();
         }
+    }
+
+    var feedGraphicAudio = null;
+    function startGraphicBgm(host) {
+        var url = host && host.getAttribute('data-audio-url');
+        if (!url) return;
+        if (!feedGraphicAudio) feedGraphicAudio = document.createElement('audio');
+        if (feedGraphicAudio.src !== url) {
+            feedGraphicAudio.src = url;
+            feedGraphicAudio.load();
+        }
+        feedGraphicAudio.loop = true;
+        feedGraphicAudio.muted = feedMuted;
+        var promise = feedGraphicAudio.play();
+        if (promise && promise.catch) promise.catch(function() {});
+    }
+    function stopGraphicBgm() {
+        if (!feedGraphicAudio) return;
+        try { feedGraphicAudio.pause(); feedGraphicAudio.currentTime = 0; } catch (e) {}
     }
 
     function bindGraphicSlideshowControls() {

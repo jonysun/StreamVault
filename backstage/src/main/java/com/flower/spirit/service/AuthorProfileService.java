@@ -510,9 +510,32 @@ public class AuthorProfileService {
 		item.setCover(slides.isEmpty() ? null : slides.get(0).getUrl());
 		item.setSourceurl(graphic.getSourceurl());
 		item.setOriginaladdress(graphic.getOriginaladdress());
+		item.setAudioUrl(extractGraphicMusicUrl(graphic.getJsonData()));
 		item.setSlides(slides);
 		enrichDisplayAuthor(item);
 		return item;
+	}
+
+	private String extractGraphicMusicUrl(String jsonData) {
+		if (jsonData == null || jsonData.isBlank()) return null;
+		try {
+			JSONObject root = JSONObject.parseObject(jsonData);
+			JSONObject detail = root.getJSONObject("aweme_detail");
+			if (detail == null) detail = root;
+			JSONObject music = detail.getJSONObject("music");
+			if (music == null) return null;
+			Object play = music.get("play_url");
+			if (play instanceof JSONObject object) {
+				String direct = object.getString("url");
+				if (direct != null && !direct.isBlank()) return direct;
+				com.alibaba.fastjson.JSONArray urls = object.getJSONArray("url_list");
+				if (urls == null) urls = object.getJSONArray("urls");
+				return urls == null || urls.isEmpty() ? null : urls.getString(urls.size() - 1);
+			}
+			return play == null ? null : String.valueOf(play);
+		} catch (RuntimeException ignored) {
+			return null;
+		}
 	}
 
 	private List<AdminMediaSlide> parseGraphicSlides(String rawImages) {

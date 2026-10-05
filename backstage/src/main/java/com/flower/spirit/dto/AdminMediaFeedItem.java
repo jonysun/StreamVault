@@ -34,6 +34,7 @@ public class AdminMediaFeedItem {
 	private String platformkey;
 	private String contenttype;
 	private String authorhomepage;
+	private String audioUrl;
 	private List<AdminMediaSlide> slides = new ArrayList<>();
 
 	public String getType() {
@@ -258,6 +259,14 @@ public class AdminMediaFeedItem {
 
 	public void setAuthorhomepage(String authorhomepage) {
 		this.authorhomepage = authorhomepage;
+	}
+
+	public String getAudioUrl() {
+		return audioUrl;
+	}
+
+	public void setAudioUrl(String audioUrl) {
+		this.audioUrl = audioUrl;
 	}
 
 	public List<AdminMediaSlide> getSlides() {

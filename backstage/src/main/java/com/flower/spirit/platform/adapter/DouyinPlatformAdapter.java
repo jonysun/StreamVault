@@ -423,6 +423,11 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		WorkContentType contentType = hasImages
 				? (hasImageResource && !hasVideoResource ? WorkContentType.GRAPHIC : WorkContentType.MIXED)
 				: WorkContentType.VIDEO;
+		JSONObject music = detail.getJSONObject("music");
+		String musicUrl = music == null ? null : mediaUrlValue(music.get("play_url"));
+		if (musicUrl != null && (contentType == WorkContentType.GRAPHIC || contentType == WorkContentType.MIXED)) {
+			resources.add(resource(resources.size(), WorkMediaResource.Type.AUDIO, musicUrl, "mp3"));
+		}
 		String sourceUrl = contentType == WorkContentType.VIDEO
 				? DouyinSourceUrlUtil.video(workId)
 				: firstText(DouyinSourceUrlUtil.graphic(authorId, workId), DouyinSourceUrlUtil.note(workId));
