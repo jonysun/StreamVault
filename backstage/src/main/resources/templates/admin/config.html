@@ -213,6 +213,7 @@
 								</div>
 								<div class="form-group"><label>DTK Base URL</label><input class="form-control" id="dtkBaseUrl" name="dtkBaseUrl" th:value="${config.dtkBaseUrl}" placeholder="例如 https://demo.douyin.wtf"></div>
 								<div class="form-group"><label>DTK API Key</label><input class="form-control" id="dtkApiKey" name="dtkApiKey" type="password" autocomplete="new-password" placeholder="留空保持现有 Key 不变"></div>
+								<div class="form-group"><label>DTK API 节点池（每行：Base URL|API Key）</label><textarea class="form-control" id="dtkApiPool" name="dtkApiPool" rows="4" autocomplete="off" placeholder="https://dtk-1.example|key-1&#10;https://dtk-2.example|key-2" th:text="${config.dtkApiPool}"></textarea><small class="text-muted">启用节点池后按轮询使用；502/503/429 或超时的节点会暂时冷却。未配置时回退到上面的单个 URL/Key。</small></div>
 								<div class="form-group"><label>DTK 请求超时(ms)</label><input class="form-control" id="dtkTimeoutMs" name="dtkTimeoutMs" type="number" min="1000" th:value="${config.dtkTimeoutMs}"></div>
 								<div class="form-group"><label>DTK 详情刷新</label><select class="form-control" id="dtkDetailRefreshEnabled" name="dtkDetailRefreshEnabled"><option value="1" th:selected="${config.dtkDetailRefreshEnabled} eq '1'">启用</option><option value="0" th:selected="${config.dtkDetailRefreshEnabled} eq '0'">禁用</option></select></div>
                             </div>
@@ -1105,6 +1106,7 @@
 			  option['douyinProvider'] = $("#douyinProvider").val();
 			  option['dtkBaseUrl'] = $("#dtkBaseUrl").val();
 			  option['dtkApiKey'] = $("#dtkApiKey").val();
+			  option['dtkApiPool'] = $("#dtkApiPool").val();
 			  option['dtkTimeoutMs'] = $("#dtkTimeoutMs").val();
 			  option['dtkDetailRefreshEnabled'] = $("#dtkDetailRefreshEnabled").val();
               option['mediahomemode'] = $("#mediahomemode").val();
@@ -1309,6 +1311,7 @@
 			option['douyinProvider'] = $("#douyinProvider").val();
 			option['dtkBaseUrl'] = $("#dtkBaseUrl").val();
 			option['dtkApiKey'] = $("#dtkApiKey").val();
+			option['dtkApiPool'] = $("#dtkApiPool").val();
 			option['dtkTimeoutMs'] = $("#dtkTimeoutMs").val();
 			option['dtkDetailRefreshEnabled'] = $("#dtkDetailRefreshEnabled").val();
             option['mediahomemode'] = $("#mediahomemode").val();

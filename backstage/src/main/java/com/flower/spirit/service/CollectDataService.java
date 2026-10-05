@@ -1660,7 +1660,8 @@ public class CollectDataService {
 			return;
 		}
 		if (f2cmd != null && f2cmd.contains("F2_UPSTREAM_SOFT_BLOCK")) {
-			logger.warn("[F2] upstream soft block platform={} scope=AUTHOR_LIST cooldownApplied=false", platform);
+			logger.warn("[F2] upstream soft block platform={} scope=COOKIE cooldownApplied=true", platform);
+			platformCookieService.reportRisk(platform, cookie, "F2_UPSTREAM_SOFT_BLOCK");
 		} else if (platformCookieService.isRiskSignal(f2cmd)) {
 			platformCookieService.reportRisk(platform, cookie, previewOutput(f2cmd));
 		}

@@ -203,6 +203,7 @@ public class Global {
 	public static String dtkBaseUrl = "";
 
 	public static String dtkApiKey = "";
+	public static String dtkApiPool = "";
 
 	public static int dtkTimeoutMs = 15000;
 

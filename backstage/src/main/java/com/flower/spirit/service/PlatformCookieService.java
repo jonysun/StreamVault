@@ -114,11 +114,17 @@ public class PlatformCookieService {
 				return false;
 			}
 			successAt.remove(riskKey(safePlatform, cookie));
-			douyinGlobalRiskStartedAtMs.accumulateAndGet(now, Math::max);
 			long cooldownMs = douyinRiskCooldownMillis();
-			logger.warn("platform cooldown platform={} scope=GLOBAL_RISK reason={} cooldownMs={}", safePlatform,
-					confirmedEvidence,
-					cooldownMs);
+			if ("F2_UPSTREAM_RATE_LIMIT".equals(confirmedEvidence)
+					|| "F2_UPSTREAM_SOFT_BLOCK".equals(confirmedEvidence)) {
+				riskUntil.put(riskKey(safePlatform, cookie), now + cooldownMs);
+				logger.warn("platform cooldown platform={} scope=COOKIE_RISK reason={} cooldownMs={}", safePlatform,
+						confirmedEvidence, cooldownMs);
+			} else {
+				douyinGlobalRiskStartedAtMs.accumulateAndGet(now, Math::max);
+				logger.warn("platform cooldown platform={} scope=GLOBAL_RISK reason={} cooldownMs={}", safePlatform,
+						confirmedEvidence, cooldownMs);
+			}
 			return true;
 		}
 		purgeExpiredRisks(now);
@@ -323,6 +329,9 @@ public class PlatformCookieService {
 		}
 		if (normalized.contains("f2_upstream_rate_limit")) {
 			return "F2_UPSTREAM_RATE_LIMIT";
+		}
+		if (normalized.contains("f2_upstream_soft_block")) {
+			return "F2_UPSTREAM_SOFT_BLOCK";
 		}
 		if (containsHttpStatusEvidence(normalized, "401")) return "HTTP_STATUS_401";
 		if (containsHttpStatusEvidence(normalized, "403")) return "HTTP_STATUS_403";

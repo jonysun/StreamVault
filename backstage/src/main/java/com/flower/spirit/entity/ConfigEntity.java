@@ -115,6 +115,8 @@ public class ConfigEntity implements Serializable {
 
 	@Column(name = "dtk_api_key")
 	private String dtkApiKey;
+	@Column(name = "dtk_api_pool", columnDefinition = "TEXT")
+	private String dtkApiPool;
 
 	@Column(name = "dtk_timeout_ms")
 	private String dtkTimeoutMs;
@@ -440,6 +442,8 @@ public class ConfigEntity implements Serializable {
 	public void setDtkBaseUrl(String dtkBaseUrl) { this.dtkBaseUrl = dtkBaseUrl; }
 	public String getDtkApiKey() { return dtkApiKey; }
 	public void setDtkApiKey(String dtkApiKey) { this.dtkApiKey = dtkApiKey; }
+	public String getDtkApiPool() { return dtkApiPool; }
+	public void setDtkApiPool(String dtkApiPool) { this.dtkApiPool = dtkApiPool; }
 	public String getDtkTimeoutMs() { return dtkTimeoutMs; }
 	public void setDtkTimeoutMs(String dtkTimeoutMs) { this.dtkTimeoutMs = dtkTimeoutMs; }
 	public String getDtkDetailRefreshEnabled() { return dtkDetailRefreshEnabled; }

@@ -273,6 +273,7 @@ public class ConfigService {
 				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
 		Global.dtkBaseUrl = configData.getDtkBaseUrl() == null ? "" : configData.getDtkBaseUrl().trim();
 		Global.dtkApiKey = configData.getDtkApiKey() == null ? "" : configData.getDtkApiKey().trim();
+		Global.dtkApiPool = configData.getDtkApiPool() == null ? "" : configData.getDtkApiPool().trim();
 		try {
 			Global.dtkTimeoutMs = Math.max(1000, Integer.parseInt(configData.getDtkTimeoutMs()));
 		} catch (RuntimeException ignored) {

@@ -68,6 +68,7 @@ public class AppConfig {
 				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
 		Global.dtkBaseUrl = data.getDtkBaseUrl() == null ? "" : data.getDtkBaseUrl().trim();
 		Global.dtkApiKey = data.getDtkApiKey() == null ? "" : data.getDtkApiKey().trim();
+		Global.dtkApiPool = data.getDtkApiPool() == null ? "" : data.getDtkApiPool().trim();
 		try { Global.dtkTimeoutMs = Math.max(1000, Integer.parseInt(data.getDtkTimeoutMs())); }
 		catch (RuntimeException ignored) { Global.dtkTimeoutMs = 15000; }
 		Global.dtkDetailRefreshEnabled = !"0".equals(data.getDtkDetailRefreshEnabled());

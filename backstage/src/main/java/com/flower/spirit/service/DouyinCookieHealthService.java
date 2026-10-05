@@ -221,6 +221,10 @@ public class DouyinCookieHealthService {
 		if ("AUTHOR_UNAVAILABLE".equals(probeStatus)) {
 			return status(item, "INDETERMINATE", "无法确认", "探针作者不存在或不可见，未判定 Cookie 失效", "AUTHOR_PROBE");
 		}
+		if ("F2_UPSTREAM_SOFT_BLOCK".equals(stringValue(probe.get("errorCode")))
+				&& platformCookieService != null) {
+			platformCookieService.reportRisk("douyin", cookie, "F2_UPSTREAM_SOFT_BLOCK");
+		}
 		return status(item, "INDETERMINATE", "无法确认",
 				"探针返回 " + valueOr(errorCategory, "UNKNOWN") + "，未判定 Cookie 失效", "PROBE");
 	}

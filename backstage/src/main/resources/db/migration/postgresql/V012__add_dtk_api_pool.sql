@@ -1,0 +1,1 @@
+ALTER TABLE biz_config ADD COLUMN dtk_api_pool TEXT NOT NULL DEFAULT '';
