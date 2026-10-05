@@ -59,6 +59,11 @@ public class CollectRunService {
 		});
 	}
 
+	public int repairInvalidBackfillState(int taskId) {
+		return databaseWriteExecutor.execute("collect-repair-invalid-backfill-state",
+				() -> transaction.repairInvalidBackfillState(taskId));
+	}
+
 	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, int observedCount,
 			String stopReason, CollectRunFetchedItem.FetchWatermark watermark) {
 		storeFetchPlan(runId, taskId, items, observedCount, stopReason, watermark, null);

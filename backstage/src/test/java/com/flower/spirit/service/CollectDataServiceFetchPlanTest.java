@@ -169,6 +169,31 @@ class CollectDataServiceFetchPlanTest {
 		assertThat(request.getValue().backfillComplete()).isFalse();
 		assertThat(request.getValue().backfillVerifying()).isFalse();
 		assertThat(request.getValue().backfillCleanPasses()).isZero();
+		verify(runService, never()).repairInvalidBackfillState(7);
+	}
+
+	@Test
+	void invalidPersistedBackfillStateIsRepairedBeforeFetch() {
+		CollectDataEntity task = postTask(new java.util.Date());
+		task.setBackfillSourceId("MS4-author");
+		task.setBackfillCursor("480");
+		task.setBackfillComplete(1);
+		task.setBackfillVerifying(1);
+		task.setBackfillCleanPasses(2);
+		when(taskDao.findById(7)).thenReturn(Optional.of(task));
+		when(queryService.findKnownWorkIds(7)).thenReturn(Set.of());
+		when(runService.repairInvalidBackfillState(7)).thenReturn(1);
+		when(fetchService.fetch(any())).thenReturn(envelope(List.of(), Set.of(), "NO_MORE"));
+
+		service.executeQueuedCollectTask(7, 914L, CollectTriggerType.SCHEDULED);
+
+		verify(runService).repairInvalidBackfillState(7);
+		ArgumentCaptor<DouyinFetchRequest> request = ArgumentCaptor.forClass(DouyinFetchRequest.class);
+		verify(fetchService).fetch(request.capture());
+		assertThat(request.getValue().backfillCursor()).isNull();
+		assertThat(request.getValue().backfillComplete()).isFalse();
+		assertThat(request.getValue().backfillVerifying()).isFalse();
+		assertThat(request.getValue().backfillCleanPasses()).isZero();
 	}
 
 	@Test

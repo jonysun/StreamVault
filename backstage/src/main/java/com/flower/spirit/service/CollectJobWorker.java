@@ -301,7 +301,8 @@ public class CollectJobWorker {
 	private static boolean isNonRetryable(String errorCode) {
 		return "INVALID_AUTHOR_ID".equals(errorCode) || "INVALID_SOURCE".equals(errorCode)
 				|| "UNSUPPORTED_PERSISTENT_FETCH".equals(errorCode) || "COOKIE_MISSING".equals(errorCode)
-				|| "F2_PROTOCOL_ERROR".equals(errorCode) || "DTK_UPSTREAM_SCHEMA".equals(errorCode);
+				|| "F2_PROTOCOL_ERROR".equals(errorCode) || "DTK_UPSTREAM_SCHEMA".equals(errorCode)
+				|| "COLLECT_STATE_INVALID".equals(errorCode);
 	}
 
 	static String faultDomain(String errorCode) {
@@ -309,6 +310,7 @@ public class CollectJobWorker {
 				|| "UNSUPPORTED_PERSISTENT_FETCH".equals(errorCode) || "COOKIE_MISSING".equals(errorCode)) {
 			return "TASK_CONFIGURATION";
 		}
+		if ("COLLECT_STATE_INVALID".equals(errorCode)) return "TASK_STATE";
 		if ("SQLITE_BUSY".equals(errorCode) || "DB_WRITE_FAILED".equals(errorCode)) return "DATABASE";
 		if ("PAUSED_DURING_EXECUTION".equals(errorCode)) return "RUNTIME_CONTROL";
 		if ("F2_UPSTREAM_TIMEOUT".equals(errorCode) || "F2_NETWORK_ERROR".equals(errorCode)) return "NETWORK";

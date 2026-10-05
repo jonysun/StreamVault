@@ -169,6 +169,7 @@ class CollectJobWorkerTest {
 		assertThat(CollectJobWorker.faultDomain("F2_UPSTREAM_RESPONSE_ERROR")).isEqualTo("REMOTE_API");
 		assertThat(CollectJobWorker.faultDomain("DB_WRITE_FAILED")).isEqualTo("DATABASE");
 		assertThat(CollectJobWorker.faultDomain("COOKIE_MISSING")).isEqualTo("TASK_CONFIGURATION");
+		assertThat(CollectJobWorker.faultDomain("COLLECT_STATE_INVALID")).isEqualTo("TASK_STATE");
 		assertThat(CollectJobWorker.faultDomain("F2_RUNTIME_ERROR")).isEqualTo("APPLICATION");
 		assertThat(CollectJobWorker.faultDomain("UNEXPECTED")).isEqualTo("APPLICATION");
 	}
@@ -449,6 +450,31 @@ class CollectJobWorkerTest {
 					"Douyin author identifier is invalid; update the task source");
 			verify(runService, never()).retryOrFail(any(), anyString(), anyString(), anyLong());
 			verify(cookieService, never()).douyinGlobalCooldownRemainingMillis();
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void invalidCollectStateFailsJobWithoutRetry() {
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		CollectJobClaim claim = new CollectJobClaim(4150L, 6250L, 99,
+				CollectTriggerType.SCHEDULED, 1, 3);
+		when(dataService.isCollectTaskEnabled(99)).thenReturn(true);
+		when(runService.currentState(6250L)).thenReturn(CollectRunState.FETCHING);
+		org.mockito.Mockito.doThrow(new CollectFetchException("COLLECT_STATE_INVALID",
+				"Douyin fetch backfill state is inconsistent: complete=true, verifying=true, cleanPasses=2"))
+				.when(dataService).executeQueuedCollectTask(99, 6250L, CollectTriggerType.SCHEDULED);
+		CollectJobWorker worker = new CollectJobWorker(mock(CollectQueueTransaction.class), runService,
+				dataService, cookieService, passthroughWrites(), 1);
+
+		try {
+			ReflectionTestUtils.invokeMethod(worker, "process", claim);
+			verify(runService).failJob(claim, "COLLECT_STATE_INVALID",
+					"Douyin fetch backfill state is inconsistent: complete=true, verifying=true, cleanPasses=2");
+			verify(runService, never()).retryOrFail(any(), anyString(), anyString(), anyLong());
 		} finally {
 			worker.shutdown();
 		}

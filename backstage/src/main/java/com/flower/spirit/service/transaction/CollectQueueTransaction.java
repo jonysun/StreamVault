@@ -134,6 +134,20 @@ public class CollectQueueTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int repairInvalidBackfillState(int taskId) {
+		return jdbcTemplate.update("UPDATE biz_collect_data SET backfill_cursor = '0', "
+				+ "backfill_complete = 0, backfill_verifying = 0, backfill_clean_passes = 0, "
+				+ "backfill_verified_at = NULL WHERE id = ? AND ("
+				+ "backfill_complete IS NULL OR backfill_complete NOT IN (0, 1) "
+				+ "OR backfill_verifying IS NULL OR backfill_verifying NOT IN (0, 1) "
+				+ "OR backfill_clean_passes IS NULL OR backfill_clean_passes NOT IN (0, 1, 2) "
+				+ "OR (backfill_complete = 1 AND (backfill_verifying <> 0 OR backfill_clean_passes <> 2)) "
+				+ "OR (backfill_verifying = 1 AND backfill_clean_passes >= 2) "
+				+ "OR (backfill_complete = 0 AND backfill_verifying = 0 AND backfill_clean_passes <> 0))",
+				taskId);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void storeFetchPlan(long runId, int taskId, List<CollectRunFetchedItem> items, String stopReason,
 			CollectRunFetchedItem.FetchWatermark watermark, Instant now) {
 		storeFetchPlan(runId, taskId, items, items.size(), stopReason, watermark, null, now);

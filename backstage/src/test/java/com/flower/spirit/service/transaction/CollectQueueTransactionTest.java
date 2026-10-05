@@ -436,6 +436,37 @@ class CollectQueueTransactionTest {
 	}
 
 	@Test
+	void invalidBackfillStateRepairIsConditionalAndAtomic() throws Exception {
+		try (AnnotationConfigApplicationContext context = context()) {
+			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+			createSchema(jdbc);
+			CollectQueueTransaction transaction = context.getBean(CollectQueueTransaction.class);
+			jdbc.update("INSERT INTO biz_collect_data(id, backfill_cursor, backfill_complete, "
+					+ "backfill_verifying, backfill_clean_passes, backfill_verified_at) "
+					+ "VALUES(7, '480', 1, 1, 2, CURRENT_TIMESTAMP)");
+			jdbc.update("INSERT INTO biz_collect_data(id, backfill_cursor, backfill_complete, "
+					+ "backfill_verifying, backfill_clean_passes, backfill_verified_at) "
+					+ "VALUES(8, '800', 1, 0, 2, CURRENT_TIMESTAMP)");
+
+			assertThat(transaction.repairInvalidBackfillState(7)).isEqualTo(1);
+			assertThat(transaction.repairInvalidBackfillState(8)).isZero();
+			assertThat(jdbc.queryForMap("SELECT backfill_cursor, backfill_complete, backfill_verifying, "
+					+ "backfill_clean_passes, backfill_verified_at FROM biz_collect_data WHERE id = 7"))
+					.containsEntry("backfill_cursor", "0")
+					.containsEntry("backfill_complete", 0)
+					.containsEntry("backfill_verifying", 0)
+					.containsEntry("backfill_clean_passes", 0)
+					.containsEntry("backfill_verified_at", null);
+			assertThat(jdbc.queryForMap("SELECT backfill_cursor, backfill_complete, backfill_verifying, "
+					+ "backfill_clean_passes FROM biz_collect_data WHERE id = 8"))
+					.containsEntry("backfill_cursor", "800")
+					.containsEntry("backfill_complete", 1)
+					.containsEntry("backfill_verifying", 0)
+					.containsEntry("backfill_clean_passes", 2);
+		}
+	}
+
+	@Test
 	void terminalRemoteAccountStateDisablesTaskAndSurvivesRunCompletion() throws Exception {
 		try (AnnotationConfigApplicationContext context = context()) {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);

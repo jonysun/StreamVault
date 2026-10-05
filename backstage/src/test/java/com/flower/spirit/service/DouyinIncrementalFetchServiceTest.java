@@ -67,6 +67,18 @@ class DouyinIncrementalFetchServiceTest {
 	}
 
 	@Test
+	void rejectsInvalidRequestStateAsNonRetryableCollectStateError() {
+		DouyinFetchRequest invalid = new DouyinFetchRequest("MS4-author", Set.of(), "100", 20, 10, 3,
+				DouyinFetchMode.INCREMENTAL, 40, "0", true, true, 2, "cookie");
+
+		assertThatThrownBy(() -> new DouyinIncrementalFetchService(new FakeRunner()).fetch(invalid))
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("complete=true")
+				.extracting(error -> ((CollectFetchException) error).getErrorCode())
+				.isEqualTo("COLLECT_STATE_INVALID");
+	}
+
+	@Test
 	void parsesBackfillProgressFields() {
 		FakeRunner runner = new FakeRunner();
 		runner.resultJson = """

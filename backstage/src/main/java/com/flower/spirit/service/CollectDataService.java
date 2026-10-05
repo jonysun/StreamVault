@@ -2297,11 +2297,19 @@ public class CollectDataService {
 				: mode == DouyinFetchMode.INCREMENTAL ? incrementalFetchLimit(task) : 0;
 		String currentSourceId = sourceId(task);
 		boolean sameBackfillSource = currentSourceId.equals(task.getBackfillSourceId());
-		String backfillCursor = sameBackfillSource ? task.getBackfillCursor() : null;
-		boolean backfillComplete = sameBackfillSource && flag(task.getBackfillComplete());
-		boolean backfillVerifying = sameBackfillSource && flag(task.getBackfillVerifying());
-		int backfillCleanPasses = sameBackfillSource
-				? Math.min(2, Math.max(0, valueOrZero(task.getBackfillCleanPasses()))) : 0;
+		boolean invalidBackfillState = sameBackfillSource && !validPersistedBackfillState(task);
+		if (invalidBackfillState) {
+			int repairedRows = collectRunService.repairInvalidBackfillState(task.getId());
+			logger.warn("[CollectTask] event=COLLECT_STATE_REPAIRED runId={} taskId={} sourceId={} "
+					+ "backfillSourceId={} cursor={} complete={} verifying={} cleanPasses={} repairedRows={}",
+					runId, task.getId(), currentSourceId, task.getBackfillSourceId(), task.getBackfillCursor(),
+					task.getBackfillComplete(), task.getBackfillVerifying(), task.getBackfillCleanPasses(), repairedRows);
+		}
+		String backfillCursor = sameBackfillSource && !invalidBackfillState ? task.getBackfillCursor() : null;
+		boolean backfillComplete = sameBackfillSource && !invalidBackfillState && flag(task.getBackfillComplete());
+		boolean backfillVerifying = sameBackfillSource && !invalidBackfillState && flag(task.getBackfillVerifying());
+		int backfillCleanPasses = sameBackfillSource && !invalidBackfillState
+				? valueOrZero(task.getBackfillCleanPasses()) : 0;
 		boolean verificationDue = mode == DouyinFetchMode.INCREMENTAL && backfillComplete
 				&& verificationDue(task.getBackfillVerifiedAt(), Instant.now());
 		if (verificationDue) {
@@ -2586,6 +2594,25 @@ public class CollectDataService {
 		return value == null ? 0 : value;
 	}
 
+	private static boolean validPersistedBackfillState(CollectDataEntity task) {
+		Integer completeValue = task.getBackfillComplete();
+		Integer verifyingValue = task.getBackfillVerifying();
+		Integer cleanPasses = task.getBackfillCleanPasses();
+		if (!isBinaryFlag(completeValue) || !isBinaryFlag(verifyingValue)
+				|| cleanPasses == null || cleanPasses < 0 || cleanPasses > 2) {
+			return false;
+		}
+		boolean complete = completeValue == 1;
+		boolean verifying = verifyingValue == 1;
+		return !(complete && (verifying || cleanPasses != 2))
+				&& !(verifying && cleanPasses >= 2)
+				&& !(!complete && !verifying && cleanPasses != 0);
+	}
+
+	private static boolean isBinaryFlag(Integer value) {
+		return value != null && (value == 0 || value == 1);
+	}
+
 	private String sourceId(CollectDataEntity task) {
 		String address = valueOrEmpty(task.getOriginaladdress());
 		String sourceId = address.startsWith("post") ? address.substring(4).trim() : "";
@@ -2612,6 +2639,9 @@ public class CollectDataService {
 		}
 		if ("F2_RUNTIME_ERROR".equals(errorCode) || "F2_PROTOCOL_ERROR".equals(errorCode)) {
 			return "APPLICATION";
+		}
+		if ("COLLECT_STATE_INVALID".equals(errorCode)) {
+			return "TASK_STATE";
 		}
 		if ("INVALID_AUTHOR_ID".equals(errorCode) || "INVALID_SOURCE".equals(errorCode)) {
 			return "TASK_CONFIGURATION";

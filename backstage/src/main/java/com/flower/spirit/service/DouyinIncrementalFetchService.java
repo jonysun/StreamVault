@@ -292,7 +292,10 @@ public class DouyinIncrementalFetchService {
 				|| (request.backfillVerifying() && request.backfillCleanPasses() >= 2)
 				|| (!request.backfillComplete() && !request.backfillVerifying()
 						&& request.backfillCleanPasses() != 0)) {
-			throw new IllegalArgumentException("Douyin fetch backfill state is inconsistent");
+			throw new CollectFetchException("COLLECT_STATE_INVALID",
+					"Douyin fetch backfill state is inconsistent: complete=" + request.backfillComplete()
+							+ ", verifying=" + request.backfillVerifying()
+							+ ", cleanPasses=" + request.backfillCleanPasses());
 		}
 	}
 
