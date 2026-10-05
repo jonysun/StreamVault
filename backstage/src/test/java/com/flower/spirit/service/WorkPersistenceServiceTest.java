@@ -128,7 +128,7 @@ class WorkPersistenceServiceTest {
 	@Test
 	void rejectsMissingDownloadedVideoBeforePersistence() {
 		org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.persist(metadata(WorkContentType.VIDEO,
-				List.of(resource(0, WorkMediaResource.Type.VIDEO, tempDir.resolve("missing.mp4"))))))
+				List.of(resource(0, WorkMediaResource.Type.VIDEO, tempDir.resolve("missing.mp4").toString()))))
 				.isInstanceOf(com.flower.spirit.platform.WorkMetadataValidationException.class)
 				.hasMessageContaining("missing or empty");
 	}
