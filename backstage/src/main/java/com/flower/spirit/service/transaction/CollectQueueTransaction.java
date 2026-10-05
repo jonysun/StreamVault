@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
+import com.flower.spirit.config.Global;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,6 +55,16 @@ public class CollectQueueTransaction {
 			CollectEnqueueResult active = existing.get(0);
 			return new CollectEnqueueResult(active.runId(), active.jobId(), currentRunState(active.runId()), false,
 					false);
+		}
+		if (triggerType == CollectTriggerType.SCHEDULED || triggerType == CollectTriggerType.MANUAL) {
+			Timestamp lastFinished = jdbcTemplate.query(
+					"SELECT finished_at FROM biz_collect_run WHERE collect_task_id = ? AND state = 'COMPLETED' "
+							+ "AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1",
+					rs -> rs.next() ? rs.getTimestamp(1) : null, taskId);
+			if (lastFinished != null && Global.collectTaskIntervalMs > 0) {
+				Instant eligible = lastFinished.toInstant().plusMillis(Global.collectTaskIntervalMs);
+				if (eligible.isAfter(availableAt)) availableAt = eligible;
+			}
 		}
 
 		long runId = insertRun(taskId, triggerType, requestedLimit, CollectRunState.QUEUED, availableAt);

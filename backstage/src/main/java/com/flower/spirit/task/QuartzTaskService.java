@@ -88,7 +88,8 @@ public class QuartzTaskService {
 
             CronTrigger trigger = TriggerBuilder.newTrigger()
                     .withIdentity("trigger-" + task.getId(), groupName)
-                    .withSchedule(CronScheduleBuilder.cronSchedule(cron))
+                    .withSchedule(CronScheduleBuilder.cronSchedule(cron)
+                            .withMisfireHandlingInstructionDoNothing())
                     .build();
 
             scheduler.scheduleJob(jobDetail, trigger);
