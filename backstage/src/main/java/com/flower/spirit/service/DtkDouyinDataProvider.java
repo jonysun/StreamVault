@@ -168,7 +168,8 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			if (response.statusCode() == 429)
 				throw new CollectFetchException("DTK_RATE_LIMITED", "DTK API 被限流 Retry-After=" + response.headers().firstValue("Retry-After").orElse("unknown"));
 			if (response.statusCode() < 200 || response.statusCode() >= 300)
-				throw new CollectFetchException("DTK_UPSTREAM_HTTP", "DTK API HTTP status=" + response.statusCode());
+				throw new CollectFetchException("DTK_UPSTREAM_HTTP", "DTK API HTTP status=" + response.statusCode()
+						+ ", endpoint=" + path + ", body=" + preview(response.body(), 1000));
 			JSONObject parsed = JSON.parseObject(response.body());
 			if (parsed == null) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 返回空 JSON");
 			Boolean success = parsed.getBoolean("success");
@@ -185,6 +186,12 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		} catch (Exception e) {
 			throw new CollectFetchException("DTK_UNAVAILABLE", "DTK API 请求失败: " + e.getClass().getSimpleName(), e);
 		}
+	}
+
+	private static String preview(String value, int limit) {
+		if (value == null) return "";
+		String normalized = value.replaceAll("[\\r\\n\\t]+", " ").trim();
+		return normalized.length() <= limit ? normalized : normalized.substring(0, limit) + "…";
 	}
 
 	private JSONObject normalizeItem(JSONObject item) {

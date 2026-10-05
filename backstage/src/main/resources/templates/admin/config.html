@@ -902,11 +902,28 @@
                 '<td>' + escapeHtml(message) + '</td>' +
                 '<td>' +
                 '<button type="button" class="btn btn-info btn-sm" onclick="openDouyinCookieEditor(' + i + ')">编辑</button> ' +
+                '<button type="button" class="btn btn-default btn-sm" onclick="showDouyinCookieDiagnostics(' + i + ')">诊断详情</button> ' +
                 '<button type="button" class="btn btn-danger btn-sm" onclick="deleteDouyinCookie(' + i + ')">删除</button>' +
                 '</td>' +
                 '</tr>';
             $rows.append(row);
         }
+    }
+
+    function showDouyinCookieDiagnostics(index){
+        var health = douyinCookieHealth[index + 1] || {};
+        var fields = ['status','statusText','message','evidence','probeStatus','errorCategory','listState',
+            'upstreamStatus','errorCode','probeMessage','probeSecUserId','profileStatus','pageStatus',
+            'exitCode','durationMs','outputPreview','diagnostics','probeAttempts'];
+        var html = '<div style="padding:16px;max-height:70vh;overflow:auto;"><table class="table table-bordered table-condensed">';
+        for(var i = 0; i < fields.length; i++){
+            var key = fields[i];
+            if(health[key] === undefined || health[key] === null || health[key] === '') continue;
+            var value = typeof health[key] === 'object' ? JSON.stringify(health[key], null, 2) : String(health[key]);
+            html += '<tr><th style="width:150px;white-space:nowrap;">' + escapeHtml(key) + '</th><td><pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(value) + '</pre></td></tr>';
+        }
+        html += '</table></div>';
+        layer.open({type:1, title:'Cookie 探针诊断详情 #' + (index + 1), area:['min(900px,96vw)','80%'], content:html});
     }
 
     function openDouyinCookieEditor(index){
