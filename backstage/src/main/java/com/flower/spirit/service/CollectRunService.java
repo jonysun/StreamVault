@@ -89,6 +89,13 @@ public class CollectRunService {
 		});
 	}
 
+	public void updateProvider(long runId, String providerPath, String providerReason) {
+		databaseWriteExecutor.execute("collect-run-provider", () -> {
+			transaction.updateProvider(runId, providerPath, providerReason, Instant.now());
+			return null;
+		});
+	}
+
 	public CollectRunState currentState(long runId) {
 		return databaseWriteExecutor.execute("collect-run-current-state", () -> transaction.currentState(runId));
 	}

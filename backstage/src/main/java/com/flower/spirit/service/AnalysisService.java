@@ -322,8 +322,8 @@ public class AnalysisService {
 					String baseName = FilenameUtils.getBaseName(filename);
 					String namefix = new File(new File(filename).getParent()).getName(); 
 					String dircos = FileUtil.generateDir(false, detectedPlatform, true,new File(new File(filename).getParent()).getName(), null, null);
-					String description = parseObject.getString("description");
-					String display_id = parseObject.getString("display_id");
+						String description = parseObject.getString("description");
+						String display_id = firstText(parseObject.getString("id"), parseObject.getString("display_id"));
 					String name = new File(filename).getName();
 					String coverdb = dircos + baseName + ".webp";
 					String videodb = dircos + name;
@@ -331,11 +331,21 @@ public class AnalysisService {
 						continue;
 					}
 					VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,detectedPlatform, coverdb, filename, videodb, url);
-					rawPayloadService.storeVideoRawPayload(videoDataEntity, parseObject.toJSONString());
+						rawPayloadService.storeVideoRawPayload(videoDataEntity, parseObject.toJSONString());
+						videoDataEntity.setPlatformkey(detectedPlatform);
+						videoDataEntity.setContenttype("video");
+						videoDataEntity.setPublishtime(normalizeLegacyPublishTime(parseObject));
+						videoDataEntity.setVideocover(firstText(parseObject.getString("thumbnail"),
+								parseObject.getString("cover_url"), coverdb));
 					videoDataEntity.setVideoauthor(parseObject.getString("uploader"));
 					videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
 					videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
-					videoDataEntity.setSourceurl(parseObject.getString("uploader_url"));
+						videoDataEntity.setAuthoravatar(firstText(parseObject.getString("uploader_avatar"),
+								parseObject.getString("channel_avatar")));
+					videoDataEntity.setAuthorhomepage(firstText(parseObject.getString("uploader_url"),
+							parseObject.getString("channel_url")));
+					videoDataEntity.setSourceurl(firstText(parseObject.getString("webpage_url"),
+							parseObject.getString("original_url"), url));
 					authorProfileService.upsertAuthor(detectedPlatform, parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), parseObject.getString("uploader"), null, parseObject.getString("uploader_url"));
 					VideoDataEntity saved = videoDataDao.save(videoDataEntity);
 					if (saved != null && saved.getId() != null) {
@@ -366,7 +376,8 @@ public class AnalysisService {
 				String h265Url = video.getH265Url();
 				String videoId = video.getVideoId();
 				String author = video.getAuthor();
-				String upload_date = DateUtils.formatDateTime(new Date(video.getTimestamp()));
+				String upload_date = video.getTimestamp() == null ? null
+						: DateUtils.normalizePublishTime(String.valueOf(video.getTimestamp()));
 				HashMap<String, String> header = new HashMap<String, String>();
 				String filename = FileNameTemplateUtil.resolveFileName(title, videoId, author, upload_date, "快手");
 				String videofile = FileUtil.generateDir(Global.down_path, Global.platform.kuaishou.name(), true,
@@ -395,7 +406,7 @@ public class AnalysisService {
 				HttpUtil.downloadFileWithOkHttp(coverUrl, coverfile, coverdir, header);
 				// 生成元数据
 				if (Global.getGeneratenfo) {
-					EmbyMetadataGenerator.createKuaiNfo(author, author, upload_date, videoId, title, title, coverfile,
+						EmbyMetadataGenerator.createKuaiNfo(author, author, upload_date, videoId, title, title, coverfile,
 							videofile);
 				}
 				videofile = videofile+filename + ".mp4";
@@ -405,12 +416,17 @@ public class AnalysisService {
 				VideoDataEntity videoDataEntity = new VideoDataEntity(videoId, title, title, platform, coverunaddr,
 						videofile,
 						videounrealaddr, url);
-				rawPayloadService.storeVideoRawPayload(videoDataEntity, JSONObject.toJSONString(video));
+					rawPayloadService.storeVideoRawPayload(videoDataEntity, JSONObject.toJSONString(video));
+					videoDataEntity.setPlatformkey("kuaishou");
+					videoDataEntity.setContenttype("video");
+					videoDataEntity.setPublishtime(video.getTimestamp() == null ? null
+							: DateUtils.normalizePublishTime(String.valueOf(video.getTimestamp())));
 				videoDataEntity.setVideoauthor(author);
 				videoDataEntity.setAuthoruid(video.getAuthorId());
 				videoDataEntity.setAuthorusername(video.getAuthorId());
-				videoDataEntity.setAuthoravatar(coverUrl);
-				videoDataEntity.setSourceurl(url);
+				videoDataEntity.setAuthoravatar(video.getAuthorAvatar());
+				videoDataEntity.setAuthorhomepage(video.getAuthorHomepage());
+				videoDataEntity.setSourceurl(firstText(video.getSourceUrl(), url));
 				authorProfileService.upsertAuthor(platform, video.getAuthorId(), video.getAuthorId(), author, coverUrl, url);
 				VideoDataEntity saved = videoDataDao.save(videoDataEntity);
 				if (saved != null && saved.getId() != null) {
@@ -587,7 +603,7 @@ public class AnalysisService {
 				// System.out.println(exec);
 				// String title = parseObject.getString("title");
 				String description = parseObject.getString("description");
-				String display_id = parseObject.getString("display_id");
+				String display_id = firstText(parseObject.getString("id"), parseObject.getString("display_id"));
 				String uploader = parseObject.getString("uploader");
 				String uploader_url = parseObject.getString("uploader_url");
 				String upload_date = parseObject.getString("upload_date");
@@ -602,15 +618,24 @@ public class AnalysisService {
 				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,
 						Global.platform.twitter.name(), coverdb, filename, videodb, url);
+				rawPayloadService.storeVideoRawPayload(videoDataEntity, parseObject.toJSONString());
+				videoDataEntity.setPlatformkey("twitter");
+				videoDataEntity.setContenttype("video");
+				videoDataEntity.setPublishtime(normalizeLegacyPublishTime(parseObject));
+				videoDataEntity.setVideocover(firstText(parseObject.getString("thumbnail"), coverdb));
 				videoDataEntity.setVideoauthor(uploader);
 				videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
 				videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
-				videoDataEntity.setSourceurl(uploader_url);
+				videoDataEntity.setAuthoravatar(firstText(parseObject.getString("uploader_avatar"),
+						parseObject.getString("author_avatar")));
+				videoDataEntity.setAuthorhomepage(firstText(uploader_url, parseObject.getString("channel_url")));
+				videoDataEntity.setSourceurl(firstText(parseObject.getString("webpage_url"),
+						parseObject.getString("original_url"), url));
 				authorProfileService.upsertAuthor(Global.platform.twitter.name(), parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), uploader, null, uploader_url);
 				videoDataDao.save(videoDataEntity);
 				processHistoryService.saveProcess(saveProcess.getId(), url, platform);
 				if (Global.getGeneratenfo) {
-					EmbyMetadataGenerator.generateMetadata(namefix, upload_date.substring(0, 4), description, "twitter",
+					EmbyMetadataGenerator.generateMetadata(namefix, safeYear(upload_date), description, "twitter",
 							null, uploader, filedoc, null, uploader_url, dir + baseNameNo + ".webp");
 				}
 				sendNotify.sendNotifyData(namefix, url, platform);
@@ -644,7 +669,7 @@ public class AnalysisService {
 			String dircos = FileUtil.generateDir(false, Global.platform.instagram.name(), true,
 					new File(new File(filename).getParent()).getName(), null, null);
 			String description = parseObject.getString("description");
-			String display_id = parseObject.getString("display_id");
+			String display_id = firstText(parseObject.getString("id"), parseObject.getString("display_id"));
 			String uploader = parseObject.getString("uploader");
 			String uploader_url = parseObject.getString("uploader_url");
 			String upload_date = parseObject.getString("upload_date");
@@ -659,15 +684,24 @@ public class AnalysisService {
 			}
 			VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,
 					Global.platform.instagram.name(), coverdb, filename, videodb, url);
+			rawPayloadService.storeVideoRawPayload(videoDataEntity, parseObject.toJSONString());
+			videoDataEntity.setPlatformkey("instagram");
+			videoDataEntity.setContenttype("video");
+			videoDataEntity.setPublishtime(normalizeLegacyPublishTime(parseObject));
+			videoDataEntity.setVideocover(firstText(parseObject.getString("thumbnail"), coverdb));
 			videoDataEntity.setVideoauthor(uploader);
 			videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
 			videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
-			videoDataEntity.setSourceurl(uploader_url);
+			videoDataEntity.setAuthoravatar(firstText(parseObject.getString("uploader_avatar"),
+					parseObject.getString("author_avatar")));
+			videoDataEntity.setAuthorhomepage(firstText(uploader_url, parseObject.getString("channel_url")));
+			videoDataEntity.setSourceurl(firstText(parseObject.getString("webpage_url"),
+					parseObject.getString("original_url"), url));
 			authorProfileService.upsertAuthor(Global.platform.instagram.name(), parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), uploader, null, uploader_url);
 			videoDataDao.save(videoDataEntity);
 			processHistoryService.saveProcess(saveProcess.getId(), url, platform);
 			if (Global.getGeneratenfo) {
-				EmbyMetadataGenerator.generateMetadata(namefix, upload_date.substring(0, 4), description, "instagram",
+				EmbyMetadataGenerator.generateMetadata(namefix, safeYear(upload_date), description, "instagram",
 						null, uploader, filedoc, null, uploader_url, dir + baseNameNo + ".webp");
 			}
 			sendNotify.sendNotifyData(namefix, url, platform);
@@ -707,7 +741,7 @@ public class AnalysisService {
 				// System.out.println(exec);
 				// String title = parseObject.getString("title");
 				String description = parseObject.getString("description");
-				String display_id = parseObject.getString("display_id");
+				String display_id = firstText(parseObject.getString("id"), parseObject.getString("display_id"));
 				String uploader = parseObject.getString("uploader");
 				String uploader_url = parseObject.getString("uploader_url");
 				String upload_date = parseObject.getString("upload_date");
@@ -722,15 +756,24 @@ public class AnalysisService {
 				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(display_id, baseName, description,
 						Global.platform.youtube.name(), coverdb, filename, videodb, youtube);
-				videoDataEntity.setSourceurl("https://www.youtube.com/watch?v=" + display_id);
+				rawPayloadService.storeVideoRawPayload(videoDataEntity, parseObject.toJSONString());
+				videoDataEntity.setPlatformkey("youtube");
+				videoDataEntity.setContenttype("video");
+				videoDataEntity.setPublishtime(normalizeLegacyPublishTime(parseObject));
+				videoDataEntity.setVideocover(firstText(parseObject.getString("thumbnail"), coverdb));
+				videoDataEntity.setSourceurl(firstText(parseObject.getString("webpage_url"),
+						parseObject.getString("original_url"), "https://www.youtube.com/watch?v=" + display_id));
 				videoDataEntity.setVideoauthor(uploader);
 				videoDataEntity.setAuthoruid(parseObject.getString("uploader_id"));
 				videoDataEntity.setAuthorusername(parseObject.getString("uploader_id"));
+				videoDataEntity.setAuthoravatar(firstText(parseObject.getString("uploader_avatar"),
+						parseObject.getString("channel_avatar")));
+				videoDataEntity.setAuthorhomepage(firstText(uploader_url, parseObject.getString("channel_url")));
 				authorProfileService.upsertAuthor(Global.platform.youtube.name(), parseObject.getString("uploader_id"), parseObject.getString("uploader_id"), uploader, null, uploader_url);
 				videoDataDao.save(videoDataEntity);
 				processHistoryService.saveProcess(saveProcess.getId(), youtube, platform);
 				if (Global.getGeneratenfo) {
-					EmbyMetadataGenerator.generateMetadata(namefix, upload_date.substring(0, 4), description, "youtube",
+					EmbyMetadataGenerator.generateMetadata(namefix, safeYear(upload_date), description, "youtube",
 							null, uploader, filedoc, null, uploader_url, dir + baseNameNo + ".webp");
 				}
 				sendNotify.sendNotifyData(namefix, youtube, platform);
@@ -815,10 +858,15 @@ public class AnalysisService {
 				}
 				VideoDataEntity videoDataEntity = new VideoDataEntity(cid, title, desc, platform, coverunaddr,
 						videoPath, videounaddr, video);
+				rawPayloadService.storeVideoRawPayload(videoDataEntity, JSONObject.toJSONString(videoInfo));
+				videoDataEntity.setPlatformkey("bilibili");
+				videoDataEntity.setContenttype("video");
+				videoDataEntity.setPublishtime(DateUtils.normalizePublishTime(ctime));
+				videoDataEntity.setVideocover(firstText(pic, coverunaddr));
 				String bvid = videoInfo.get("bvid");
 				if (bvid != null && !bvid.trim().isEmpty()) {
 					videoDataEntity.setSourceurl("https://www.bilibili.com/video/" + bvid + "/");
-				}
+				} else videoDataEntity.setSourceurl(video);
 				videoDataEntity.setVideoauthor(upname);
 				videoDataEntity.setAuthoruid(upmid);
 				videoDataEntity.setAuthorusername(upmid);
@@ -1298,8 +1346,10 @@ public class AnalysisService {
 						videoItem.put("index", i + 1);
 						videoItem.put("title", jsonObject.getString("title"));
 						videoItem.put("platform", platform);
+						videoItem.put("workId", firstText(jsonObject.getString("id"), jsonObject.getString("display_id")));
 						videoItem.put("author", jsonObject.getString("uploader"));
 						videoItem.put("duration", jsonObject.getInteger("duration"));
+						videoItem.put("publishTime", normalizeLegacyPublishTime(jsonObject));
 						videoItem.put("coverUrl", extractBestCoverUrlSimple(jsonObject));
 						// A playlist item must be submitted again as its canonical work URL.
 						// The media URL (when present) is often short-lived and cannot be
@@ -1309,7 +1359,12 @@ public class AnalysisService {
 							sourceUrl = jsonObject.getString("original_url");
 						}
 						if (sourceUrl == null || sourceUrl.isEmpty()) {
-							sourceUrl = jsonObject.getString("url");
+							String workId = firstText(jsonObject.getString("id"), jsonObject.getString("display_id"));
+							if (isYoutubeCollectionInput(video) && workId != null) {
+								sourceUrl = "https://www.youtube.com/watch?v=" + workId;
+							} else {
+								sourceUrl = jsonObject.getString("url");
+							}
 						}
 						videoItem.put("sourceUrl", sourceUrl);
 						
@@ -1447,6 +1502,25 @@ public class AnalysisService {
 		if (headers == null) return null;
 		for (Map.Entry<String, String> entry : headers.entrySet()) {
 			if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(key)) return entry.getValue();
+		}
+		return null;
+	}
+
+	private String normalizeLegacyPublishTime(JSONObject object) {
+		if (object == null) return null;
+		String raw = firstText(object.getString("timestamp"), object.getString("release_timestamp"),
+				object.getString("upload_date"), object.getString("date"));
+		return DateUtils.normalizePublishTime(raw);
+	}
+
+	private String safeYear(String publishTime) {
+		return publishTime != null && publishTime.length() >= 4 ? publishTime.substring(0, 4) : null;
+	}
+
+	private String firstText(String... values) {
+		if (values == null) return null;
+		for (String value : values) {
+			if (value != null && !value.trim().isEmpty()) return value.trim();
 		}
 		return null;
 	}

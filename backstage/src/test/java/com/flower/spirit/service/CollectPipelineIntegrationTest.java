@@ -215,7 +215,8 @@ class CollectPipelineIntegrationTest {
 				+ "carriedout TEXT, endtime TEXT, last_successful_fetch_at TIMESTAMP, last_seen_publish_time TEXT, "
 				+ "last_seen_work_id TEXT)");
 		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY AUTOINCREMENT, collect_task_id INTEGER NOT NULL, "
-				+ "trigger_type TEXT NOT NULL, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
+				+ "trigger_type TEXT NOT NULL, provider_mode TEXT NOT NULL DEFAULT 'UNKNOWN', provider_path TEXT NOT NULL DEFAULT 'UNKNOWN', "
+				+ "provider_reason TEXT, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
 				+ "planned_count INTEGER, inserted_count INTEGER, skipped_existing_count INTEGER, failed_item_count INTEGER, "
 				+ "started_at DATETIME, heartbeat_at DATETIME, finished_at DATETIME, error_code TEXT, error_message TEXT, "
 				+ "error_detail TEXT, fetch_stop_reason TEXT, fetch_warning TEXT, created_at DATETIME NOT NULL)");

@@ -115,7 +115,10 @@ public class CollectPipelineSchemaInitializer {
 				"remote_account_detected_at TIMESTAMP"));
 		definitions.put("biz_collect_run", List.of(
 				"fetch_stop_reason VARCHAR(64)",
-				"fetch_warning VARCHAR(255)"));
+				"fetch_warning VARCHAR(255)",
+				"provider_mode VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN'",
+				"provider_path VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN'",
+				"provider_reason VARCHAR(255)"));
 		definitions.put("biz_collect_run_item", List.of(
 				"metadata_snapshot TEXT",
 				"attempt_count INTEGER NOT NULL DEFAULT 0",

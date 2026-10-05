@@ -708,8 +708,9 @@ public class AdminController {
 	}
 
 	@GetMapping("/collect-runs/overview")
-	public Map<String, Object> collectRunsOverview(@RequestParam(defaultValue = "100") int limit) {
-		return collectRunQueryService.overview(limit);
+	public Map<String, Object> collectRunsOverview(@RequestParam(defaultValue = "100") int limit,
+			@RequestParam(required = false) String provider, @RequestParam(required = false) String state) {
+		return collectRunQueryService.overview(limit, provider, state);
 	}
 
 	@GetMapping("/collect-runs/{runId}")

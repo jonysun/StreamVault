@@ -51,9 +51,12 @@ class CollectPipelineSchemaInitializerTest {
 				Map.entry("remote_account_state", "VARCHAR(32)"),
 				Map.entry("remote_account_reason", "VARCHAR(255)"),
 				Map.entry("remote_account_detected_at", "TIMESTAMP")));
-		assertColumns(jdbcTemplate, "biz_collect_run", Map.of(
-				"fetch_stop_reason", "VARCHAR(64)",
-				"fetch_warning", "VARCHAR(255)"));
+			assertColumns(jdbcTemplate, "biz_collect_run", Map.of(
+					"fetch_stop_reason", "VARCHAR(64)",
+					"fetch_warning", "VARCHAR(255)",
+					"provider_mode", "VARCHAR(16)",
+					"provider_path", "VARCHAR(32)",
+					"provider_reason", "VARCHAR(255)"));
 		assertColumns(jdbcTemplate, "biz_collect_run_item", Map.of(
 				"metadata_snapshot", "TEXT",
 				"attempt_count", "INTEGER",

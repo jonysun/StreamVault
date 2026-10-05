@@ -80,8 +80,10 @@ public class DatabaseIndexInitializer {
 				"CREATE UNIQUE INDEX IF NOT EXISTS uq_collect_run_active_task "
 						+ "ON biz_collect_run(collect_task_id) "
 						+ "WHERE state IN ('QUEUED', 'FETCHING', 'PROCESSING')",
-				"CREATE INDEX IF NOT EXISTS idx_collect_run_task_created "
-						+ "ON biz_collect_run(collect_task_id, created_at DESC, id DESC)",
+					"CREATE INDEX IF NOT EXISTS idx_collect_run_task_created "
+							+ "ON biz_collect_run(collect_task_id, created_at DESC, id DESC)",
+					"CREATE INDEX IF NOT EXISTS idx_collect_run_created "
+							+ "ON biz_collect_run(created_at DESC, id DESC)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_task_id "
 						+ "ON biz_collect_run(collect_task_id, id DESC)",
 				"CREATE INDEX IF NOT EXISTS idx_collect_run_state_heartbeat "

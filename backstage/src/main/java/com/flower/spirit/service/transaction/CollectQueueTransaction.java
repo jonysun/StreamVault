@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.alibaba.fastjson.JSONObject;
+import com.flower.spirit.config.Global;
 import com.flower.spirit.service.CollectEnqueueResult;
 import com.flower.spirit.service.CollectBackfillProgress;
 import com.flower.spirit.service.CollectJobClaim;
@@ -381,6 +382,20 @@ public class CollectQueueTransaction {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void updateProvider(long runId, String providerPath, String providerReason, Instant now) {
+		String path = valueOr(providerPath, "UNKNOWN");
+		String reason = blankToNull(providerReason);
+		String previous = jdbcTemplate.queryForObject("SELECT provider_path FROM biz_collect_run WHERE id = ?",
+				String.class, runId);
+		jdbcTemplate.update("UPDATE biz_collect_run SET provider_path = ?, provider_reason = ? WHERE id = ?",
+				path, reason, runId);
+		if (!path.equals(previous)) {
+			appendEvent(runId, "INFO", "FETCHING", "PROVIDER_SELECTED",
+					"providerPath=" + path + (reason == null ? "" : ", reason=" + reason), null, now);
+		}
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void failDisabledSoftBlockRetry(CollectJobClaim claim, String message, Instant now) {
 		Timestamp timestamp = Timestamp.from(now);
 		int runUpdated = jdbcTemplate.update("UPDATE biz_collect_run SET state = 'FETCH_FAILED', finished_at = ?, "
@@ -448,16 +463,19 @@ public class CollectQueueTransaction {
 		KeyHolder keys = new GeneratedKeyHolder();
 		jdbcTemplate.update(connection -> {
 			PreparedStatement statement = connection.prepareStatement(
-					"INSERT INTO biz_collect_run (collect_task_id, trigger_type, state, requested_limit, "
+					"INSERT INTO biz_collect_run (collect_task_id, trigger_type, provider_mode, provider_path, state, requested_limit, "
 							+ "fetched_count, planned_count, inserted_count, skipped_existing_count, "
-							+ "failed_item_count, created_at) VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, ?)",
+							+ "failed_item_count, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?)",
 					Statement.RETURN_GENERATED_KEYS);
 			statement.setInt(1, taskId);
 			statement.setString(2, triggerType.name());
-			statement.setString(3, state.name());
-			if (requestedLimit == null) statement.setNull(4, java.sql.Types.INTEGER);
-			else statement.setInt(4, requestedLimit);
-			statement.setTimestamp(5, Timestamp.from(now));
+			String providerMode = configuredProvider();
+			statement.setString(3, providerMode);
+			statement.setString(4, initialProviderPath(providerMode));
+			statement.setString(5, state.name());
+			if (requestedLimit == null) statement.setNull(6, java.sql.Types.INTEGER);
+			else statement.setInt(6, requestedLimit);
+			statement.setTimestamp(7, Timestamp.from(now));
 			return statement;
 		}, keys);
 		return GeneratedIdExtractor.requireId(keys, "collect run");
@@ -635,6 +653,15 @@ public class CollectQueueTransaction {
 
 	private String valueOr(String value, String fallback) {
 		return value == null || value.isBlank() ? fallback : value;
+	}
+
+	private String configuredProvider() {
+		String value = Global.douyinProvider == null ? "" : Global.douyinProvider.trim().toUpperCase();
+		return List.of("F2", "DTK", "AUTO").contains(value) ? value : "UNKNOWN";
+	}
+
+	private String initialProviderPath(String mode) {
+		return "F2".equals(mode) || "DTK".equals(mode) ? mode : "UNKNOWN";
 	}
 
 	private record JobRow(long id, String payload, int attemptCount, int maxAttempts, String lastErrorCode) {

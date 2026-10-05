@@ -2322,6 +2322,9 @@ public class CollectDataService {
 				task.getLastSeenPublishTime(), incrementalKnownBoundary,
 				maxPages, emptyPageLimit, mode, batchLimit, backfillCursor,
 				backfillComplete, backfillVerifying, backfillCleanPasses, cookie);
+		String initialProviderPath = dtkMode || (autoMode && (cookie == null || cookie.isBlank())) ? "DTK" : "F2";
+		collectRunService.updateProvider(runId, initialProviderPath,
+				autoMode && "DTK".equals(initialProviderPath) ? "F2_COOKIE_MISSING" : null);
 		DouyinFetchEnvelope envelope;
 		try (DouyinF2RequestCoordinator.Permit ignored = dtkMode ? douyinF2RequestCoordinator.noopPermit()
 				: douyinF2RequestCoordinator.acquire()) {
@@ -2333,8 +2336,15 @@ public class CollectDataService {
 				envelope = dtkMode || autoMode
 						? douyinDataProviderService.fetchAuthorWorks(request)
 						: douyinIncrementalFetchService.fetch(request);
+				String providerPath = envelope.diagnostics() == null ? null
+						: envelope.diagnostics().getString("providerPath");
+				String providerReason = envelope.diagnostics() == null ? null
+						: envelope.diagnostics().getString("providerReason");
+				collectRunService.updateProvider(runId, providerPath == null ? initialProviderPath : providerPath,
+						providerReason);
 				if (!dtkMode && !autoMode) platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
 			} catch (CollectFetchException error) {
+				collectRunService.updateProvider(runId, initialProviderPath, error.getErrorCode());
 				logger.warn("[DouyinProvider] provider={} event=AUTHOR_LIST_FAILURE code={} faultDomain={} "
 						+ "cooldownScope={} evidence={}", dtkMode ? "DTK" : autoMode ? "AUTO" : "F2", error.getErrorCode(),
 						douyinFetchFaultDomain(error.getErrorCode()),
@@ -2430,6 +2440,7 @@ public class CollectDataService {
 	}
 
 	private void executeBoundedLegacyFetchAndPlan(CollectDataEntity task, long runId) throws IOException {
+		collectRunService.updateProvider(runId, "F2", null);
 		JSONArray fetched = getDYData(task, "Y", "collect-run-" + runId);
 		if (fetched == null) {
 			F2FailureDiagnosis diagnosis = lastF2FailureDiagnosis.get();

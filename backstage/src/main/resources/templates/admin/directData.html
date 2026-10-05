@@ -1154,6 +1154,8 @@ $(document).ready(function() {
             const title = video.title || '无标题';
             const author = video.author || '未知作者';
             const duration = video.duration ? formatDuration(video.duration) : '未知';
+            const publishTime = video.publishTime || '发布时间未知';
+            const workId = video.workId || '';
             const videoUrl = video.videoUrl || '';
             const audioUrl = video.audioUrl || '';
             const coverUrl = video.coverUrl || '';
@@ -1172,6 +1174,8 @@ $(document).ready(function() {
                             <div class="video-meta">
                                 <span class="meta-item"><i class="mdi mdi-account"></i> ${escapeHtml(author)}</span>
                                 <span class="meta-item"><i class="mdi mdi-clock"></i> ${duration}</span>
+                                <span class="meta-item"><i class="mdi mdi-calendar"></i> ${escapeHtml(publishTime)}</span>
+                                ${workId ? `<span class="meta-item"><i class="mdi mdi-identifier"></i> ${escapeHtml(workId)}</span>` : ''}
                                 ${isDash ? '<span class="meta-item badge-dash">DASH</span>' : ''}
                             </div>
                             <div class="video-actions">

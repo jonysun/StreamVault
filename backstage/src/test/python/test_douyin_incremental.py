@@ -1246,6 +1246,41 @@ class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("AUTHENTICATION", payload["errorCategory"])
         self.assertNotIn("Traceback", stdout.getvalue())
 
+    async def test_author_probe_uses_profile_and_post_list_and_accepts_empty_list(self):
+        module, crawlers = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "probe-author"}},
+            [{"status_code": 0, "aweme_list": [], "has_more": 0, "max_cursor": 0}],
+        )
+
+        result = await module.probe_douyin_author("sessionid=secret", "MS4-probe")
+
+        self.assertEqual("VALID", result["probeStatus"])
+        self.assertEqual("EMPTY", result["listState"])
+        self.assertEqual(0, result["collectCount"])
+        self.assertEqual(["MS4-probe"], crawlers[0].profile_ids)
+        self.assertEqual([0], crawlers[0].post_cursors)
+
+    async def test_author_probe_marks_null_post_list_as_upstream_schema(self):
+        module, _ = self._load_command_module(
+            {"status_code": 0, "user": {"nickname": "probe-author"}},
+            [{"status_code": 0, "aweme_list": None, "has_more": 0, "max_cursor": 0}],
+        )
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            await module.run_author_probe_command(
+                argparse.Namespace(cookie="sessionid=secret", sec_user_id="MS4-probe")
+            )
+
+        payload = json.loads(
+            stdout.getvalue().split("stream-vault-start-author-probe", 1)[1]
+            .split("stream-vault-end-author-probe", 1)[0]
+            .strip()
+        )
+        self.assertEqual("INDETERMINATE", payload["probeStatus"])
+        self.assertEqual("UPSTREAM_SCHEMA", payload["errorCategory"])
+        self.assertNotIn("sessionid=secret", stdout.getvalue())
+
     async def test_uses_profile_precheck_and_direct_page_requests(self):
         profile = {"status_code": 0, "user": {"nickname": "author"}}
         pages = [{

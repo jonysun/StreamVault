@@ -147,6 +147,11 @@ public class HongShuExecutor {
 					VideoDataEntity videoDataEntity = new VideoDataEntity(keyid, title, title, "小红书", coverunaddr,
 							videofile,
 							videounrealaddr, url);
+					videoDataEntity.setPlatformkey("xiaohongshu");
+					videoDataEntity.setContenttype("video");
+					videoDataEntity.setAuthorhomepage(null);
+					videoDataEntity.setVideocover(coverunaddr);
+					videoDataEntity.setJsonData(json.toJSONString());
 					videoDataEntity.setPublishtime(DateUtils.formatDateTime(new Date(Long.parseLong(time)*1000)));
 					videoDataEntity.setVideoauthor(nickname);
 					videoDataEntity.setAuthoruid(userId);
@@ -202,8 +207,12 @@ public class HongShuExecutor {
 		graphicContentEntity.setAuthoruid(userId);
 		graphicContentEntity.setAuthorusername(userId);
 		graphicContentEntity.setAuthoravatar(avatar);
+		graphicContentEntity.setAuthorhomepage(url);
 		graphicContentEntity.setSourceurl(url);
-		graphicContentEntity.setPublishtime(null);
+		graphicContentEntity.setPlatformkey("xiaohongshu");
+		graphicContentEntity.setContenttype(videos == null || videos.isEmpty() ? "graphic" : "mixed");
+		graphicContentEntity.setPublishtime(DateUtils.normalizePublishTime(time));
+		graphicContentEntity.setJsonData(json.toJSONString());
 		graphicContentEntity.setCreatetime(new Date());
 		graphicContentDao.save(graphicContentEntity);
 		sendNotify.sendNotifyData(filename+"(图文)", url, "小红书");

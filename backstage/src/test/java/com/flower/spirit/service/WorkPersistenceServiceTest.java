@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -32,17 +34,20 @@ import com.flower.spirit.service.WorkDeduplicationService.ExistingWork;
 
 @ExtendWith(MockitoExtension.class)
 class WorkPersistenceServiceTest {
+	@TempDir
+	Path tempDir;
 
 	@Mock private WorkDeduplicationService deduplicationService;
 	@Mock private VideoDataDao videoDataDao;
 	@Mock private GraphicContentDao graphicContentDao;
 	@Mock private AuthorProfileService authorProfileService;
-	private final MediaPathService mediaPathService = new MediaPathService(Path.of("C:/media"), "/cos");
+	private MediaPathService mediaPathService;
 
 	private WorkPersistenceService service;
 
 	@BeforeEach
 	void setUp() {
+		mediaPathService = new MediaPathService(tempDir, "/cos");
 		service = new WorkPersistenceService(new WorkMetadataNormalizer(ZoneId.of("UTC")), deduplicationService,
 				videoDataDao, graphicContentDao, authorProfileService, mediaPathService, new RawPayloadService());
 		when(deduplicationService.findExisting(any())).thenReturn(Optional.empty());
@@ -57,7 +62,7 @@ class WorkPersistenceServiceTest {
 		});
 
 		WorkPersistenceService.PersistenceResult result = service.persist(metadata(WorkContentType.VIDEO,
-				List.of(resource(0, WorkMediaResource.Type.VIDEO, "C:/media/video.mp4"))));
+				List.of(resource(0, WorkMediaResource.Type.VIDEO, mediaFile("video.mp4")))));
 
 		VideoDataEntity video = result.video();
 		assertThat(result.created()).isTrue();
@@ -86,15 +91,15 @@ class WorkPersistenceServiceTest {
 		});
 
 		WorkPersistenceService.PersistenceResult result = service.persist(metadata(WorkContentType.MIXED, List.of(
-				resource(1, WorkMediaResource.Type.VIDEO, "C:/media/second.mp4"),
-				resource(0, WorkMediaResource.Type.IMAGE, "C:/media/first.jpg"))));
+				resource(1, WorkMediaResource.Type.VIDEO, mediaFile("second.mp4")),
+				resource(0, WorkMediaResource.Type.IMAGE, mediaFile("first.jpg")))));
 
 		GraphicContentEntity graphic = result.graphic();
 		assertThat(result.contentType()).isEqualTo(WorkContentType.MIXED);
 		assertThat(graphic.getContenttype()).isEqualTo("mixed");
 		assertThat(JSON.parseArray(graphic.getImages(), String.class))
 				.containsExactly("/cos/first.jpg", "/cos/second.mp4");
-		assertThat(graphic.getMarkroute()).isEqualTo("C:\\media");
+		assertThat(graphic.getMarkroute()).isEqualTo(tempDir.toString());
 	}
 
 	@Test
@@ -118,6 +123,14 @@ class WorkPersistenceServiceTest {
 		assertThat(existing.getFavorite()).isEqualTo("1");
 		assertThat(existing.getMetadataoverrides()).contains("manual");
 		assertThat(existing.getVideoaddr()).isEqualTo("C:/old/video.mp4");
+	}
+
+	@Test
+	void rejectsMissingDownloadedVideoBeforePersistence() {
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.persist(metadata(WorkContentType.VIDEO,
+				List.of(resource(0, WorkMediaResource.Type.VIDEO, tempDir.resolve("missing.mp4"))))))
+				.isInstanceOf(com.flower.spirit.platform.WorkMetadataValidationException.class)
+				.hasMessageContaining("missing or empty");
 	}
 
 	private WorkMetadata metadata(WorkContentType type, List<WorkMediaResource> resources) {
@@ -144,6 +157,16 @@ class WorkPersistenceServiceTest {
 
 	private WorkMediaResource resource(int order, WorkMediaResource.Type type, String path) {
 		return new WorkMediaResource(order, type, null, Path.of(path), null, Map.of());
+	}
+
+	private String mediaFile(String name) {
+		try {
+			Path file = tempDir.resolve(name);
+			Files.writeString(file, "media");
+			return file.toString();
+		} catch (java.io.IOException error) {
+			throw new java.io.UncheckedIOException(error);
+		}
 	}
 
 	private WorkMediaResource remoteVideoResource() {

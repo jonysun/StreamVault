@@ -15,6 +15,8 @@ public class TikTokConfigService {
 	public static final int DEFAULT_RISK_COOLDOWN_MINUTES = 10;
 	public static final int MIN_RISK_COOLDOWN_MINUTES = 1;
 	public static final int MAX_RISK_COOLDOWN_MINUTES = 1440;
+	public static final String DEFAULT_DOUYIN_PROBE_SEC_USER_ID =
+			"MS4wLjABAAAApksOkI0F7EMtId8CEunyMrlPTWGpOTDuqdlZ8VmCqcQXq7p_tDdUtFB_rLV-rqez";
 	
 	
 	@Autowired
@@ -28,10 +30,16 @@ public class TikTokConfigService {
 		List<TikTokConfigEntity> findAll = tikTokConfigDao.findAll();
 		if(findAll.size() ==0) {
 			TikTokConfigEntity tikTokConfigEntity = new TikTokConfigEntity();
+			tikTokConfigEntity.setDouyinProbeSecUserId(DEFAULT_DOUYIN_PROBE_SEC_USER_ID);
 			TikTokConfigEntity save = tikTokConfigDao.save(tikTokConfigEntity);
 			return save;
 		}
-		return findAll.get(0);
+		TikTokConfigEntity config = findAll.get(0);
+		if (isBlank(config.getDouyinProbeSecUserId())) {
+			config.setDouyinProbeSecUserId(DEFAULT_DOUYIN_PROBE_SEC_USER_ID);
+			config = tikTokConfigDao.save(config);
+		}
+		return config;
 	}
 
 	public AjaxEntity updateTikTokConfig(TikTokConfigEntity tikTokConfigEntity) {
@@ -49,6 +57,9 @@ public class TikTokConfigService {
 		}
 		if (isBlank(tikTokConfigEntity.getCookies()) && !isBlank(tikTokConfigEntity.getCookiepool())) {
 			tikTokConfigEntity.setCookies(firstCookie(tikTokConfigEntity.getCookiepool()));
+		}
+		if (isBlank(tikTokConfigEntity.getDouyinProbeSecUserId())) {
+			tikTokConfigEntity.setDouyinProbeSecUserId(DEFAULT_DOUYIN_PROBE_SEC_USER_ID);
 		}
 		tikTokConfigDao.save(tikTokConfigEntity);
 		if(null != tikTokConfigEntity.getCookies() && !"".equals(tikTokConfigEntity.getCookies())) {

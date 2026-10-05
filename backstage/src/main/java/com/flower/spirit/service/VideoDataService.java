@@ -285,7 +285,15 @@ public class VideoDataService {
 			return "asc".equalsIgnoreCase(sortOrder) ? List.of(cb.asc(root.get("id"))) : List.of(cb.desc(root.get("id")));
 		}
 		if ("asc".equalsIgnoreCase(sortOrder)) {
+			if ("publishtime".equals(sortField)) {
+				return List.of(cb.asc(cb.selectCase().when(cb.or(cb.isNull(root.get(sortField)), cb.equal(root.get(sortField), "")), 1).otherwise(0)),
+						cb.asc(root.get(sortField)), cb.desc(root.get("id")));
+			}
 			return List.of(cb.asc(root.get(sortField)), cb.desc(root.get("id")));
+		}
+		if ("publishtime".equals(sortField)) {
+			return List.of(cb.asc(cb.selectCase().when(cb.or(cb.isNull(root.get(sortField)), cb.equal(root.get(sortField), "")), 1).otherwise(0)),
+					cb.desc(root.get(sortField)), cb.desc(root.get("id")));
 		}
 		return List.of(cb.desc(root.get(sortField)), cb.desc(root.get("id")));
 	}

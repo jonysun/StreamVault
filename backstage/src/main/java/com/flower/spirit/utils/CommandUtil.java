@@ -200,6 +200,12 @@ public class CommandUtil {
                 cmdList.add("--cookie"); cmdList.add(cookie);
                 break;
 
+            case "probe_author_list":
+                cmdList.add("probe_author_list");
+                cmdList.add("--cookie"); cmdList.add(cookie);
+                cmdList.add("--sec_user_id"); cmdList.add(uid);
+                break;
+
             case "fetch_user_collects_videos":
                 cmdList.add("fetch_user_collects_videos");
                 cmdList.add("--cookie"); cmdList.add(cookie);

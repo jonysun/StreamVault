@@ -80,7 +80,7 @@ public class MediaFeedQueryDao {
 		appendAuthorWhere(sql, parameters, request);
 		appendCursor(sql, parameters, cursor, request.getOrder(), mediaType);
 		boolean ascending = "asc".equals(request.getOrder());
-		sql.append(" ORDER BY publishtime ").append(ascending ? "ASC" : "DESC")
+		sql.append(" ORDER BY publishtime ").append(ascending ? "ASC NULLS LAST" : "DESC NULLS LAST")
 				.append(", id ").append(ascending ? "ASC" : "DESC").append(" LIMIT ?");
 		parameters.add(limit);
 		return jdbcTemplate.query(sql.toString(), this::mapRow, parameters.toArray());
@@ -108,17 +108,30 @@ public class MediaFeedQueryDao {
 		String cursorTime = LOCAL_TIME.format(LocalDateTime.ofInstant(cursor.sortTime(), ZoneId.systemDefault()));
 		String prefix = sql.indexOf(" WHERE ") >= 0 ? " AND " : " WHERE ";
 		int mediaComparison = mediaType.compareTo(cursor.mediaType());
-		if (mediaComparison > 0) {
-			sql.append(prefix).append("(publishtime ").append(timeOperator)
-					.append(" ? OR publishtime = ?)");
+		if (cursor.nullTime()) {
+			// Missing publish times form the final bucket in either direction.
+			if (mediaComparison > 0) {
+				sql.append(prefix).append("(publishtime IS NULL OR publishtime = '')");
+			} else if (mediaComparison == 0) {
+				sql.append(prefix).append("((publishtime IS NULL OR publishtime = '') AND id ")
+						.append(idOperator).append(" ?)");
+				parameters.add(cursor.internalId());
+			} else {
+				sql.append(prefix).append("1 = 0");
+			}
+		} else if (mediaComparison > 0) {
+			// A later media type wins the tie at the cursor timestamp.
+			sql.append(prefix).append("(NULLIF(publishtime, '') ").append(timeOperator)
+					.append(" ? OR NULLIF(publishtime, '') = ? OR publishtime IS NULL OR publishtime = '')");
 			parameters.add(cursorTime);
 			parameters.add(cursorTime);
 		} else if (mediaComparison < 0) {
-			sql.append(prefix).append("publishtime ").append(timeOperator).append(" ?");
+			sql.append(prefix).append("(NULLIF(publishtime, '') ").append(timeOperator)
+					.append(" ? OR publishtime IS NULL OR publishtime = '')");
 			parameters.add(cursorTime);
 		} else {
-			sql.append(prefix).append("(publishtime ").append(timeOperator)
-					.append(" ? OR (publishtime = ? AND id ").append(idOperator).append(" ?))");
+			sql.append(prefix).append("(NULLIF(publishtime, '') ").append(timeOperator)
+					.append(" ? OR publishtime IS NULL OR publishtime = '' OR (publishtime = ? AND id ").append(idOperator).append(" ?))");
 			parameters.add(cursorTime);
 			parameters.add(cursorTime);
 			parameters.add(cursor.internalId());
@@ -127,10 +140,15 @@ public class MediaFeedQueryDao {
 
 	private Comparator<MediaFeedRow> feedComparator(String order) {
 		boolean ascending = "asc".equals(order);
-		Comparator<MediaFeedRow> time = Comparator.comparingLong(MediaFeedRow::sortTimeMillis);
+		Comparator<MediaFeedRow> time = (left, right) -> {
+			if (left.publishTime() == null && right.publishTime() == null) return 0;
+			if (left.publishTime() == null) return 1;
+			if (right.publishTime() == null) return -1;
+			int result = left.publishTime().compareTo(right.publishTime());
+			return ascending ? result : -result;
+		};
 		Comparator<Integer> id = Comparator.naturalOrder();
 		if (!ascending) {
-			time = time.reversed();
 			id = id.reversed();
 		}
 		return time.thenComparing(MediaFeedRow::mediaType).thenComparing(MediaFeedRow::internalId, id);

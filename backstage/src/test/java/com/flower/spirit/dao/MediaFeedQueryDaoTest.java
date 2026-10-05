@@ -71,6 +71,29 @@ class MediaFeedQueryDaoTest {
 	}
 
 	@Test
+	void nullPublishTimeBucketContinuesWithoutRepeatingRows() throws Exception {
+		CapturingJdbcTemplate jdbc = database();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_video(id, videoid, publishtime) VALUES "
+				+ "(1, 'video-1', '2026-07-25 10:00:00'), (3, 'video-3', NULL)");
+		jdbc.update("INSERT INTO biz_graphic_content(id, videoid, publishtime, images) VALUES "
+				+ "(2, 'graphic-2', '2026-07-25 10:00:00', '[\"/g2.jpg\"]'), "
+				+ "(4, 'graphic-4', NULL, '[\"/g4.jpg\"]')");
+		MediaFeedQueryDao dao = new MediaFeedQueryDao(jdbc);
+		MediaFeedRequest request = request("mixed", "desc");
+
+		List<MediaFeedRow> first = dao.find(request, null, 3);
+		MediaFeedRow last = first.get(first.size() - 1);
+		FeedCursor cursor = new FeedCursor(Instant.ofEpochMilli(last.sortTimeMillis()), last.mediaType(),
+				last.internalId(), "desc", "hash", last.publishTime() == null);
+		List<MediaFeedRow> second = dao.find(request, cursor, 3);
+
+		assertThat(first).extracting(MediaFeedRow::mediaKey)
+				.containsExactly("graphic:2", "video:1", "graphic:4");
+		assertThat(second).extracting(MediaFeedRow::mediaKey).containsExactly("video:3");
+	}
+
+	@Test
 	void authorScopeRequiresBothCanonicalPlatformAndUidInSql() throws Exception {
 		CapturingJdbcTemplate jdbc = database();
 		createSchema(jdbc);

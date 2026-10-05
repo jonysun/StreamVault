@@ -25,7 +25,7 @@ class DouyinCookieHealthServiceTest {
 		when(cookieService.isDouyinGlobalCooldownActive()).thenReturn(true);
 		when(cookieService.douyinGlobalCooldownRemainingMillis()).thenReturn(120_000L);
 		DouyinCookieHealthService service = new DouyinCookieHealthService(configService, cookieService,
-				cookie -> { throw new AssertionError("probe must not run during cooldown"); });
+				(cookie, secUserId) -> { throw new AssertionError("probe must not run during cooldown"); });
 
 		Map<String, Object> result = service.checkDouyinCookies(false);
 
@@ -50,7 +50,7 @@ class DouyinCookieHealthServiceTest {
 				+ "\"upstreamStatus\":\"0\",\"listState\":\"NULL\",\"collectCount\":0,"
 				+ "\"errorCategory\":\"UPSTREAM_SCHEMA\"} stream-vault-end-cookie-probe";
 		DouyinCookieHealthService service = new DouyinCookieHealthService(configService, cookieService,
-				ignored -> new DouyinCookieHealthService.ProbeExecution(output, 0, 15L));
+				(ignored, secUserId) -> new DouyinCookieHealthService.ProbeExecution(output, 0, 15L));
 
 		Map<String, Object> result = service.checkDouyinCookies(false);
 
@@ -74,11 +74,37 @@ class DouyinCookieHealthServiceTest {
 		PlatformCookieService cookieService = mock(PlatformCookieService.class);
 		when(cookieService.hasRecentSuccess("douyin", cookie, java.time.Duration.ofMinutes(15))).thenReturn(true);
 		DouyinCookieHealthService service = new DouyinCookieHealthService(configService, cookieService,
-				ignored -> { throw new AssertionError("recent success should skip probe"); });
+				(ignored, secUserId) -> { throw new AssertionError("recent success should skip probe"); });
 
 		Map<String, Object> result = service.checkDouyinCookies(false);
 
 		Map<String, Object> item = (Map<String, Object>) ((List<?>) result.get("items")).get(0);
 		assertThat(item).containsEntry("status", "VALID").containsEntry("evidence", "RECENT_SUCCESS");
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void authorListProbeMarksAnEmptyButValidAuthorAsValid() {
+		String cookie = "odin_tt=a; sessionid=b; ttwid=c; passport_csrf_token=d";
+		TikTokConfigEntity config = new TikTokConfigEntity();
+		config.setCookiepool(cookie);
+		config.setDouyinProbeSecUserId("MS4-probe");
+		TikTokConfigService configService = mock(TikTokConfigService.class);
+		when(configService.getData()).thenReturn(config);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		String output = "stream-vault-start-author-probe {\"probeStatus\":\"VALID\","
+				+ "\"secUserId\":\"MS4-probe\",\"upstreamStatus\":\"0\","
+				+ "\"listState\":\"EMPTY\",\"collectCount\":0,"
+				+ "\"errorCategory\":\"NONE\"} stream-vault-end-author-probe";
+		DouyinCookieHealthService service = new DouyinCookieHealthService(configService, cookieService,
+				(cookieValue, secUserId) -> new DouyinCookieHealthService.ProbeExecution(output, 0, 20L));
+
+		Map<String, Object> result = service.checkDouyinCookies(false);
+
+		assertThat(result).containsEntry("valid", 1).containsEntry("indeterminate", 0);
+		Map<String, Object> item = (Map<String, Object>) ((List<?>) result.get("items")).get(0);
+		assertThat(item).containsEntry("status", "VALID")
+				.containsEntry("listState", "EMPTY")
+				.containsEntry("probeSecUserId", "MS4-probe");
 	}
 }

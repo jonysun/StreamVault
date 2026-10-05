@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +16,10 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.config.Global;
+import com.flower.spirit.dao.CollectdDataDao;
 import com.flower.spirit.entity.CollectDataEntity;
 import com.flower.spirit.entity.TikTokConfigEntity;
+import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.utils.CommandUtil;
 import com.flower.spirit.utils.sendNotify;
 
@@ -29,25 +32,34 @@ public class DouyinCookieHealthService {
 	private static final int COLLECT_DEGRADED_LOW_COUNT = 8;
 	private static final String PROBE_START = "stream-vault-start-cookie-probe";
 	private static final String PROBE_END = "stream-vault-end-cookie-probe";
+	private static final String AUTHOR_PROBE_START = "stream-vault-start-author-probe";
+	private static final String AUTHOR_PROBE_END = "stream-vault-end-author-probe";
 
 	private final TikTokConfigService tikTokConfigService;
 	private final PlatformCookieService platformCookieService;
+	private final CollectdDataDao collectdDataDao;
 	private final ProbeRunner probeRunner;
 	private final Map<String, Long> lastNotifyAt = new ConcurrentHashMap<>();
 
 	@Autowired
 	public DouyinCookieHealthService(TikTokConfigService tikTokConfigService,
-			PlatformCookieService platformCookieService) {
-		this(tikTokConfigService, platformCookieService, cookie -> {
-			String output = CommandUtil.f2cmd(cookie, null, "fetch_user_collects", null, null, null, null);
+			PlatformCookieService platformCookieService, CollectdDataDao collectdDataDao) {
+		this(tikTokConfigService, platformCookieService, collectdDataDao, (cookie, secUserId) -> {
+			String output = CommandUtil.f2cmd(cookie, null, "probe_author_list", secUserId, null, null, null);
 			return new ProbeExecution(output, CommandUtil.getLastF2ExitCode(), CommandUtil.getLastF2DurationMs());
 		});
 	}
 
 	DouyinCookieHealthService(TikTokConfigService tikTokConfigService, PlatformCookieService platformCookieService,
 			ProbeRunner probeRunner) {
+		this(tikTokConfigService, platformCookieService, null, probeRunner);
+	}
+
+	DouyinCookieHealthService(TikTokConfigService tikTokConfigService, PlatformCookieService platformCookieService,
+			CollectdDataDao collectdDataDao, ProbeRunner probeRunner) {
 		this.tikTokConfigService = tikTokConfigService;
 		this.platformCookieService = platformCookieService;
+		this.collectdDataDao = collectdDataDao;
 		this.probeRunner = probeRunner;
 	}
 
@@ -63,7 +75,7 @@ public class DouyinCookieHealthService {
 		int invalid = 0;
 		int cooling = 0;
 		for (int i = 0; i < cookies.size(); i++) {
-			Map<String, Object> item = checkOne(cookies.get(i), i + 1);
+			Map<String, Object> item = checkOne(cookies.get(i), i + 1, config);
 			items.add(item);
 			String status = stringValue(item.get("status"));
 			switch (status) {
@@ -106,7 +118,7 @@ public class DouyinCookieHealthService {
 		notifyCookieProblem(item);
 	}
 
-	private Map<String, Object> checkOne(String cookie, int index) {
+	private Map<String, Object> checkOne(String cookie, int index, TikTokConfigEntity config) {
 		Map<String, Object> item = baseItem(cookie, index);
 		List<String> missing = missingRequiredCookieNames(cookie);
 		item.put("missing", missing);
@@ -129,27 +141,55 @@ public class DouyinCookieHealthService {
 			return status(item, "VALID", "有效", "最近的真实抓取或下载请求已成功", "RECENT_SUCCESS");
 		}
 
-		ProbeExecution execution = probeRunner.run(cookie);
-		String output = execution == null ? null : execution.output();
-		item.put("exitCode", execution == null ? null : execution.exitCode());
-		item.put("durationMs", execution == null ? null : execution.durationMs());
-		item.put("outputPreview", preview(output, 500));
-		JSONObject probe = parseProbe(output);
-		if (probe != null) return applyProbe(item, cookie, probe);
+		List<String> probeAuthors = probeAuthors(config);
+		item.put("probeAuthors", probeAuthors);
+		if (probeAuthors.isEmpty()) {
+			return status(item, "INDETERMINATE", "无法确认", "没有可用的作者列表探针作者，未判定 Cookie 失效", "PROBE_CONFIGURATION");
+		}
 
-		if (isExpiredSignal(output)) {
-			if (platformCookieService != null) {
-				platformCookieService.reportRisk("douyin", cookie, "douyin cookie login probe expired");
+		List<Map<String, Object>> attempts = new ArrayList<>();
+		JSONObject firstIndeterminate = null;
+		boolean authorUnavailable = true;
+		for (String secUserId : probeAuthors) {
+			ProbeExecution execution = probeRunner.run(cookie, secUserId);
+			String output = execution == null ? null : execution.output();
+			item.put("exitCode", execution == null ? null : execution.exitCode());
+			item.put("durationMs", execution == null ? null : execution.durationMs());
+			item.put("outputPreview", preview(output, 500));
+			JSONObject probe = parseAuthorProbe(output);
+			if (probe == null) {
+				if (isExpiredSignal(output)) {
+					probe = new JSONObject();
+					probe.put("probeStatus", "EXPIRED");
+					probe.put("errorCategory", "AUTHENTICATION");
+				} else {
+					probe = new JSONObject();
+					probe.put("probeStatus", "INDETERMINATE");
+					probe.put("errorCategory", "UPSTREAM_ERROR");
+				}
 			}
-			return status(item, "EXPIRED", "疑似过期", "登录状态探针返回明确的登录、验证或风控信号", "LEGACY_PROBE");
+			probe.put("secUserId", secUserId);
+			attempts.add(new LinkedHashMap<>(probe));
+			String probeStatus = stringValue(probe.get("probeStatus")).toUpperCase();
+			if ("VALID".equals(probeStatus)) {
+				item.put("probeAttempts", attempts);
+				return applyProbe(item, cookie, probe);
+			}
+			if ("EXPIRED".equals(probeStatus)) {
+				item.put("probeAttempts", attempts);
+				return applyProbe(item, cookie, probe);
+			}
+			if (!"AUTHOR_UNAVAILABLE".equals(probeStatus)) {
+				authorUnavailable = false;
+				if (firstIndeterminate == null) firstIndeterminate = probe;
+			}
 		}
-		JSONArray collects = parseCollects(output);
-		if (collects != null) {
-			item.put("collectCount", collects.size());
-			if (platformCookieService != null) platformCookieService.reportSuccess("douyin", cookie);
-			return status(item, "VALID", "有效", "登录状态探针请求成功", "LEGACY_PROBE");
+		item.put("probeAttempts", attempts);
+		if (firstIndeterminate != null) return applyProbe(item, cookie, firstIndeterminate);
+		if (authorUnavailable) {
+			return status(item, "INDETERMINATE", "无法确认", "探针作者均不可用，未判定 Cookie 失效", "AUTHOR_PROBE");
 		}
-		return status(item, "INDETERMINATE", "无法确认", "探针未返回可识别结果，未判定 Cookie 失效", "PROBE");
+		return status(item, "INDETERMINATE", "无法确认", "作者列表探针未返回可识别结果，未判定 Cookie 失效", "AUTHOR_PROBE");
 	}
 
 	private Map<String, Object> applyProbe(Map<String, Object> item, String cookie, JSONObject probe) {
@@ -161,16 +201,25 @@ public class DouyinCookieHealthService {
 		item.put("listState", listState);
 		item.put("errorCategory", errorCategory);
 		item.put("collectCount", numberValue(probe.get("collectCount")));
+		if (probe.containsKey("errorCode")) item.put("errorCode", stringValue(probe.get("errorCode")));
+		if (probe.containsKey("message")) item.put("probeMessage", stringValue(probe.get("message")));
+		if (probe.containsKey("diagnostics")) item.put("diagnostics", probe.get("diagnostics"));
+		if (probe.containsKey("secUserId")) item.put("probeSecUserId", stringValue(probe.get("secUserId")));
+		if (probe.containsKey("profileStatus")) item.put("profileStatus", probe.get("profileStatus"));
+		if (probe.containsKey("pageStatus")) item.put("pageStatus", probe.get("pageStatus"));
 		if ("VALID".equals(probeStatus)) {
 			if (platformCookieService != null) platformCookieService.reportSuccess("douyin", cookie);
-			return status(item, "VALID", "有效", "登录状态探针请求成功", "PROBE");
+			return status(item, "VALID", "有效", "作者 profile 和作品列表请求成功", "AUTHOR_PROBE");
 		}
 		if ("EXPIRED".equals(probeStatus)) {
 			if (platformCookieService != null) {
 				platformCookieService.reportRisk("douyin", cookie,
 						"douyin cookie probe " + errorCategory.toLowerCase());
 			}
-			return status(item, "EXPIRED", "疑似过期", "探针返回明确的登录失效或风控信号", "PROBE");
+			return status(item, "EXPIRED", "疑似过期", "探针返回明确的登录失效信号", "AUTHOR_PROBE");
+		}
+		if ("AUTHOR_UNAVAILABLE".equals(probeStatus)) {
+			return status(item, "INDETERMINATE", "无法确认", "探针作者不存在或不可见，未判定 Cookie 失效", "AUTHOR_PROBE");
 		}
 		return status(item, "INDETERMINATE", "无法确认",
 				"探针返回 " + valueOr(errorCategory, "UNKNOWN") + "，未判定 Cookie 失效", "PROBE");
@@ -201,6 +250,49 @@ public class DouyinCookieHealthService {
 		} catch (RuntimeException ignored) {
 			return null;
 		}
+	}
+
+	private JSONObject parseAuthorProbe(String output) {
+		String content = markerContent(output, AUTHOR_PROBE_START, AUTHOR_PROBE_END);
+		if (content == null) return parseProbe(output);
+		try {
+			return JSONObject.parseObject(content);
+		} catch (RuntimeException ignored) {
+			return null;
+		}
+	}
+
+	private List<String> probeAuthors(TikTokConfigEntity config) {
+		Map<String, Boolean> candidates = new LinkedHashMap<>();
+		String configured = config == null ? null : config.getDouyinProbeSecUserId();
+		if (isBlank(configured)) configured = TikTokConfigService.DEFAULT_DOUYIN_PROBE_SEC_USER_ID;
+		if (!isBlank(configured)) candidates.put(configured.trim(), Boolean.TRUE);
+		List<String> fallback = new ArrayList<>();
+		if (collectdDataDao != null) {
+			for (CollectDataEntity task : collectdDataDao.findAll()) {
+				if (task == null || "N".equalsIgnoreCase(task.getTaskenabled())) continue;
+				if (!"douyin".equals(PlatformCatalog.canonicalKey(null, task.getPlatform()))) continue;
+				String secUserId = authorSecUserId(task.getOriginaladdress());
+				if (!isBlank(secUserId) && !candidates.containsKey(secUserId)) fallback.add(secUserId);
+			}
+		}
+		Collections.shuffle(fallback);
+		for (String secUserId : fallback) {
+			if (candidates.size() >= 4) break;
+			candidates.put(secUserId, Boolean.TRUE);
+		}
+		return new ArrayList<>(candidates.keySet());
+	}
+
+	private String authorSecUserId(String originalAddress) {
+		if (isBlank(originalAddress)) return null;
+		String value = originalAddress.trim();
+		for (String prefix : List.of("post", "like", "recommend")) {
+			if (value.startsWith(prefix) && value.length() > prefix.length()) {
+				return value.substring(prefix.length()).trim();
+			}
+		}
+		return null;
 	}
 
 	private JSONArray parseCollects(String output) {
@@ -244,9 +336,8 @@ public class DouyinCookieHealthService {
 	private boolean isExpiredSignal(String text) {
 		if (text == null) return false;
 		String lower = text.toLowerCase();
-		return lower.contains("login") || lower.contains("verify") || lower.contains("risk")
-				|| lower.contains("401") || lower.contains("403") || text.contains("登录")
-				|| text.contains("验证") || text.contains("风控");
+		return lower.contains("login") || lower.contains("unauthorized") || lower.contains("401")
+				|| text.contains("登录");
 	}
 
 	private List<String> missingRequiredCookieNames(String cookie) {
@@ -316,7 +407,7 @@ public class DouyinCookieHealthService {
 
 	@FunctionalInterface
 	interface ProbeRunner {
-		ProbeExecution run(String cookie);
+		ProbeExecution run(String cookie, String secUserId);
 	}
 
 	record ProbeExecution(String output, Integer exitCode, Long durationMs) {

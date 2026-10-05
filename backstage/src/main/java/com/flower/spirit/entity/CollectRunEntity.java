@@ -23,6 +23,12 @@ public class CollectRunEntity implements Serializable {
 	private Integer collectTaskId;
 	@Column(name = "trigger_type", nullable = false)
 	private String triggerType;
+	@Column(name = "provider_mode", nullable = false)
+	private String providerMode;
+	@Column(name = "provider_path", nullable = false)
+	private String providerPath;
+	@Column(name = "provider_reason")
+	private String providerReason;
 	@Column(nullable = false)
 	private String state;
 	@Column(name = "requested_limit")

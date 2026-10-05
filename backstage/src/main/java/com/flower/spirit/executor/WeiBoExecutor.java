@@ -142,7 +142,12 @@ public class WeiBoExecutor {
 			graphicContentEntity.setAuthoruid(uid);
 			graphicContentEntity.setAuthorusername(uid);
 			graphicContentEntity.setAuthoravatar(avatar);
+			graphicContentEntity.setAuthorhomepage(uid != null && !uid.trim().isEmpty()
+					? "https://weibo.com/u/" + uid : weibourl);
 			graphicContentEntity.setSourceurl(weibourl);
+			graphicContentEntity.setJsonData(fetchWeiboDetail);
+			graphicContentEntity.setPlatformkey("weibo");
+			graphicContentEntity.setContenttype(isVideo ? "video" : "graphic");
 			graphicContentEntity.setPublishtime(object.getString("created_at"));
 			graphicContentEntity.setCreatetime(new Date());
 			graphicContentDao.save(graphicContentEntity);

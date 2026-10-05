@@ -50,6 +50,7 @@ class DouyinDataProviderServiceTest {
 		when(f2.fetchAuthorWorks(request)).thenReturn(expected);
 
 		assertThat(service.fetchAuthorWorks(request)).isSameAs(expected);
+		assertThat(expected.diagnostics().getString("providerPath")).isEqualTo("F2");
 		verify(dtk, never()).fetchAuthorWorks(request);
 	}
 
@@ -61,6 +62,8 @@ class DouyinDataProviderServiceTest {
 		when(dtk.fetchAuthorWorks(request)).thenReturn(expected);
 
 		assertThat(service.fetchAuthorWorks(request)).isSameAs(expected);
+		assertThat(expected.diagnostics().getString("providerPath")).isEqualTo("F2->DTK");
+		assertThat(expected.diagnostics().getString("providerReason")).isEqualTo("F2_UPSTREAM_EMPTY_RESPONSE");
 		verify(dtk).fetchAuthorWorks(request);
 	}
 
@@ -81,6 +84,7 @@ class DouyinDataProviderServiceTest {
 		when(dtk.fetchAuthorWorks(request)).thenReturn(expected);
 
 		assertThat(service.fetchAuthorWorks(request)).isSameAs(expected);
+		assertThat(expected.diagnostics().getString("providerPath")).isEqualTo("DTK");
 		verify(f2, never()).fetchAuthorWorks(request);
 	}
 

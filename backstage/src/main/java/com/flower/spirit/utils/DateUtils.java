@@ -18,7 +18,7 @@ public class DateUtils extends org.apache.commons.lang3.time.DateUtils {
 	private static String[] parsePatterns = {
 		"yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM", 
 		"yyyy/MM/dd", "yyyy/MM/dd HH:mm:ss", "yyyy/MM/dd HH:mm", "yyyy/MM",
-		"yyyy.MM.dd", "yyyy.MM.dd HH:mm:ss", "yyyy.MM.dd HH:mm", "yyyy.MM"};
+		"yyyy.MM.dd", "yyyy.MM.dd HH:mm:ss", "yyyy.MM.dd HH:mm", "yyyy.MM", "yyyyMMdd"};
 
 	/**
 	 * 得到当前日期字符串 格式（yyyy-MM-dd）
@@ -125,9 +125,9 @@ public class DateUtils extends org.apache.commons.lang3.time.DateUtils {
 		}
 		String value = raw.trim();
 		try {
-			if (value.matches("^\\d{10}$")) {
-				long sec = Long.parseLong(value);
-				return formatDateTime(new Date(sec * 1000L));
+			if (value.matches("^\\d{9,13}$")) {
+				long raw = Long.parseLong(value);
+				return formatDateTime(new Date(value.length() >= 12 ? raw : raw * 1000L));
 			}
 			if (value.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}-\\d{2}$")) {
 				String fixed = value.substring(0, 10) + " " + value.substring(11).replace('-', ':');

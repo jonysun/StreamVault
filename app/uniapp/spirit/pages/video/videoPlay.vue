@@ -58,16 +58,20 @@
 </template>
 
 <script>
+	import { normalizeVideoPath, resolvePlayableSource } from '@/utils/videoUrl.js'
+
 	export default {
 		data() {
 			return {
 				videoInfo: {},
-				isShare: false
+				isShare: false,
+				playbackOverride: '',
+				fallbackTried: false
 			}
 		},
 		computed: {
 			playSrc() {
-				return this.videoInfo.playSrc || this.videoInfo.videounrealaddr || this.videoInfo.playurl || ''
+				return this.playbackOverride || resolvePlayableSource(this.videoInfo, 'prefer_mp4')
 			},
 			shareSrc() {
 				return this.playSrc || this.videoInfo.videounrealaddr || ''
@@ -82,15 +86,15 @@
 		onLoad(options) {
 			if (options.share === 'true') {
 				this.isShare = true;
-				this.videoInfo = {
+				this.videoInfo = this.prepareVideoInfo({
 					videounrealaddr: decodeURIComponent(options.url || ''),
 					videoname: decodeURIComponent(options.title || ''),
 					videodesc: decodeURIComponent(options.desc || ''),
 					createTime: decodeURIComponent(options.time || '')
-				};
+				});
 			} else if (options.videoInfo) {
 				try {
-					this.videoInfo = JSON.parse(decodeURIComponent(options.videoInfo));
+					this.videoInfo = this.prepareVideoInfo(JSON.parse(decodeURIComponent(options.videoInfo)));
 				} catch (e) {
 					uni.showToast({ title: '视频信息加载失败', icon: 'none' });
 				}
@@ -111,8 +115,30 @@
 			};
 		},
 		methods: {
+			prepareVideoInfo(rawInfo) {
+				const info = Object.assign({}, rawInfo || {});
+				const serveraddr = uni.getStorageSync('serveraddr') || '';
+				const serverport = uni.getStorageSync('serverport') || '';
+				const servertoken = uni.getStorageSync('servertoken') || '';
+				info.videounrealaddr = normalizeVideoPath(info.videounrealaddr, serveraddr, serverport, servertoken);
+				info.playurl = normalizeVideoPath(info.playurl, serveraddr, serverport, servertoken);
+				const normalizedPlaySrc = normalizeVideoPath(info.playSrc, serveraddr, serverport, servertoken);
+				info.playSrc = info.videounrealaddr || info.playurl || normalizedPlaySrc || '';
+				info.videocover = normalizeVideoPath(info.videocover, serveraddr, serverport, servertoken);
+				return info;
+			},
 			handleVideoError(err) {
 				console.log('video play error', err, this.playSrc);
+				if (!this.fallbackTried) {
+					const fallback = [this.videoInfo.videounrealaddr, this.videoInfo.playurl, this.videoInfo.playSrc]
+						.map(url => String(url || '').trim())
+						.find(url => url && url !== this.playSrc)
+					if (fallback) {
+						this.fallbackTried = true
+						this.playbackOverride = fallback
+						return
+					}
+				}
 				uni.showToast({ title: '视频加载失败', icon: 'none' });
 			},
 			formatTime(timestamp) {

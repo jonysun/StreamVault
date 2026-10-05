@@ -8,9 +8,9 @@
 			<cover-view class="icon-btn" @tap="toggleInfoPanel">i</cover-view>
 		</cover-view>
 
-		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" @animationfinish="onSwiperAnimationFinish" :duration="swipeDuration" :skip-hidden-item-layout="false" :easing-function="'easeOutCubic'">
+		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" @animationfinish="onSwiperAnimationFinish" :duration="swipeDuration" :skip-hidden-item-layout="true" :easing-function="'easeOutCubic'">
 			<swiper-item v-for="(video, index) in playList" :key="video.id || video.videoid || index" class="swiper-cell">
-				<view class="video-wrapper">
+				<view class="video-wrapper" @tap="onVideoTap">
 					<video
 						:id="`video-${index}`"
 						:src="getVideoSrc(index, video)"
@@ -31,14 +31,12 @@
 						@pause="onVideoPause(index)"
 						@error="onVideoError(index)"
 						@ended="onVideoEnded(index)"
-						@timeupdate="onTimeUpdate"
+						@timeupdate="onTimeUpdate(index, $event)"
 					></video>
-
-					<cover-view class="touch-layer" @tap="onVideoTap"></cover-view>
 
 					<cover-view class="video-overlay">
 						<cover-view class="bottom-info">
-							<cover-view class="author-name" @tap="selectAuthor(video.videoauthor)">@{{ video.videoauthor || '未知作者' }}</cover-view>
+							<cover-view class="author-name" @tap.stop="selectAuthor(video.videoauthor)">@{{ video.videoauthor || '未知作者' }}</cover-view>
 							<cover-view class="publish-time" v-if="formatPublishTime(video)">发布时间：{{ formatPublishTime(video) }}</cover-view>
 							<cover-view class="desc-text">{{ video.videoname || video.videodesc || '' }}</cover-view>
 						</cover-view>
@@ -101,6 +99,7 @@
 				isMuted: true,
 				isPlaying: false,
 				currentIndex: 0,
+				sourceCenterIndex: 0,
 				activePlayingIndex: -1,
 				pageNo: 0,
 				sessionRandomSeed: '',
@@ -109,6 +108,7 @@
 				prefetchCount: 6,
 				isResettingFeed: false,
 				isLoading: false,
+				feedRequestId: 0,
 				hasMore: true,
 				serveraddr: '',
 				serverport: '',
@@ -132,6 +132,7 @@
 				nativeTried: false,
 				nativeActive: false,
 				nativeOpening: false,
+				resumeOnShow: false,
 				switchPending: {},
 				perfStats: {
 					lastMs: 0,
@@ -208,9 +209,12 @@
 		onShow() {
 			this.cacheSettings = cacheManager.readSettings()
 			this.applyFeedSettings()
+			let resumeAfterNative = this.resumeOnShow
+			this.resumeOnShow = false
 			if (this.nativeActive) {
 				this.nativeActive = false
 				this.nativeTried = true
+				resumeAfterNative = true
 			}
 			if (!this.serveraddr || !this.serverport || !this.servertoken) {
 				this.ensureServerConfig()
@@ -218,7 +222,13 @@
 			if (this.playList.length === 0) {
 				this.initFeedSession()
 				this.resetAndLoadFeed({ keepOrder: true })
+			} else if (resumeAfterNative) {
+				this.$nextTick(() => this.playCurrent())
 			}
+		},
+		onHide() {
+			this.resumeOnShow = this.isPlaying
+			this.pauseAll()
 		},
 		methods: {
 			showNativeTrace(title, marker) {
@@ -397,10 +407,7 @@
 				if (safe === this.currentIndex) return
 				this.currentIndex = safe
 				this.showControls = false
-				this.playCurrent()
-				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
-					this.loadVideos()
-				}
+				this.pausePrevious()
 			},
 			applyFeedSettings() {
 				const s = this.cacheSettings || {}
@@ -487,6 +494,8 @@
 					return Promise.resolve(false)
 				}
 				this.isResettingFeed = true
+				this.feedRequestId++
+				this.isLoading = false
 				this.pauseAll()
 				this.playRequestToken++
 				this.baseList = []
@@ -494,6 +503,7 @@
 				this.pageNo = 1
 				this.hasMore = true
 				this.currentIndex = 0
+				this.sourceCenterIndex = 0
 				this.activePlayingIndex = -1
 				this.videoContexts = {}
 				this.currentSec = 0
@@ -530,12 +540,14 @@
 					return
 				}
 				this.isLoading = true
+				const requestId = ++this.feedRequestId
 				uni.request({
 					url: `${this.serveraddr}:${this.serverport}/api/findVideos?token=${this.servertoken}`,
 					method: 'POST',
 					header: { 'content-type': 'application/x-www-form-urlencoded' },
 					data: this.buildFeedQuery(this.pageNo),
 					success: (res) => {
+						if (requestId !== this.feedRequestId) return
 						if (res.data && res.data.resCode === '000001' && res.data.record && res.data.record.content) {
 							const list = res.data.record.content || []
 							list.forEach(v => {
@@ -559,9 +571,11 @@
 						}
 					},
 					fail: () => {
+						if (requestId !== this.feedRequestId) return
 						uni.showToast({ title: '网络异常，请检查服务器', icon: 'none' })
 					},
 					complete: () => {
+						if (requestId !== this.feedRequestId) return
 						this.isLoading = false
 						if (typeof onDone === 'function') onDone()
 					}
@@ -581,14 +595,9 @@
 				if (next === this.currentIndex) return
 				this.showControls = false
 				this.currentIndex = next
-				this.preparePlaybackWindow(next)
-				if (this.pendingOrderMode && this.pendingOrderMode !== this.activeOrderMode) {
-					this.applyPendingOrder()
-					return
-				}
-				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
-					setTimeout(() => this.loadVideos(), 60)
-				}
+				// Keep sourceCenterIndex unchanged until the native animation finishes.
+				// This prevents src churn while swiper is tracking the user's finger.
+				this.pausePrevious()
 			},
 			onSwiperAnimationFinish(e) {
 				if (this.isResettingFeed) return
@@ -597,9 +606,14 @@
 				if (next !== this.currentIndex) {
 					this.currentIndex = next
 				}
+				this.sourceCenterIndex = next
+				this.preparePlaybackWindow(next)
 				if (this.pendingOrderMode && this.pendingOrderMode !== this.activeOrderMode) {
 					this.applyPendingOrder()
 					return
+				}
+				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
+					this.loadVideos()
 				}
 				this.playCurrent()
 			},
@@ -641,7 +655,7 @@
 			},
 			getVideoSrc(index, video) {
 				if (!video) return ''
-				if (Math.abs(index - this.currentIndex) <= 1 || Math.abs(index - this.currentIndex) <= this.preloadNeighbors) {
+				if (Math.abs(index - this.sourceCenterIndex) <= 1 || Math.abs(index - this.sourceCenterIndex) <= this.preloadNeighbors) {
 					return video.playSrc || ''
 				}
 				return ''
@@ -721,7 +735,8 @@
 					this.$nextTick(() => this.playCurrent())
 				}
 			},
-			onTimeUpdate(e) {
+			onTimeUpdate(index, e) {
+				if (index !== this.currentIndex) return
 				const d = e && e.detail ? e.detail : {}
 				this.currentSec = Number(d.currentTime || 0)
 				this.durationSec = Number(d.duration || this.durationSec || 0)
@@ -777,7 +792,6 @@
 	.swiper-cell { background: #000; }
 	.video-wrapper { width: 100%; height: 100%; position: relative; overflow: hidden; background: #000; }
 	.video-player { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000; }
-	.touch-layer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 5; }
 	.video-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 24rpx; background: linear-gradient(to top, rgba(0,0,0,.55), transparent); }
 	.bottom-info { color: #fff; }
 	.author-name { font-size: 28rpx; font-weight: 600; display: block; margin-bottom: 10rpx; }

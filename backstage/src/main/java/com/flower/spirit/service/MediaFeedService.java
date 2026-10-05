@@ -97,7 +97,7 @@ public class MediaFeedService {
 		if (hasMore && !rows.isEmpty()) {
 			MediaFeedRow last = rows.get(rows.size() - 1);
 			nextCursor = feedCursorCodec.encode(new FeedCursor(Instant.ofEpochMilli(last.sortTimeMillis()),
-					last.mediaType(), last.internalId(), request.getOrder(), filterHash));
+					last.mediaType(), last.internalId(), request.getOrder(), filterHash, last.publishTime() == null));
 		}
 		return new MediaFeedCursorPage(items, nextCursor, hasMore);
 	}

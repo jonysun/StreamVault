@@ -37,6 +37,9 @@ public class TikTokConfigEntity implements Serializable {
 
 	@Column(name = "author_list_soft_block_auto_retry_enabled")
 	private Boolean authorListSoftBlockAutoRetryEnabled;
+
+	@Column(name = "douyin_probe_sec_user_id", length = 255)
+	private String douyinProbeSecUserId;
 	
 	/**
 	 * 解析server
@@ -89,6 +92,14 @@ public class TikTokConfigEntity implements Serializable {
 
 	public void setAuthorListSoftBlockAutoRetryEnabled(Boolean authorListSoftBlockAutoRetryEnabled) {
 		this.authorListSoftBlockAutoRetryEnabled = authorListSoftBlockAutoRetryEnabled;
+	}
+
+	public String getDouyinProbeSecUserId() {
+		return douyinProbeSecUserId;
+	}
+
+	public void setDouyinProbeSecUserId(String douyinProbeSecUserId) {
+		this.douyinProbeSecUserId = douyinProbeSecUserId;
 	}
 
 	public String getAnalysisserver() {

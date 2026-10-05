@@ -1,6 +1,8 @@
 package com.flower.spirit.service;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.io.IOException;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -86,6 +88,9 @@ public class WorkPersistenceService {
 		if (created && localVideo == null) {
 			throw new WorkMetadataValidationException("downloaded video local path is required before persistence");
 		}
+		if (localVideo != null && !isUsableMediaFile(localVideo)) {
+			throw new WorkMetadataValidationException("downloaded video file is missing or empty: " + localVideo);
+		}
 		entity.setVideoid(metadata.getWorkId());
 		entity.setVideoplatform(platformDisplayValue(metadata));
 		entity.setPlatformkey(metadata.getPlatformKey());
@@ -139,6 +144,11 @@ public class WorkPersistenceService {
 		if (created && localPaths.isEmpty()) {
 			throw new WorkMetadataValidationException("downloaded graphic media local path is required before persistence");
 		}
+		for (Path localPath : localPaths) {
+			if (!isUsableMediaFile(localPath)) {
+				throw new WorkMetadataValidationException("downloaded graphic media file is missing or empty: " + localPath);
+			}
+		}
 		entity.setVideoid(metadata.getWorkId());
 		entity.setPlatform(platformDisplayValue(metadata));
 		entity.setPlatformkey(metadata.getPlatformKey());
@@ -178,6 +188,15 @@ public class WorkPersistenceService {
 			return (int) paths.stream().filter(WorkPersistenceService::hasText).count();
 		} catch (RuntimeException error) {
 			return 0;
+		}
+	}
+
+	private boolean isUsableMediaFile(Path path) {
+		try {
+			return path != null && Files.isRegularFile(path) && Files.size(path) > 0;
+		} catch (IOException error) {
+			logger.warn("Could not inspect downloaded media path {}", path, error);
+			return false;
 		}
 	}
 

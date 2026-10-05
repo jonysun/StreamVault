@@ -70,6 +70,8 @@ _VERIFICATION_RESULT_FIELDS = (
 )
 _F2_REQUEST_ATTEMPT_LIMIT = 2
 _F2_WORK_DETAIL_PATH = "/aweme/v1/web/aweme/detail/"
+_AUTHOR_PROBE_START = "stream-vault-start-author-probe"
+_AUTHOR_PROBE_END = "stream-vault-end-author-probe"
 
 
 class FetchCommandError(RuntimeError):
@@ -1189,6 +1191,161 @@ async def run_incremental_command(args):
         _emit_fetch_error(wrapped, args.cookie)
         raise SystemExit(3) from None
 
+
+def _author_probe_error_payload(error, sec_user_id, cookie):
+    error_code = getattr(error, "error_code", "F2_PROTOCOL_ERROR")
+    reason = str(getattr(error, "classification_reason", "")).upper()
+    diagnostics = getattr(error, "diagnostics", {}) or {}
+    request = _last_request_evidence(diagnostics)
+    status_code = request.get("statusCode")
+    response_section = diagnostics.get("pageStatus") or diagnostics.get("profileStatus") or {}
+    response_status = response_section.get("statusCode") if isinstance(response_section, dict) else None
+    if status_code in (401, "401") or "LOGIN_STATUS_REQUIRED" in reason:
+        probe_status, category = "EXPIRED", "AUTHENTICATION"
+    elif error_code == "INVALID_AUTHOR_ID":
+        probe_status, category = "AUTHOR_UNAVAILABLE", "AUTHOR_UNAVAILABLE"
+    elif error_code in ("F2_COOKIE_OR_VERIFY_REQUIRED", "F2_AUTH_OR_VERIFY_SUSPECTED"):
+        probe_status, category = "INDETERMINATE", "RISK_CONTROL"
+    elif error_code == "UPSTREAM_SCHEMA_ERROR":
+        probe_status, category = "INDETERMINATE", "UPSTREAM_SCHEMA"
+    elif error_code in ("F2_UPSTREAM_RATE_LIMIT", "F2_RATE_LIMIT_SUSPECTED"):
+        probe_status, category = "INDETERMINATE", "RATE_LIMIT"
+    elif error_code in ("F2_NETWORK_ERROR", "F2_UPSTREAM_TIMEOUT"):
+        probe_status, category = "INDETERMINATE", "NETWORK"
+    else:
+        probe_status, category = "INDETERMINATE", "UPSTREAM_ERROR"
+    payload = {
+        "probeStatus": probe_status,
+        "secUserId": sec_user_id,
+        "upstreamStatus": response_status if response_status not in (None, "")
+        else status_code or diagnostics.get("upstreamStatus", ""),
+        "listState": "UNAVAILABLE",
+        "collectCount": 0,
+        "errorCategory": category,
+        "errorCode": error_code,
+        "message": getattr(error, "safe_message", str(error)),
+        "diagnostics": diagnostics,
+    }
+    return json.loads(_redact_cookie(json.dumps(payload, ensure_ascii=False), cookie))
+
+
+def _author_probe_success(sec_user_id, profile_summary, page_summary, response):
+    aweme_list = response.get("aweme_list")
+    return {
+        "probeStatus": "VALID",
+        "secUserId": sec_user_id,
+        "upstreamStatus": str(response.get("status_code", "")),
+        "listState": "EMPTY" if not aweme_list else "ARRAY",
+        "collectCount": len(aweme_list),
+        "errorCategory": "NONE",
+        "profileStatus": profile_summary,
+        "pageStatus": page_summary,
+    }
+
+
+async def probe_douyin_author(cookie, sec_user_id):
+    """Probe the same F2 author profile and post-list path used by collection."""
+    sec_user_id = str(sec_user_id or "").strip()
+    if not sec_user_id:
+        raise InvalidAuthorIdError({"reason": "empty_sec_user_id"})
+
+    async with InstrumentedDouyinCrawler(douyin_kwargs(cookie)) as crawler:
+        crawler.bogus_manager = XBogusManager
+        try:
+            profile = await crawler.fetch_user_profile(UserProfile(sec_user_id=sec_user_id))
+        except Exception as error:
+            diagnostics = _with_request_evidence({"secUserId": sec_user_id}, crawler)
+            raise _request_error(error, "Douyin probe profile request failed", diagnostics) from None
+
+        profile_summary = _profile_status_summary(profile, cookie)
+        diagnostics = _with_request_evidence(
+            {"secUserId": sec_user_id, "profileStatus": profile_summary}, crawler
+        )
+        verification_error = _response_verification_error(profile, cookie)
+        if verification_error is not None:
+            verification_error.diagnostics = dict(diagnostics)
+            raise verification_error
+        if not isinstance(profile, dict):
+            raise UpstreamCommandSchemaError("Douyin probe profile response was not an object", diagnostics)
+        if _is_invalid_author_profile(profile, cookie):
+            raise InvalidAuthorIdError(diagnostics)
+        profile_user = profile.get("user") if isinstance(profile.get("user"), dict) else {}
+        if profile.get("user_not_see") or profile_user.get("user_not_see"):
+            raise InvalidAuthorIdError(diagnostics)
+        if _has_nonzero_status(profile):
+            status_text = _status_text(profile, cookie).lower()
+            if any(marker in status_text for marker in ("login", "登录", "unauthorized", "401")):
+                raise CookieOrVerifyRequired(diagnostics, "PROFILE_AUTHENTICATION_REQUIRED")
+            if any(marker in status_text for marker in ("risk", "captcha", "verify", "验证", "风控", "403")):
+                raise AuthOrVerifySuspected(diagnostics, "PROFILE_RISK_CONTROL_OR_VERIFY")
+            raise UpstreamFetchError(
+                "F2_UPSTREAM_RESPONSE_ERROR",
+                "Douyin probe profile returned a nonzero status",
+                diagnostics,
+                "ProfileStatus",
+                "PROFILE_NONZERO_STATUS",
+            )
+        if not isinstance(profile.get("user"), dict):
+            raise UpstreamCommandSchemaError("Douyin probe profile schema validation failed", diagnostics)
+
+        try:
+            response = await crawler.fetch_user_post(
+                UserPost(max_cursor=0, count=20, sec_user_id=sec_user_id)
+            )
+        except Exception as error:
+            page_diagnostics = _with_request_evidence(
+                {**diagnostics, "profileStatus": profile_summary}, crawler
+            )
+            raise _request_error(error, "Douyin probe author-work request failed", page_diagnostics) from None
+
+        page_summary = _page_status_summary(response, 1, 0, cookie)
+        diagnostics = _with_request_evidence(
+            {**diagnostics, "profileStatus": profile_summary, "pageStatus": page_summary}, crawler
+        )
+        verification_error = _response_verification_error(response, cookie)
+        if verification_error is not None:
+            verification_error.diagnostics = dict(diagnostics)
+            raise verification_error
+        if not isinstance(response, dict) or "status_code" not in response:
+            raise UpstreamCommandSchemaError("Douyin probe author-work response schema failed", diagnostics)
+        if not _has_explicit_success_status(response):
+            if _is_invalid_author_profile(response, cookie):
+                raise InvalidAuthorIdError(diagnostics)
+            status_text = _status_text(response, cookie).lower()
+            if any(marker in status_text for marker in ("login", "登录", "unauthorized", "401")):
+                raise CookieOrVerifyRequired(diagnostics, "PAGE_AUTHENTICATION_REQUIRED")
+            if any(marker in status_text for marker in ("risk", "captcha", "verify", "验证", "风控", "403")):
+                raise AuthOrVerifySuspected(diagnostics, "PAGE_RISK_CONTROL_OR_VERIFY")
+            raise UpstreamFetchError(
+                "F2_UPSTREAM_RESPONSE_ERROR",
+                "Douyin probe author-work returned a nonzero status",
+                diagnostics,
+                "PageStatus",
+                "PAGE_NONZERO_STATUS",
+            )
+        aweme_list = response.get("aweme_list")
+        if not isinstance(aweme_list, list):
+            raise UpstreamCommandSchemaError("Douyin probe author-work list schema failed", diagnostics)
+        return _author_probe_success(sec_user_id, profile_summary, page_summary, response)
+
+
+async def run_author_probe_command(args):
+    try:
+        result = await probe_douyin_author(args.cookie, args.sec_user_id)
+    except FetchCommandError as error:
+        result = _author_probe_error_payload(error, args.sec_user_id, args.cookie)
+    except Exception as error:
+        wrapped = FetchCommandError(
+            "F2_PROTOCOL_ERROR",
+            "Douyin author probe failed before producing a valid result",
+            {},
+            type(error).__name__,
+        )
+        result = _author_probe_error_payload(wrapped, args.sec_user_id, args.cookie)
+    print(_AUTHOR_PROBE_START, json.dumps(result, ensure_ascii=False), _AUTHOR_PROBE_END)
+    if result.get("probeStatus") == "VALID":
+        print("stream-vault-ok")
+
 def write_to_file(data, output_file: str) -> bool:
     """
     将数据写入文件
@@ -1625,6 +1782,10 @@ async def main():
     fetch_user_collects_parser = subparsers.add_parser("fetch_user_collects", help="Fetch user_collects info from Douyin")
     fetch_user_collects_parser.add_argument("--cookie", type=str, required=True, help="Douyin cookie")
 
+    author_probe_parser = subparsers.add_parser("probe_author_list", help="Probe a Douyin author profile and post list")
+    author_probe_parser.add_argument("--cookie", type=str, required=True, help="Douyin cookie")
+    author_probe_parser.add_argument("--sec_user_id", type=str, required=True, help="Author sec_user_id")
+
     #获取对应收藏夹的视频
     fetch_user_collects_videos_parser = subparsers.add_parser("fetch_user_collects_videos", help="Fetch user_collects_video info from Douyin")
     fetch_user_collects_videos_parser.add_argument("--cookie", type=str, required=True, help="Douyin cookie")
@@ -1661,6 +1822,8 @@ async def main():
         await run_incremental_command(args)
     if args.command == "fetch_user_collects":
         await fetch_user_collects(args.cookie)
+    if args.command == "probe_author_list":
+        await run_author_probe_command(args)
     if args.command == "fetch_user_collects_videos":
         await fetch_user_collects_videos(args.cookie, args.cid ,args.maxc, args.output)
     if args.command == "fetch_user_feed_videos":

@@ -670,7 +670,8 @@ class CollectQueueTransactionTest {
 				+ "backfill_clean_passes INTEGER NOT NULL DEFAULT 0, backfill_verified_at TIMESTAMP, "
 				+ "remote_account_state TEXT, remote_account_reason TEXT, remote_account_detected_at TIMESTAMP)");
 		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY AUTOINCREMENT, collect_task_id INTEGER NOT NULL, "
-				+ "trigger_type TEXT NOT NULL, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
+				+ "trigger_type TEXT NOT NULL, provider_mode TEXT NOT NULL DEFAULT 'UNKNOWN', provider_path TEXT NOT NULL DEFAULT 'UNKNOWN', "
+				+ "provider_reason TEXT, state TEXT NOT NULL, requested_limit INTEGER, fetched_count INTEGER, "
 				+ "planned_count INTEGER, inserted_count INTEGER, skipped_existing_count INTEGER, failed_item_count INTEGER, "
 				+ "started_at DATETIME, heartbeat_at DATETIME, finished_at DATETIME, error_code TEXT, error_message TEXT, "
 				+ "error_detail TEXT, fetch_stop_reason TEXT, fetch_warning TEXT, created_at DATETIME NOT NULL)");

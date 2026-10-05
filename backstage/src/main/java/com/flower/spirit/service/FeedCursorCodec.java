@@ -32,6 +32,7 @@ public class FeedCursorCodec {
 		payload.put("internalId", cursor.internalId());
 		payload.put("order", cursor.order());
 		payload.put("filterHash", cursor.filterHash());
+		payload.put("nullTime", cursor.nullTime());
 		String encoded = Base64.getUrlEncoder().withoutPadding()
 				.encodeToString(payload.toJSONString().getBytes(StandardCharsets.UTF_8));
 		return encoded + "." + hmac(encoded);
@@ -49,7 +50,7 @@ public class FeedCursorCodec {
 					StandardCharsets.UTF_8));
 			return new FeedCursor(Instant.ofEpochMilli(payload.getLongValue("sortTime")),
 					payload.getString("mediaType"), payload.getIntValue("internalId"),
-					payload.getString("order"), payload.getString("filterHash"));
+					payload.getString("order"), payload.getString("filterHash"), payload.getBooleanValue("nullTime"));
 		} catch (RuntimeException error) {
 			throw new IllegalArgumentException("feed cursor payload is invalid", error);
 		}

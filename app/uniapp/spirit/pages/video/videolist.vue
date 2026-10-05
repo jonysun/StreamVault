@@ -333,12 +333,15 @@
 				const serveraddr = uni.getStorageSync('serveraddr') || '';
 				const serverport = uni.getStorageSync('serverport') || '';
 				const servertoken = uni.getStorageSync('servertoken') || '';
+				const normalizedMp4 = normalizeVideoPath(videoInfo.videounrealaddr, serveraddr, serverport, servertoken);
+				const normalizedHls = normalizeVideoPath(videoInfo.playurl, serveraddr, serverport, servertoken);
+				const normalizedPlaySrc = normalizeVideoPath(videoInfo.playSrc, serveraddr, serverport, servertoken);
 				const payload = Object.assign({}, videoInfo, {
-					videounrealaddr: normalizeVideoPath(videoInfo.videounrealaddr, serveraddr, serverport, servertoken),
-					playurl: normalizeVideoPath(videoInfo.playurl, serveraddr, serverport, servertoken),
+					videounrealaddr: normalizedMp4,
+					playurl: normalizedHls,
 					videocover: normalizeVideoPath(videoInfo.videocover, serveraddr, serverport, servertoken)
 				});
-				payload.playSrc = payload.playSrc || payload.videounrealaddr || payload.playurl || '';
+				payload.playSrc = normalizedMp4 || normalizedHls || normalizedPlaySrc || '';
 				uni.navigateTo({
 					url: `/pages/video/videoPlay?videoInfo=${encodeURIComponent(JSON.stringify(payload))}`
 				});

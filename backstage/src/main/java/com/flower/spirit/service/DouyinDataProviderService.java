@@ -30,18 +30,37 @@ public class DouyinDataProviderService {
 	public boolean isAuto() { return "AUTO".equalsIgnoreCase(Global.douyinProvider); }
 
 	public DouyinFetchEnvelope fetchAuthorWorks(DouyinFetchRequest request) {
-		if (!isAuto()) return current().fetchAuthorWorks(request);
+		if (!isAuto()) return markProvider(current().fetchAuthorWorks(request), isDtkOnly() ? "DTK" : "F2", null);
 		if (request.cookie() == null || request.cookie().isBlank()) {
 			logger.info("[DouyinProvider] operation=AUTHOR_LIST provider=DTK reason=F2_COOKIE_MISSING");
-			return dtk.fetchAuthorWorks(request);
+			return markProvider(dtk.fetchAuthorWorks(request), "DTK", "F2_COOKIE_MISSING");
 		}
 		try {
-			return f2.fetchAuthorWorks(request);
+			return markProvider(f2.fetchAuthorWorks(request), "F2", null);
 		} catch (RuntimeException error) {
 			if (!shouldFailover(error)) throw error;
 			logger.warn("[DouyinProvider] failover operation=AUTHOR_LIST from=F2 to=DTK reason={}", error.getMessage());
-			return dtk.fetchAuthorWorks(request);
+			return markProvider(dtk.fetchAuthorWorks(request), "F2->DTK", errorCode(error));
 		}
+	}
+
+	private DouyinFetchEnvelope markProvider(DouyinFetchEnvelope envelope, String path, String reason) {
+		if (envelope == null) return null;
+		JSONObject diagnostics = envelope.diagnostics();
+		if (diagnostics == null) {
+			diagnostics = new JSONObject(true);
+		}
+		diagnostics.put("providerPath", path);
+		if (reason != null && !reason.isBlank()) diagnostics.put("providerReason", reason);
+		if (envelope.diagnostics() != null) return envelope;
+		return new DouyinFetchEnvelope(envelope.items(), envelope.newWorkIds(), envelope.outcome(),
+				envelope.pagesFetched(), envelope.emptyPages(), envelope.lastCursor(), envelope.backfillCursor(),
+			envelope.backfillComplete(), envelope.backfillVerifying(), envelope.backfillCleanPasses(), diagnostics);
+	}
+
+	private String errorCode(Throwable error) {
+		if (error instanceof CollectFetchException fetch && fetch.getErrorCode() != null) return fetch.getErrorCode();
+		return error == null ? "F2_FAILOVER" : error.getClass().getSimpleName();
 	}
 
 	public Map<String, String> fetchDirect(String url, String cookie) {

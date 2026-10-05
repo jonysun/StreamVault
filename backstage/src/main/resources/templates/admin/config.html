@@ -499,6 +499,10 @@
                                         <input type="number" class="form-control tiktokriskcooldownminutes" min="1" max="1440" step="1" th:value="${tiktok.riskCooldownMinutes != null ? tiktok.riskCooldownMinutes : 10}" />
                                     </div>
                                     <div class="form-group">
+                                        <label>Cookie 作者列表探针 sec_user_id <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('Cookie 检测会先请求该作者的 profile 和作品列表；仅当未配置或作者不可用时，才随机回退最多 3 个启用中的抖音收藏任务作者。')"></i></label>
+                                        <input type="text" class="form-control tiktokProbeSecUserId" autocomplete="off" th:value="${tiktok.douyinProbeSecUserId}" placeholder="抖音 sec_user_id" />
+                                    </div>
+                                    <div class="form-group">
                                         <div class="custom-control custom-switch">
                                             <input type="checkbox" class="custom-control-input tiktokSoftBlockAutoRetry" id="tiktokSoftBlockAutoRetry" th:checked="${tiktok.authorListSoftBlockAutoRetryEnabled == null || tiktok.authorListSoftBlockAutoRetryEnabled}" />
                                             <label class="custom-control-label" for="tiktokSoftBlockAutoRetry">作者列表软拦截自动重试</label>
@@ -881,6 +885,12 @@
             var status = health.status || 'UNKNOWN';
             var statusText = health.statusText || '未检测';
             var message = health.message || '点击检测有效性';
+            var probeDetail = [];
+            if(health.errorCategory) probeDetail.push('分类: ' + health.errorCategory);
+            if(health.listState) probeDetail.push('列表: ' + health.listState);
+            if(health.upstreamStatus !== undefined && health.upstreamStatus !== '') probeDetail.push('上游状态: ' + health.upstreamStatus);
+            if(health.probeSecUserId) probeDetail.push('作者探针: ' + health.probeSecUserId);
+            if(probeDetail.length) message += '（' + probeDetail.join('；') + '）';
             var fingerprint = health.fingerprint || localId;
             var length = health.length || cookies[i].length;
             var statusClass = statusClassName(status);
@@ -1145,6 +1155,7 @@
             option['cookiestrategy'] = $('.tiktokcookiestrategy').val();
             option['riskCooldownMinutes'] = $('.tiktokriskcooldownminutes').val();
             option['authorListSoftBlockAutoRetryEnabled'] = $('.tiktokSoftBlockAutoRetry').is(':checked');
+            option['douyinProbeSecUserId'] = $('.tiktokProbeSecUserId').val();
             option['analysisserver'] = analysisserver;
             $.post("/admin/api/updateTikTokConfig",option,function(data,status){
                 if(data.resCode =="000001"){
