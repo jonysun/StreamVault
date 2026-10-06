@@ -55,6 +55,7 @@ import com.flower.spirit.service.ConfigService;
 import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
 import com.flower.spirit.service.DouyinCookieHealthService;
+import com.flower.spirit.service.DtkDouyinDataProvider;
 import com.flower.spirit.service.DouyinAuthorReconciliationService;
 import com.flower.spirit.service.DouyinAuthorProfileRefreshService;
 import com.flower.spirit.service.DouyinWorkMaintenanceService;
@@ -197,6 +198,9 @@ public class AdminController {
 
 	@Autowired
 	private DouyinCookieHealthService douyinCookieHealthService;
+
+	@Autowired
+	private DtkDouyinDataProvider dtkDouyinDataProvider;
 
 	@Autowired
 	private PlatformCookieService platformCookieService;
@@ -1075,6 +1079,11 @@ public class AdminController {
 	@PostMapping(value = "/checkDouyinCookies")
 	public AjaxEntity checkDouyinCookies() {
 		return new AjaxEntity(Global.ajax_success, "检测完成", douyinCookieHealthService.checkDouyinCookies(false));
+	}
+
+	@PostMapping(value = "/checkDtkNodes")
+	public AjaxEntity checkDtkNodes(@RequestParam(required = false) String secUserId) {
+		return new AjaxEntity(Global.ajax_success, "DTK 节点检测完成", dtkDouyinDataProvider.checkNodes(secUserId));
 	}
 	
 	@GetMapping(value = "/loadDouFav")

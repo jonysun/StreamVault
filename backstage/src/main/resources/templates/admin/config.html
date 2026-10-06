@@ -214,6 +214,7 @@
 								<div class="form-group"><label>DTK Base URL</label><input class="form-control" id="dtkBaseUrl" name="dtkBaseUrl" th:value="${config.dtkBaseUrl}" placeholder="例如 https://demo.douyin.wtf"></div>
 								<div class="form-group"><label>DTK API Key</label><input class="form-control" id="dtkApiKey" name="dtkApiKey" type="password" autocomplete="new-password" placeholder="留空保持现有 Key 不变"></div>
 								<div class="form-group"><label>DTK API 节点池（每行：Base URL|API Key）</label><textarea class="form-control" id="dtkApiPool" name="dtkApiPool" rows="4" autocomplete="off" placeholder="https://dtk-1.example|key-1&#10;https://dtk-2.example|key-2" th:text="${config.dtkApiPool}"></textarea><small class="text-muted">启用节点池后按轮询使用；502/503/429 或超时的节点会暂时冷却。未配置时回退到上面的单个 URL/Key。</small></div>
+								<div class="form-group"><label>DTK 节点有效性</label><div><button type="button" class="btn btn-info btn-sm" onclick="checkDtkNodes()"><i class="mdi mdi-connection" style="margin-right:2px;"></i>检测 DTK 节点池</button><small class="text-muted" style="margin-left:8px;">使用作者探针请求 DTK 用户接口，不显示 API Key。</small></div></div>
 								<div class="form-group"><label>DTK 请求超时(ms)</label><input class="form-control" id="dtkTimeoutMs" name="dtkTimeoutMs" type="number" min="1000" th:value="${config.dtkTimeoutMs}"></div>
 								<div class="form-group"><label>DTK 详情刷新</label><select class="form-control" id="dtkDetailRefreshEnabled" name="dtkDetailRefreshEnabled"><option value="1" th:selected="${config.dtkDetailRefreshEnabled} eq '1'">启用</option><option value="0" th:selected="${config.dtkDetailRefreshEnabled} eq '0'">禁用</option></select></div>
                             </div>
@@ -997,6 +998,35 @@
         cookies.splice(index, 1);
         douyinCookieHealth = {};
         syncDouyinCookiePool(cookies);
+    }
+
+    function checkDtkNodes(){
+        var secUserId = $.trim($('.tiktokProbeSecUserId').val() || '');
+        var loading = layer.msg('正在检测 DTK 节点池...', {icon: 16, time: 0});
+        $.ajax({
+            url: '/admin/api/checkDtkNodes',
+            type: 'POST',
+            data: {secUserId: secUserId},
+            success: function(res){
+                layer.close(loading);
+                if(res.resCode !== '000001'){
+                    layer.msg(res.message || 'DTK 节点检测失败');
+                    return;
+                }
+                var rows = (res.record || []).map(function(item){
+                    var state = item.ok ? '<span class="text-success">可用</span>' : '<span class="text-danger">失败</span>';
+                    var detail = item.ok ? (item.responseSummary || '--') : ((item.errorCode || '') + ' ' + (item.message || ''));
+                    var cooldown = Number(item.cooldownRemainingMs || 0);
+                    return '<tr><td><code>' + escapeHtml(item.node || '') + '</code></td><td>' + state + '</td><td>' + escapeHtml(String(item.status || '--')) + '</td><td>' + escapeHtml(String(item.durationMs || 0)) + ' ms</td><td>' + escapeHtml(cooldown > 0 ? Math.ceil(cooldown / 1000) + ' s' : '--') + '</td><td><pre style="white-space:pre-wrap;margin:0;max-width:520px;">' + escapeHtml(detail) + '</pre></td></tr>';
+                }).join('');
+                var content = '<div style="padding:16px;max-height:70vh;overflow:auto;"><table class="table table-bordered table-condensed"><thead><tr><th>节点</th><th>状态</th><th>HTTP</th><th>耗时</th><th>冷却</th><th>诊断</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+                layer.open({type:1, title:'DTK 节点检测结果', area:['min(1200px,96vw)','80%'], content:content});
+            },
+            error: function(){
+                layer.close(loading);
+                layer.msg('DTK 节点检测失败');
+            }
+        });
     }
 
     function checkDouyinCookies(){

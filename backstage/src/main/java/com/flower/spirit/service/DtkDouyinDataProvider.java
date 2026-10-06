@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -156,9 +157,25 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	}
 
 	private JSONObject get(String path, String... params) {
-		DtkNode node = null;
+		List<DtkNode> nodes = configuredNodes();
+		Set<String> attempted = new java.util.HashSet<>();
+		CollectFetchException last = null;
+		for (int attempt = 0; attempt < nodes.size(); attempt++) {
+			DtkNode node = selectNode(attempted);
+			attempted.add(node.identity());
+			try {
+				return requestNode(node, path, params);
+			} catch (CollectFetchException error) {
+				last = error;
+				if (!isNodeRetryable(error) || attempt + 1 >= nodes.size()) throw error;
+				logger.warn("[DTK] node failed, trying next node path={} node={} code={}", path, node.baseUrl(), error.getErrorCode());
+			}
+		}
+		throw last == null ? new CollectFetchException("DTK_UNAVAILABLE", "DTK 节点池无可用节点") : last;
+	}
+
+	private JSONObject requestNode(DtkNode node, String path, String... params) {
 		try {
-			node = selectNode();
 			StringBuilder url = new StringBuilder(trimSlash(node.baseUrl())).append(path);
 			for (int i = 0; i + 1 < params.length; i += 2) {
 				url.append(i == 0 ? '?' : '&').append(URLEncoder.encode(params[i], StandardCharsets.UTF_8))
@@ -171,15 +188,15 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			HttpResponse<String> response = client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
 			logger.info("[DTK] endpoint={} status={} node={}", path, response.statusCode(), node.baseUrl());
 			if (response.statusCode() == 401 || response.statusCode() == 403) {
-				nodeCooldownUntil.put(node.baseUrl(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
+				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_AUTH_FAILED", "DTK API 鉴权失败");
 			}
 			if (response.statusCode() == 429) {
-				nodeCooldownUntil.put(node.baseUrl(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
+				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_RATE_LIMITED", "DTK API 被限流 Retry-After=" + response.headers().firstValue("Retry-After").orElse("unknown"));
 			}
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				nodeCooldownUntil.put(node.baseUrl(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
+				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_UPSTREAM_HTTP", "DTK API HTTP status=" + response.statusCode()
 						+ ", endpoint=" + path + ", body=" + preview(response.body(), 1000));
 			}
@@ -197,12 +214,19 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		} catch (CollectFetchException e) {
 			throw e;
 		} catch (Exception e) {
-			if (node != null) nodeCooldownUntil.put(node.baseUrl(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
+			nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 			throw new CollectFetchException("DTK_UNAVAILABLE", "DTK API 请求失败: " + e.getClass().getSimpleName(), e);
 		}
 	}
 
-	private DtkNode selectNode() {
+	private boolean isNodeRetryable(CollectFetchException error) {
+		String code = error.getErrorCode();
+		return "DTK_UPSTREAM_HTTP".equals(code) || "DTK_RATE_LIMITED".equals(code)
+				|| "DTK_AUTH_FAILED".equals(code) || "DTK_UNAVAILABLE".equals(code)
+				|| "DTK_UPSTREAM_SCHEMA".equals(code);
+	}
+
+	private DtkNode selectNode(Set<String> excluded) {
 		List<DtkNode> nodes = configuredNodes();
 		long now = System.currentTimeMillis();
 		int start = Math.floorMod(nodeCursor.getAndIncrement(), nodes.size());
@@ -210,11 +234,49 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		long earliestAt = Long.MAX_VALUE;
 		for (int i = 0; i < nodes.size(); i++) {
 			DtkNode node = nodes.get((start + i) % nodes.size());
-			long until = nodeCooldownUntil.getOrDefault(node.baseUrl(), 0L);
+			if (excluded.contains(node.identity())) continue;
+			long until = nodeCooldownUntil.getOrDefault(node.identity(), 0L);
 			if (until <= now) return node;
 			if (until < earliestAt) { earliestAt = until; earliest = node; }
 		}
 		return earliest;
+	}
+
+	public List<Map<String, Object>> checkNodes(String secUserId) {
+		List<Map<String, Object>> results = new ArrayList<>();
+		for (DtkNode node : configuredNodes()) {
+			Map<String, Object> result = new LinkedHashMap<>();
+			result.put("node", node.baseUrl());
+			long started = System.currentTimeMillis();
+			try {
+				JSONObject response = requestNode(node, "/api/v1/douyin/user", "sec_user_id",
+						blank(secUserId) ? "" : secUserId, "wait", waitSeconds());
+				result.put("ok", true);
+				result.put("status", 200);
+				result.put("responseSummary", preview(response == null ? null : response.toJSONString(), 1000));
+			} catch (CollectFetchException error) {
+				result.put("ok", false);
+				result.put("errorCode", error.getErrorCode());
+				result.put("message", error.getMessage());
+				Integer status = extractHttpStatus(error.getMessage());
+				if (status != null) result.put("status", status);
+			} catch (RuntimeException error) {
+				result.put("ok", false);
+				result.put("errorCode", "DTK_CHECK_FAILED");
+				result.put("message", error.getMessage());
+			}
+			result.put("durationMs", System.currentTimeMillis() - started);
+			result.put("cooldownRemainingMs", Math.max(0,
+				nodeCooldownUntil.getOrDefault(node.identity(), 0L) - System.currentTimeMillis()));
+			results.add(result);
+		}
+		return results;
+	}
+
+	private static Integer extractHttpStatus(String message) {
+		if (message == null) return null;
+		java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("HTTP status=(\\d{3})").matcher(message);
+		return matcher.find() ? Integer.valueOf(matcher.group(1)) : null;
 	}
 
 	private List<DtkNode> configuredNodes() {
@@ -232,7 +294,9 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		return nodes;
 	}
 
-	private record DtkNode(String baseUrl, String apiKey) {}
+	private record DtkNode(String baseUrl, String apiKey) {
+		private String identity() { return baseUrl + "|" + apiKey; }
+	}
 
 	private static String preview(String value, int limit) {
 		if (value == null) return "";

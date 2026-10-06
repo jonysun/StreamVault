@@ -11,6 +11,18 @@ import java.util.Properties;
 import org.junit.jupiter.api.Test;
 
 class PostgresqlDeploymentContractTest {
+	@Test
+	void postgresqlMigrationVersionsAreUnique() throws Exception {
+		Path migrationRoot = Path.of("src", "main", "resources", "db", "migration", "postgresql");
+		try (var migrations = Files.list(migrationRoot)) {
+			List<String> versions = migrations.map(path -> path.getFileName().toString())
+					.filter(name -> name.matches("V[^_]+__.*\\.sql"))
+					.map(name -> name.substring(0, name.indexOf("__")))
+					.toList();
+			assertThat(versions).doesNotHaveDuplicates();
+		}
+	}
+
 
     @Test
     void latestImageCanRunMigrationAndSelectDatabaseProfileFromEnvironment() throws Exception {

@@ -2353,7 +2353,9 @@ public class CollectDataService {
 						providerReason);
 				if (!dtkMode && !autoMode) platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
 			} catch (CollectFetchException error) {
-				collectRunService.updateProvider(runId, initialProviderPath, error.getErrorCode());
+				String failedProviderPath = autoMode && error.getErrorCode() != null
+						&& error.getErrorCode().startsWith("DTK_") ? "F2->DTK" : initialProviderPath;
+				collectRunService.updateProvider(runId, failedProviderPath, error.getErrorCode());
 				logger.warn("[DouyinProvider] provider={} event=AUTHOR_LIST_FAILURE code={} faultDomain={} "
 						+ "cooldownScope={} evidence={}", dtkMode ? "DTK" : autoMode ? "AUTO" : "F2", error.getErrorCode(),
 						douyinFetchFaultDomain(error.getErrorCode()),
