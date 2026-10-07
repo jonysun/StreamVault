@@ -71,6 +71,9 @@ class AuthorProfileServiceTest {
 	@Mock
 	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
 
+	@Mock
+	private DouyinProfileGateway douyinProfileGateway;
+
 	@InjectMocks
 	private AuthorProfileService service;
 

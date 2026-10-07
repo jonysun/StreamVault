@@ -51,6 +51,9 @@ public class DouyinWorkMaintenanceService {
 	private PlatformCookieService platformCookieService;
 
 	@Autowired
+	private DouyinProfileGateway douyinProfileGateway;
+
+	@Autowired
 	private RawPayloadService rawPayloadService;
 
 	public AjaxEntity redownloadVideo(Integer id) {
@@ -450,9 +453,9 @@ public class DouyinWorkMaintenanceService {
 	}
 
 	private JSONObject resolveAuthor(String secUid, String uniqueId) {
-		JSONObject profile = extractProfileUser(DouUtil.fetchUserProfile(secUid));
+		JSONObject profile = isBlank(secUid) ? null : douyinProfileGateway.fetchProfileUser(secUid);
 		if (profile == null) {
-			profile = extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
+			profile = douyinProfileGateway.fetchProfileUserByUniqueId(uniqueId);
 		}
 		return profile;
 	}

@@ -38,6 +38,15 @@ public class F2DouyinDataProvider implements DouyinDataProvider {
 	@Override
 	public JSONObject fetchAuthorProfile(String secUid) {
 		JSONObject profile = DouUtil.fetchUserProfile(secUid);
+		return extractProfileUser(profile);
+	}
+
+	@Override
+	public JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
+		return extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
+	}
+
+	private JSONObject extractProfileUser(JSONObject profile) {
 		if (profile == null) return null;
 		JSONObject user = profile.getJSONObject("user");
 		if (user != null) return user;

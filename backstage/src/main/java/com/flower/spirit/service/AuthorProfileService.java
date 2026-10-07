@@ -76,6 +76,9 @@ public class AuthorProfileService {
 	private AuthorEnrichmentQueueService authorEnrichmentQueueService;
 
 	@Autowired
+	private DouyinProfileGateway douyinProfileGateway;
+
+	@Autowired
 	private RawPayloadService rawPayloadService;
 
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName,
@@ -1061,14 +1064,12 @@ public class AuthorProfileService {
 		}
 		String key = safeUid == null ? "username:" + safeUsername : "uid:" + safeUid;
 		if (cache == null) {
-			return safeUid == null ? extractProfileUser(DouUtil.fetchUserProfileByUniqueId(safeUsername))
-					: resolveProfileAuthor(safeUid);
+			return resolveProfileAuthor(safeUid, safeUsername);
 		}
 		if (cache.containsKey(key)) {
 			return cache.get(key);
 		}
-		JSONObject resolved = safeUid == null ? extractProfileUser(DouUtil.fetchUserProfileByUniqueId(safeUsername))
-				: resolveProfileAuthor(safeUid);
+		JSONObject resolved = resolveProfileAuthor(safeUid, safeUsername);
 		cache.put(key, resolved);
 		if (resolved != null && AuthorIdentityUtil.isDouyinSecUid(resolved.getString("sec_uid"))) {
 			cache.put("uid:" + resolved.getString("sec_uid").trim(), resolved);
@@ -1184,8 +1185,9 @@ public class AuthorProfileService {
 		return detail == null ? null : detail.getJSONObject("author");
 	}
 
-	private JSONObject resolveProfileAuthor(String secUid) {
-		return extractProfileUser(DouUtil.fetchUserProfile(secUid));
+	private JSONObject resolveProfileAuthor(String secUid, String uniqueId) {
+		return secUid == null ? douyinProfileGateway.fetchProfileUserByUniqueId(uniqueId)
+				: douyinProfileGateway.fetchProfileUser(secUid);
 	}
 
 	private String authorSignature(JSONObject profileAuthor, JSONObject hybridAuthor) {

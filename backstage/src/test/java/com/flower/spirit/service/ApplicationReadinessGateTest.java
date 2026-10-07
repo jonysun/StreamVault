@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import com.flower.spirit.database.DatabaseSchemaInspector;
 
 import com.flower.spirit.database.sqlite.SqliteRuntimeVerifier;
 
@@ -37,5 +38,13 @@ class ApplicationReadinessGateTest {
         assertThat(gate.isReady()).isFalse();
         assertThat(gate.snapshot().state()).isEqualTo(ApplicationReadinessGate.State.BLOCKED);
         assertThat(gate.snapshot().reason()).contains("broken index");
+    }
+
+    @Test
+    void postgresWorkersAreNotHeldByLateReadyEventListeners() {
+        ApplicationReadinessGate gate = new ApplicationReadinessGate(Optional.empty(),
+                mock(DatabaseSchemaInspector.class), "postgresql");
+
+        assertThat(gate.isReady()).isTrue();
     }
 }

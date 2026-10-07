@@ -330,6 +330,11 @@ public class AdminController {
 	public AjaxEntity saveConfig(ConfigEntity configEntity,HttpServletRequest request) {
 		return configService.saveConfig(configEntity);
 	}
+
+	@PostMapping(value = "/saveDouyinDownloadConfig")
+	public AjaxEntity saveDouyinDownloadConfig(ConfigEntity configEntity) {
+		return configService.saveDouyinDownloadConfig(configEntity);
+	}
 	/**
 	 * 分页获取已缓存的视频历史记录
 	 * @param videoDataEntity

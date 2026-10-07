@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import com.flower.spirit.entity.TikTokConfigEntity;
@@ -106,5 +107,37 @@ class DouyinCookieHealthServiceTest {
 		assertThat(item).containsEntry("status", "VALID")
 				.containsEntry("listState", "EMPTY")
 				.containsEntry("probeSecUserId", "MS4-probe");
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void checksEachCookieIndependentlyInsteadOfReusingOneSuccessfulResult() {
+		String validCookie = "odin_tt=a; sessionid=valid; ttwid=c; passport_csrf_token=d";
+		String expiredCookie = "odin_tt=a; sessionid=expired; ttwid=c; passport_csrf_token=d";
+		TikTokConfigEntity config = new TikTokConfigEntity();
+		config.setCookiepool(validCookie + "\n" + expiredCookie);
+		config.setDouyinProbeSecUserId("MS4-probe");
+		TikTokConfigService configService = mock(TikTokConfigService.class);
+		when(configService.getData()).thenReturn(config);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		AtomicInteger probeCount = new AtomicInteger();
+		DouyinCookieHealthService service = new DouyinCookieHealthService(configService, cookieService,
+				(cookie, secUserId) -> {
+					probeCount.incrementAndGet();
+					String status = cookie.contains("sessionid=valid") ? "VALID" : "EXPIRED";
+					String error = "EXPIRED".equals(status) ? ",\"errorCategory\":\"AUTHENTICATION\"" : "";
+					String output = "stream-vault-start-author-probe {\"probeStatus\":\"" + status
+							+ "\",\"secUserId\":\"MS4-probe\"" + error
+							+ "} stream-vault-end-author-probe";
+					return new DouyinCookieHealthService.ProbeExecution(output, 0, 20L);
+				});
+
+		Map<String, Object> result = service.checkDouyinCookies(false);
+		List<Map<String, Object>> items = (List<Map<String, Object>>) result.get("items");
+
+		assertThat(probeCount).hasValue(2);
+		assertThat(items).hasSize(2);
+		assertThat(items.get(0)).containsEntry("status", "VALID");
+		assertThat(items.get(1)).containsEntry("status", "EXPIRED");
 	}
 }
