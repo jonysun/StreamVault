@@ -150,7 +150,18 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 
 	@Override
 	public JSONObject fetchAuthorProfile(String secUid) {
-		JSONObject response = get("/api/v1/douyin/user", "sec_user_id", secUid, "wait", waitSeconds());
+		if (blank(secUid)) return null;
+		return fetchAuthorProfile("sec_user_id", secUid);
+	}
+
+	@Override
+	public JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
+		if (blank(uniqueId)) return null;
+		return fetchAuthorProfile("unique_id", uniqueId);
+	}
+
+	private JSONObject fetchAuthorProfile(String identityKey, String identityValue) {
+		JSONObject response = get("/api/v1/douyin/user", identityKey, identityValue, "wait", waitSeconds());
 		JSONObject data = payload(response);
 		if (data == null) return response.getJSONObject("user");
 		JSONObject user = data.getJSONObject("user");

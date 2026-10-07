@@ -8,13 +8,13 @@
 			<cover-view class="icon-btn" @tap="toggleInfoPanel">i</cover-view>
 		</cover-view>
 
-		<swiper class="video-swiper" :vertical="true" :current="currentIndex" @change="onSwiperChange" @animationfinish="onSwiperAnimationFinish" :duration="swipeDuration" :skip-hidden-item-layout="true" :easing-function="'easeOutCubic'">
-			<swiper-item v-for="(video, index) in playList" :key="video.id || video.videoid || index" class="swiper-cell">
-				<view class="video-wrapper" @tap="onVideoTap">
+		<swiper class="video-swiper" :vertical="true" :current="swiperCurrent" @change="onSwiperChange" @animationfinish="onSwiperAnimationFinish" :duration="isRecentering ? 0 : swipeDuration" :skip-hidden-item-layout="true" :easing-function="'easeOutCubic'">
+			<swiper-item v-for="entry in feedWindow" :key="entry.key" class="swiper-cell">
+				<view v-if="entry.video" class="video-wrapper" @tap="onVideoTap">
 					<video
-						:id="`video-${index}`"
-						:src="getVideoSrc(index, video)"
-						:poster="video.videocover"
+						:id="`video-${entry.index}`"
+						:src="getVideoSrc(entry.index, entry.video)"
+						:poster="entry.video.videocover"
 						:controls="false"
 						:autoplay="false"
 						:muted="isMuted"
@@ -27,22 +27,22 @@
 						:codec="'hardware'"
 						:http-cache="true"
 						class="video-player"
-						@play="onVideoPlay(index)"
-						@pause="onVideoPause(index)"
-						@error="onVideoError(index)"
-						@ended="onVideoEnded(index)"
-						@timeupdate="onTimeUpdate(index, $event)"
+						@play="onVideoPlay(entry.index)"
+						@pause="onVideoPause(entry.index)"
+						@error="onVideoError(entry.index)"
+						@ended="onVideoEnded(entry.index)"
+						@timeupdate="onTimeUpdate(entry.index, $event)"
 					></video>
 
 					<cover-view class="video-overlay">
 						<cover-view class="bottom-info">
-							<cover-view class="author-name" @tap.stop="selectAuthor(video.videoauthor)">@{{ video.videoauthor || '未知作者' }}</cover-view>
-							<cover-view class="publish-time" v-if="formatPublishTime(video)">发布时间：{{ formatPublishTime(video) }}</cover-view>
-							<cover-view class="desc-text">{{ video.videoname || video.videodesc || '' }}</cover-view>
+							<cover-view class="author-name" @tap.stop="selectAuthor(entry.video.videoauthor)">@{{ entry.video.videoauthor || '未知作者' }}</cover-view>
+							<cover-view class="publish-time" v-if="formatPublishTime(entry.video)">发布时间：{{ formatPublishTime(entry.video) }}</cover-view>
+							<cover-view class="desc-text">{{ entry.video.videoname || entry.video.videodesc || '' }}</cover-view>
 						</cover-view>
 					</cover-view>
 
-					<cover-view v-if="showControls && index === currentIndex" class="progress-wrap" @touchstart.stop.prevent="onProgressTouchStart" @touchmove.stop.prevent="onProgressTouchMove" @touchend.stop.prevent="onProgressTouchEnd">
+					<cover-view v-if="showControls && entry.index === currentIndex" class="progress-wrap" @touchstart.stop.prevent="onProgressTouchStart" @touchmove.stop.prevent="onProgressTouchMove" @touchend.stop.prevent="onProgressTouchEnd">
 						<cover-view class="progress-time">{{ currentTimeText }} / {{ durationText }}</cover-view>
 						<cover-view class="progress-track">
 							<cover-view class="progress-buffer" :style="{ width: bufferPercent + '%' }"></cover-view>
@@ -51,8 +51,9 @@
 						</cover-view>
 					</cover-view>
 
-					<cover-view v-if="manualPaused && !isPlaying && index === currentIndex" class="pause-indicator">暂停</cover-view>
+					<cover-view v-if="manualPaused && !isPlaying && entry.index === currentIndex" class="pause-indicator">暂停</cover-view>
 				</view>
+				<view v-else class="video-wrapper video-placeholder"></view>
 			</swiper-item>
 		</swiper>
 
@@ -92,6 +93,7 @@
 			return {
 				baseList: [],
 				playList: [],
+				feedWindow: [],
 				authorOptions: [],
 				activeOrderMode: 'desc',
 				pendingOrderMode: '',
@@ -99,7 +101,9 @@
 				isMuted: true,
 				isPlaying: false,
 				currentIndex: 0,
-				sourceCenterIndex: 0,
+				swiperCurrent: 1,
+				isRecentering: false,
+				windowVersion: 0,
 				activePlayingIndex: -1,
 				pageNo: 0,
 				sessionRandomSeed: '',
@@ -405,9 +409,17 @@
 			stepTo(nextIndex) {
 				const safe = Math.max(0, Math.min(this.playList.length - 1, nextIndex))
 				if (safe === this.currentIndex) return
+				const previous = this.activePlayingIndex
+				if (previous >= 0 && this.videoContexts[previous]) this.videoContexts[previous].pause()
 				this.currentIndex = safe
+				this.windowVersion++
+				this.refreshFeedWindow(safe)
+				this.preparePlaybackWindow(safe)
 				this.showControls = false
-				this.pausePrevious()
+				this.resetSwiperToCenter(() => this.playCurrent())
+				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
+					this.loadVideos()
+				}
 			},
 			applyFeedSettings() {
 				const s = this.cacheSettings || {}
@@ -489,6 +501,19 @@
 					}
 				}
 			},
+			refreshFeedWindow(centerIndex = this.currentIndex) {
+				const safe = Math.max(0, Math.min(this.playList.length - 1, Number(centerIndex) || 0))
+				const entries = [-1, 0, 1].map(offset => {
+					const index = safe + offset
+					const video = this.playList[index] || null
+					return {
+						key: `${this.windowVersion}:${index}`,
+						index,
+						video
+					}
+				})
+				this.feedWindow = entries
+			},
 			resetAndLoadFeed(options = {}) {
 				if (this.isResettingFeed) {
 					return Promise.resolve(false)
@@ -500,10 +525,13 @@
 				this.playRequestToken++
 				this.baseList = []
 				this.playList = []
+				this.feedWindow = []
 				this.pageNo = 1
 				this.hasMore = true
 				this.currentIndex = 0
-				this.sourceCenterIndex = 0
+				this.swiperCurrent = 1
+				this.isRecentering = false
+				this.windowVersion++
 				this.activePlayingIndex = -1
 				this.videoContexts = {}
 				this.currentSec = 0
@@ -522,9 +550,7 @@
 					this.loadVideos(() => {
 						this.isResettingFeed = false
 						this.preparePlaybackWindow(0)
-						if (this.playList.length > 0) {
-							this.$nextTick(() => this.tryOpenNativeFeed())
-						}
+						if (this.playList.length > 0) this.$nextTick(() => this.playCurrent())
 						resolve(true)
 					})
 				})
@@ -557,12 +583,12 @@
 								v.playSrc = this.resolvePlayableSource(v)
 							})
 							this.baseList = this.baseList.concat(list)
-							this.playList = this.baseList.slice()
+						this.playList = this.baseList.slice()
+						this.refreshFeedWindow(this.currentIndex)
 							this.pageNo++
 							this.hasMore = !res.data.record.last
 							this.refreshAuthorOptions()
 							this.preparePlaybackWindow(this.currentIndex)
-							cacheManager.prefetchVideos(list)
 						} else {
 							uni.showToast({
 								title: (res.data && (res.data.message || res.data.resMsg)) || '获取视频失败',
@@ -592,22 +618,28 @@
 				const next = Number(e && e.detail && e.detail.current)
 				if (Number.isNaN(next)) return
 				if (this.isResettingFeed) return
-				if (next === this.currentIndex) return
+				if (next === this.swiperCurrent) return
 				this.showControls = false
-				this.currentIndex = next
-				// Keep sourceCenterIndex unchanged until the native animation finishes.
-				// This prevents src churn while swiper is tracking the user's finger.
-				this.pausePrevious()
+				this.swiperCurrent = next
+				const active = this.videoContexts[this.activePlayingIndex]
+				if (active) active.pause()
+				this.isPlaying = false
 			},
 			onSwiperAnimationFinish(e) {
 				if (this.isResettingFeed) return
 				const next = Number(e && e.detail && e.detail.current)
 				if (Number.isNaN(next)) return
-				if (next !== this.currentIndex) {
-					this.currentIndex = next
+				const direction = next === 0 ? -1 : next === 2 ? 1 : 0
+				if (!direction) return
+				const target = this.currentIndex + direction
+				if (target < 0 || target >= this.playList.length) {
+					this.resetSwiperToCenter()
+					return
 				}
-				this.sourceCenterIndex = next
-				this.preparePlaybackWindow(next)
+				this.currentIndex = target
+				this.windowVersion++
+				this.refreshFeedWindow(target)
+				this.preparePlaybackWindow(target)
 				if (this.pendingOrderMode && this.pendingOrderMode !== this.activeOrderMode) {
 					this.applyPendingOrder()
 					return
@@ -615,7 +647,15 @@
 				if (this.hasMore && this.currentIndex >= this.playList.length - 1 - this.prefetchTriggerOffset) {
 					this.loadVideos()
 				}
-				this.playCurrent()
+				this.resetSwiperToCenter(() => this.playCurrent())
+			},
+			resetSwiperToCenter(afterReset) {
+				this.isRecentering = true
+				this.swiperCurrent = 1
+				this.$nextTick(() => this.$nextTick(() => {
+					this.isRecentering = false
+					if (typeof afterReset === 'function') afterReset()
+				}))
 			},
 			playCurrent() {
 				const requestToken = ++this.playRequestToken
@@ -655,7 +695,7 @@
 			},
 			getVideoSrc(index, video) {
 				if (!video) return ''
-				if (Math.abs(index - this.sourceCenterIndex) <= 1 || Math.abs(index - this.sourceCenterIndex) <= this.preloadNeighbors) {
+				if (Math.abs(index - this.currentIndex) <= 1) {
 					return video.playSrc || ''
 				}
 				return ''
@@ -663,15 +703,10 @@
 			prefetchAround(idx) {
 				const prefetchCount = Math.max(1, this.prefetchCount)
 				const queue = []
-				if (idx + 1 < this.playList.length) {
-					queue.push(this.playList[idx + 1])
-				}
-				if (idx - 1 >= 0) {
-					queue.push(this.playList[idx - 1])
-				}
-				for (let i = idx + 2; i < Math.min(this.playList.length, idx + 1 + prefetchCount); i++) {
+				for (let i = idx + 1; i < Math.min(this.playList.length, idx + 1 + prefetchCount); i++) {
 					queue.push(this.playList[i])
 				}
+				if (idx - 1 >= 0) queue.push(this.playList[idx - 1])
 				cacheManager.prefetchVideos(queue)
 			},
 			pauseAll() {
@@ -687,6 +722,7 @@
 				if (prev < 0 || prev === this.currentIndex) return
 				const c = this.videoContexts[prev]
 				if (c) c.pause()
+				this.$delete(this.videoContexts, prev)
 				this.isPlaying = false
 			},
 			onVideoPlay(index) {
@@ -791,6 +827,7 @@
 	.video-swiper { width: 100%; height: 100%; }
 	.swiper-cell { background: #000; }
 	.video-wrapper { width: 100%; height: 100%; position: relative; overflow: hidden; background: #000; }
+	.video-placeholder { background: #000; }
 	.video-player { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000; }
 	.video-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 24rpx; background: linear-gradient(to top, rgba(0,0,0,.55), transparent); }
 	.bottom-info { color: #fff; }

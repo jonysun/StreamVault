@@ -19,4 +19,8 @@ public interface DouyinDataProvider {
 	default JSONObject fetchAuthorProfile(String secUid) {
 		return null;
 	}
+
+	default JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
+		return null;
+	}
 }

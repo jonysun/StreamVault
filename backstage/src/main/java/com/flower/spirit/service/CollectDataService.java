@@ -1998,7 +1998,7 @@ public class CollectDataService {
 			if (secUserId == null || secUserId.trim().isEmpty()) {
 				return new AjaxEntity(Global.ajax_uri_error, "未解析到抖音用户ID", null);
 			}
-			JSONObject profileUser = extractProfileUser(DouUtil.fetchUserProfile(secUserId));
+			JSONObject profileUser = douyinDataProviderService.fetchAuthorProfile(secUserId);
 			String nickname = profileUser == null ? null : profileUser.getString("nickname");
 			Map<String, String> record = new HashMap<>();
 			record.put("platform", "抖音");

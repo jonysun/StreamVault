@@ -287,6 +287,38 @@ public class ConfigService {
 		return new AjaxEntity(Global.ajax_option_success, "操作成功", configEntity);
 	}
 
+	public AjaxEntity saveDouyinDownloadConfig(ConfigEntity incoming) {
+		List<ConfigEntity> list = configDao.findAll();
+		ConfigEntity configData = list.isEmpty() ? new ConfigEntity() : list.get(0);
+		if (incoming.getDouyinapiurls() != null) configData.setDouyinapiurls(incoming.getDouyinapiurls());
+		if (incoming.getDouyinProvider() != null) configData.setDouyinProvider(incoming.getDouyinProvider());
+		if (incoming.getDtkBaseUrl() != null) configData.setDtkBaseUrl(incoming.getDtkBaseUrl());
+		if (incoming.getDtkApiKey() != null && !incoming.getDtkApiKey().trim().isEmpty()) {
+			configData.setDtkApiKey(incoming.getDtkApiKey());
+		}
+		if (incoming.getDtkApiPool() != null) configData.setDtkApiPool(incoming.getDtkApiPool());
+		if (incoming.getDtkTimeoutMs() != null) configData.setDtkTimeoutMs(incoming.getDtkTimeoutMs());
+		if (incoming.getDtkDetailRefreshEnabled() != null) {
+			configData.setDtkDetailRefreshEnabled(incoming.getDtkDetailRefreshEnabled());
+		}
+		configData = configDao.save(configData);
+
+		Global.douyinApiUrls = configData.getDouyinapiurls() == null ? "" : configData.getDouyinapiurls();
+		String provider = configData.getDouyinProvider();
+		Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
+				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+		Global.dtkBaseUrl = configData.getDtkBaseUrl() == null ? "" : configData.getDtkBaseUrl().trim();
+		Global.dtkApiKey = configData.getDtkApiKey() == null ? "" : configData.getDtkApiKey().trim();
+		Global.dtkApiPool = configData.getDtkApiPool() == null ? "" : configData.getDtkApiPool().trim();
+		try {
+			Global.dtkTimeoutMs = Math.max(1000, Integer.parseInt(configData.getDtkTimeoutMs()));
+		} catch (RuntimeException ignored) {
+			Global.dtkTimeoutMs = 15000;
+		}
+		Global.dtkDetailRefreshEnabled = !"0".equals(configData.getDtkDetailRefreshEnabled());
+		return new AjaxEntity(Global.ajax_option_success, "抖音下载配置保存成功", configData);
+	}
+
 	private String normalizeVideoListSortField(String value) {
 		if ("id".equals(value) || "createtime".equals(value) || "publishtime".equals(value) || "videoauthor".equals(value)) {
 			return value;

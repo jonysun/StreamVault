@@ -99,6 +99,11 @@
         .cookie-status-unknown { background: #f0f2f5; color: #595959; }
         .cookie-empty { padding: 14px; color: #8c8c8c; text-align: center; font-size: 12px; }
         .cookie-edit-area { width: 100%; min-height: 180px; border: 1px solid #e8e8e8; border-radius: 6px; padding: 8px; resize: vertical; }
+        .dtk-node-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .dtk-node-row .dtk-node-url { flex: 1 1 52%; }
+        .dtk-node-row .dtk-node-key { flex: 1 1 38%; }
+        .dtk-node-row .dtk-node-remove { flex: 0 0 auto; }
+        @media (max-width: 600px) { .dtk-node-row { flex-wrap: wrap; } .dtk-node-row .dtk-node-url, .dtk-node-row .dtk-node-key { flex: 1 1 100%; } }
         .help-icon { cursor: pointer; font-size: 12px; color: #bfbfbf; margin-left: 2px; }
         .help-icon:hover { color: #4361ee; }
         .runtime-status-card { margin-top: 12px; }
@@ -199,24 +204,6 @@
                                     <label>收藏任务内子项间隔(ms)</label>
                                     <input class="form-control" type="number" id="collectitemintervalms" name="collectitemintervalms" placeholder="默认2500" th:value="${config.collectitemintervalms}">
                                 </div>
-								<div class="form-group">
-									<label>抖音解析API URL列表 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('每行一个API Base URL或完整接口URL。会依次尝试 /api/hybrid/video_data?url=... 和 /api/douyin/web/handler_user_profile?...，不需要配置token。支持占位符 {url}、{sec_uid}、{unique_id}。')"></i></label>
-									<textarea class="form-control" id="douyinapiurls" name="douyinapiurls" rows="4" placeholder="例如：https://example.com" th:text="${config.douyinapiurls}"></textarea>
-								</div>
-								<div class="form-group">
-									<label>抖音数据源</label>
-									<select class="form-control" id="douyinProvider" name="douyinProvider">
-										<option value="F2" th:selected="${config.douyinProvider} eq 'F2'">F2（本地 Cookie）</option>
-										<option value="DTK" th:selected="${config.douyinProvider} eq 'DTK'">Douyin_TikTok_Download_API</option>
-										<option value="AUTO" th:selected="${config.douyinProvider} eq 'AUTO'">自动切换（F2 故障转移到 DTK）</option>
-									</select>
-								</div>
-								<div class="form-group"><label>DTK Base URL</label><input class="form-control" id="dtkBaseUrl" name="dtkBaseUrl" th:value="${config.dtkBaseUrl}" placeholder="例如 https://demo.douyin.wtf"></div>
-								<div class="form-group"><label>DTK API Key</label><input class="form-control" id="dtkApiKey" name="dtkApiKey" type="password" autocomplete="new-password" placeholder="留空保持现有 Key 不变"></div>
-								<div class="form-group"><label>DTK API 节点池（每行：Base URL|API Key）</label><textarea class="form-control" id="dtkApiPool" name="dtkApiPool" rows="4" autocomplete="off" placeholder="https://dtk-1.example|key-1&#10;https://dtk-2.example|key-2" th:text="${config.dtkApiPool}"></textarea><small class="text-muted">启用节点池后按轮询使用；502/503/429 或超时的节点会暂时冷却。未配置时回退到上面的单个 URL/Key。</small></div>
-								<div class="form-group"><label>DTK 节点有效性</label><div><button type="button" class="btn btn-info btn-sm" onclick="checkDtkNodes()"><i class="mdi mdi-connection" style="margin-right:2px;"></i>检测 DTK 节点池</button><small class="text-muted" style="margin-left:8px;">使用作者探针请求 DTK 用户接口，不显示 API Key。</small></div></div>
-								<div class="form-group"><label>DTK 请求超时(ms)</label><input class="form-control" id="dtkTimeoutMs" name="dtkTimeoutMs" type="number" min="1000" th:value="${config.dtkTimeoutMs}"></div>
-								<div class="form-group"><label>DTK 详情刷新</label><select class="form-control" id="dtkDetailRefreshEnabled" name="dtkDetailRefreshEnabled"><option value="1" th:selected="${config.dtkDetailRefreshEnabled} eq '1'">启用</option><option value="0" th:selected="${config.dtkDetailRefreshEnabled} eq '0'">禁用</option></select></div>
                             </div>
                         </div>
                     </div>
@@ -459,7 +446,7 @@
                     <!-- 抖音/快手/红书/微博 Cookie -->
                     <div class="col-md-6">
                         <div class="card">
-                            <div class="card-header"><h4>抖音/快手配置 <i class="mdi mdi-help-circle help-icon" onclick="layer.open({type:1,title:'提示',area:['auto','auto'],content:'<div style=&quot;padding:10px;&quot;><a href=&quot;https://cookie-editor.com/&quot;>使用Cookie-Editor导出Header String</a><br/>也可以在抖音主页 F12 网络请求中 过滤get/user 请求 找到cookie 进行复制</div>'})"></i></h4></div>
+                            <div class="card-header"><h4>抖音下载配置 <i class="mdi mdi-help-circle help-icon" onclick="layer.open({type:1,title:'提示',area:['auto','auto'],content:'<div style=&quot;padding:10px;&quot;><a href=&quot;https://cookie-editor.com/&quot;>使用Cookie-Editor导出Header String</a><br/>也可以在抖音主页 F12 网络请求中 过滤get/user 请求 找到cookie 进行复制</div>'})"></i></h4></div>
                             <div class="card-body">
                                 <form action="#" method="post" onsubmit="return false;">
                                     <input type="hidden" class="tiktok" th:value="${tiktok.id}" />
@@ -489,6 +476,35 @@
                                             <div id="douyinCookieEmpty" class="cookie-empty" style="display:none;">暂无 Cookie</div>
                                         </div>
                                     </div>
+                                    <hr>
+                                    <div class="form-group">
+                                        <label>抖音下载数据源</label>
+                                        <select class="form-control" id="douyinProvider" name="douyinProvider">
+                                            <option value="F2" th:selected="${config.douyinProvider} eq 'F2'">F2（Cookie 池）</option>
+                                            <option value="DTK" th:selected="${config.douyinProvider} eq 'DTK'">DTK（API 节点池）</option>
+                                            <option value="AUTO" th:selected="${config.douyinProvider} eq 'AUTO'">AUTO（F2 故障切换 DTK）</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>DTK API 节点池 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('每一行是一个完整的 URL + API Key pair；节点失败后只切换到另一整行，不会交叉组合。')"></i></label>
+                                        <textarea id="dtkApiPool" style="display:none;" th:text="${config.dtkApiPool}"></textarea>
+                                        <div id="dtkNodeRows"></div>
+                                        <button type="button" class="btn btn-default btn-sm" onclick="addDtkNodeRow()"><i class="mdi mdi-plus" style="margin-right:2px;"></i>新增 DTK 节点</button>
+                                        <small class="text-muted" style="display:block;margin-top:6px;">每行一个 pair：DTK API URL 与对应 API Key。留空节点池时使用兼容单节点配置。</small>
+                                    </div>
+                                    <div class="form-group" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+                                        <div style="flex:1 1 220px;"><label>兼容 DTK Base URL</label><input class="form-control" id="dtkBaseUrl" name="dtkBaseUrl" th:value="${config.dtkBaseUrl}" placeholder="例如 https://demo.douyin.wtf"></div>
+                                        <div style="flex:1 1 220px;"><label>兼容 DTK API Key</label><input class="form-control" id="dtkApiKey" name="dtkApiKey" type="password" autocomplete="new-password" placeholder="留空保持现有 Key 不变"></div>
+                                    </div>
+                                    <div class="form-group" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+                                        <div style="flex:1 1 220px;"><label>DTK 请求超时(ms)</label><input class="form-control" id="dtkTimeoutMs" name="dtkTimeoutMs" type="number" min="1000" th:value="${config.dtkTimeoutMs}"></div>
+                                        <div style="flex:1 1 220px;"><label>DTK 详情刷新</label><select class="form-control" id="dtkDetailRefreshEnabled" name="dtkDetailRefreshEnabled"><option value="1" th:selected="${config.dtkDetailRefreshEnabled} eq '1'">启用</option><option value="0" th:selected="${config.dtkDetailRefreshEnabled} eq '0'">禁用</option></select></div>
+                                        <button type="button" class="btn btn-info btn-sm" onclick="checkDtkNodes()"><i class="mdi mdi-connection" style="margin-right:2px;"></i>检测 DTK 节点</button>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>抖音解析 API URL 列表 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('旧版解析 API 兼容配置；每行一个 URL。')"></i></label>
+                                        <textarea class="form-control" id="douyinapiurls" name="douyinapiurls" rows="3" placeholder="例如：https://example.com" th:text="${config.douyinapiurls}"></textarea>
+                                    </div>
                                     <div class="form-group">
                                         <label>抖音Cookie模式</label>
                                         <select class="form-control tiktokcookiestrategy">
@@ -511,9 +527,10 @@
                                         </div>
                                     </div>
                                     <div class="form-group">
-                                        <button class="btn btn-primary saveTikTokConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存</button>
+                                        <button class="btn btn-primary saveTikTokConfig" type="button"><i class="mdi mdi-content-save-outline" style="margin-right: 3px;"></i>保存抖音下载配置</button>
                                     </div>
                                 </form>
+                                <div style="border-top:1px solid #f0f0f0;padding-top:14px;margin-top:16px;"><h5 style="font-size:13px;margin:0 0 10px;color:#595959;">其他平台 Cookie</h5></div>
                                 <div style="display: flex; flex-wrap: wrap; margin: 0 -5px;">
                                     <div style="flex: 0 0 50%; max-width: 50%; padding: 0 5px; box-sizing: border-box;">
                                         <form action="#" method="post" onsubmit="return false;">
@@ -706,6 +723,7 @@
         saveCookieConfig();
         saveAgentConfig();
         initDouyinCookieList();
+        initDtkNodeEditor();
         checkCookies();
         getNotifyConfig();
         initHiddenPlatforms();
@@ -1194,6 +1212,8 @@
     }
     function saveTikTokConfig(){
         $('.saveTikTokConfig').click(function(){
+            var dtkPool = serializeDtkNodePool();
+            if(dtkPool === null) return;
             var appid = $('.tiktok').val();
             var cookiepool = $('.tiktokcookiepool').val();
             var analysisserver = $('.analysisserver').val();
@@ -1208,10 +1228,24 @@
             option['analysisserver'] = analysisserver;
             $.post("/admin/api/updateTikTokConfig",option,function(data,status){
                 if(data.resCode =="000001"){
-                    layer.closeAll();
-                    layer.alert(data.message,function(){
-                        window.location.reload();
-                    })
+                    var configOption = {
+                        id: $('#appid').val(),
+                        douyinapiurls: $('#douyinapiurls').val(),
+                        douyinProvider: $('#douyinProvider').val(),
+                        dtkBaseUrl: $('#dtkBaseUrl').val(),
+                        dtkApiKey: $('#dtkApiKey').val(),
+                        dtkApiPool: dtkPool,
+                        dtkTimeoutMs: $('#dtkTimeoutMs').val(),
+                        dtkDetailRefreshEnabled: $('#dtkDetailRefreshEnabled').val()
+                    };
+                    $.post("/admin/api/saveDouyinDownloadConfig", configOption, function(configData){
+                        if(configData.resCode == "000001"){
+                            layer.closeAll();
+                            layer.alert('抖音下载配置保存成功', function(){ window.location.reload(); });
+                        }else{
+                            layer.alert(configData.message || 'DTK 配置保存失败');
+                        }
+                    });
                 }else{
 
                     layer.alert(data.message,function(){
@@ -1220,6 +1254,49 @@
                 }
             })
         })
+    }
+
+    function initDtkNodeEditor(){
+        var raw = $('#dtkApiPool').val() || '';
+        var lines = raw.split(/\r?\n/);
+        var added = false;
+        for(var i = 0; i < lines.length; i++){
+            var line = $.trim(lines[i] || '');
+            if(!line || line.charAt(0) === '#') continue;
+            var pair = line.split('|');
+            addDtkNodeRow(pair[0] || '', pair.slice(1).join('|'));
+            added = true;
+        }
+        if(!added) addDtkNodeRow('', '');
+    }
+
+    function addDtkNodeRow(url, key){
+        var row = $('<div class="dtk-node-row"></div>');
+        row.append('<input type="url" class="form-control dtk-node-url" placeholder="DTK API URL" autocomplete="off">');
+        row.append('<input type="password" class="form-control dtk-node-key" placeholder="对应 API Key" autocomplete="new-password">');
+        row.append('<button type="button" class="btn btn-danger btn-sm dtk-node-remove" title="删除节点"><i class="mdi mdi-delete-outline"></i></button>');
+        row.find('.dtk-node-url').val(url || '');
+        row.find('.dtk-node-key').val(key || '');
+        row.find('.dtk-node-remove').on('click', function(){ row.remove(); });
+        $('#dtkNodeRows').append(row);
+    }
+
+    function serializeDtkNodePool(){
+        var lines = [];
+        var invalid = false;
+        $('#dtkNodeRows .dtk-node-row').each(function(){
+            var url = $.trim($(this).find('.dtk-node-url').val() || '');
+            var key = $.trim($(this).find('.dtk-node-key').val() || '');
+            if(!url && !key) return;
+            if(!url || !key){ invalid = true; return; }
+            lines.push(url + '|' + key);
+        });
+        if(invalid){
+            layer.msg('每个 DTK 节点必须同时填写 URL 和 API Key');
+            return null;
+        }
+        $('#dtkApiPool').val(lines.join('\n'));
+        return lines.join('\n');
     }
 
     function firstNonEmptyLine(text) {
@@ -1309,6 +1386,8 @@
     }
     function saveConfig(){
         $('.saveConfig').click(function(){
+            var dtkPool = serializeDtkNodePool();
+            if(dtkPool === null) return;
             var appid = $('#appid').val();
             var apptoken = $('#apptoken').val();
             var openprocesshistory = $('#openprocesshistory').val();

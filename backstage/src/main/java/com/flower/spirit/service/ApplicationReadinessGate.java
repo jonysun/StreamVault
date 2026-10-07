@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
@@ -21,19 +22,23 @@ public class ApplicationReadinessGate {
     private static final Logger logger = LoggerFactory.getLogger(ApplicationReadinessGate.class);
     private final Optional<SqliteRuntimeVerifier> sqliteRuntimeVerifier;
     private final DatabaseSchemaInspector schemaInspector;
+    private final String databaseKind;
     private final AtomicReference<Snapshot> snapshot = new AtomicReference<>(
             new Snapshot(State.STARTING, "Application initialization is incomplete", Instant.now()));
 
     @Autowired
     public ApplicationReadinessGate(Optional<SqliteRuntimeVerifier> sqliteRuntimeVerifier,
-            DatabaseSchemaInspector schemaInspector) {
+            DatabaseSchemaInspector schemaInspector,
+            @Value("${streamvault.database.kind:sqlite}") String databaseKind) {
         this.sqliteRuntimeVerifier = sqliteRuntimeVerifier;
         this.schemaInspector = schemaInspector;
+        this.databaseKind = databaseKind;
     }
 
     public ApplicationReadinessGate(Optional<SqliteRuntimeVerifier> sqliteRuntimeVerifier) {
         this.sqliteRuntimeVerifier = sqliteRuntimeVerifier;
         this.schemaInspector = null;
+        this.databaseKind = "sqlite";
     }
 
     @Order(1000)
@@ -42,8 +47,11 @@ public class ApplicationReadinessGate {
         transition(State.CHECKING_DATABASE, "Database readiness check is running");
         try {
             sqliteRuntimeVerifier.ifPresent(SqliteRuntimeVerifier::verify);
-            if (sqliteRuntimeVerifier.isEmpty()) {
+            if (sqliteRuntimeVerifier.isEmpty() && !isPostgresql()) {
                 verifyPortableSchema();
+            } else if (sqliteRuntimeVerifier.isEmpty()) {
+                // Flyway + Hibernate validate the PostgreSQL schema before this event.
+                logger.info("[Readiness] PostgreSQL schema validation delegated to Flyway/JPA");
             }
             transition(State.READY, "Application and database are ready");
             logger.info("[Readiness] state=READY");
@@ -67,12 +75,22 @@ public class ApplicationReadinessGate {
     }
 
     public boolean isReady() {
-        return snapshot.get().state() == State.READY;
+        State state = snapshot.get().state();
+        if (state == State.READY) {
+            return true;
+        }
+        // PostgreSQL has already passed Flyway migration and Hibernate validation before
+        // ApplicationReadyEvent. Do not hold workers behind unrelated late startup listeners.
+        return state != State.BLOCKED && isPostgresql() && sqliteRuntimeVerifier.isEmpty();
+    }
+
+    private boolean isPostgresql() {
+        return "postgresql".equalsIgnoreCase(databaseKind);
     }
 
     public PauseDecision mayRun() {
         Snapshot current = snapshot.get();
-        return current.state() == State.READY
+        return isReady()
                 ? PauseDecision.permit()
                 : PauseDecision.paused("application.readiness", current.reason());
     }

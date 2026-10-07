@@ -89,6 +89,19 @@ public class DouyinDataProviderService {
 		return dtk.fetchAuthorProfile(secUid);
 	}
 
+	public JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
+		if (!isAuto()) return current().fetchAuthorProfileByUniqueId(uniqueId);
+		try {
+			JSONObject result = f2.fetchAuthorProfileByUniqueId(uniqueId);
+			if (result != null && !result.isEmpty()) return result;
+		} catch (RuntimeException error) {
+			if (!shouldFailover(error)) throw error;
+			logger.warn("[DouyinProvider] failover operation=AUTHOR_PROFILE from=F2 to=DTK identity=unique_id reason={}", error.getMessage());
+		}
+		logger.info("[DouyinProvider] operation=AUTHOR_PROFILE provider=DTK identity=unique_id reason=F2_EMPTY_RESULT");
+		return dtk.fetchAuthorProfileByUniqueId(uniqueId);
+	}
+
 	public String fetchDtkWorkData(String workId) {
 		return dtk.fetchWorkData(workId);
 	}

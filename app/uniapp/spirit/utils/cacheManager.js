@@ -1,5 +1,9 @@
 const CACHE_INDEX_KEY = 'SV_VIDEO_CACHE_INDEX'
 const CACHE_SETTINGS_KEY = 'SV_CACHE_SETTINGS'
+const inflightDownloads = new Map()
+const downloadQueue = []
+const maxConcurrentDownloads = 2
+let activeDownloads = 0
 
 const DEFAULT_SETTINGS = {
 	maxCount: 10,
@@ -113,7 +117,7 @@ function getPlayableUrl(video) {
 	return item.path
 }
 
-function prefetchOne(video) {
+function downloadOne(video) {
 	return new Promise(async (resolve) => {
 		const settings = readSettings()
 		if (!settings.enabled) {
@@ -175,6 +179,36 @@ function prefetchOne(video) {
 			fail: () => resolve(false)
 		})
 	})
+}
+
+function prefetchOne(video) {
+	const key = getCacheKey(video)
+	if (!key) return downloadOne(video)
+	if (inflightDownloads.has(key)) return inflightDownloads.get(key)
+	let resolveTask
+	const task = new Promise(resolve => {
+		resolveTask = resolve
+	})
+	inflightDownloads.set(key, task)
+	downloadQueue.push({ key, video, resolve: resolveTask })
+	pumpDownloadQueue()
+	return task
+}
+
+function pumpDownloadQueue() {
+	while (activeDownloads < maxConcurrentDownloads && downloadQueue.length > 0) {
+		const job = downloadQueue.shift()
+		activeDownloads += 1
+		downloadOne(job.video).then((result) => {
+			job.resolve(result)
+		}, () => {
+			job.resolve(false)
+		}).then(() => {
+			inflightDownloads.delete(job.key)
+			activeDownloads -= 1
+			pumpDownloadQueue()
+		})
+	}
 }
 
 async function prefetchVideos(videos) {

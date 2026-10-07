@@ -24,6 +24,7 @@ class DtkDouyinDataProviderTest {
 	private String baseUrl;
 	private String oldBaseUrl;
 	private String oldApiKey;
+	private String oldApiPool;
 	private ExecutorService executor;
 	private AtomicReference<String> receivedApiKey;
 
@@ -31,6 +32,7 @@ class DtkDouyinDataProviderTest {
 	void setUp() throws IOException {
 		oldBaseUrl = Global.dtkBaseUrl;
 		oldApiKey = Global.dtkApiKey;
+		oldApiPool = Global.dtkApiPool;
 		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		executor = Executors.newSingleThreadExecutor();
 		receivedApiKey = new AtomicReference<>();
@@ -71,16 +73,32 @@ class DtkDouyinDataProviderTest {
 			exchange.sendResponseHeaders(200, body.length);
 			try (var output = exchange.getResponseBody()) { output.write(body); }
 		});
+		server.createContext("/api/v1/douyin/user", exchange -> {
+			receivedApiKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
+			String query = exchange.getRequestURI().getRawQuery();
+			String bodyText = "{\"success\":true,\"data\":{\"user\":{\"sec_uid\":\"MS4-profile\","
+					+ "\"unique_id\":\"profile-user\",\"nickname\":\"Profile User\"}}}";
+			if (query == null || !query.contains("unique_id=profile-user")) {
+				exchange.sendResponseHeaders(400, -1);
+				exchange.close();
+				return;
+			}
+			byte[] body = bodyText.getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
 		server.start();
 		baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
 		Global.dtkBaseUrl = baseUrl;
 		Global.dtkApiKey = "test-key";
+		Global.dtkApiPool = "";
 	}
 
 	@AfterEach
 	void tearDown() {
 		Global.dtkBaseUrl = oldBaseUrl;
 		Global.dtkApiKey = oldApiKey;
+		Global.dtkApiPool = oldApiPool;
 		if (server != null) server.stop(0);
 		if (executor != null) executor.shutdownNow();
 	}
@@ -136,5 +154,16 @@ class DtkDouyinDataProviderTest {
 		assertThat(result.items().get(0).getJSONArray("video_play_addr").getString(0))
 				.isEqualTo("https://media.example/post.mp4");
 		assertThat(result.backfillComplete()).isTrue();
+	}
+
+	@Test
+	void fetchesAuthorProfileByUniqueIdThroughConfiguredDtkNode() {
+		JSONObject profile = new DtkDouyinDataProvider(HttpClient.newHttpClient())
+				.fetchAuthorProfileByUniqueId("profile-user");
+
+		assertThat(profile).containsEntry("sec_uid", "MS4-profile")
+				.containsEntry("unique_id", "profile-user")
+				.containsEntry("nickname", "Profile User");
+		assertThat(receivedApiKey).hasValue("test-key");
 	}
 }

@@ -110,6 +110,38 @@ class DouyinDataProviderServiceTest {
 		verify(dtk).fetchDirect("https://www.douyin.com/video/1");
 	}
 
+	@Test
+	void autoProfileUsesF2ProfileApiWhenItReturnsAUser() {
+		JSONObject expected = new JSONObject();
+		expected.put("sec_uid", "MS4-profile");
+		when(f2.fetchAuthorProfile("MS4-profile")).thenReturn(expected);
+
+		assertThat(service.fetchAuthorProfile("MS4-profile")).isSameAs(expected);
+		verify(dtk, never()).fetchAuthorProfile("MS4-profile");
+	}
+
+	@Test
+	void autoProfileFallsBackToDtkWhenF2ProfileApiReturnsEmpty() {
+		JSONObject expected = new JSONObject();
+		expected.put("sec_uid", "MS4-profile");
+		when(f2.fetchAuthorProfile("MS4-profile")).thenReturn(null);
+		when(dtk.fetchAuthorProfile("MS4-profile")).thenReturn(expected);
+
+		assertThat(service.fetchAuthorProfile("MS4-profile")).isSameAs(expected);
+		verify(dtk).fetchAuthorProfile("MS4-profile");
+	}
+
+	@Test
+	void autoUniqueIdProfileFallsBackToDtkWhenF2ProfileApiReturnsEmpty() {
+		JSONObject expected = new JSONObject();
+		expected.put("unique_id", "profile-user");
+		when(f2.fetchAuthorProfileByUniqueId("profile-user")).thenReturn(null);
+		when(dtk.fetchAuthorProfileByUniqueId("profile-user")).thenReturn(expected);
+
+		assertThat(service.fetchAuthorProfileByUniqueId("profile-user")).isSameAs(expected);
+		verify(dtk).fetchAuthorProfileByUniqueId("profile-user");
+	}
+
 	private DouyinFetchRequest request(String cookie) {
 		return new DouyinFetchRequest("sec-user-id", Set.of(), null, 0, 1, 1,
 				DouyinFetchMode.INITIAL, 10, cookie);
