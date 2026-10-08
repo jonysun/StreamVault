@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -91,7 +92,7 @@ class DtkDouyinDataProviderTest {
 		baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
 		Global.dtkBaseUrl = baseUrl;
 		Global.dtkApiKey = "test-key";
-		Global.dtkApiPool = "";
+		Global.dtkApiPool = baseUrl + "|test-key";
 	}
 
 	@AfterEach
@@ -165,5 +166,17 @@ class DtkDouyinDataProviderTest {
 				.containsEntry("unique_id", "profile-user")
 				.containsEntry("nickname", "Profile User");
 		assertThat(receivedApiKey).hasValue("test-key");
+	}
+
+	@Test
+	void doesNotFallBackToLegacyBaseUrlWhenTheNodePoolIsEmpty() {
+		Global.dtkApiPool = "";
+		Global.dtkBaseUrl = baseUrl;
+		Global.dtkApiKey = "legacy-key";
+
+		assertThatThrownBy(() -> new DtkDouyinDataProvider(HttpClient.newHttpClient())
+				.fetchAuthorProfile("sec-user"))
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("DTK 节点池未配置");
 	}
 }
