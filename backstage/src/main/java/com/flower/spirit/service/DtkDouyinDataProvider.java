@@ -216,7 +216,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			JSONObject error = parsed.getJSONObject("error");
 			String errorCode = error == null ? parsed.getString("code") : error.getString("code");
 			if (Boolean.FALSE.equals(success) || (errorCode != null && !errorCode.isBlank()
-					&& !"000001".equals(errorCode) && !"0".equals(errorCode))) {
+					&& !isSuccessCode(errorCode))) {
 				String message = error == null ? parsed.getString("message") : error.getString("message");
 				throw new CollectFetchException("DTK_" + (errorCode == null ? "UPSTREAM_ERROR" : errorCode.toUpperCase()), message);
 			}
@@ -320,6 +320,10 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				|| "DTK_UPSTREAM_SCHEMA".equals(code);
 	}
 
+	private boolean isSuccessCode(String code) {
+		return "000001".equals(code) || "0".equals(code) || "200".equals(code);
+	}
+
 	private DtkNode selectNode(Set<String> excluded) {
 		List<DtkNode> nodes = configuredNodes();
 		long now = System.currentTimeMillis();
@@ -386,8 +390,9 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			String base = parts[0].trim();
 			if (!base.isEmpty()) nodes.add(new DtkNode(base, parts.length > 1 ? parts[1].trim() : ""));
 		}
-		if (nodes.isEmpty() && !blank(Global.dtkBaseUrl)) nodes.add(new DtkNode(Global.dtkBaseUrl, Global.dtkApiKey));
-		if (nodes.isEmpty()) throw new CollectFetchException("DTK_NOT_CONFIGURED", "DTK Base URL 未配置");
+		if (nodes.isEmpty()) {
+			throw new CollectFetchException("DTK_NOT_CONFIGURED", "DTK 节点池未配置有效的 URL|API Key 节点");
+		}
 		return nodes;
 	}
 

@@ -1054,7 +1054,7 @@ public class CollectDataService {
 					videoDataEntity.setAuthorhomepage(AuthorIdentityUtil.douyinHomepage(authorUidForSave));
 					videoDataEntity.setPlatformkey("douyin");
 					videoDataEntity.setContenttype("video");
-					videoDataEntity.setSourceurl(sourceUrl);
+					videoDataEntity.setSourceurl(entity.getOriginaladdress());
 					if (Global.getGeneratenfo) {
 						String uid = authorUid;
 						String publisher = dyNickname + "-" + uid + ".png";
