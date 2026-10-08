@@ -490,20 +490,14 @@
                                         <textarea id="dtkApiPool" style="display:none;" th:text="${config.dtkApiPool}"></textarea>
                                         <div id="dtkNodeRows"></div>
                                         <button type="button" class="btn btn-default btn-sm" onclick="addDtkNodeRow()"><i class="mdi mdi-plus" style="margin-right:2px;"></i>新增 DTK 节点</button>
-                                        <small class="text-muted" style="display:block;margin-top:6px;">每行一个 pair：DTK API URL 与对应 API Key。留空节点池时使用兼容单节点配置。</small>
+                                        <small class="text-muted" style="display:block;margin-top:6px;">每行一个 pair：DTK API URL 与对应 API Key。旧版单节点配置会在首次打开时导入此池，保存后统一使用节点池。</small>
                                     </div>
-                                    <div class="form-group" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-                                        <div style="flex:1 1 220px;"><label>兼容 DTK Base URL</label><input class="form-control" id="dtkBaseUrl" name="dtkBaseUrl" th:value="${config.dtkBaseUrl}" placeholder="例如 https://demo.douyin.wtf"></div>
-                                        <div style="flex:1 1 220px;"><label>兼容 DTK API Key</label><input class="form-control" id="dtkApiKey" name="dtkApiKey" type="password" autocomplete="new-password" placeholder="留空保持现有 Key 不变"></div>
-                                    </div>
+                                    <input type="hidden" id="dtkLegacyBaseUrl" th:value="${config.dtkBaseUrl}">
+                                    <input type="hidden" id="dtkLegacyApiKey" th:value="${config.dtkApiKey}">
                                     <div class="form-group" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
                                         <div style="flex:1 1 220px;"><label>DTK 请求超时(ms)</label><input class="form-control" id="dtkTimeoutMs" name="dtkTimeoutMs" type="number" min="1000" th:value="${config.dtkTimeoutMs}"></div>
                                         <div style="flex:1 1 220px;"><label>DTK 详情刷新</label><select class="form-control" id="dtkDetailRefreshEnabled" name="dtkDetailRefreshEnabled"><option value="1" th:selected="${config.dtkDetailRefreshEnabled} eq '1'">启用</option><option value="0" th:selected="${config.dtkDetailRefreshEnabled} eq '0'">禁用</option></select></div>
                                         <button type="button" class="btn btn-info btn-sm" onclick="checkDtkNodes()"><i class="mdi mdi-connection" style="margin-right:2px;"></i>检测 DTK 节点</button>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>抖音解析 API URL 列表 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('旧版解析 API 兼容配置；每行一个 URL。')"></i></label>
-                                        <textarea class="form-control" id="douyinapiurls" name="douyinapiurls" rows="3" placeholder="例如：https://example.com" th:text="${config.douyinapiurls}"></textarea>
                                     </div>
                                     <div class="form-group">
                                         <label>抖音Cookie模式</label>
@@ -1113,6 +1107,8 @@
 
     function saveAgentConfig(){
     	$('.saveAgentConfig').click(function(){
+			var dtkPool = serializeDtkNodePool();
+			if(dtkPool === null) return;
     		//这里先这样把 本来后台搞一个bean复制 可以少传一点  拉倒吧 先这样
     		  var appid = $('#appid').val();
               var apptoken = $('#apptoken').val();
@@ -1150,11 +1146,8 @@
               option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
               option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
               option['collectitemintervalms'] = $("#collectitemintervalms").val();
-			  option['douyinapiurls'] = $("#douyinapiurls").val();
 			  option['douyinProvider'] = $("#douyinProvider").val();
-			  option['dtkBaseUrl'] = $("#dtkBaseUrl").val();
-			  option['dtkApiKey'] = $("#dtkApiKey").val();
-			  option['dtkApiPool'] = $("#dtkApiPool").val();
+			  option['dtkApiPool'] = dtkPool;
 			  option['dtkTimeoutMs'] = $("#dtkTimeoutMs").val();
 			  option['dtkDetailRefreshEnabled'] = $("#dtkDetailRefreshEnabled").val();
               option['mediahomemode'] = $("#mediahomemode").val();
@@ -1230,10 +1223,7 @@
                 if(data.resCode =="000001"){
                     var configOption = {
                         id: $('#appid').val(),
-                        douyinapiurls: $('#douyinapiurls').val(),
                         douyinProvider: $('#douyinProvider').val(),
-                        dtkBaseUrl: $('#dtkBaseUrl').val(),
-                        dtkApiKey: $('#dtkApiKey').val(),
                         dtkApiPool: dtkPool,
                         dtkTimeoutMs: $('#dtkTimeoutMs').val(),
                         dtkDetailRefreshEnabled: $('#dtkDetailRefreshEnabled').val()
@@ -1266,6 +1256,11 @@
             var pair = line.split('|');
             addDtkNodeRow(pair[0] || '', pair.slice(1).join('|'));
             added = true;
+        }
+        if(!added){
+            var legacyUrl = $.trim($('#dtkLegacyBaseUrl').val() || '');
+            var legacyKey = $.trim($('#dtkLegacyApiKey').val() || '');
+            if(legacyUrl && legacyKey){ addDtkNodeRow(legacyUrl, legacyKey); added = true; }
         }
         if(!added) addDtkNodeRow('', '');
     }
@@ -1416,11 +1411,8 @@
             option['mediapreviewlimit'] = $("#mediapreviewlimit").val();
             option['collecttaskintervalms'] = $("#collecttaskintervalms").val();
             option['collectitemintervalms'] = $("#collectitemintervalms").val();
-			option['douyinapiurls'] = $("#douyinapiurls").val();
 			option['douyinProvider'] = $("#douyinProvider").val();
-			option['dtkBaseUrl'] = $("#dtkBaseUrl").val();
-			option['dtkApiKey'] = $("#dtkApiKey").val();
-			option['dtkApiPool'] = $("#dtkApiPool").val();
+			option['dtkApiPool'] = dtkPool;
 			option['dtkTimeoutMs'] = $("#dtkTimeoutMs").val();
 			option['dtkDetailRefreshEnabled'] = $("#dtkDetailRefreshEnabled").val();
             option['mediahomemode'] = $("#mediahomemode").val();

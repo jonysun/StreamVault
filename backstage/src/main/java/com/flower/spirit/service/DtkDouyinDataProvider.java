@@ -157,7 +157,9 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	@Override
 	public JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
 		if (blank(uniqueId)) return null;
-		return fetchAuthorProfile("unique_id", uniqueId);
+		String profileUrl = "https://www.douyin.com/user/"
+				+ URLEncoder.encode(uniqueId.trim(), StandardCharsets.UTF_8).replace("+", "%20");
+		return fetchAuthorProfile("url", profileUrl);
 	}
 
 	private JSONObject fetchAuthorProfile(String identityKey, String identityValue) {
@@ -188,16 +190,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 
 	private JSONObject requestNode(DtkNode node, String path, String... params) {
 		try {
-			StringBuilder url = new StringBuilder(trimSlash(node.baseUrl())).append(path);
-			for (int i = 0; i + 1 < params.length; i += 2) {
-				url.append(i == 0 ? '?' : '&').append(URLEncoder.encode(params[i], StandardCharsets.UTF_8))
-						.append('=').append(URLEncoder.encode(params[i + 1] == null ? "" : params[i + 1], StandardCharsets.UTF_8));
-			}
-			HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url.toString()))
-					.timeout(Duration.ofMillis(Math.max(1000, Global.dtkTimeoutMs)))
-					.header("Accept", "application/json");
-			if (!blank(node.apiKey())) builder.header("X-API-Key", node.apiKey());
-			HttpResponse<String> response = client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
+			HttpResponse<String> response = send(node, path, params);
 			logger.info("[DTK] endpoint={} status={} node={}", path, response.statusCode(), node.baseUrl());
 			if (response.statusCode() == 401 || response.statusCode() == 403) {
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
@@ -207,13 +200,18 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_RATE_LIMITED", "DTK API 被限流 Retry-After=" + response.headers().firstValue("Retry-After").orElse("unknown"));
 			}
-			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+			if (response.statusCode() != 202 && (response.statusCode() < 200 || response.statusCode() >= 300)) {
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_UPSTREAM_HTTP", "DTK API HTTP status=" + response.statusCode()
 						+ ", endpoint=" + path + ", body=" + preview(response.body(), 1000));
 			}
 			JSONObject parsed = JSON.parseObject(response.body());
 			if (parsed == null) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 返回空 JSON");
+			String taskId = taskId(parsed);
+			if (response.statusCode() == 202 || !blank(taskId)) {
+				if (blank(taskId)) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 异步响应缺少 task_id");
+				parsed = pollTask(node, taskId, parsed);
+			}
 			Boolean success = parsed.getBoolean("success");
 			JSONObject error = parsed.getJSONObject("error");
 			String errorCode = error == null ? parsed.getString("code") : error.getString("code");
@@ -229,6 +227,90 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 			throw new CollectFetchException("DTK_UNAVAILABLE", "DTK API 请求失败: " + e.getClass().getSimpleName(), e);
 		}
+	}
+
+	private HttpResponse<String> send(DtkNode node, String path, String... params) throws Exception {
+		StringBuilder url = new StringBuilder(trimSlash(node.baseUrl())).append(path);
+		for (int i = 0; i + 1 < params.length; i += 2) {
+			url.append(i == 0 ? '?' : '&').append(URLEncoder.encode(params[i], StandardCharsets.UTF_8))
+					.append('=').append(URLEncoder.encode(params[i + 1] == null ? "" : params[i + 1], StandardCharsets.UTF_8));
+		}
+		return sendUrl(node, url.toString());
+	}
+
+	private HttpResponse<String> sendUrl(DtkNode node, String url) throws Exception {
+		HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+				.timeout(Duration.ofMillis(Math.max(1000, Global.dtkTimeoutMs)))
+				.header("Accept", "application/json");
+		if (!blank(node.apiKey())) builder.header("X-API-Key", node.apiKey());
+		return client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
+	}
+
+	private JSONObject pollTask(DtkNode node, String taskId, JSONObject initial) throws Exception {
+		long deadline = System.nanoTime() + Duration.ofMillis(Math.max(1000, Global.dtkTimeoutMs)).toNanos();
+		JSONObject current = initial;
+		String encodedId = URLEncoder.encode(taskId, StandardCharsets.UTF_8);
+		while (System.nanoTime() < deadline) {
+			String status = taskStatus(current);
+			if ("failed".equals(status) || "error".equals(status) || "cancelled".equals(status)) {
+				JSONObject data = payload(current);
+				JSONObject task = data == null ? null : data.getJSONObject("task");
+				JSONObject error = current.getJSONObject("error");
+				String message = error == null ? firstText(data, "error", "message", "status_msg")
+						: firstText(error, "message", "code");
+				if (blank(message)) message = firstText(task, "error", "message", "status_msg");
+				throw new CollectFetchException("DTK_TASK_FAILED", "DTK 异步任务失败 task_id=" + taskId
+						+ (blank(message) ? "" : ": " + message));
+			}
+			if ("done".equals(status) || "completed".equals(status) || "success".equals(status)) {
+				JSONObject data = payload(current);
+				JSONObject result = data == null ? null : data.getJSONObject("result");
+				JSONObject task = data == null ? null : data.getJSONObject("task");
+				if (result == null && task != null) result = task.getJSONObject("result");
+				if (result != null && result.getJSONObject("data") != null
+						&& (result.get("success") != null || result.get("error") != null)) {
+					result = result.getJSONObject("data");
+				}
+				if (result != null) {
+					JSONObject completed = new JSONObject(true);
+					completed.put("success", current.get("success") == null ? Boolean.TRUE : current.get("success"));
+					completed.put("data", result);
+					return completed;
+				}
+				return current;
+			}
+			if (!"queued".equals(status) && !"pending".equals(status) && !"running".equals(status)
+					&& !"processing".equals(status) && current != initial) return current;
+			Thread.sleep(500);
+			HttpResponse<String> response = sendUrl(node,
+					trimSlash(node.baseUrl()) + "/api/v1/tasks/" + encodedId);
+			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				if (response.statusCode() == 401 || response.statusCode() == 403 || response.statusCode() == 429
+						|| response.statusCode() >= 500) {
+					nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
+				}
+				throw new CollectFetchException("DTK_TASK_POLL_FAILED",
+						"DTK task status HTTP status=" + response.statusCode() + ", task_id=" + taskId);
+			}
+			current = JSON.parseObject(response.body());
+			if (current == null) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK task 返回空 JSON");
+		}
+		throw new CollectFetchException("DTK_TASK_TIMEOUT", "DTK 异步任务等待超时 task_id=" + taskId);
+	}
+
+	private String taskId(JSONObject response) {
+		JSONObject data = payload(response);
+		String id = firstText(data, "task_id", "taskId");
+		JSONObject task = data == null ? null : data.getJSONObject("task");
+		return blank(id) ? firstText(task, "task_id", "taskId", "id") : id;
+	}
+
+	private String taskStatus(JSONObject response) {
+		JSONObject data = payload(response);
+		String status = firstText(data, "status", "state", "task_status", "taskStatus");
+		JSONObject task = data == null ? null : data.getJSONObject("task");
+		if (blank(status)) status = firstText(task, "status", "state", "task_status", "taskStatus");
+		return blank(status) ? "" : status.toLowerCase(java.util.Locale.ROOT);
 	}
 
 	private boolean isNodeRetryable(CollectFetchException error) {
@@ -261,10 +343,13 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			result.put("node", node.baseUrl());
 			long started = System.currentTimeMillis();
 			try {
-				JSONObject response = requestNode(node, "/api/v1/douyin/user", "sec_user_id",
-						blank(secUserId) ? "" : secUserId, "wait", waitSeconds());
+				JSONObject response = blank(secUserId)
+						? requestNode(node, "/api/v1/system/status")
+						: requestNode(node, "/api/v1/douyin/user", "sec_user_id", secUserId,
+							"wait", waitSeconds());
 				result.put("ok", true);
 				result.put("status", 200);
+				result.put("probe", blank(secUserId) ? "SYSTEM_STATUS" : "DOUYIN_PROFILE");
 				result.put("responseSummary", preview(response == null ? null : response.toJSONString(), 1000));
 			} catch (CollectFetchException error) {
 				result.put("ok", false);
@@ -698,7 +783,8 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	}
 
 	private String waitSeconds() {
-		return String.valueOf(Math.max(1, Math.min(25, Global.dtkTimeoutMs / 1000)));
+		// Async-by-default DTK endpoints return a task id for wait=0; poll under our own timeout.
+		return "0";
 	}
 
 	private String avatar(JSONObject author) {

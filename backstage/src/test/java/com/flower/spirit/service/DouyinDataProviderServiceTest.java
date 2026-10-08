@@ -111,13 +111,15 @@ class DouyinDataProviderServiceTest {
 	}
 
 	@Test
-	void autoProfileUsesF2ProfileApiWhenItReturnsAUser() {
+	void autoProfileUsesUnifiedDtkPoolEvenWhenF2IsAvailable() {
 		JSONObject expected = new JSONObject();
 		expected.put("sec_uid", "MS4-profile");
 		when(f2.fetchAuthorProfile("MS4-profile")).thenReturn(expected);
+		when(dtk.fetchAuthorProfile("MS4-profile")).thenReturn(expected);
 
 		assertThat(service.fetchAuthorProfile("MS4-profile")).isSameAs(expected);
-		verify(dtk, never()).fetchAuthorProfile("MS4-profile");
+		verify(dtk).fetchAuthorProfile("MS4-profile");
+		verify(f2, never()).fetchAuthorProfile("MS4-profile");
 	}
 
 	@Test
