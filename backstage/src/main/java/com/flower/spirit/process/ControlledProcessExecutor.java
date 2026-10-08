@@ -107,30 +107,65 @@ public class ControlledProcessExecutor {
         }
     }
 
-    private void terminate(Process process, String operation) {
+    /**
+     * Stops a process and all descendants. This is public so callers that use
+     * a custom process runner (for example the incremental F2 fetcher) cannot
+     * accidentally leave descendants holding inherited pipes open.
+     */
+    public Termination terminate(Process process, String operation) {
         if (process == null) {
-            return;
+            return new Termination(true, false, 0, false);
         }
-        List<ProcessHandle> descendants = new ArrayList<>(process.toHandle().descendants().toList());
+        List<ProcessHandle> descendants = descendantsOf(process);
         Collections.reverse(descendants);
         descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy);
+        boolean interrupted = false;
+        boolean forcibly = false;
         try {
             process.destroy();
             process.waitFor(GRACEFUL_STOP_SECONDS, TimeUnit.SECONDS);
-            boolean force = process.isAlive() || descendants.stream().anyMatch(ProcessHandle::isAlive);
-            if (force) {
+            forcibly = process.isAlive() || descendants.stream().anyMatch(ProcessHandle::isAlive);
+            if (forcibly) {
                 descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
                 if (process.isAlive()) process.destroyForcibly();
+                // Confirm the forced termination where the Process
+                // implementation supports a bounded wait. This also closes
+                // the race where the worker returns while a child still owns
+                // an inherited output pipe.
+                try {
+                    process.waitFor(GRACEFUL_STOP_SECONDS, TimeUnit.SECONDS);
+                } catch (InterruptedException error) {
+                    interrupted = true;
+                    Thread.currentThread().interrupt();
+                }
             }
             logger.warn("[Process] terminated operation={} descendants={} forcibly={}", operation,
-                    descendants.size(), force);
+                    descendants.size(), forcibly);
         } catch (InterruptedException error) {
+            interrupted = true;
             Thread.currentThread().interrupt();
             descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
             if (process.isAlive()) process.destroyForcibly();
             logger.warn("[Process] terminated operation={} descendants={} forcibly=true", operation,
                     descendants.size());
         }
+        boolean alive = process.isAlive() || descendants.stream().anyMatch(ProcessHandle::isAlive);
+        return new Termination(!alive, forcibly, descendants.size(), interrupted);
+    }
+
+    private List<ProcessHandle> descendantsOf(Process process) {
+        try {
+            return new ArrayList<>(process.toHandle().descendants().toList());
+        } catch (RuntimeException error) {
+            // Test doubles and a few platform Process implementations do not
+            // expose a ProcessHandle. The main process can still be stopped.
+            logger.debug("[Process] descendants unavailable type={}", error.getClass().getSimpleName());
+            return new ArrayList<>();
+        }
+    }
+
+    public record Termination(boolean terminated, boolean forcibly, int descendantCount,
+            boolean interrupted) {
     }
 
     public record Result(int exitCode, boolean timedOut, String stdout, String stderr,

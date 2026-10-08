@@ -38,7 +38,6 @@ public class CommandUtil {
     private static final long INCREMENTAL_PER_PAGE_TIMEOUT_SECONDS = 15;
     private static final long INCREMENTAL_MIN_TIMEOUT_SECONDS = 60;
     private static final long INCREMENTAL_MAX_TIMEOUT_SECONDS = 15 * 60;
-    private static final long PROCESS_STOP_WAIT_SECONDS = 2;
     private static final long OUTPUT_READER_JOIN_MILLIS = 2000;
     private static final long LEGACY_F2_TIMEOUT_SECONDS = 15 * 60;
     private static final int STRUCTURED_OUTPUT_LIMIT = 16 * 1024 * 1024;
@@ -412,36 +411,13 @@ public class CommandUtil {
 
     private static boolean stopIncrementalProcess(Process process,
             StringBuffer output, boolean forceImmediately) {
-        boolean interrupted = forceImmediately;
-        boolean gracefulWaitCompleted = false;
-        process.destroy();
-        if (!forceImmediately) {
-            try {
-                gracefulWaitCompleted = process.waitFor(
-                        PROCESS_STOP_WAIT_SECONDS, TimeUnit.SECONDS);
-            } catch (InterruptedException error) {
-                interrupted = true;
-                forceImmediately = true;
-            }
+        ControlledProcessExecutor.Termination termination =
+                CONTROLLED_PROCESS_EXECUTOR.terminate(process, "incremental-f2");
+        if (!termination.terminated()) {
+            appendProcessDiagnostic(output,
+                    "process cleanup failed: still alive after force");
         }
-
-        if (forceImmediately || !gracefulWaitCompleted || process.isAlive()) {
-            process.destroyForcibly();
-            boolean forcedWaitCompleted = false;
-            try {
-                forcedWaitCompleted = process.waitFor(
-                        PROCESS_STOP_WAIT_SECONDS, TimeUnit.SECONDS);
-            } catch (InterruptedException error) {
-                interrupted = true;
-            }
-            boolean stillAlive = process.isAlive();
-            boolean forcedCleanupConfirmed = forcedWaitCompleted && !stillAlive;
-            if (!forcedCleanupConfirmed && stillAlive) {
-                appendProcessDiagnostic(output,
-                        "process cleanup failed: still alive after force");
-            }
-        }
-        return interrupted;
+        return forceImmediately || termination.interrupted();
     }
 
     private static boolean finishIncrementalOutputReader(Thread outputReader,
