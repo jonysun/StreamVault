@@ -132,11 +132,38 @@ public class ConfigService {
 		List<ConfigEntity> list =  configDao.findAll();
 		ConfigEntity configData = list.isEmpty() ? new ConfigEntity() : list.get(0);
 		String existingDtkApiKey = configData.getDtkApiKey();
+		String existingDouyinApiUrls = configData.getDouyinapiurls();
 		BeanUtil.copyPropertiesIgnoreCase(configEntity,configData);
 		if (configEntity.getDtkApiKey() == null || configEntity.getDtkApiKey().trim().isEmpty()) {
 			configData.setDtkApiKey(existingDtkApiKey);
 		}
+		if (configEntity.getDtkBaseUrl() == null) {
+			configData.setDtkBaseUrl(list.isEmpty() ? null : list.get(0).getDtkBaseUrl());
+		}
+		if (configEntity.getDouyinapiurls() == null) {
+			configData.setDouyinapiurls(existingDouyinApiUrls);
+		}
+		if (configEntity.getDtkApiPool() != null) {
+			configData.setDtkBaseUrl("");
+			configData.setDtkApiKey("");
+			configData.setDouyinapiurls("");
+		}
 		configDao.save(configData);
+		if (configEntity.getDtkApiPool() != null) {
+			Global.douyinApiUrls = "";
+			Global.dtkBaseUrl = "";
+			Global.dtkApiKey = "";
+			Global.dtkApiPool = configData.getDtkApiPool() == null ? "" : configData.getDtkApiPool().trim();
+			String provider = configData.getDouyinProvider();
+			Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
+					: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+			try {
+				Global.dtkTimeoutMs = Math.max(1000, Integer.parseInt(configData.getDtkTimeoutMs()));
+			} catch (RuntimeException ignored) {
+				Global.dtkTimeoutMs = 15000;
+			}
+			Global.dtkDetailRefreshEnabled = !"0".equals(configData.getDtkDetailRefreshEnabled());
+		}
 		Global.apptoken =configEntity.getApptoken();
 		if(configEntity.getGeneratenfo()!= null && configEntity.getGeneratenfo().equals("1")) {
 			Global.getGeneratenfo =  true;
@@ -297,6 +324,11 @@ public class ConfigService {
 			configData.setDtkApiKey(incoming.getDtkApiKey());
 		}
 		if (incoming.getDtkApiPool() != null) configData.setDtkApiPool(incoming.getDtkApiPool());
+		if (incoming.getDtkApiPool() != null) {
+			configData.setDtkBaseUrl("");
+			configData.setDtkApiKey("");
+			configData.setDouyinapiurls("");
+		}
 		if (incoming.getDtkTimeoutMs() != null) configData.setDtkTimeoutMs(incoming.getDtkTimeoutMs());
 		if (incoming.getDtkDetailRefreshEnabled() != null) {
 			configData.setDtkDetailRefreshEnabled(incoming.getDtkDetailRefreshEnabled());

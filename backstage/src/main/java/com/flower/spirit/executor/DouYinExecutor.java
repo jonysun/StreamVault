@@ -58,6 +58,9 @@ public class DouYinExecutor {
 
 	@Autowired
 	private com.flower.spirit.service.PlatformCookieService platformCookieService;
+
+	@Autowired
+	private com.flower.spirit.service.DouyinDataProviderService douyinDataProviderService;
 	
     private static GraphicContentDao staticGraphicContentDao;
     
@@ -69,6 +72,8 @@ public class DouYinExecutor {
 
     private static com.flower.spirit.service.PlatformCookieService staticPlatformCookieService;
 
+    private static com.flower.spirit.service.DouyinDataProviderService staticDouyinDataProviderService;
+
     @PostConstruct
     public void init() {
         staticGraphicContentDao = graphicContentDao;
@@ -76,6 +81,7 @@ public class DouYinExecutor {
         staticAuthorProfileService = authorProfileService;
         staticBlockedWorkService = blockedWorkService;
         staticPlatformCookieService = platformCookieService;
+        staticDouyinDataProviderService = douyinDataProviderService;
     }
 	
 	
@@ -187,7 +193,7 @@ public class DouYinExecutor {
 			graphicContentEntity.setPlatformkey("douyin");
 			graphicContentEntity.setContenttype("graphic");
 			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
-			JSONObject hybridData = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(post)));
+			JSONObject hybridData = fetchDtkWorkData(post);
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
@@ -316,7 +322,7 @@ public class DouYinExecutor {
 			graphicContentEntity.setPlatformkey("douyin");
 			graphicContentEntity.setContenttype("graphic");
 			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
-			JSONObject hybridData = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(post)));
+			JSONObject hybridData = fetchDtkWorkData(post);
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
@@ -367,6 +373,17 @@ public class DouYinExecutor {
 		}
 		File file = new File(path);
 		return file.exists() && file.isFile() && file.length() > 0;
+	}
+
+	private static JSONObject fetchDtkWorkData(String workId) {
+		if (staticDouyinDataProviderService == null || workId == null || workId.isBlank()) return null;
+		try {
+			String raw = staticDouyinDataProviderService.fetchDtkWorkData(workId);
+			return raw == null || raw.isBlank() ? null : JSONObject.parseObject(raw);
+		} catch (RuntimeException error) {
+			logger.warn("[DouyinImageText] DTK work supplement failed workId={} error={}", workId, error.getMessage());
+			return null;
+		}
 	}
 
 	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, String fallbackName, String taskAddress) {

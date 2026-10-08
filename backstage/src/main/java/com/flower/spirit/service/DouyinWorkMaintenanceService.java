@@ -54,6 +54,9 @@ public class DouyinWorkMaintenanceService {
 	private DouyinProfileGateway douyinProfileGateway;
 
 	@Autowired
+	private DouyinDataProviderService douyinDataProviderService;
+
+	@Autowired
 	private RawPayloadService rawPayloadService;
 
 	public AjaxEntity redownloadVideo(Integer id) {
@@ -73,10 +76,10 @@ public class DouyinWorkMaintenanceService {
 			return new AjaxEntity(Global.ajax_uri_error, "缺少原作品链接，无法重新下载", null);
 		}
 		String cookie = platformCookieService.currentDouyinCookie("redownload_video");
-		Map<String, String> data = DouUtil.downVideo(source, null, cookie);
-		if (data == null) {
+		Map<String, String> data = douyinDataProviderService.fetchDirect(source, cookie);
+		if (data == null && !douyinDataProviderService.isDtkOnly()) {
 			platformCookieService.reportRisk("抖音", cookie, "redownload video parse failed");
-		} else {
+		} else if (data != null && !douyinDataProviderService.isDtkOnly()) {
 			platformCookieService.reportSuccess("抖音", cookie);
 		}
 		if (data == null) {
@@ -137,8 +140,6 @@ public class DouyinWorkMaintenanceService {
 		for (VideoDataEntity video : videos) {
 			try {
 				boolean changed = false;
-				String oldSource = video.getSourceurl();
-				String originalAddress = video.getOriginaladdress();
 				String sourceUrl = isBlank(video.getVideoid()) ? null : DouyinSourceUrlUtil.video(video.getVideoid());
 				if (!isBlank(sourceUrl) && !sourceUrl.equals(video.getSourceurl())) {
 					video.setSourceurl(sourceUrl);
@@ -153,7 +154,7 @@ public class DouyinWorkMaintenanceService {
 						jsonUpdated++;
 						changed = true;
 					} else {
-						hybrid = fetchHybridWithFallbacks(oldSource, originalAddress, sourceUrl);
+						hybrid = fetchDtkWorkData(video.getVideoid());
 						if (hybrid != null) {
 							rawPayload().storeVideoRawPayload(video, hybrid.toJSONString());
 							jsonUpdated++;
@@ -178,14 +179,10 @@ public class DouyinWorkMaintenanceService {
 		for (GraphicContentEntity item : graphics) {
 			try {
 				boolean changed = false;
-				String oldSource = item.getSourceurl();
-				String originalAddress = item.getOriginaladdress();
 				String sourceUrl = isBlank(item.getVideoid()) ? null
 						: DouyinSourceUrlUtil.graphic(
 								AuthorProfileService.preferDouyinAuthorUid(item.getSecuid(), item.getAuthoruid()),
 								item.getVideoid());
-				String fetchSourceUrl = firstNotBlank(sourceUrl,
-						isBlank(item.getVideoid()) ? null : DouyinSourceUrlUtil.note(item.getVideoid()));
 				if (!isBlank(sourceUrl) && !sourceUrl.equals(item.getSourceurl())) {
 					item.setSourceurl(sourceUrl);
 					sourceUrlUpdated++;
@@ -193,7 +190,7 @@ public class DouyinWorkMaintenanceService {
 				}
 				JSONObject hybrid = null;
 				if (isBlank(item.getJsonData())) {
-					hybrid = fetchHybridWithFallbacks(oldSource, originalAddress, fetchSourceUrl);
+					hybrid = fetchDtkWorkData(item.getVideoid());
 					if (hybrid != null) {
 						item.setJsonData(hybrid.toJSONString());
 						jsonUpdated++;
@@ -222,17 +219,15 @@ public class DouyinWorkMaintenanceService {
 		return new AjaxEntity(Global.ajax_success, "抖音元数据修复完成", result);
 	}
 
-	private JSONObject fetchHybridWithFallbacks(String... urls) {
-		for (String url : urls) {
-			if (isBlank(url)) {
-				continue;
-			}
-			JSONObject hybrid = DouUtil.fetchHybridVideoData(url);
-			if (hybrid != null) {
-				return hybrid;
-			}
+	private JSONObject fetchDtkWorkData(String workId) {
+		if (isBlank(workId)) return null;
+		try {
+			String raw = douyinDataProviderService.fetchDtkWorkData(workId);
+			return isBlank(raw) ? null : JSONObject.parseObject(raw);
+		} catch (RuntimeException error) {
+			logger.warn("DTK work metadata refresh failed workId={} error={}", workId, error.getMessage());
+			return null;
 		}
-		return null;
 	}
 
 	private void applyVideoDownload(VideoDataEntity target, Map<String, String> map, String source) throws IOException, InterruptedException {
@@ -358,7 +353,7 @@ public class DouyinWorkMaintenanceService {
 		}
 		AuthorSnapshot snapshot = resolveAuthorSnapshot(detail, nickname);
 		String sourceUrl = DouyinSourceUrlUtil.graphic(snapshot.authorUid, postId);
-		JSONObject hybrid = DouUtil.fetchHybridVideoData(firstNotBlank(sourceUrl, DouyinSourceUrlUtil.note(postId)));
+		JSONObject hybrid = fetchDtkWorkData(postId);
 		target.setVideoid(postId);
 		target.setPlatform("抖音");
 		target.setOriginaladdress(source);
