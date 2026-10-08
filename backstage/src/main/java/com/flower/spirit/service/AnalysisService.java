@@ -915,7 +915,7 @@ public class AnalysisService {
 		if (dtkMode || autoMode || (null != cookie && !cookie.equals(""))) {
 			Map<String, String> downVideo = dtkMode || autoMode
 					? douyinDataProviderService.fetchDirect(video, cookie)
-					: DouUtil.downVideo(video, historyId, cookie);
+					: DouUtil.downVideoWithoutHybridSupplement(video, historyId, cookie);
 			if(downVideo!= null) {
 				if (!dtkMode && !autoMode) platformCookieService.reportSuccess("抖音", cookie);
 				this.putRecord(downVideo.get("awemeid"), downVideo.get("desc"), downVideo.get("videoplay"),
@@ -1190,7 +1190,7 @@ public class AnalysisService {
 				String cookie = dtkMode ? "" : platformCookieService.currentDouyinCookie("direct_parse");
 				Map<String, String> douData = dtkMode || autoMode
 						? douyinDataProviderService.fetchDirect(url, cookie)
-						: DouUtil.downVideo(url, null, cookie);
+						: DouUtil.downVideoWithoutHybridSupplement(url, null, cookie);
 				if (douData == null) {
 					if (!dtkMode && !autoMode) platformCookieService.reportRisk("抖音", cookie, "direct parse failed");
 					return new AjaxEntity(Global.ajax_uri_error, "解析失败", null);

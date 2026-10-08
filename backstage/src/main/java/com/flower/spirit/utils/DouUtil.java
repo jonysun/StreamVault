@@ -322,6 +322,14 @@ public class DouUtil {
 	}
 
 	public static Map<String, String> downVideo(String url, Integer historyId, String cookie) {
+		return downVideo(url, historyId, cookie, true);
+	}
+
+	public static Map<String, String> downVideoWithoutHybridSupplement(String url, Integer historyId, String cookie) {
+		return downVideo(url, historyId, cookie, false);
+	}
+
+	private static Map<String, String> downVideo(String url, Integer historyId, String cookie, boolean includeHybridSupplement) {
 		try {
 			logger.info("[DouyinSingle] start rawUrl={}", url);
 			// 获取重定向后的真实URL
@@ -345,7 +353,8 @@ public class DouUtil {
 			logger.info("[DouyinSingle] extracted videoId={}", videoId);
 			
 			// 获取视频数据
-			Map<String, String> data = getBogusWithSource(videoId, url, cookie);
+			Map<String, String> data = includeHybridSupplement
+					? getBogusWithSource(videoId, url, cookie) : getBogusWithCookie(videoId, cookie);
 			if (data != null) {
 				logger.info("接口解析成功，数据: {}", data);
 				return data;
