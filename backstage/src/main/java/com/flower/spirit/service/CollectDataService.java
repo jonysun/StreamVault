@@ -1014,14 +1014,8 @@ public class CollectDataService {
 					if (!localVideoExists) {
 						HttpUtil.downloadFileWithOkHttp(coveruri, filename + ".jpg", dir2, header);
 					}
-					JSONObject hybridData = null;
-					try {
-						String dtkWorkData = douyinDataProviderService.fetchDtkWorkData(awemeId);
-						if (dtkWorkData != null && !dtkWorkData.isBlank()) hybridData = JSONObject.parseObject(dtkWorkData);
-					} catch (RuntimeException error) {
-						logger.warn("[CollectTask] DTK work supplement failed runId={} awemeId={} error={}",
-								runId, awemeId, error.getMessage());
-					}
+					String sourceUrl = DouyinSourceUrlUtil.video(awemeId);
+					JSONObject hybridData = DouUtil.fetchHybridVideoData(sourceUrl);
 					String rawJsonData = hybridData == null ? detailJson : hybridData.toJSONString();
 					VideoDataEntity videoDataEntity = new VideoDataEntity(awemeId, desc, desc, "抖音", coverunaddr,
 							FileUtil.generateDir(true, Global.platform.douyin.name(), false, filename, taskname, "mp4"),
@@ -1054,7 +1048,7 @@ public class CollectDataService {
 					videoDataEntity.setAuthorhomepage(AuthorIdentityUtil.douyinHomepage(authorUidForSave));
 					videoDataEntity.setPlatformkey("douyin");
 					videoDataEntity.setContenttype("video");
-					videoDataEntity.setSourceurl(sourceUrl);
+					videoDataEntity.setSourceurl(entity.getOriginaladdress());
 					if (Global.getGeneratenfo) {
 						String uid = authorUid;
 						String publisher = dyNickname + "-" + uid + ".png";
@@ -2988,3 +2982,4 @@ public class CollectDataService {
 	record SnapshotMediaStats(int videoCount, int imageCount) {
 	}
 }
+
