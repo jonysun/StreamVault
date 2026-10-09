@@ -185,7 +185,7 @@ public class CollectRunQueryService {
 				+ "(SELECT q.state FROM biz_job_queue q WHERE q.job_type='COLLECT_FETCH' AND q.dedupe_key='collect:' || CAST(r.collect_task_id AS VARCHAR(64)) "
 				+ "ORDER BY q.id DESC LIMIT 1) AS \"jobState\" FROM biz_collect_run r "
 				+ "LEFT JOIN biz_collect_data t ON t.id=r.collect_task_id " + filter
-				+ "ORDER BY r.created_at DESC, r.id DESC LIMIT " + safeLimit;
+				+ "ORDER BY COALESCE(r.heartbeat_at, r.started_at, r.finished_at, r.created_at) DESC NULLS LAST, r.id DESC LIMIT " + safeLimit;
 		List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, filterArgs.toArray()).stream()
 				.map(this::withStateLabel).toList();
 		Map<String, Object> countRow = jdbcTemplate.queryForMap("SELECT "

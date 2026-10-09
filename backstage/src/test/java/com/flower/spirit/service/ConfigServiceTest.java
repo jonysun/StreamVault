@@ -34,4 +34,26 @@ class ConfigServiceTest {
 		assertThat(config.getDtkDetailRefreshEnabled()).isEqualTo("1");
 		verify(dao).save(config);
 	}
+
+	@Test
+	void unifiedDtkPoolSaveClearsLegacyDtkAndParserEndpoints() {
+		ConfigDao dao = mock(ConfigDao.class);
+		ConfigEntity existing = new ConfigEntity();
+		existing.setDtkBaseUrl("https://legacy.example");
+		existing.setDtkApiKey("legacy-key");
+		existing.setDouyinapiurls("https://old-parser.example");
+		when(dao.findAll()).thenReturn(List.of(existing));
+		when(dao.save(any(ConfigEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		ConfigService service = new ConfigService();
+		ReflectionTestUtils.setField(service, "configDao", dao);
+		ConfigEntity incoming = new ConfigEntity();
+		incoming.setDtkApiPool("");
+
+		service.saveDouyinDownloadConfig(incoming);
+
+		assertThat(existing.getDtkApiPool()).isEmpty();
+		assertThat(existing.getDtkBaseUrl()).isEmpty();
+		assertThat(existing.getDtkApiKey()).isEmpty();
+		assertThat(existing.getDouyinapiurls()).isEmpty();
+	}
 }

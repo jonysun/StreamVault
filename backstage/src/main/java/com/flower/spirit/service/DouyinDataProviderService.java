@@ -64,7 +64,8 @@ public class DouyinDataProviderService {
 	}
 
 	public Map<String, String> fetchDirect(String url, String cookie) {
-		if (!isAuto()) return current().fetchDirect(url);
+		if (isDtkOnly()) return dtk.fetchDirect(url);
+		if (!isAuto()) return f2.fetchDirect(url, cookie);
 		try {
 			Map<String, String> result = f2.fetchDirect(url, cookie);
 			if (result != null && result.get("videoplay") != null && !result.get("videoplay").isBlank()) return result;
@@ -77,28 +78,10 @@ public class DouyinDataProviderService {
 	}
 
 	public JSONObject fetchAuthorProfile(String secUid) {
-		if (!isAuto()) return current().fetchAuthorProfile(secUid);
-		try {
-			JSONObject result = f2.fetchAuthorProfile(secUid);
-			if (result != null && !result.isEmpty()) return result;
-		} catch (RuntimeException error) {
-			if (!shouldFailover(error)) throw error;
-			logger.warn("[DouyinProvider] failover operation=AUTHOR_PROFILE from=F2 to=DTK reason={}", error.getMessage());
-		}
-		logger.info("[DouyinProvider] operation=AUTHOR_PROFILE provider=DTK reason=F2_EMPTY_RESULT");
 		return dtk.fetchAuthorProfile(secUid);
 	}
 
 	public JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
-		if (!isAuto()) return current().fetchAuthorProfileByUniqueId(uniqueId);
-		try {
-			JSONObject result = f2.fetchAuthorProfileByUniqueId(uniqueId);
-			if (result != null && !result.isEmpty()) return result;
-		} catch (RuntimeException error) {
-			if (!shouldFailover(error)) throw error;
-			logger.warn("[DouyinProvider] failover operation=AUTHOR_PROFILE from=F2 to=DTK identity=unique_id reason={}", error.getMessage());
-		}
-		logger.info("[DouyinProvider] operation=AUTHOR_PROFILE provider=DTK identity=unique_id reason=F2_EMPTY_RESULT");
 		return dtk.fetchAuthorProfileByUniqueId(uniqueId);
 	}
 

@@ -2,7 +2,6 @@ package com.flower.spirit.service;
 
 import org.springframework.stereotype.Service;
 
-import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.utils.DouUtil;
 
 @Service
@@ -32,25 +31,7 @@ public class F2DouyinDataProvider implements DouyinDataProvider {
 	}
 
 	public java.util.Map<String, String> fetchDirect(String url, String cookie) {
-		return DouUtil.downVideo(url, null, cookie);
+		return DouUtil.downVideoWithoutHybridSupplement(url, null, cookie);
 	}
 
-	@Override
-	public JSONObject fetchAuthorProfile(String secUid) {
-		JSONObject profile = DouUtil.fetchUserProfile(secUid);
-		return extractProfileUser(profile);
-	}
-
-	@Override
-	public JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
-		return extractProfileUser(DouUtil.fetchUserProfileByUniqueId(uniqueId));
-	}
-
-	private JSONObject extractProfileUser(JSONObject profile) {
-		if (profile == null) return null;
-		JSONObject user = profile.getJSONObject("user");
-		if (user != null) return user;
-		JSONObject data = profile.getJSONObject("data");
-		return data == null ? null : data.getJSONObject("user") == null ? data : data.getJSONObject("user");
-	}
 }
