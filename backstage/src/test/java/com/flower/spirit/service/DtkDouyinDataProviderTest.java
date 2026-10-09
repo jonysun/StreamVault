@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -40,13 +41,6 @@ class DtkDouyinDataProviderTest {
 		server.createContext("/api/v1/douyin/video", exchange -> {
 			receivedApiKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
 			String query = exchange.getRequestURI().getRawQuery();
-			if (query != null && query.contains("aweme_id=async-work")) {
-				byte[] body = "{\"success\":true,\"data\":{\"task_id\":\"task-1\",\"status\":\"queued\"}}"
-						.getBytes(StandardCharsets.UTF_8);
-				exchange.sendResponseHeaders(202, body.length);
-				try (var output = exchange.getResponseBody()) { output.write(body); }
-				return;
-			}
 			String bodyText = query != null && query.contains("aweme_id=top-level-cover")
 			? "{\"success\":true,\"data\":{\"aweme_id\":\"top-level-cover\",\"desc\":\"title\","
 					+ "\"video\":{\"play_addr\":{\"url_list\":[\"https://media.example/video.mp4\"]}},"
@@ -69,15 +63,6 @@ class DtkDouyinDataProviderTest {
 			exchange.sendResponseHeaders(200, body.length);
 			try (var output = exchange.getResponseBody()) { output.write(body); }
 		});
-		server.createContext("/api/v1/tasks/task-1", exchange -> {
-			receivedApiKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
-			byte[] body = ("{\"success\":true,\"data\":{\"state\":\"done\",\"result\":{" +
-					"\"success\":true,\"data\":{\"aweme_id\":\"async-work\",\"desc\":\"done\","
-					+ "\"video\":{\"url\":\"https://media.example/async.mp4\"}},\"error\":null,\"meta\":{}}}}")
-					.getBytes(StandardCharsets.UTF_8);
-			exchange.sendResponseHeaders(200, body.length);
-			try (var output = exchange.getResponseBody()) { output.write(body); }
-		});
 		server.createContext("/api/v1/douyin/user/posts", exchange -> {
 			byte[] body = ("{\"code\":200,\"message\":\"success\",\"data\":{"
 					+ "\"items\":[{\"content_id\":\"456\",\"kind\":\"video\",\"description\":\"post\","
@@ -92,9 +77,9 @@ class DtkDouyinDataProviderTest {
 		server.createContext("/api/v1/douyin/user", exchange -> {
 			receivedApiKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
 			String query = exchange.getRequestURI().getRawQuery();
-			String bodyText = "{\"success\":true,\"data\":{\"user\":{\"sec_uid\":\"MS4-profile\"," +
-					"\"unique_id\":\"profile-user\",\"nickname\":\"Profile User\"}}}";
-			if (query == null || !query.contains("url=https%3A%2F%2Fwww.douyin.com%2Fuser%2Fprofile-user")) {
+			String bodyText = "{\"success\":true,\"data\":{\"user\":{\"sec_uid\":\"MS4-profile\","
+					+ "\"unique_id\":\"profile-user\",\"nickname\":\"Profile User\"}}}";
+			if (query == null || !query.contains("unique_id=profile-user")) {
 				exchange.sendResponseHeaders(400, -1);
 				exchange.close();
 				return;
@@ -107,7 +92,7 @@ class DtkDouyinDataProviderTest {
 		baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
 		Global.dtkBaseUrl = baseUrl;
 		Global.dtkApiKey = "test-key";
-		Global.dtkApiPool = "";
+		Global.dtkApiPool = baseUrl + "|test-key";
 	}
 
 	@AfterEach
@@ -136,13 +121,6 @@ class DtkDouyinDataProviderTest {
 	void unwrapsOfficialEnvelopeForWorkData() {
 		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("123");
 		assertThat(raw).contains("\"aweme_detail\"", "\"aweme_id\":\"123\"");
-	}
-
-	@Test
-	void pollsAsyncTaskOnTheSameDtkNodeUntilWorkDataIsReady() {
-		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("async-work");
-		assertThat(raw).contains("\"aweme_id\":\"async-work\"").contains("https://media.example/async.mp4");
-		assertThat(receivedApiKey).hasValue("test-key");
 	}
 
 	@Test
@@ -189,4 +167,17 @@ class DtkDouyinDataProviderTest {
 				.containsEntry("nickname", "Profile User");
 		assertThat(receivedApiKey).hasValue("test-key");
 	}
+
+	@Test
+	void doesNotFallBackToLegacyBaseUrlWhenTheNodePoolIsEmpty() {
+		Global.dtkApiPool = "";
+		Global.dtkBaseUrl = baseUrl;
+		Global.dtkApiKey = "legacy-key";
+
+		assertThatThrownBy(() -> new DtkDouyinDataProvider(HttpClient.newHttpClient())
+				.fetchAuthorProfile("sec-user"))
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("DTK 节点池未配置");
+	}
 }
+
