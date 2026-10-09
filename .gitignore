@@ -53,3 +53,6 @@ buildNumber.properties
 # extend - StreamVault CLI runtime files
 extend/**/config.json
 extend/**/.last_query.json
+
+# local DTK credentials
+/dtk.txt

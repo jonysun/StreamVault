@@ -35,6 +35,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private final AtomicInteger nodeCursor = new AtomicInteger();
 	private final ConcurrentHashMap<String, Long> nodeCooldownUntil = new ConcurrentHashMap<>();
 	private static final long NODE_COOLDOWN_MS = 60_000L;
+	private static final long TASK_POLL_TIMEOUT_MS = 30_000L;
 	private static final List<String> ITEM_ARRAY_KEYS = List.of("items", "aweme_list", "list", "posts", "works");
 
 	public DtkDouyinDataProvider() {
@@ -59,12 +60,22 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		Set<String> known = request.knownWorkIds() == null ? Set.of() : request.knownWorkIds();
 		List<JSONObject> items = new ArrayList<>();
 		Set<String> newIds = new LinkedHashSet<>();
-		String cursor = blank(request.backfillCursor()) ? "0" : request.backfillCursor();
+		String cursor = blank(request.backfillCursor()) ? null : request.backfillCursor();
 		int pages = 0;
 		boolean hasMore = true;
 		while (hasMore && pages < request.maxPages() && (request.maxItems() <= 0 || newIds.size() < request.maxItems())) {
-			JSONObject response = get("/api/v1/douyin/user/posts", "sec_user_id", request.secUserId(),
-					"cursor", cursor, "count", "50", "wait", waitSeconds());
+			List<String> params = new ArrayList<>();
+			params.add("sec_user_id");
+			params.add(request.secUserId());
+			if (!blank(cursor)) {
+				params.add("cursor");
+				params.add(cursor);
+			}
+			params.add("count");
+			params.add("50");
+			params.add("wait");
+			params.add(waitSeconds());
+			JSONObject response = get("/api/v1/douyin/user/posts", params.toArray(String[]::new));
 			JSONObject data = payload(response);
 			JSONArray rawItems = findItemArray(response, 0);
 			if (rawItems == null) {
@@ -101,9 +112,10 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		diagnostics.put("provider", name());
 		diagnostics.put("observedCount", items.size());
 		diagnostics.put("pagesFetched", pages);
+		String finalCursor = blank(cursor) ? "0" : cursor;
 		return new DouyinFetchEnvelope(List.copyOf(items), Collections.unmodifiableSet(newIds),
 				items.isEmpty() ? "NO_PUBLIC_WORKS" : hasMore ? "BATCH_LIMIT" : "NO_MORE", pages, 0,
-				cursor, cursor, !hasMore, false, 0, diagnostics);
+				finalCursor, finalCursor, !hasMore, false, 0, diagnostics);
 	}
 
 	@Override
@@ -157,7 +169,8 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	@Override
 	public JSONObject fetchAuthorProfileByUniqueId(String uniqueId) {
 		if (blank(uniqueId)) return null;
-		return fetchAuthorProfile("unique_id", uniqueId);
+		throw new CollectFetchException("DTK_UNSUPPORTED_SOURCE",
+				"DTK 作者资料接口仅支持 sec_user_id 或 url，不支持 unique_id");
 	}
 
 	private JSONObject fetchAuthorProfile(String identityKey, String identityValue) {
@@ -187,6 +200,10 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	}
 
 	private JSONObject requestNode(DtkNode node, String path, String... params) {
+		return requestNode(node, true, path, params);
+	}
+
+	private JSONObject requestNode(DtkNode node, boolean awaitAsyncTask, String path, String... params) {
 		try {
 			StringBuilder url = new StringBuilder(trimSlash(node.baseUrl())).append(path);
 			for (int i = 0; i + 1 < params.length; i += 2) {
@@ -214,6 +231,14 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			}
 			JSONObject parsed = JSON.parseObject(response.body());
 			if (parsed == null) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 返回空 JSON");
+			if (awaitAsyncTask && response.statusCode() == 202) {
+				String taskId = taskId(parsed);
+				if (blank(taskId)) {
+					throw new CollectFetchException("DTK_UPSTREAM_SCHEMA",
+							"DTK 异步响应缺少 task_id " + schemaDiagnostics(parsed, null));
+				}
+				return awaitTask(node, taskId);
+			}
 			Boolean success = parsed.getBoolean("success");
 			JSONObject error = parsed.getJSONObject("error");
 			String errorCode = error == null ? parsed.getString("code") : error.getString("code");
@@ -229,6 +254,59 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 			throw new CollectFetchException("DTK_UNAVAILABLE", "DTK API 请求失败: " + e.getClass().getSimpleName(), e);
 		}
+	}
+
+	private JSONObject awaitTask(DtkNode node, String taskId) {
+		long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS
+				.toNanos(Math.max(5_000L, TASK_POLL_TIMEOUT_MS));
+		long delayMs = 250L;
+		String encodedTaskId = URLEncoder.encode(taskId, StandardCharsets.UTF_8);
+		while (true) {
+			JSONObject taskResponse = requestNode(node, false, "/api/v1/tasks/" + encodedTaskId);
+			JSONObject taskData = payload(taskResponse);
+			String state = firstText(taskData, "state");
+			if ("done".equalsIgnoreCase(state)) {
+				JSONObject result = taskData == null ? null : taskData.getJSONObject("data");
+				if (result == null) {
+					throw new CollectFetchException("DTK_UPSTREAM_SCHEMA",
+							"DTK 任务完成但缺少结果数据 " + schemaDiagnostics(taskResponse, null));
+				}
+				JSONObject flattened = new JSONObject(true);
+				flattened.putAll(taskResponse);
+				flattened.put("data", result);
+				JSONObject meta = flattened.getJSONObject("meta");
+				if (meta == null) meta = new JSONObject(true);
+				meta.put("task_id", taskId);
+				meta.put("async", true);
+				flattened.put("meta", meta);
+				return flattened;
+			}
+			if ("failed".equalsIgnoreCase(state) || "error".equalsIgnoreCase(state)) {
+				JSONObject error = taskData == null ? null : taskData.getJSONObject("error");
+				if (error == null) error = taskResponse.getJSONObject("error");
+				String code = error == null ? null : error.getString("code");
+				String message = error == null ? null : error.getString("message");
+				throw new CollectFetchException("DTK_TASK_FAILED",
+						"DTK 异步任务失败" + (blank(code) ? "" : " code=" + code)
+							+ (blank(message) ? "" : " message=" + message));
+			}
+			if (System.nanoTime() >= deadline) {
+				throw new CollectFetchException("DTK_TASK_TIMEOUT", "DTK 异步任务轮询超时 task_id=" + taskId);
+			}
+			try {
+				Thread.sleep(delayMs);
+			} catch (InterruptedException interrupted) {
+				Thread.currentThread().interrupt();
+				throw new CollectFetchException("DTK_TASK_INTERRUPTED", "DTK 异步任务轮询被中断", interrupted);
+			}
+			delayMs = Math.min(1_000L, delayMs * 2L);
+		}
+	}
+
+	private String taskId(JSONObject response) {
+		JSONObject data = response == null ? null : response.getJSONObject("data");
+		String taskId = firstText(data, "task_id", "taskId");
+		return blank(taskId) ? firstText(response, "task_id", "taskId") : taskId;
 	}
 
 	private boolean isNodeRetryable(CollectFetchException error) {
