@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Set;
 
@@ -28,6 +29,9 @@ class DtkDouyinDataProviderTest {
 	private String oldApiPool;
 	private ExecutorService executor;
 	private AtomicReference<String> receivedApiKey;
+	private AtomicReference<String> receivedPostsQuery;
+	private AtomicReference<Boolean> asyncPosts;
+	private AtomicInteger taskPolls;
 
 	@BeforeEach
 	void setUp() throws IOException {
@@ -37,6 +41,9 @@ class DtkDouyinDataProviderTest {
 		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		executor = Executors.newSingleThreadExecutor();
 		receivedApiKey = new AtomicReference<>();
+		receivedPostsQuery = new AtomicReference<>();
+		asyncPosts = new AtomicReference<>(false);
+		taskPolls = new AtomicInteger();
 		server.setExecutor(executor);
 		server.createContext("/api/v1/douyin/video", exchange -> {
 			receivedApiKey.set(exchange.getRequestHeaders().getFirst("X-API-Key"));
@@ -64,6 +71,14 @@ class DtkDouyinDataProviderTest {
 			try (var output = exchange.getResponseBody()) { output.write(body); }
 		});
 		server.createContext("/api/v1/douyin/user/posts", exchange -> {
+			receivedPostsQuery.set(exchange.getRequestURI().getRawQuery());
+			if (Boolean.TRUE.equals(asyncPosts.get())) {
+				byte[] body = "{\"success\":true,\"data\":{\"task_id\":\"task-1\",\"state\":\"running\"},\"error\":null,\"meta\":{}}"
+						.getBytes(StandardCharsets.UTF_8);
+				exchange.sendResponseHeaders(202, body.length);
+				try (var output = exchange.getResponseBody()) { output.write(body); }
+				return;
+			}
 			byte[] body = ("{\"code\":200,\"message\":\"success\",\"data\":{"
 					+ "\"items\":[{\"content_id\":\"456\",\"kind\":\"video\",\"description\":\"post\","
 					+ "\"created_at\":\"1710000000\",\"web_url\":\"https://www.douyin.com/video/456\","
@@ -71,6 +86,19 @@ class DtkDouyinDataProviderTest {
 					+ "\"media\":{\"type\":\"video\",\"url\":\"https://media.example/post.mp4\"}}],"
 					+ "\"max_cursor\":\"20\",\"has_more\":0}}")
 					.getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
+		server.createContext("/api/v1/tasks/task-1", exchange -> {
+			int poll = taskPolls.incrementAndGet();
+			String bodyText = poll < 2
+					? "{\"success\":true,\"data\":{\"task_id\":\"task-1\",\"state\":\"running\"},\"error\":null,\"meta\":{}}"
+					: "{\"success\":true,\"data\":{\"task_id\":\"task-1\",\"state\":\"done\","
+							+ "\"data\":{\"items\":[{\"content_id\":\"async-456\",\"kind\":\"video\","
+							+ "\"media\":{\"type\":\"video\",\"url\":\"https://media.example/async.mp4\"}}],"
+							+ "\"cursor\":null,\"has_more\":false}},\"result_meta\":{}},"
+							+ "\"error\":null,\"meta\":{}}";
+			byte[] body = bodyText.getBytes(StandardCharsets.UTF_8);
 			exchange.sendResponseHeaders(200, body.length);
 			try (var output = exchange.getResponseBody()) { output.write(body); }
 		});
@@ -158,14 +186,34 @@ class DtkDouyinDataProviderTest {
 	}
 
 	@Test
-	void fetchesAuthorProfileByUniqueIdThroughConfiguredDtkNode() {
-		JSONObject profile = new DtkDouyinDataProvider(HttpClient.newHttpClient())
-				.fetchAuthorProfileByUniqueId("profile-user");
+	void omitsCursorOnInitialAuthorRequest() {
+		DtkDouyinDataProvider provider = new DtkDouyinDataProvider(HttpClient.newHttpClient());
 
-		assertThat(profile).containsEntry("sec_uid", "MS4-profile")
-				.containsEntry("unique_id", "profile-user")
-				.containsEntry("nickname", "Profile User");
-		assertThat(receivedApiKey).hasValue("test-key");
+		provider.fetchAuthorWorks(new DouyinFetchRequest(
+				"sec-user", Set.of(), null, 0, 1, 1, DouyinFetchMode.INITIAL, 10, ""));
+
+		assertThat(receivedPostsQuery).hasValueSatisfying(query -> assertThat(query).doesNotContain("cursor="));
+	}
+
+	@Test
+	void pollsAsyncTaskAndUnwrapsNestedResult() {
+		asyncPosts.set(true);
+		DtkDouyinDataProvider provider = new DtkDouyinDataProvider(HttpClient.newHttpClient());
+
+		DouyinFetchEnvelope result = provider.fetchAuthorWorks(new DouyinFetchRequest(
+				"sec-user", Set.of(), null, 0, 1, 1, DouyinFetchMode.INITIAL, 10, ""));
+
+		assertThat(result.items()).singleElement().extracting(item -> item.getString("aweme_id"))
+				.isEqualTo("async-456");
+		assertThat(taskPolls).hasValue(2);
+	}
+
+	@Test
+	void rejectsUnsupportedDtkUniqueIdProfileLookup() {
+		assertThatThrownBy(() -> new DtkDouyinDataProvider(HttpClient.newHttpClient())
+				.fetchAuthorProfileByUniqueId("profile-user"))
+				.isInstanceOf(CollectFetchException.class)
+				.hasMessageContaining("不支持 unique_id");
 	}
 
 	@Test
@@ -180,4 +228,3 @@ class DtkDouyinDataProviderTest {
 				.hasMessageContaining("DTK 节点池未配置");
 	}
 }
-

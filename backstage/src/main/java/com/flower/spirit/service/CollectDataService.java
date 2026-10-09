@@ -2982,4 +2982,3 @@ public class CollectDataService {
 	record SnapshotMediaStats(int videoCount, int imageCount) {
 	}
 }
-
