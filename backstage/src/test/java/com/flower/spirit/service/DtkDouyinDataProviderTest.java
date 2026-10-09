@@ -217,6 +217,23 @@ class DtkDouyinDataProviderTest {
 	}
 
 	@Test
+	void diagnosticValuesAreRedactedAndStable() {
+		String raw = "{\"api_key\":\"secret-key\",\"nested\":{\"sec_uid\":\"MS4-sensitive\"},"
+				+ "\"message\":\"bad gateway\"}";
+
+		assertThat(DtkDouyinDataProvider.diagnosticPreview(raw, 500))
+				.doesNotContain("secret-key", "MS4-sensitive")
+				.contains("***", "bad gateway");
+		assertThat(DtkDouyinDataProvider.diagnosticPreview(
+				"api_key=secret-key sec_uid=MS4-sensitive access_token=access-secret", 500))
+				.doesNotContain("secret-key", "MS4-sensitive", "access-secret")
+				.contains("***");
+		assertThat(DtkDouyinDataProvider.maskIdentifier("MS4-sensitive"))
+				.startsWith("sha256:")
+				.hasSize(19);
+	}
+
+	@Test
 	void doesNotFallBackToLegacyBaseUrlWhenTheNodePoolIsEmpty() {
 		Global.dtkApiPool = "";
 		Global.dtkBaseUrl = baseUrl;
