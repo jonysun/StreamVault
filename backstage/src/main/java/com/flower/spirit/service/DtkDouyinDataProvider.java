@@ -6,6 +6,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -17,6 +19,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +36,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private static final Logger logger = LoggerFactory.getLogger(DtkDouyinDataProvider.class);
 	private final HttpClient client;
 	private final AtomicInteger nodeCursor = new AtomicInteger();
+	private final AtomicLong requestSequence = new AtomicLong();
 	private final ConcurrentHashMap<String, Long> nodeCooldownUntil = new ConcurrentHashMap<>();
 	private static final long NODE_COOLDOWN_MS = 60_000L;
 	private static final List<String> ITEM_ARRAY_KEYS = List.of("items", "aweme_list", "list", "posts", "works");
@@ -170,23 +174,43 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 
 	private JSONObject get(String path, String... params) {
 		List<DtkNode> nodes = configuredNodes();
+		String requestId = "dtk-" + requestSequence.incrementAndGet();
+		long startedAt = System.nanoTime();
+		logger.debug("[DTK] request-start id={} endpoint={} poolSize={} params={}", requestId, path,
+				nodes.size(), diagnosticParams(params));
 		Set<String> attempted = new java.util.HashSet<>();
 		CollectFetchException last = null;
 		for (int attempt = 0; attempt < nodes.size(); attempt++) {
 			DtkNode node = selectNode(attempted);
 			attempted.add(node.identity());
+			long cooldownRemaining = Math.max(0L,
+				nodeCooldownUntil.getOrDefault(node.identity(), 0L) - System.currentTimeMillis());
+			logger.debug("[DTK] request-node-selected id={} attempt={}/{} node={} cooldownRemainingMs={} excludedNodes={}",
+					requestId, attempt + 1, nodes.size(), node.baseUrl(), cooldownRemaining, attempted.size() - 1);
 			try {
-				return requestNode(node, path, params);
+				JSONObject result = requestNode(node, path, requestId, params);
+				logger.debug("[DTK] request-finished id={} endpoint={} node={} totalDurationMs={} attemptedNodes={}",
+						requestId, path, node.baseUrl(), elapsedMs(startedAt), attempted.size());
+				return result;
 			} catch (CollectFetchException error) {
 				last = error;
-				if (!isNodeRetryable(error) || attempt + 1 >= nodes.size()) throw error;
-				logger.warn("[DTK] node failed, trying next node path={} node={} code={}", path, node.baseUrl(), error.getErrorCode());
+				if (!isNodeRetryable(error) || attempt + 1 >= nodes.size()) {
+					logger.warn("[DTK] request-failed id={} endpoint={} node={} code={} totalDurationMs={} attemptedNodes={}",
+							requestId, path, node.baseUrl(), error.getErrorCode(), elapsedMs(startedAt), attempted.size());
+					throw error;
+				}
+				logger.warn("[DTK] node-failed-switching id={} endpoint={} node={} code={} elapsedMs={} nextAttempt={}/{}",
+						requestId, path, node.baseUrl(), error.getErrorCode(), elapsedMs(startedAt),
+						attempt + 2, nodes.size());
 			}
 		}
+		logger.warn("[DTK] request-failed-no-node id={} endpoint={} totalDurationMs={} attemptedNodes={}",
+				requestId, path, elapsedMs(startedAt), attempted.size());
 		throw last == null ? new CollectFetchException("DTK_UNAVAILABLE", "DTK 节点池无可用节点") : last;
 	}
 
-	private JSONObject requestNode(DtkNode node, String path, String... params) {
+	private JSONObject requestNode(DtkNode node, String path, String requestId, String... params) {
+		long startedAt = System.nanoTime();
 		try {
 			StringBuilder url = new StringBuilder(trimSlash(node.baseUrl())).append(path);
 			for (int i = 0; i + 1 < params.length; i += 2) {
@@ -198,7 +222,15 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 					.header("Accept", "application/json");
 			if (!blank(node.apiKey())) builder.header("X-API-Key", node.apiKey());
 			HttpResponse<String> response = client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
-			logger.info("[DTK] endpoint={} status={} node={}", path, response.statusCode(), node.baseUrl());
+			String body = response.body();
+			logger.info("[DTK] response id={} endpoint={} status={} node={} durationMs={} bodyBytes={} bodySha256={}",
+					requestId, path, response.statusCode(), node.baseUrl(), elapsedMs(startedAt),
+					body == null ? 0 : body.getBytes(StandardCharsets.UTF_8).length, sha256(body));
+			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				logger.warn("[DTK] response-error id={} endpoint={} status={} node={} durationMs={} retryAfter={} body={}",
+						requestId, path, response.statusCode(), node.baseUrl(), elapsedMs(startedAt),
+						response.headers().firstValue("Retry-After").orElse(""), diagnosticPreview(body, 320));
+			}
 			if (response.statusCode() == 401 || response.statusCode() == 403) {
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_AUTH_FAILED", "DTK API 鉴权失败");
@@ -210,9 +242,9 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_UPSTREAM_HTTP", "DTK API HTTP status=" + response.statusCode()
-						+ ", endpoint=" + path + ", body=" + preview(response.body(), 1000));
+						+ ", endpoint=" + path + ", body=" + diagnosticPreview(body, 1000));
 			}
-			JSONObject parsed = JSON.parseObject(response.body());
+			JSONObject parsed = JSON.parseObject(body);
 			if (parsed == null) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 返回空 JSON");
 			Boolean success = parsed.getBoolean("success");
 			JSONObject error = parsed.getJSONObject("error");
@@ -227,6 +259,8 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			throw e;
 		} catch (Exception e) {
 			nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
+			logger.warn("[DTK] transport-error id={} endpoint={} node={} durationMs={} exception={}",
+					requestId, path, node.baseUrl(), elapsedMs(startedAt), e.getClass().getSimpleName());
 			throw new CollectFetchException("DTK_UNAVAILABLE", "DTK API 请求失败: " + e.getClass().getSimpleName(), e);
 		}
 	}
@@ -265,7 +299,8 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			result.put("node", node.baseUrl());
 			long started = System.currentTimeMillis();
 			try {
-				JSONObject response = requestNode(node, "/api/v1/douyin/user", "sec_user_id",
+				String requestId = "dtk-check-" + requestSequence.incrementAndGet();
+				JSONObject response = requestNode(node, "/api/v1/douyin/user", requestId, "sec_user_id",
 						blank(secUserId) ? "" : secUserId, "wait", waitSeconds());
 				result.put("ok", true);
 				result.put("status", 200);
@@ -319,6 +354,51 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		if (value == null) return "";
 		String normalized = value.replaceAll("[\\r\\n\\t]+", " ").trim();
 		return normalized.length() <= limit ? normalized : normalized.substring(0, limit) + "…";
+	}
+
+	private String diagnosticParams(String... params) {
+		if (params == null || params.length == 0) return "{}";
+		StringBuilder result = new StringBuilder("{");
+		for (int i = 0; i + 1 < params.length; i += 2) {
+			if (i > 0) result.append(", ");
+			String key = params[i];
+			String value = params[i + 1];
+			result.append(key).append('=');
+			if ("sec_user_id".equalsIgnoreCase(key) || "cursor".equalsIgnoreCase(key)
+					|| "url".equalsIgnoreCase(key) || "aweme_id".equalsIgnoreCase(key)) {
+				result.append(maskIdentifier(value));
+			} else {
+				result.append(value == null ? "" : value);
+			}
+		}
+		return result.append('}').toString();
+	}
+
+	static String maskIdentifier(String value) {
+		return value == null || value.isBlank() ? "" : "sha256:" + sha256(value).substring(0, 12);
+	}
+
+	static String diagnosticPreview(String value, int limit) {
+		if (value == null) return "";
+		String redacted = value.replaceAll("(?i)(\\\"?(?:api[_-]?key|authorization|cookie|password|secret|token)\\\"?\\s*[:=]\\s*\\\")[^\\\"]*(\\\")", "$1***$2")
+				.replaceAll("(?i)(\\\"?(?:sec[_-]?uid|sec[_-]?user[_-]?id)\\\"?\\s*[:=]\\s*\\\")[^\\\"]*(\\\")", "$1***$2");
+		return preview(redacted, limit);
+	}
+
+	static String sha256(String value) {
+		if (value == null) return "";
+		try {
+			byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+			StringBuilder result = new StringBuilder(digest.length * 2);
+			for (byte item : digest) result.append(String.format("%02x", item));
+			return result.toString();
+		} catch (NoSuchAlgorithmException error) {
+			throw new IllegalStateException("SHA-256 unavailable", error);
+		}
+	}
+
+	private static long elapsedMs(long startedAt) {
+		return Duration.ofNanos(Math.max(0L, System.nanoTime() - startedAt)).toMillis();
 	}
 
 	private JSONObject normalizeItem(JSONObject item) {
