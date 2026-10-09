@@ -67,10 +67,18 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		int pages = 0;
 		boolean hasMore = true;
 		while (hasMore && pages < request.maxPages() && (request.maxItems() <= 0 || newIds.size() < request.maxItems())) {
+			int page = pages + 1;
+			logger.debug("[DTK] author-list-page-start page={} cursor={} knownCount={} maxItems={} maxPages={}",
+					page, maskIdentifier(cursor), known.size(), request.maxItems(), request.maxPages());
 			JSONObject response = get("/api/v1/douyin/user/posts", "sec_user_id", request.secUserId(),
 					"cursor", cursor, "count", "50", "wait", waitSeconds());
 			JSONObject data = payload(response);
 			JSONArray rawItems = findItemArray(response, 0);
+			logger.debug("[DTK] author-list-page-response page={} cursor={} itemCount={} hasMore={} nextCursor={} responseKeys={}",
+					page, maskIdentifier(cursor), rawItems == null ? -1 : rawItems.size(),
+					bool(data, "has_more") || bool(response, "has_more"),
+					maskIdentifier(firstText(data, "cursor", "max_cursor", "next_cursor", "nextCursor")),
+					response == null ? List.of() : response.keySet());
 			if (rawItems == null) {
 				throw new CollectFetchException("DTK_UPSTREAM_SCHEMA",
 						"DTK 作者列表缺少作品数组 " + schemaDiagnostics(response, null));
