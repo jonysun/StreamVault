@@ -236,7 +236,8 @@ class DtkDouyinDataProviderTest {
 		assertThat(receivedPostsQuery).hasValueSatisfying(query -> assertThat(query).contains("include_raw=true"));
 		assertThat(receivedAuthorization).hasValue("Bearer test-key");
 		assertThat(receivedLanguage).hasValue("zh");
-		assertThat(receivedUserAgent).hasValueContaining("Mozilla/5.0");
+		assertThat(receivedUserAgent).hasValueSatisfying(userAgent ->
+				assertThat(userAgent).contains("Mozilla/5.0"));
 	}
 
 	@Test
@@ -272,7 +273,8 @@ class DtkDouyinDataProviderTest {
 				.isNotNull()
 				.hasMessageContaining("第 2 页失败")
 				.hasMessageContaining("cursor=sha256:")
-				.hasMessageNotContaining("sec-user", "cursor=20");
+				.hasMessageNotContaining("sec-user")
+				.hasMessageNotContaining("cursor=20");
 		assertThat(failure.getRetryAfterSeconds()).isEqualTo(60L);
 		assertThat(postsCalls).hasValue(2);
 		assertThat(receivedPostsQuery).hasValueSatisfying(query -> assertThat(query).contains("cursor=20"));
