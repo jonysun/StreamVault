@@ -64,7 +64,20 @@ public class RuntimeControlService {
 		case MEDIA_DOWNLOAD -> RuntimeControlTransaction.PAUSE_DOWNLOAD;
 		case HLS_TRANSCODE -> RuntimeControlTransaction.PAUSE_HLS;
 		};
-		return enabled(key) ? PauseDecision.paused(key, reason(key)) : PauseDecision.permit();
+		if (enabled(key)) return PauseDecision.paused(key, reason(key));
+		if (category == TaskCategory.COLLECT_FETCH && enabled(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL)) {
+			return PauseDecision.paused(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL,
+					reason(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL));
+		}
+		return PauseDecision.permit();
+	}
+
+	public RuntimeControlSnapshot setAutomaticF2PoolPause(boolean paused, String reason) {
+		values = databaseWriteExecutor.execute("runtime-control-auto-f2-pool",
+				() -> transaction.setAutomaticF2PoolPause(paused, reason, Instant.now()));
+		applyToLegacyGlobals(values);
+		logger.warn("[RuntimeControl] automatic F2 pool pause enabled={} reason={}", paused, reason);
+		return snapshot();
 	}
 
 	public RuntimeControlSnapshot snapshot() {
@@ -72,7 +85,8 @@ public class RuntimeControlService {
 		boolean collect = enabled(RuntimeControlTransaction.PAUSE_COLLECT);
 		boolean download = enabled(RuntimeControlTransaction.PAUSE_DOWNLOAD);
 		boolean hls = enabled(RuntimeControlTransaction.PAUSE_HLS);
-		return new RuntimeControlSnapshot(all, collect, download, hls, all || collect, all || download,
+		boolean f2Pool = enabled(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL);
+		return new RuntimeControlSnapshot(all, collect, download, hls, all || collect || f2Pool, all || download,
 				all || hls, Map.copyOf(values));
 	}
 

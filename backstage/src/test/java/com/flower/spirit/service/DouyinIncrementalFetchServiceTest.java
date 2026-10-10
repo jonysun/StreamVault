@@ -264,6 +264,24 @@ class DouyinIncrementalFetchServiceTest {
 	}
 
 	@Test
+	void rejectsIncompletePaginationOutcomesInsteadOfTreatingThemAsSuccess() {
+		FakeRunner runner = new FakeRunner();
+		DouyinIncrementalFetchService service = new DouyinIncrementalFetchService(runner);
+		for (String outcome : Set.of("EMPTY_PAGINATION", "MAX_PAGE_GUARD")) {
+			runner.resultJson = """
+					{"items":[],"newWorkIds":[],"outcome":"%s","pagesFetched":4,
+					 "emptyPages":2,"lastCursor":"cursor","diagnostics":{}}
+					""".formatted(outcome);
+			assertThatThrownBy(() -> service.fetch(request(Set.of())))
+					.isInstanceOf(CollectFetchException.class)
+					.hasMessageContaining(outcome)
+					.extracting(error -> ((CollectFetchException) error).getErrorCode())
+					.isEqualTo("F2_PAGINATION_INCOMPLETE");
+			assertTemporaryFilesDeleted(runner);
+		}
+	}
+
+	@Test
 	void deletesTemporaryFilesWhenRunnerThrows() {
 		FakeRunner runner = new FakeRunner();
 		runner.failure = new IllegalStateException("launch failed");

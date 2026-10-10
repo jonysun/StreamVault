@@ -2349,23 +2349,52 @@ public class CollectDataService {
 						: envelope.diagnostics().getString("providerPath");
 				String providerReason = envelope.diagnostics() == null ? null
 						: envelope.diagnostics().getString("providerReason");
+				String actualProvider = providerPath == null ? initialProviderPath : providerPath;
+				if (autoMode && actualProvider.startsWith("F2->")
+						&& isF2CookieRiskCode(providerReason) && cookie != null) {
+					platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, providerReason);
+					if ("F2_UPSTREAM_SOFT_BLOCK".equals(providerReason)) {
+						providerReason += "（" + platformCookieService.cookieIdentity(cookie) + "）";
+					}
+				}
 				collectRunService.updateProvider(runId, providerPath == null ? initialProviderPath : providerPath,
 						providerReason);
-				if (!dtkMode && !autoMode) platformCookieService.reportSuccess(Global.platform.douyin.name(), cookie);
+				if (!dtkMode && ("F2".equals(actualProvider) || actualProvider.endsWith("->F2") || !autoMode)) {
+					platformCookieService.reportDouyinAuthorListSuccess(cookie);
+				}
 			} catch (CollectFetchException error) {
-				String failedProviderPath = autoMode && error.getErrorCode() != null
-						&& error.getErrorCode().startsWith("DTK_") ? "F2->DTK" : initialProviderPath;
-				collectRunService.updateProvider(runId, failedProviderPath, error.getErrorCode());
+				boolean f2SoftBlocked = hasErrorCode(error, "F2_UPSTREAM_SOFT_BLOCK");
+				boolean f2CookieRisk = f2SoftBlocked || hasErrorCode(error, "F2_UPSTREAM_RATE_LIMIT");
+				String identity = cookie == null ? null : platformCookieService.cookieIdentity(cookie);
+				if (f2CookieRisk && cookie != null) {
+					platformCookieService.reportRisk(Global.platform.douyin.name(), cookie,
+							f2SoftBlocked ? "F2_UPSTREAM_SOFT_BLOCK" : "F2_UPSTREAM_RATE_LIMIT");
+				}
+				String failedProviderPath = initialProviderPath;
+				if (autoMode && error.getErrorCode() != null && error.getErrorCode().startsWith("DTK_")) {
+					failedProviderPath = "F2->DTK";
+				} else if (autoMode && hasSuppressedProviderError(error, "DTK_")) {
+					failedProviderPath = "DTK->F2";
+				}
+				String failureReason = error.getErrorCode();
+				if (f2CookieRisk && identity != null) {
+					String f2RiskCode = f2SoftBlocked ? "F2_UPSTREAM_SOFT_BLOCK" : "F2_UPSTREAM_RATE_LIMIT";
+					failureReason = f2RiskCode + "（" + identity + "）"
+							+ (f2RiskCode.equals(error.getErrorCode()) ? "" : "；回退/后续失败：" + error.getErrorCode());
+				}
+				collectRunService.updateProvider(runId, failedProviderPath, failureReason);
 				logger.warn("[DouyinProvider] provider={} event=AUTHOR_LIST_FAILURE code={} faultDomain={} "
 						+ "cooldownScope={} evidence={}", dtkMode ? "DTK" : autoMode ? "AUTO" : "F2", error.getErrorCode(),
 						douyinFetchFaultDomain(error.getErrorCode()),
 						isDouyinRiskError(error.getErrorCode()) ? "GLOBAL_RISK" : "TASK_ONLY",
 						error.getMessage());
-				if ("F2_UPSTREAM_SOFT_BLOCK".equals(error.getErrorCode())) {
-					logger.warn("[F2] upstream soft block platform=douyin scope=AUTHOR_LIST "
-							+ "cooldownApplied=false code={}", error.getErrorCode());
-				} else if (!dtkMode && !autoMode && isDouyinRiskError(error.getErrorCode())) {
+				if (!f2CookieRisk && !dtkMode && !autoMode && isDouyinRiskError(error.getErrorCode())) {
 					platformCookieService.reportRisk(Global.platform.douyin.name(), cookie, error.getErrorCode());
+				}
+				String errorMessage = error.getMessage() == null ? "" : error.getMessage();
+				if (f2CookieRisk && identity != null && !errorMessage.contains(identity)) {
+					throw new CollectFetchException(error.getErrorCode(), errorMessage + "；" + identity,
+							error, error.getRetryAfterSeconds());
 				}
 				throw error;
 			}
@@ -2409,6 +2438,29 @@ public class CollectDataService {
 					task.getId(), task.getTaskname(), envelope.outcome(), currentSourceId);
 			sendNotify.sendMessage("StreamVault 收藏任务异常", notice);
 		}
+	}
+
+	private boolean hasErrorCode(Throwable error, String code) {
+		if (error == null) return false;
+		if (error instanceof CollectFetchException fetch && code.equals(fetch.getErrorCode())) return true;
+		for (Throwable suppressed : error.getSuppressed()) {
+			if (hasErrorCode(suppressed, code)) return true;
+		}
+		return hasErrorCode(error.getCause(), code);
+	}
+
+	private boolean isF2CookieRiskCode(String code) {
+		return "F2_UPSTREAM_SOFT_BLOCK".equals(code) || "F2_UPSTREAM_RATE_LIMIT".equals(code);
+	}
+
+	private boolean hasSuppressedProviderError(Throwable error, String prefix) {
+		if (error == null) return false;
+		for (Throwable suppressed : error.getSuppressed()) {
+			if (suppressed instanceof CollectFetchException fetch && fetch.getErrorCode() != null
+					&& fetch.getErrorCode().startsWith(prefix)) return true;
+			if (hasSuppressedProviderError(suppressed, prefix)) return true;
+		}
+		return hasSuppressedProviderError(error.getCause(), prefix);
 	}
 
 	private DouyinFetchEnvelope selectedEnvelope(DouyinFetchEnvelope envelope, int batchLimit,

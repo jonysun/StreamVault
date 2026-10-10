@@ -19,8 +19,9 @@ public class RuntimeControlTransaction {
 	public static final String PAUSE_COLLECT = "pause.collect";
 	public static final String PAUSE_DOWNLOAD = "pause.download";
 	public static final String PAUSE_HLS = "pause.hls";
+	public static final String PAUSE_COLLECT_F2_POOL = "pause.collect.f2_cookie_pool";
 	private static final java.util.List<String> KEYS = java.util.List.of(
-			PAUSE_ALL, PAUSE_COLLECT, PAUSE_DOWNLOAD, PAUSE_HLS);
+			PAUSE_ALL, PAUSE_COLLECT, PAUSE_DOWNLOAD, PAUSE_HLS, PAUSE_COLLECT_F2_POOL);
 
 	private final JdbcTemplate jdbcTemplate;
 
@@ -53,6 +54,15 @@ public class RuntimeControlTransaction {
 				+ "VALUES (?, ?, ?, ?, ?) ON CONFLICT(control_key) DO UPDATE SET enabled = excluded.enabled, "
 				+ "updated_at = excluded.updated_at, updated_by = excluded.updated_by, reason = excluded.reason",
 				key, enabled ? 1 : 0, Timestamp.from(now), trim(updatedBy, 255), trim(reason, 1000));
+		return loadInCurrentTransaction();
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public Map<String, RuntimeControlValue> setAutomaticF2PoolPause(boolean enabled, String reason, Instant now) {
+		jdbcTemplate.update("INSERT INTO biz_runtime_control(control_key, enabled, updated_at, updated_by, reason) "
+				+ "VALUES (?, ?, ?, ?, ?) ON CONFLICT(control_key) DO UPDATE SET enabled = excluded.enabled, "
+				+ "updated_at = excluded.updated_at, updated_by = excluded.updated_by, reason = excluded.reason",
+				PAUSE_COLLECT_F2_POOL, enabled ? 1 : 0, Timestamp.from(now), "system:f2-pool", trim(reason, 1000));
 		return loadInCurrentTransaction();
 	}
 

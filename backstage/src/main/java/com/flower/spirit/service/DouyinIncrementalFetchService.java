@@ -28,8 +28,7 @@ public class DouyinIncrementalFetchService {
 			"lastCursor", "diagnostics");
 	private static final Set<String> SUCCESSFUL_OUTCOMES = Set.of(
 			"NO_PUBLIC_WORKS", "ACCOUNT_DEACTIVATED", "ACCOUNT_BANNED", "WORKS_UNAVAILABLE",
-			"EMPTY_PAGINATION", "KNOWN_BOUNDARY", "INITIAL_LIMIT", "BATCH_LIMIT", "NO_MORE",
-			"MAX_PAGE_GUARD");
+			"KNOWN_BOUNDARY", "INITIAL_LIMIT", "BATCH_LIMIT", "NO_MORE");
 
 	private final CommandRunner commandRunner;
 
@@ -158,6 +157,10 @@ public class DouyinIncrementalFetchService {
 		JSONArray items = requireArray(object, "items");
 		JSONArray newWorkIds = requireArray(object, "newWorkIds");
 		String outcome = requireString(object, "outcome");
+		if ("EMPTY_PAGINATION".equals(outcome) || "MAX_PAGE_GUARD".equals(outcome)) {
+			throw new CollectFetchException("F2_PAGINATION_INCOMPLETE",
+					"F2 作者作品分页未完整：" + outcome + "；本轮不按成功处理");
+		}
 		if (!SUCCESSFUL_OUTCOMES.contains(outcome)) {
 			throw new IllegalStateException("Douyin fetch envelope has unsupported outcome: " + outcome);
 		}

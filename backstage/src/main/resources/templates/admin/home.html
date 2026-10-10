@@ -1434,6 +1434,7 @@
 					+ queueCount(downloadQueue, 'RETRY_WAIT', 0);
 			renderDownloadTaskProgress(jobs.downloadTasks || []);
 			let html = '';
+			const autoF2PoolPause = control.values && control.values['pause.collect.f2_cookie_pool'];
 			html += taskStatusBlock('下载任务', 'mdi-download', !!control.effectiveDownloadPaused, [
 				'国内池：运行 ' + numberText(domestic.activeCount) + ' / 队列 ' + numberText(domestic.queueSize),
 				'哔哩池：运行 ' + numberText(bilibili.activeCount) + ' / 队列 ' + numberText(bilibili.queueSize),
@@ -1441,6 +1442,7 @@
 				'持久下载：运行 ' + numberText(downloadRunning) + ' / 队列 ' + numberText(downloadWaiting)
 			]);
 			html += taskStatusBlock('收藏/爬取', 'mdi-cloud-search-outline', !!control.effectiveCollectPaused, [
+				autoF2PoolPause && autoF2PoolPause.enabled ? '自动暂停：' + (autoF2PoolPause.reason || 'F2 Cookie 池全部冷却') : null,
 				'触发器：' + (quartz.isStarted ? '已启动' : '未启动'),
 				'监控定义：' + numberText(quartz.totalTasks),
 				'持久运行：' + numberText(fetchRunning),
@@ -1578,7 +1580,7 @@
 			let html = '<div class="task-status-block">';
 			html += '<div class="task-status-title"><span><i class="mdi ' + icon + '"></i> ' + escapeRecentlyHtml(title) + '</span><span class="badge ' + (paused ? 'badge-danger' : 'badge-success') + '">' + (paused ? '已暂停' : '运行中') + '</span></div>';
 			html += '<ul class="task-status-list">';
-			(lines || []).forEach(function(line) {
+			(lines || []).filter(function(line) { return line != null && line !== ''; }).forEach(function(line) {
 				html += '<li>' + escapeRecentlyHtml(line) + '</li>';
 			});
 			html += '</ul></div>';

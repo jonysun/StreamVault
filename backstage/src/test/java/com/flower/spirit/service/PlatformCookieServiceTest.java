@@ -163,6 +163,33 @@ class PlatformCookieServiceTest {
 	}
 
 	@Test
+	void softBlockCoolsCookieOnlyAfterTwoConsecutiveConfirmedSignals() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		service.reportRisk("douyin", "a=1", "F2_UPSTREAM_SOFT_BLOCK");
+		assertThat(service.selectCookie("douyin", "round_robin", "a=1\nb=2", "", "collect"))
+				.isNotEmpty();
+		assertThat(service.cookieIdentity("a=1")).contains("Cookie #?").contains(" · ")
+				.doesNotContain("a=1");
+
+		service.reportRisk("douyin", "a=1", "F2_UPSTREAM_SOFT_BLOCK");
+		assertThat(service.selectCookie("douyin", "round_robin", "a=1", "", "collect")).isEmpty();
+		assertThat(service.selectCookie("douyin", "round_robin", "a=1\nb=2", "", "collect"))
+				.isEqualTo("b=2");
+	}
+
+	@Test
+	void successfulF2RequestResetsConsecutiveSoftBlockCounter() {
+		PlatformCookieService service = new PlatformCookieService();
+
+		service.reportRisk("douyin", "a=1", "F2_UPSTREAM_SOFT_BLOCK");
+		service.reportSuccess("douyin", "a=1");
+		service.reportRisk("douyin", "a=1", "F2_UPSTREAM_SOFT_BLOCK");
+
+		assertThat(service.selectCookie("douyin", "round_robin", "a=1", "", "collect")).isEqualTo("a=1");
+	}
+
+	@Test
 	void poolFallsBackToLegacySingleCookie() {
 		PlatformCookieService service = new PlatformCookieService();
 

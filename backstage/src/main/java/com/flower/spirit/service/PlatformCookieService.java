@@ -2,6 +2,9 @@ package com.flower.spirit.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -13,13 +16,17 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import com.flower.spirit.config.Global;
+import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.dao.CookiesConfigDao;
 import com.flower.spirit.entity.CookiesConfigEntity;
 import com.flower.spirit.entity.TikTokConfigEntity;
 import com.flower.spirit.platform.PlatformCatalog;
+import com.flower.spirit.service.transaction.DouyinCookieRiskTransaction;
 
 @Service
 public class PlatformCookieService {
@@ -34,6 +41,7 @@ public class PlatformCookieService {
 	private final Map<String, AtomicInteger> cursors = new ConcurrentHashMap<>();
 	private final Map<String, Long> riskUntil = new ConcurrentHashMap<>();
 	private final Map<String, Long> successAt = new ConcurrentHashMap<>();
+	private final Map<String, AtomicInteger> consecutiveSoftBlocks = new ConcurrentHashMap<>();
 	private final AtomicLong douyinGlobalRiskStartedAtMs = new AtomicLong(0);
 	private final AtomicLong douyinGlobalSoftBlockStartedAtMs = new AtomicLong(0);
 
@@ -42,6 +50,31 @@ public class PlatformCookieService {
 
 	@Autowired(required = false)
 	private CookiesConfigDao cookiesConfigDao;
+
+	@Autowired(required = false)
+	private DouyinCookieRiskTransaction douyinCookieRiskTransaction;
+
+	@Autowired(required = false)
+	private DatabaseWriteExecutor databaseWriteExecutor;
+
+	@EventListener(ApplicationReadyEvent.class)
+	public void restorePersistedDouyinCookieRisk() {
+		if (douyinCookieRiskTransaction == null) return;
+		if (databaseWriteExecutor == null) douyinCookieRiskTransaction.initializeSchema();
+		else databaseWriteExecutor.execute("douyin-cookie-risk-schema", () -> {
+			douyinCookieRiskTransaction.initializeSchema();
+			return null;
+		});
+		long now = System.currentTimeMillis();
+		Map<String, DouyinCookieRiskTransaction.RiskState> persisted = databaseWriteExecutor == null
+				? douyinCookieRiskTransaction.load()
+				: databaseWriteExecutor.execute("douyin-cookie-risk-load", douyinCookieRiskTransaction::load);
+		persisted.forEach((fingerprint, state) -> {
+			if (state.consecutiveSoftBlocks() > 0) consecutiveSoftBlocks.put(fingerprint, new AtomicInteger(state.consecutiveSoftBlocks()));
+			if (state.cooldownUntilEpochMillis() > now) riskUntil.put(DOUYIN_PLATFORM_KEY + ":" + fingerprint,
+					state.cooldownUntilEpochMillis());
+		});
+	}
 
 	public String currentDouyinCookie(String purpose) {
 		TikTokConfigEntity config = tikTokConfigService == null ? null : tikTokConfigService.getData();
@@ -113,10 +146,17 @@ public class PlatformCookieService {
 				logger.warn("platform risk signal suppressed platform={} scope=GLOBAL_RISK reason=UNCONFIRMED", safePlatform);
 				return false;
 			}
+			if ("F2_UPSTREAM_SOFT_BLOCK".equals(confirmedEvidence)) {
+				int failures = recordSoftBlock(cookie);
+				if (failures < 2) {
+					logger.warn("platform soft-block observed platform={} cookie={} consecutive={} threshold=2 cooldownApplied=false",
+							safePlatform, cookieIdentity(cookie), failures);
+					return true;
+				}
+			}
 			successAt.remove(riskKey(safePlatform, cookie));
 			long cooldownMs = douyinRiskCooldownMillis();
-			if ("F2_UPSTREAM_RATE_LIMIT".equals(confirmedEvidence)
-					|| "F2_UPSTREAM_SOFT_BLOCK".equals(confirmedEvidence)) {
+			if ("F2_UPSTREAM_SOFT_BLOCK".equals(confirmedEvidence)) {
 				riskUntil.put(riskKey(safePlatform, cookie), now + cooldownMs);
 				logger.warn("platform cooldown platform={} scope=COOKIE_RISK reason={} cooldownMs={}", safePlatform,
 						confirmedEvidence, cooldownMs);
@@ -137,8 +177,23 @@ public class PlatformCookieService {
 
 	public void reportSuccess(String platform, String cookie) {
 		if (isBlank(platform) || isBlank(cookie)) return;
-		successAt.put(riskKey(canonicalPlatform(platform), cookie), System.currentTimeMillis());
+		String safePlatform = canonicalPlatform(platform);
+		successAt.put(riskKey(safePlatform, cookie), System.currentTimeMillis());
+		if (DOUYIN_PLATFORM_KEY.equals(safePlatform)) {
+			String fingerprint = cookieFingerprint(cookie);
+			consecutiveSoftBlocks.remove(fingerprint);
+			if (douyinCookieRiskTransaction != null) {
+				if (databaseWriteExecutor == null) douyinCookieRiskTransaction.recordSuccess(fingerprint, Instant.now());
+				else databaseWriteExecutor.execute("douyin-cookie-risk-success",
+						() -> { douyinCookieRiskTransaction.recordSuccess(fingerprint, Instant.now()); return null; });
+			}
+		}
 		// Recording evidence must not cancel a newer risk cooldown.
+	}
+
+	public void reportDouyinAuthorListSuccess(String cookie) {
+		if (isBlank(cookie)) return;
+		reportSuccess(DOUYIN_PLATFORM_KEY, cookie);
 	}
 
 	/** Records a confirmed repeated empty detail response without treating it as an authentication failure. */
@@ -281,7 +336,67 @@ public class PlatformCookieService {
 	}
 
 	private String riskKey(String platform, String cookie) {
-		return platform + ":" + cookie.hashCode();
+		return platform + ":" + (DOUYIN_PLATFORM_KEY.equals(platform) ? cookieFingerprint(cookie) : cookie.hashCode());
+	}
+
+	public int recordSoftBlock(String cookie) {
+		if (isBlank(cookie)) return 0;
+		String fingerprint = cookieFingerprint(cookie);
+		int count;
+		if (douyinCookieRiskTransaction == null) {
+			count = consecutiveSoftBlocks.computeIfAbsent(fingerprint, ignored -> new AtomicInteger()).incrementAndGet();
+		} else if (databaseWriteExecutor == null) {
+			count = douyinCookieRiskTransaction.recordSoftBlock(fingerprint, Instant.now(),
+					Instant.now().plusMillis(douyinRiskCooldownMillis()));
+		} else {
+			count = databaseWriteExecutor.execute("douyin-cookie-risk-soft-block",
+					() -> douyinCookieRiskTransaction.recordSoftBlock(fingerprint, Instant.now(),
+							Instant.now().plusMillis(douyinRiskCooldownMillis())));
+		}
+		consecutiveSoftBlocks.put(fingerprint, new AtomicInteger(count));
+		if (count >= 2) {
+			long now = System.currentTimeMillis();
+			riskUntil.put(riskKey(DOUYIN_PLATFORM_KEY, cookie), now + douyinRiskCooldownMillis());
+		}
+		return count;
+	}
+
+	public String cookieIdentity(String cookie) {
+		if (isBlank(cookie)) return "Cookie 未知";
+		TikTokConfigEntity config = tikTokConfigService == null ? null : tikTokConfigService.getData();
+		List<String> cookies = parseCookiePool(config == null ? null : config.getCookiepool(),
+				firstNotBlank(config == null ? null : config.getCookies(), Global.tiktokCookie));
+		int index = cookies.indexOf(cookie.trim());
+		return "Cookie #" + (index < 0 ? "?" : index + 1) + " · " + cookieFingerprint(cookie);
+	}
+
+	public Map<String, Object> douyinCookiePoolStatus() {
+		TikTokConfigEntity config = tikTokConfigService == null ? null : tikTokConfigService.getData();
+		List<String> cookies = parseCookiePool(config == null ? null : config.getCookiepool(),
+				firstNotBlank(config == null ? null : config.getCookies(), Global.tiktokCookie));
+		long now = System.currentTimeMillis();
+		long earliest = Long.MAX_VALUE;
+		int cooling = 0;
+		for (String cookie : cookies) {
+			long until = riskUntil.getOrDefault(riskKey(DOUYIN_PLATFORM_KEY, cookie), 0L);
+			if (until > now) { cooling++; earliest = Math.min(earliest, until); }
+		}
+		boolean globalCooling = isDouyinGlobalRiskCooldownActive();
+		if (globalCooling) earliest = Math.min(earliest, douyinGlobalRiskCooldownUntilEpochMillis());
+		return Map.of("configured", cookies.size(), "cooling", globalCooling ? cookies.size() : cooling,
+				"available", globalCooling ? 0 : Math.max(0, cookies.size() - cooling),
+				"earliestCooldownUntil", earliest == Long.MAX_VALUE ? 0L : earliest);
+	}
+
+	private String cookieFingerprint(String cookie) {
+		try {
+			byte[] digest = MessageDigest.getInstance("SHA-256").digest(cookie.trim().getBytes(StandardCharsets.UTF_8));
+			StringBuilder hex = new StringBuilder();
+			for (int i = 0; i < 6; i++) hex.append(String.format("%02x", digest[i]));
+			return hex.toString();
+		} catch (NoSuchAlgorithmException impossible) {
+			throw new IllegalStateException("SHA-256 is unavailable", impossible);
+		}
 	}
 
 	private String canonicalPlatform(String platform) {
