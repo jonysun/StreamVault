@@ -155,8 +155,17 @@
                                 <button class="btn btn-sm btn-default" id="collectAuthorNext" title="下一页"><i class="mdi mdi-chevron-right"></i></button>
                             </div>
                         </div>
-                        <div id="collectAuthorWorksPanel" style="display:none;margin-top:18px;">
+                        <div id="collectAuthorWorksPanel" style="display:none;padding:16px;">
                             <h5 id="collectAuthorWorksTitle">作者作品</h5>
+                            <div class="filter-row" style="padding:8px 0 12px 0;">
+                                <select class="form-control" id="collectWorkStatusFilter" style="max-width:220px;">
+                                    <option value="ALL">全部状态</option><option value="DOWNLOADED">已下载</option>
+                                    <option value="DOWNLOADING">正在下载</option><option value="QUEUED">等待下载</option>
+                                    <option value="RETRY_WAIT">等待重试</option><option value="FAILED">失败</option>
+                                    <option value="REMOTE_MISSING">远端已删除</option><option value="BLOCKED">已屏蔽</option>
+                                    <option value="LOCAL_MISSING">本地文件缺失</option><option value="NOT_DOWNLOADED">未下载</option>
+                                </select>
+                            </div>
                             <div class="table-wrap"><table class="table download-table"><thead><tr>
                                 <th>作品</th><th>类型</th><th>发布时间</th><th>状态</th><th>操作</th>
                             </tr></thead><tbody id="collectAuthorWorkRows"></tbody></table></div>
@@ -176,7 +185,7 @@
 <script src="../static/js/layer/layer.js"></script>
 <script>
     (function() {
-        const state = { view:'active', page:0, pageSize:25, totalPages:0, totalElements:0, rows:[], paused:false, timer:null, selectedKeys:new Set(), allMatching:false, excludedKeys:new Set(), authorPage:0, authorTotalPages:0, selectedTaskId:null, selectedAuthorUid:'', selectedAuthorName:'', workPage:0, workTotalPages:0 };
+        const state = { view:'active', page:0, pageSize:25, totalPages:0, totalElements:0, rows:[], paused:false, timer:null, selectedKeys:new Set(), allMatching:false, excludedKeys:new Set(), authorPage:0, authorTotalPages:0, selectedTaskId:null, selectedAuthorUid:'', selectedAuthorName:'', workPage:0, workTotalPages:0, workLayer:null };
         const labels = {
             RUNNING:'正在下载', QUEUED:'等待下载', RETRY_WAIT:'等待重试', COMPLETED:'已完成', FAILED:'失败',
             CANCELLED:'已取消', SKIPPED_EXISTING:'已存在', SKIPPED_BLOCKED:'已屏蔽', SKIPPED_REMOTE_MISSING:'远端已删除',
@@ -214,7 +223,8 @@
             $('#authorKeywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { state.authorPage=0; loadAuthors(); } });
             $('#collectAuthorPrev').on('click', function() { if (state.authorPage > 0) { state.authorPage--; loadAuthors(); } });
             $('#collectAuthorNext').on('click', function() { if (state.authorPage + 1 < state.authorTotalPages) { state.authorPage++; loadAuthors(); } });
-            $('#collectAuthorRows').on('click', '.author-works', function() { state.selectedTaskId = $(this).data('task-id'); state.selectedAuthorUid = $(this).data('author-uid') || ''; state.selectedAuthorName = $(this).data('author') || ''; state.workPage=0; loadAuthorWorks(state.selectedAuthorUid, state.selectedAuthorName); });
+            $('#collectAuthorRows').on('click', '.author-works', function() { state.selectedTaskId = $(this).data('task-id'); state.selectedAuthorUid = $(this).data('author-uid') || ''; state.selectedAuthorName = $(this).data('author') || ''; state.workPage=0; $('#collectWorkStatusFilter').val('ALL'); $('#collectAuthorWorksTitle').text((state.selectedAuthorName || '作者') + ' 的全部作品'); $('#collectAuthorWorksPanel').show(); state.workLayer=layer.open({type:1,title:(state.selectedAuthorName || '作者')+' 的全部作品',area:['96%','85%'],maxmin:true,content:$('#collectAuthorWorksPanel'),success:function(){loadAuthorWorks(state.selectedAuthorUid,state.selectedAuthorName);},end:function(){state.workLayer=null;$('#collectAuthorWorksPanel').hide();}}); });
+            $('#collectWorkStatusFilter').on('change', function(){state.workPage=0;loadAuthorWorks(state.selectedAuthorUid,state.selectedAuthorName);});
             $('#collectWorkPrev').on('click', function() { if (state.workPage > 0) { state.workPage--; loadAuthorWorks(state.selectedAuthorUid, state.selectedAuthorName); } });
             $('#collectWorkNext').on('click', function() { if (state.workPage + 1 < state.workTotalPages) { state.workPage++; loadAuthorWorks(state.selectedAuthorUid, state.selectedAuthorName); } });
             $('#collectAuthorWorkRows').on('click', '.work-detail', function() { showWorkDetail($(this).data('record-key')); });
@@ -276,9 +286,8 @@
         }
 
         function loadAuthorWorks(authorUid, authorName) {
-            $('#collectAuthorWorksTitle').text((authorName || '作者') + ' 的全部作品').data('author', authorName || '作者').show();
-            $('#collectAuthorWorksPanel').show();
-            $.getJSON('/admin/api/download-center/collect-author-works', { authorUid:authorUid, authorName:authorName, page:state.workPage, pageSize:state.pageSize })
+            $('#collectAuthorWorksTitle').text((authorName || '作者') + ' 的全部作品').data('author', authorName || '作者');
+            $.getJSON('/admin/api/download-center/collect-author-works', { authorUid:authorUid, authorName:authorName, taskId:state.selectedTaskId, page:state.workPage, pageSize:state.pageSize, status:$('#collectWorkStatusFilter').val() || 'ALL' })
                 .done(function(response) {
                     if (!response || response.resCode !== '000001') return;
                     const data = response.record || {}, rows = Array.isArray(data.content) ? data.content : [];

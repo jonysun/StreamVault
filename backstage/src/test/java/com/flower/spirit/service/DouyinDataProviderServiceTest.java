@@ -55,6 +55,20 @@ class DouyinDataProviderServiceTest {
 	}
 
 	@Test
+	void autoAlternatesPreferredProviderAcrossSuccessfulCalls() {
+		DouyinFetchRequest request = request("cookie-value");
+		DouyinFetchEnvelope f2Result = envelope("F2");
+		DouyinFetchEnvelope dtkResult = envelope("DTK");
+		when(f2.fetchAuthorWorks(request)).thenReturn(f2Result);
+		when(dtk.fetchAuthorWorks(request)).thenReturn(dtkResult);
+
+		assertThat(service.fetchAuthorWorks(request)).isSameAs(f2Result);
+		assertThat(service.fetchAuthorWorks(request)).isSameAs(dtkResult);
+		assertThat(f2Result.diagnostics().getString("providerPath")).isEqualTo("F2");
+		assertThat(dtkResult.diagnostics().getString("providerPath")).isEqualTo("DTK");
+	}
+
+	@Test
 	void autoFailsOverOnlyForRetryableF2Failure() {
 		DouyinFetchRequest request = request("cookie-value");
 		DouyinFetchEnvelope expected = envelope("DTK");

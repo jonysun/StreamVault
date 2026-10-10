@@ -162,11 +162,16 @@ public class DownloadCenterService {
 
 	/** Returns the latest known work for one collection task with a user-facing status. */
 	public Map<String, Object> collectAuthorWorks(int taskId, int page, int pageSize) {
-		return collectAuthorWorks(null, null, taskId, page, pageSize);
+		return collectAuthorWorks(null, null, taskId, page, pageSize, null);
 	}
 
 	/** Returns the union of all observed works for one author across collection runs. */
 	public Map<String, Object> collectAuthorWorks(String authorUid, String authorName, int taskId, int page, int pageSize) {
+		return collectAuthorWorks(authorUid, authorName, taskId, page, pageSize, null);
+	}
+
+	public Map<String, Object> collectAuthorWorks(String authorUid, String authorName, int taskId, int page,
+			int pageSize, String statusFilter) {
 		int safePage = Math.max(0, page);
 		int safeSize = Math.min(Math.max(1, pageSize), 100);
 		String identityFilter;
@@ -200,6 +205,10 @@ public class DownloadCenterService {
 		}
 		List<Map<String, Object>> all = new ArrayList<>();
 		for (Map<String, Object> row : latest.values()) all.add(toAuthorWork(row));
+		if (statusFilter != null && !statusFilter.isBlank() && !"ALL".equalsIgnoreCase(statusFilter)) {
+			String normalizedStatus = statusFilter.trim().toUpperCase(Locale.ROOT);
+			all.removeIf(item -> !normalizedStatus.equals(String.valueOf(item.get("status"))));
+		}
 		int from = Math.min(safePage * safeSize, all.size());
 		int to = Math.min(from + safeSize, all.size());
 		Map<String, Object> result = new LinkedHashMap<>();

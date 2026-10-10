@@ -74,6 +74,30 @@ class CollectRunQueryServiceTest {
 	}
 
 	@Test
+	void runsExposeProviderSnapshotAndFullFetchErrorDiagnostics() throws Exception {
+		JdbcTemplate jdbc = jdbcTemplate("run-diagnostics.db");
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id, taskname, originaladdress, platform) VALUES "
+				+ "(4, 'Author', 'postMS4wLjABAAAA123456789012345678', '抖音')");
+		jdbc.update("INSERT INTO biz_collect_run(id, collect_task_id, trigger_type, provider_mode, provider_path, "
+				+ "provider_reason, state, error_code, error_message, error_detail) VALUES "
+				+ "(12, 4, 'SCHEDULED', 'F2', 'F2', 'F2_UPSTREAM_SOFT_BLOCK', 'FETCH_FAILED', "
+				+ "'F2_UPSTREAM_SOFT_BLOCK', 'upstream returned an empty response', 'stack trace')");
+
+		CollectRunQueryService service = new CollectRunQueryService(jdbc, new SnapshotCodec(4096, 2));
+
+		Map<String, Object> run = service.findRuns(4, 20, 0).get(0);
+
+		assertThat(run).containsEntry("providerMode", "F2")
+				.containsEntry("providerPath", "F2")
+				.containsEntry("providerReason", "F2_UPSTREAM_SOFT_BLOCK")
+				.containsEntry("errorCode", "F2_UPSTREAM_SOFT_BLOCK")
+				.containsEntry("errorMessage", "upstream returned an empty response")
+				.containsEntry("errorDetail", "stack trace")
+				.containsEntry("authorSecUid", "MS4wLjABAAAA123456789012345678");
+	}
+
+	@Test
 	void downloadQueueReturnsCountsAndClaimOrderedItems() throws Exception {
 		JdbcTemplate jdbc = jdbcTemplate("download-queue.db");
 		createSchema(jdbc);
@@ -115,14 +139,18 @@ class CollectRunQueryServiceTest {
 	}
 
 	private void createSchema(JdbcTemplate jdbc) {
-		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, collect_task_id INTEGER)");
+		jdbc.execute("CREATE TABLE biz_collect_run (id INTEGER PRIMARY KEY, collect_task_id INTEGER, "
+				+ "trigger_type TEXT, provider_mode TEXT, provider_path TEXT, provider_reason TEXT, state TEXT, "
+				+ "requested_limit INTEGER, fetched_count INTEGER, planned_count INTEGER, inserted_count INTEGER, "
+				+ "skipped_existing_count INTEGER, failed_item_count INTEGER, created_at DATETIME, started_at DATETIME, "
+				+ "heartbeat_at DATETIME, finished_at DATETIME, error_code TEXT, error_message TEXT, error_detail TEXT)");
 		jdbc.execute("CREATE TABLE biz_collect_run_item (id INTEGER PRIMARY KEY, run_id INTEGER, ordinal INTEGER, "
 				+ "platform_key TEXT, work_id TEXT, author_uid TEXT, nickname_snapshot TEXT, title_snapshot TEXT, "
 				+ "publish_time TEXT, media_type TEXT, decision TEXT, process_state TEXT, error_code TEXT, "
 				+ "error_message TEXT, error_detail TEXT, attempt_count INTEGER, max_attempts INTEGER, "
 				+ "available_at DATETIME, locked_by TEXT, locked_at DATETIME, started_at DATETIME, finished_at DATETIME, "
 				+ "queue_generation TEXT, created_at DATETIME, updated_at DATETIME)");
-		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, "
+		jdbc.execute("CREATE TABLE biz_collect_data (id INTEGER PRIMARY KEY, taskname TEXT, originaladdress TEXT, platform TEXT, "
 				+ "lastfetchsnapshot TEXT, lastplanitems TEXT)");
 	}
 

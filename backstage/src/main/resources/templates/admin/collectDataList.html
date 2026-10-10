@@ -1020,11 +1020,17 @@
 				var columns = [
 					{title:'运行ID', render:function(row){ return codeCell(row.runId); }},
 					{title:'触发', render:function(row){ return cell(row.triggerType); }},
+					{title:'模式', render:function(row){ return badgeCell(row.providerMode || 'UNKNOWN'); }},
+					{title:'实际提供方', render:function(row){
+						var path = row.providerPath || 'UNKNOWN';
+						var reason = row.providerReason ? '<br/><small class="text-muted">'+escapeHtml(row.providerReason)+'</small>' : '';
+						return '<strong>'+escapeHtml(path)+'</strong>'+reason;
+					}},
 					{title:'状态', render:function(row){ return badgeCell(row.stateLabel || row.state); }},
 					{title:'抓取', render:function(row){ return cell(row.fetchedCount); }},
 					{title:'计划/新增/跳过/失败', render:function(row){ return cell([row.plannedCount,row.insertedCount,row.skippedExistingCount,row.failedItemCount].join(' / ')); }},
 					{title:'排队时间', render:function(row){ return smallCell(row.queuedAt); }},
-					{title:'错误', render:function(row){ return smallCell([row.errorCode,row.errorMessage].filter(Boolean).join('\n')); }},
+					{title:'错误', render:function(row){ return logCell([row.errorCode,row.errorMessage,row.errorDetail].filter(Boolean).join('\n')); }},
 					{title:'操作', render:function(row){
 						return '<button class="btn btn-xs btn-primary inspectRun" data-run-id="'+escapeHtml(row.runId)+'">明细</button> '
 							+'<button class="btn btn-xs btn-warning retryFailedRun" data-run-id="'+escapeHtml(row.runId)+'">重试失败项</button>';

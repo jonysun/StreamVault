@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ public class DouyinDataProviderService {
 	private static final Logger logger = LoggerFactory.getLogger(DouyinDataProviderService.class);
 	private final F2DouyinDataProvider f2;
 	private final DtkDouyinDataProvider dtk;
+	private final AtomicInteger autoProviderTurn = new AtomicInteger();
 
 	public DouyinDataProviderService(F2DouyinDataProvider f2, DtkDouyinDataProvider dtk) {
 		this.f2 = f2;
@@ -31,17 +33,39 @@ public class DouyinDataProviderService {
 
 	public DouyinFetchEnvelope fetchAuthorWorks(DouyinFetchRequest request) {
 		if (!isAuto()) return markProvider(current().fetchAuthorWorks(request), isDtkOnly() ? "DTK" : "F2", null);
-		if (request.cookie() == null || request.cookie().isBlank()) {
-			logger.info("[DouyinProvider] operation=AUTHOR_LIST provider=DTK reason=F2_COOKIE_MISSING");
-			return markProvider(dtk.fetchAuthorWorks(request), "DTK", "F2_COOKIE_MISSING");
+		String first = nextAutoProvider();
+		String second = "F2".equals(first) ? "DTK" : "F2";
+		RuntimeException firstFailure = null;
+		boolean attemptedFirst = false;
+		if ("DTK".equals(first) || request.cookie() != null && !request.cookie().isBlank()) {
+			attemptedFirst = true;
+			try {
+				return markProvider(fetchAuthorWorks(first, request), first, null);
+			} catch (RuntimeException error) {
+				if (!shouldFailover(error)) throw error;
+				firstFailure = error;
+			}
+		} else {
+			firstFailure = new CollectFetchException("F2_COOKIE_MISSING", "F2 cookie is missing");
 		}
+		if ("F2".equals(second) && (request.cookie() == null || request.cookie().isBlank())) throw firstFailure;
+		logger.warn("[DouyinProvider] failover operation=AUTHOR_LIST from={} to={} reason={}", first, second,
+				errorCode(firstFailure));
 		try {
-			return markProvider(f2.fetchAuthorWorks(request), "F2", null);
-		} catch (RuntimeException error) {
-			if (!shouldFailover(error)) throw error;
-			logger.warn("[DouyinProvider] failover operation=AUTHOR_LIST from=F2 to=DTK reason={}", error.getMessage());
-			return markProvider(dtk.fetchAuthorWorks(request), "F2->DTK", errorCode(error));
+			return markProvider(fetchAuthorWorks(second, request), attemptedFirst ? first + "->" + second : second,
+					errorCode(firstFailure));
+		} catch (RuntimeException fallbackError) {
+			fallbackError.addSuppressed(firstFailure);
+			throw fallbackError;
 		}
+	}
+
+	private DouyinFetchEnvelope fetchAuthorWorks(String provider, DouyinFetchRequest request) {
+		return "F2".equals(provider) ? f2.fetchAuthorWorks(request) : dtk.fetchAuthorWorks(request);
+	}
+
+	private String nextAutoProvider() {
+		return (autoProviderTurn.getAndIncrement() & 1) == 0 ? "F2" : "DTK";
 	}
 
 	private DouyinFetchEnvelope markProvider(DouyinFetchEnvelope envelope, String path, String reason) {
@@ -66,15 +90,34 @@ public class DouyinDataProviderService {
 	public Map<String, String> fetchDirect(String url, String cookie) {
 		if (isDtkOnly()) return dtk.fetchDirect(url);
 		if (!isAuto()) return f2.fetchDirect(url, cookie);
-		try {
-			Map<String, String> result = f2.fetchDirect(url, cookie);
-			if (result != null && result.get("videoplay") != null && !result.get("videoplay").isBlank()) return result;
-			logger.warn("[DouyinProvider] failover operation=DIRECT from=F2 to=DTK reason=F2_EMPTY_MEDIA_RESULT");
-		} catch (RuntimeException error) {
-			if (!shouldFailover(error)) throw error;
-			logger.warn("[DouyinProvider] failover operation=DIRECT from=F2 to=DTK reason={}", error.getMessage());
+		String first = nextAutoProvider();
+		String second = "F2".equals(first) ? "DTK" : "F2";
+		RuntimeException firstFailure = null;
+		if ("DTK".equals(first) || cookie != null && !cookie.isBlank()) {
+			try {
+				Map<String, String> result = fetchDirect(first, url, cookie);
+				if (result != null && result.get("videoplay") != null && !result.get("videoplay").isBlank()) return result;
+				firstFailure = new CollectFetchException("EMPTY_MEDIA_RESULT", first + " returned no media URL");
+			} catch (RuntimeException error) {
+				if (!shouldFailover(error)) throw error;
+				firstFailure = error;
+			}
+		} else {
+			firstFailure = new CollectFetchException("F2_COOKIE_MISSING", "F2 cookie is missing");
 		}
-		return dtk.fetchDirect(url);
+		if ("F2".equals(second) && (cookie == null || cookie.isBlank())) throw firstFailure;
+		logger.warn("[DouyinProvider] failover operation=DIRECT from={} to={} reason={}", first, second,
+				errorCode(firstFailure));
+		try {
+			return fetchDirect(second, url, cookie);
+		} catch (RuntimeException fallbackError) {
+			fallbackError.addSuppressed(firstFailure);
+			throw fallbackError;
+		}
+	}
+
+	private Map<String, String> fetchDirect(String provider, String url, String cookie) {
+		return "F2".equals(provider) ? f2.fetchDirect(url, cookie) : dtk.fetchDirect(url);
 	}
 
 	public JSONObject fetchAuthorProfile(String secUid) {
@@ -110,7 +153,8 @@ public class DouyinDataProviderService {
 				String code = fetch.getErrorCode();
 				if (code != null && (code.contains("UPSTREAM") || code.contains("TIMEOUT")
 						|| code.contains("NETWORK") || code.contains("SOFT_BLOCK")
-						|| code.contains("RATE_LIMIT") || code.contains("COOKIE_COOLDOWN"))) return true;
+						|| code.contains("RATE_LIMIT") || code.contains("COOKIE_COOLDOWN")
+						|| code.contains("PAGINATION") || code.contains("NODE_COOLDOWN"))) return true;
 			}
 			current = current.getCause();
 		}

@@ -257,13 +257,16 @@ public class CollectJobWorker {
 			return;
 		}
 		try {
-			CollectEnqueueResult retry = collectRunService.retryOrFail(claim, errorCode, message, retryDelaySeconds);
+			long retryDelay = retryDelaySeconds;
+			CollectEnqueueResult retry = collectRunService.retryOrFail(claim, errorCode, message, retryDelay);
 			if (retry.inserted()) {
-				boolean cooldownApplied = isExpectedDouyinRisk(errorCode)
-						&& platformCookieService.isDouyinGlobalCooldownActive();
+				boolean cooldownApplied = (isExpectedDouyinRisk(errorCode)
+						&& platformCookieService.isDouyinGlobalCooldownActive())
+						|| "DTK_UPSTREAM_RISK_CONTROL".equals(errorCode)
+						|| "DTK_NODE_COOLDOWN".equals(errorCode);
 				logger.warn("[CollectWorker] retry queued jobId={} runId={} taskId={} code={} faultDomain={} "
-						+ "retryable=true cooldownApplied={} root={} nextRunId={} nextState={}", claim.jobId(),
-						claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), cooldownApplied, message,
+					+ "retryable=true cooldownApplied={} retryDelaySeconds={} root={} nextRunId={} nextState={}", claim.jobId(),
+					claim.runId(), claim.taskId(), errorCode, faultDomain(errorCode), cooldownApplied, retryDelay, message,
 						retry.runId(), retry.state());
 			} else {
 				logger.error("[CollectWorker] retry exhausted jobId={} runId={} taskId={} code={} faultDomain={} "
@@ -321,6 +324,9 @@ public class CollectJobWorker {
 
 	private long retryDelaySeconds(Throwable error) {
 		if (error instanceof CollectFetchException fetchError) {
+			if (fetchError.getRetryAfterSeconds() != null) {
+				return Math.max(5, fetchError.getRetryAfterSeconds() + 5);
+			}
 			String errorCode = fetchError.getErrorCode();
 			if ("F2_UPSTREAM_SOFT_BLOCK".equals(errorCode)) {
 				return AUTHOR_LIST_SOFT_BLOCK_RETRY_SECONDS;

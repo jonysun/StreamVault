@@ -131,18 +131,20 @@ public class CollectRunQueryService {
 
 	public List<Map<String, Object>> findRuns(int taskId, int limit, long afterId) {
 		int safeLimit = Math.min(Math.max(limit, 1), 100);
-		return jdbcTemplate.queryForList("SELECT id AS \"runId\", collect_task_id AS \"taskId\", "
-				+ "trigger_type AS \"triggerType\", provider_mode AS \"providerMode\", "
-				+ "provider_path AS \"providerPath\", provider_reason AS \"providerReason\", state, "
-				+ "requested_limit AS \"requestedLimit\", "
-				+ "fetched_count AS \"fetchedCount\", planned_count AS \"plannedCount\", "
-				+ "inserted_count AS \"insertedCount\", skipped_existing_count AS \"skippedExistingCount\", "
-				+ "failed_item_count AS \"failedItemCount\", created_at AS \"queuedAt\", "
-				+ "started_at AS \"startedAt\", heartbeat_at AS \"heartbeatAt\", "
-				+ "finished_at AS \"finishedAt\", error_code AS \"errorCode\", error_message AS \"errorMessage\" "
-				+ "FROM biz_collect_run WHERE collect_task_id = ? AND (? = 0 OR id < ?) "
-				+ "ORDER BY id DESC LIMIT " + safeLimit, taskId, afterId, afterId).stream()
-				.map(this::withStateLabel).toList();
+		return jdbcTemplate.queryForList("SELECT r.id AS \"runId\", r.collect_task_id AS \"taskId\", t.originaladdress AS \"sourceAddress\", t.platform AS \"taskPlatform\", "
+				+ "r.trigger_type AS \"triggerType\", r.provider_mode AS \"providerMode\", "
+				+ "r.provider_path AS \"providerPath\", r.provider_reason AS \"providerReason\", r.state, "
+				+ "r.requested_limit AS \"requestedLimit\", "
+				+ "r.fetched_count AS \"fetchedCount\", r.planned_count AS \"plannedCount\", "
+				+ "r.inserted_count AS \"insertedCount\", r.skipped_existing_count AS \"skippedExistingCount\", "
+				+ "r.failed_item_count AS \"failedItemCount\", r.created_at AS \"queuedAt\", "
+				+ "r.started_at AS \"startedAt\", r.heartbeat_at AS \"heartbeatAt\", "
+				+ "r.finished_at AS \"finishedAt\", r.error_code AS \"errorCode\", r.error_message AS \"errorMessage\", "
+				+ "r.error_detail AS \"errorDetail\" "
+				+ "FROM biz_collect_run r LEFT JOIN biz_collect_data t ON t.id=r.collect_task_id "
+				+ "WHERE r.collect_task_id = ? AND (? = 0 OR r.id < ?) "
+				+ "ORDER BY r.id DESC LIMIT " + safeLimit, taskId, afterId, afterId).stream()
+				.map(this::withAuthorSecUid).map(this::withStateLabel).toList();
 	}
 
 	/** Global collection-run view used by the dedicated collection monitor page. */
@@ -175,7 +177,7 @@ public class CollectRunQueryService {
 				+ "r.inserted_count AS \"insertedCount\", r.skipped_existing_count AS \"skippedExistingCount\", "
 				+ "r.failed_item_count AS \"failedItemCount\", r.created_at AS \"queuedAt\", "
 				+ "r.started_at AS \"startedAt\", r.heartbeat_at AS \"heartbeatAt\", r.finished_at AS \"finishedAt\", "
-				+ "r.error_code AS \"errorCode\", r.error_message AS \"errorMessage\", "
+				+ "r.error_code AS \"errorCode\", r.error_message AS \"errorMessage\", r.error_detail AS \"errorDetail\", t.originaladdress AS \"sourceAddress\", t.platform AS \"taskPlatform\", "
 				+ "COALESCE((SELECT COUNT(*) FROM biz_collect_run_item i WHERE i.run_id=r.id),0) AS \"itemCount\", "
 				+ "COALESCE((SELECT COUNT(*) FROM biz_collect_run_item i WHERE i.run_id=r.id AND i.process_state IN ('COMPLETED','SKIPPED_EXISTING','SKIPPED_EXISTING_ACTIVE_DOWNLOAD')),0) AS \"completedCount\", "
 				+ "COALESCE((SELECT COUNT(*) FROM biz_collect_run_item i WHERE i.run_id=r.id AND i.process_state='FAILED'),0) AS \"failedCount\", "
@@ -187,7 +189,7 @@ public class CollectRunQueryService {
 				+ "LEFT JOIN biz_collect_data t ON t.id=r.collect_task_id " + filter
 				+ "ORDER BY COALESCE(r.heartbeat_at, r.started_at, r.finished_at, r.created_at) DESC NULLS LAST, r.id DESC LIMIT " + safeLimit;
 		List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, filterArgs.toArray()).stream()
-				.map(this::withStateLabel).toList();
+				.map(this::withAuthorSecUid).map(this::withStateLabel).toList();
 		Map<String, Object> countRow = jdbcTemplate.queryForMap("SELECT "
 				+ "SUM(CASE WHEN state IN ('QUEUED','FETCHING','PROCESSING') THEN 1 ELSE 0 END) AS active_count, "
 				+ "SUM(CASE WHEN state='COMPLETED' THEN 1 ELSE 0 END) AS completed_count, "
@@ -216,15 +218,29 @@ public class CollectRunQueryService {
 				+ "r.failed_item_count AS \"failedItemCount\", r.created_at AS \"queuedAt\", "
 				+ "r.started_at AS \"startedAt\", r.heartbeat_at AS \"heartbeatAt\", "
 				+ "r.finished_at AS \"finishedAt\", r.error_code AS \"errorCode\", "
-				+ "r.error_message AS \"errorMessage\", r.error_detail AS \"errorDetail\" FROM biz_collect_run r "
+				+ "r.error_message AS \"errorMessage\", r.error_detail AS \"errorDetail\", t.originaladdress AS \"sourceAddress\", t.platform AS \"taskPlatform\" FROM biz_collect_run r "
 				+ "LEFT JOIN biz_collect_data t ON t.id = r.collect_task_id WHERE r.id = ?", runId);
 		if (rows.isEmpty()) return Map.of();
-		Map<String, Object> result = withStateLabel(rows.get(0));
+		Map<String, Object> result = withStateLabel(withAuthorSecUid(rows.get(0)));
 		Map<String, Object> error = new HashMap<>();
 		error.put("code", result.get("errorCode"));
 		error.put("message", result.get("errorMessage"));
 		error.put("detail", result.get("errorDetail"));
 		result.put("error", error);
+		return result;
+	}
+
+	private Map<String, Object> withAuthorSecUid(Map<String, Object> source) {
+		Map<String, Object> result = new LinkedHashMap<>(source);
+		Object rawAddress = result.remove("sourceAddress");
+		Object rawPlatform = result.remove("taskPlatform");
+		String address = rawAddress == null ? "" : rawAddress.toString().trim();
+		String platform = rawPlatform == null ? "" : rawPlatform.toString();
+		if (!platform.toLowerCase(java.util.Locale.ROOT).contains("douyin") && !platform.contains("抖音")) return result;
+		if (address.startsWith("post") || address.startsWith("like") || address.startsWith("recommend")) {
+			address = address.replaceFirst("^(post|like|recommend)", "");
+		}
+		if (address.matches("MS4wLjAB[A-Za-z0-9_-]{20,}")) result.put("authorSecUid", address);
 		return result;
 	}
 

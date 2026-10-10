@@ -882,9 +882,11 @@ public class AdminController {
 	@GetMapping("/download-center/collect-author-works")
 	public AjaxEntity downloadCenterCollectAuthorWorks(@RequestParam(required = false) Integer taskId,
 			@RequestParam(required = false) String authorUid, @RequestParam(required = false) String authorName,
-			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int pageSize) {
+			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int pageSize,
+			@RequestParam(required = false) String status) {
 		return new AjaxEntity(Global.ajax_success, "Collection works loaded",
-				downloadCenterService.collectAuthorWorks(authorUid, authorName, taskId == null ? 0 : taskId, page, pageSize));
+				downloadCenterService.collectAuthorWorks(authorUid, authorName, taskId == null ? 0 : taskId,
+						page, pageSize, status));
 	}
 
 	@GetMapping("/download-center/detail")
