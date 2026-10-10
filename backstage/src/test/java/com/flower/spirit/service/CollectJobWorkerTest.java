@@ -17,10 +17,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flower.spirit.database.DatabaseWriteExecutor;
+import com.flower.spirit.config.Global;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
 
 import ch.qos.logback.classic.Level;
@@ -29,6 +31,13 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
 class CollectJobWorkerTest {
+
+	private final String previousDouyinProvider = Global.douyinProvider;
+
+	@AfterEach
+	void restoreDouyinProvider() {
+		Global.douyinProvider = previousDouyinProvider;
+	}
 
 	@Test
 	void workerPassesTriggerTypeAndCompletesImmediatelyAfterFetchPlanning() {
@@ -71,6 +80,7 @@ class CollectJobWorkerTest {
 
 	@Test
 	void activeCooldownPreventsQueueClaim() {
+		Global.douyinProvider = "F2";
 		CollectQueueTransaction transaction = mock(CollectQueueTransaction.class);
 		PlatformCookieService cookieService = mock(PlatformCookieService.class);
 		when(cookieService.isDouyinGlobalCooldownActive()).thenReturn(true);
@@ -80,6 +90,83 @@ class CollectJobWorkerTest {
 		try {
 			worker.processOne();
 			verify(transaction, never()).claimNext(anyString(), any());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void autoProviderCanClaimDuringF2GlobalCooldown() {
+		Global.douyinProvider = "AUTO";
+		CollectQueueTransaction transaction = mock(CollectQueueTransaction.class);
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		DatabaseWriteExecutor writes = passthroughWrites();
+		CollectJobClaim claim = new CollectJobClaim(11L, 90L, 7, CollectTriggerType.SCHEDULED, 1, 3);
+		when(transaction.claimNext(anyString(), any())).thenReturn(claim);
+		when(dataService.isCollectTaskEnabled(7)).thenReturn(true);
+		when(cookieService.isDouyinGlobalCooldownActive()).thenReturn(true);
+		CollectJobWorker worker = new CollectJobWorker(transaction, runService, dataService, cookieService, writes, 1);
+
+		try {
+			worker.processOne();
+			verify(transaction).claimNext(anyString(), any());
+			verify(runService).start(90L);
+			verify(dataService).executeQueuedCollectTask(7, 90L, CollectTriggerType.SCHEDULED);
+			verify(runService).complete(90L, 11L);
+			verify(runService, never()).deferForCooldown(any(), any(), anyString());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void dtkProviderCanClaimDuringF2GlobalCooldown() {
+		Global.douyinProvider = "DTK";
+		CollectQueueTransaction transaction = mock(CollectQueueTransaction.class);
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		DatabaseWriteExecutor writes = passthroughWrites();
+		CollectJobClaim claim = new CollectJobClaim(11L, 90L, 7, CollectTriggerType.SCHEDULED, 1, 3);
+		when(transaction.claimNext(anyString(), any())).thenReturn(claim);
+		when(dataService.isCollectTaskEnabled(7)).thenReturn(true);
+		when(cookieService.isDouyinGlobalCooldownActive()).thenReturn(true);
+		CollectJobWorker worker = new CollectJobWorker(transaction, runService, dataService, cookieService, writes, 1);
+
+		try {
+			worker.processOne();
+			verify(transaction).claimNext(anyString(), any());
+			verify(runService).start(90L);
+			verify(dataService).executeQueuedCollectTask(7, 90L, CollectTriggerType.SCHEDULED);
+			verify(runService).complete(90L, 11L);
+			verify(runService, never()).deferForCooldown(any(), any(), anyString());
+		} finally {
+			worker.shutdown();
+		}
+	}
+
+	@Test
+	void unknownProviderDoesNotInheritF2OnlyCooldownPause() {
+		Global.douyinProvider = "";
+		CollectQueueTransaction transaction = mock(CollectQueueTransaction.class);
+		CollectRunService runService = mock(CollectRunService.class);
+		CollectDataService dataService = mock(CollectDataService.class);
+		PlatformCookieService cookieService = mock(PlatformCookieService.class);
+		DatabaseWriteExecutor writes = passthroughWrites();
+		CollectJobClaim claim = new CollectJobClaim(11L, 90L, 7, CollectTriggerType.SCHEDULED, 1, 3);
+		when(transaction.claimNext(anyString(), any())).thenReturn(claim);
+		when(dataService.isCollectTaskEnabled(7)).thenReturn(true);
+		when(cookieService.isDouyinGlobalCooldownActive()).thenReturn(true);
+		CollectJobWorker worker = new CollectJobWorker(transaction, runService, dataService, cookieService, writes, 1);
+
+		try {
+			worker.processOne();
+			verify(transaction).claimNext(anyString(), any());
+			verify(dataService).executeQueuedCollectTask(7, 90L, CollectTriggerType.SCHEDULED);
+			verify(runService).complete(90L, 11L);
+			verify(runService, never()).deferForCooldown(any(), any(), anyString());
 		} finally {
 			worker.shutdown();
 		}

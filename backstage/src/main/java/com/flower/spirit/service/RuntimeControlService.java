@@ -65,7 +65,8 @@ public class RuntimeControlService {
 		case HLS_TRANSCODE -> RuntimeControlTransaction.PAUSE_HLS;
 		};
 		if (enabled(key)) return PauseDecision.paused(key, reason(key));
-		if (category == TaskCategory.COLLECT_FETCH && enabled(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL)) {
+		if (category == TaskCategory.COLLECT_FETCH && isF2OnlyProvider()
+				&& enabled(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL)) {
 			return PauseDecision.paused(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL,
 					reason(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL));
 		}
@@ -85,7 +86,7 @@ public class RuntimeControlService {
 		boolean collect = enabled(RuntimeControlTransaction.PAUSE_COLLECT);
 		boolean download = enabled(RuntimeControlTransaction.PAUSE_DOWNLOAD);
 		boolean hls = enabled(RuntimeControlTransaction.PAUSE_HLS);
-		boolean f2Pool = enabled(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL);
+		boolean f2Pool = isF2OnlyProvider() && enabled(RuntimeControlTransaction.PAUSE_COLLECT_F2_POOL);
 		return new RuntimeControlSnapshot(all, collect, download, hls, all || collect || f2Pool, all || download,
 				all || hls, Map.copyOf(values));
 	}
@@ -97,6 +98,10 @@ public class RuntimeControlService {
 	private boolean enabled(String key) {
 		RuntimeControlValue value = values.get(key);
 		return value != null && value.enabled();
+	}
+
+	private boolean isF2OnlyProvider() {
+		return "F2".equalsIgnoreCase(Global.douyinProvider);
 	}
 
 	private String reason(String key) {

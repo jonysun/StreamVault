@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 
+import com.flower.spirit.config.Global;
 import com.flower.spirit.database.DatabaseWriteExecutor;
 import com.flower.spirit.service.transaction.CollectQueueTransaction;
 import com.flower.spirit.utils.SqliteErrors;
@@ -95,7 +96,7 @@ public class CollectJobWorker {
 				15, 15, TimeUnit.SECONDS);
 		try {
 			if (!applicationReady()) return;
-			if (platformCookieService.isDouyinGlobalCooldownActive()) {
+			if (isF2OnlyProvider() && platformCookieService.isDouyinGlobalCooldownActive()) {
 				logger.debug("[CollectWorker] claim deferred by Douyin global cooldown remainingMs={}",
 						platformCookieService.douyinGlobalCooldownRemainingMillis());
 				return;
@@ -160,7 +161,7 @@ public class CollectJobWorker {
 						claim.jobId(), claim.runId(), claim.taskId());
 				return;
 			}
-			if (platformCookieService.isDouyinGlobalCooldownActive()) {
+			if (isF2OnlyProvider() && platformCookieService.isDouyinGlobalCooldownActive()) {
 				deferForCooldown(claim, "F2_COOKIE_COOLDOWN", "Douyin global cooldown started after queue claim");
 				return;
 			}
@@ -171,11 +172,11 @@ public class CollectJobWorker {
 			logger.info("[CollectWorker] complete jobId={} runId={} taskId={}", claim.jobId(), claim.runId(),
 					claim.taskId());
 		} catch (CollectFetchException error) {
-			if ("F2_COOKIE_COOLDOWN".equals(error.getErrorCode())) {
+			if (isF2OnlyProvider() && "F2_COOKIE_COOLDOWN".equals(error.getErrorCode())) {
 				deferForCooldown(claim, error.getErrorCode(), rootMessage(error));
 				return;
 			}
-			if (isExpectedDouyinRisk(error.getErrorCode())
+			if (isF2OnlyProvider() && isExpectedDouyinRisk(error.getErrorCode())
 					&& platformCookieService.isDouyinGlobalCooldownActive()) {
 				deferForCooldown(claim, error.getErrorCode(), rootMessage(error));
 				return;
@@ -213,6 +214,10 @@ public class CollectJobWorker {
 			logger.error("[CollectCooldownDeferralWrite] failed jobId={} runId={} taskId={}", claim.jobId(),
 					claim.runId(), claim.taskId(), queueWriteError);
 		}
+	}
+
+	private boolean isF2OnlyProvider() {
+		return "F2".equalsIgnoreCase(Global.douyinProvider);
 	}
 
 	private CollectRunState currentExpectedState(long runId, CollectRunState fallback) {

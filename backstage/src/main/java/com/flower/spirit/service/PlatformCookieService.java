@@ -74,6 +74,11 @@ public class PlatformCookieService {
 			if (state.cooldownUntilEpochMillis() > now) riskUntil.put(DOUYIN_PLATFORM_KEY + ":" + fingerprint,
 					state.cooldownUntilEpochMillis());
 		});
+		DouyinCookieRiskTransaction.GlobalRiskState global = databaseWriteExecutor == null
+				? douyinCookieRiskTransaction.loadGlobalRisk()
+				: databaseWriteExecutor.execute("douyin-global-risk-load", douyinCookieRiskTransaction::loadGlobalRisk);
+		douyinGlobalRiskStartedAtMs.set(global.riskStartedAtEpochMillis());
+		douyinGlobalSoftBlockStartedAtMs.set(global.detailStartedAtEpochMillis());
 	}
 
 	public String currentDouyinCookie(String purpose) {
@@ -162,6 +167,7 @@ public class PlatformCookieService {
 						confirmedEvidence, cooldownMs);
 			} else {
 				douyinGlobalRiskStartedAtMs.accumulateAndGet(now, Math::max);
+				persistGlobalRisk(now);
 				logger.warn("platform cooldown platform={} scope=GLOBAL_RISK reason={} cooldownMs={}", safePlatform,
 						confirmedEvidence, cooldownMs);
 			}
@@ -201,6 +207,7 @@ public class PlatformCookieService {
 		if (!DOUYIN_PLATFORM_KEY.equals(canonicalPlatform(platform))) return;
 		long now = System.currentTimeMillis();
 		douyinGlobalSoftBlockStartedAtMs.accumulateAndGet(now, Math::max);
+		persistDetailSoftBlock(now);
 		logger.warn("platform cooldown platform={} scope=DETAIL_API reason={} cooldownMs={}", DOUYIN_PLATFORM_KEY,
 				reason, DOUYIN_SOFT_BLOCK_COOLDOWN_MS);
 	}
@@ -408,15 +415,34 @@ public class PlatformCookieService {
 		return Math.max(0, douyinGlobalRiskCooldownUntilEpochMillis() - now);
 	}
 
-	/** Clears only the in-memory global Douyin cooldown; configured cookies are unchanged. */
+	/** Clears the persisted and in-memory global Douyin cooldown; configured cookies are unchanged. */
 	public Map<String, Object> clearDouyinGlobalCooldown(String operator) {
 		long previousRisk = douyinGlobalRiskStartedAtMs.getAndSet(0);
 		long previousSoft = douyinGlobalSoftBlockStartedAtMs.getAndSet(0);
+		if (douyinCookieRiskTransaction != null) {
+			Instant now = Instant.now();
+			if (databaseWriteExecutor == null) douyinCookieRiskTransaction.clearGlobalRisk(now);
+			else databaseWriteExecutor.execute("douyin-global-risk-clear", () -> { douyinCookieRiskTransaction.clearGlobalRisk(now); return null; });
+		}
 		logger.warn("platform cooldown manually cleared platform={} operator={} hadRisk={} hadDetailBackoff={}",
 				DOUYIN_PLATFORM_KEY, operator == null || operator.isBlank() ? "unknown" : operator, previousRisk > 0,
 				previousSoft > 0);
 		return Map.of("cleared", true, "hadGlobalRiskCooldown", previousRisk > 0,
 				"hadDetailBackoff", previousSoft > 0);
+	}
+
+	private void persistGlobalRisk(long startedAtEpochMillis) {
+		if (douyinCookieRiskTransaction == null) return;
+		Instant startedAt = Instant.ofEpochMilli(startedAtEpochMillis);
+		if (databaseWriteExecutor == null) douyinCookieRiskTransaction.recordGlobalRisk(startedAt);
+		else databaseWriteExecutor.execute("douyin-global-risk-record", () -> { douyinCookieRiskTransaction.recordGlobalRisk(startedAt); return null; });
+	}
+
+	private void persistDetailSoftBlock(long startedAtEpochMillis) {
+		if (douyinCookieRiskTransaction == null) return;
+		Instant startedAt = Instant.ofEpochMilli(startedAtEpochMillis);
+		if (databaseWriteExecutor == null) douyinCookieRiskTransaction.recordDetailSoftBlock(startedAt);
+		else databaseWriteExecutor.execute("douyin-detail-risk-record", () -> { douyinCookieRiskTransaction.recordDetailSoftBlock(startedAt); return null; });
 	}
 
 	private long douyinGlobalRiskCooldownUntilEpochMillis() {

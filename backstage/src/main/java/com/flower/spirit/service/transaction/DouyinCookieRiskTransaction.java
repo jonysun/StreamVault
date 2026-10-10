@@ -24,6 +24,9 @@ public class DouyinCookieRiskTransaction {
 		jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS biz_douyin_cookie_risk ("
 				+ "cookie_fingerprint VARCHAR(12) PRIMARY KEY, consecutive_soft_blocks INTEGER NOT NULL DEFAULT 0, "
 				+ "cooldown_until TIMESTAMP NULL, updated_at TIMESTAMP NOT NULL)");
+		jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS biz_douyin_global_risk ("
+				+ "singleton_id INTEGER PRIMARY KEY, risk_started_at TIMESTAMP NULL, detail_started_at TIMESTAMP NULL, "
+				+ "updated_at TIMESTAMP NOT NULL)");
 	}
 
 	@Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
@@ -60,6 +63,52 @@ public class DouyinCookieRiskTransaction {
 				+ "WHERE cookie_fingerprint = ?", Timestamp.from(now), fingerprint);
 	}
 
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void recordGlobalRisk(Instant now) {
+		upsertGlobal(now, null, now);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void recordDetailSoftBlock(Instant now) {
+		upsertGlobal(null, now, now);
+	}
+
+	@Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+	public GlobalRiskState loadGlobalRisk() {
+		return loadGlobalRiskInTransaction();
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void clearGlobalRisk(Instant now) {
+		jdbcTemplate.update("UPDATE biz_douyin_global_risk SET risk_started_at = NULL, detail_started_at = NULL, updated_at = ? "
+				+ "WHERE singleton_id = 1", Timestamp.from(now));
+	}
+
+	private void upsertGlobal(Instant riskStartedAt, Instant detailStartedAt, Instant now) {
+		GlobalRiskState current = loadGlobalRiskInTransaction();
+		long risk = riskStartedAt == null ? current.riskStartedAtEpochMillis()
+				: Math.max(current.riskStartedAtEpochMillis(), riskStartedAt.toEpochMilli());
+		long detail = detailStartedAt == null ? current.detailStartedAtEpochMillis()
+				: Math.max(current.detailStartedAtEpochMillis(), detailStartedAt.toEpochMilli());
+		jdbcTemplate.update("INSERT INTO biz_douyin_global_risk(singleton_id, risk_started_at, detail_started_at, updated_at) "
+				+ "VALUES (1, ?, ?, ?) ON CONFLICT(singleton_id) DO UPDATE SET risk_started_at = excluded.risk_started_at, "
+				+ "detail_started_at = excluded.detail_started_at, updated_at = excluded.updated_at",
+				risk == 0 ? null : new Timestamp(risk), detail == 0 ? null : new Timestamp(detail), Timestamp.from(now));
+	}
+
+	private GlobalRiskState loadGlobalRiskInTransaction() {
+		return jdbcTemplate.query("SELECT risk_started_at, detail_started_at FROM biz_douyin_global_risk WHERE singleton_id = 1",
+				(rs, rowNum) -> new GlobalRiskState(timestampMillis(rs.getTimestamp(1)), timestampMillis(rs.getTimestamp(2))))
+				.stream().findFirst().orElse(new GlobalRiskState(0L, 0L));
+	}
+
+	private long timestampMillis(Timestamp timestamp) {
+		return timestamp == null ? 0L : timestamp.getTime();
+	}
+
 	public record RiskState(int consecutiveSoftBlocks, long cooldownUntilEpochMillis) {
+	}
+
+	public record GlobalRiskState(long riskStartedAtEpochMillis, long detailStartedAtEpochMillis) {
 	}
 }

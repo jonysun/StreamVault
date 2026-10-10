@@ -329,8 +329,9 @@ public class CollectQueueTransaction {
 		Timestamp timestamp = Timestamp.from(now);
 		int updated = jdbcTemplate.update("UPDATE biz_collect_run SET state = 'COMPLETED', fetched_count = ?, "
 				+ "planned_count = ?, inserted_count = ?, skipped_existing_count = ?, failed_item_count = ?, "
-				+ "heartbeat_at = ?, finished_at = ? WHERE id = ? AND state = 'PROCESSING'", counts.fetched(),
-				counts.planned(), counts.inserted(), counts.skipped(), counts.failed(), timestamp, timestamp, runId);
+				+ "heartbeat_at = ?, finished_at = ?, error_code = NULL, error_message = NULL, error_detail = NULL "
+				+ "WHERE id = ? AND state = 'PROCESSING'", counts.fetched(), counts.planned(), counts.inserted(),
+				counts.skipped(), counts.failed(), timestamp, timestamp, runId);
 		if (updated != 1) {
 			throw new IllegalCollectRunTransitionException(runId, CollectRunState.PROCESSING, CollectRunState.COMPLETED);
 		}
