@@ -23,6 +23,7 @@ class RuntimeControlServiceTest {
 	private boolean collect;
 	private boolean download;
 	private boolean hls;
+	private String douyinProvider;
 
 	@BeforeEach
 	void rememberGlobals() {
@@ -30,6 +31,7 @@ class RuntimeControlServiceTest {
 		collect = Global.backgroundTaskPauseCollect;
 		download = Global.backgroundTaskPauseDownload;
 		hls = Global.backgroundTaskPauseHls;
+		douyinProvider = Global.douyinProvider;
 	}
 
 	@AfterEach
@@ -38,6 +40,7 @@ class RuntimeControlServiceTest {
 		Global.backgroundTaskPauseCollect = collect;
 		Global.backgroundTaskPauseDownload = download;
 		Global.backgroundTaskPauseHls = hls;
+		Global.douyinProvider = douyinProvider;
 	}
 
 	@Test
@@ -75,6 +78,7 @@ class RuntimeControlServiceTest {
 
 	@Test
 	void automaticF2PoolPauseBlocksOnlyCollectionAndDoesNotReplaceManualPause() {
+		Global.douyinProvider = "F2";
 		RuntimeControlTransaction transaction = mock(RuntimeControlTransaction.class);
 		Map<String, RuntimeControlValue> initial = values(false, false, false, false, false);
 		Map<String, RuntimeControlValue> automaticPause = values(false, false, false, false, true);
@@ -98,6 +102,22 @@ class RuntimeControlServiceTest {
 		assertThat(service.snapshot().effectiveCollectPaused()).isTrue();
 		assertThat(service.mayRun(TaskCategory.COLLECT_FETCH).controlKey())
 				.isEqualTo(RuntimeControlTransaction.PAUSE_COLLECT);
+	}
+
+	@Test
+	void automaticF2PoolPauseDoesNotBlockAutoProvider() {
+		Global.douyinProvider = "AUTO";
+		RuntimeControlTransaction transaction = mock(RuntimeControlTransaction.class);
+		Map<String, RuntimeControlValue> initial = values(false, false, false, false, false);
+		Map<String, RuntimeControlValue> automaticPause = values(false, false, false, false, true);
+		when(transaction.initializeAndLoad(any())).thenReturn(initial);
+		when(transaction.setAutomaticF2PoolPause(eq(true), eq("池耗尽"), any())).thenReturn(automaticPause);
+		RuntimeControlService service = new RuntimeControlService(transaction, new SqliteWriteRetrier(1, 0, 0));
+		service.initialize();
+
+		service.setAutomaticF2PoolPause(true, "池耗尽");
+		assertThat(service.mayRun(TaskCategory.COLLECT_FETCH).allowed()).isTrue();
+		assertThat(service.snapshot().effectiveCollectPaused()).isFalse();
 	}
 
 	private Map<String, RuntimeControlValue> values(boolean pauseAll, boolean pauseCollect,

@@ -125,6 +125,9 @@ class CollectQueueTransactionTest {
 							"100", "image", "EXISTING", "SKIPPED_EXISTING")), 40, "NO_MORE",
 					new CollectRunFetchedItem.FetchWatermark("200", "work-1", 2, 0, "cursor-2"),
 					now.plusSeconds(4));
+			jdbc.update("UPDATE biz_collect_run SET error_code = 'F2_UPSTREAM_SOFT_BLOCK', "
+					+ "error_message = 'previous attempt failed', error_detail = 'diagnostics' WHERE id = ?",
+					claim.runId());
 			transaction.complete(claim.runId(), claim.jobId(), now.plusSeconds(7));
 
 			assertThat(jdbc.queryForObject("SELECT state FROM biz_collect_run WHERE id = ?", String.class,
@@ -155,6 +158,9 @@ class CollectQueueTransactionTest {
 					claim.runId())).isEqualTo("NO_MORE");
 			assertThat(jdbc.queryForObject("SELECT state FROM biz_job_queue WHERE id = ?", String.class,
 					claim.jobId())).isEqualTo("COMPLETED");
+			assertThat(jdbc.queryForMap("SELECT error_code, error_message, error_detail FROM biz_collect_run WHERE id = ?",
+					claim.runId())).containsEntry("error_code", null).containsEntry("error_message", null)
+					.containsEntry("error_detail", null);
 		}
 	}
 

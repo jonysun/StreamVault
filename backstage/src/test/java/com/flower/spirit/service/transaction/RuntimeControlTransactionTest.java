@@ -71,6 +71,8 @@ class RuntimeControlTransactionTest {
 			JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
 			jdbc.execute("CREATE TABLE biz_douyin_cookie_risk (cookie_fingerprint TEXT PRIMARY KEY, "
 					+ "consecutive_soft_blocks INTEGER NOT NULL DEFAULT 0, cooldown_until DATETIME, updated_at DATETIME NOT NULL)");
+			jdbc.execute("CREATE TABLE biz_douyin_global_risk (singleton_id INTEGER PRIMARY KEY, "
+					+ "risk_started_at DATETIME, detail_started_at DATETIME, updated_at DATETIME NOT NULL)");
 			DouyinCookieRiskTransaction transaction = context.getBean(DouyinCookieRiskTransaction.class);
 			Instant now = Instant.parse("2026-07-25T09:00:00Z");
 
@@ -84,6 +86,16 @@ class RuntimeControlTransactionTest {
 
 			transaction.recordSuccess("012345abcdef", now.plusSeconds(2));
 			assertThat(transaction.load().get("012345abcdef").consecutiveSoftBlocks()).isZero();
+
+			transaction.recordGlobalRisk(now.plusSeconds(3));
+			transaction.recordDetailSoftBlock(now.plusSeconds(4));
+			assertThat(transaction.loadGlobalRisk().riskStartedAtEpochMillis())
+				.isEqualTo(now.plusSeconds(3).toEpochMilli());
+			assertThat(transaction.loadGlobalRisk().detailStartedAtEpochMillis())
+				.isEqualTo(now.plusSeconds(4).toEpochMilli());
+			transaction.clearGlobalRisk(now.plusSeconds(5));
+			assertThat(transaction.loadGlobalRisk().riskStartedAtEpochMillis()).isZero();
+			assertThat(transaction.loadGlobalRisk().detailStartedAtEpochMillis()).isZero();
 		}
 	}
 
