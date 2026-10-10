@@ -40,6 +40,9 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private final ConcurrentHashMap<String, Long> nodeCooldownUntil = new ConcurrentHashMap<>();
 	private static final long NODE_COOLDOWN_MS = 60_000L;
 	private static final long TASK_POLL_TIMEOUT_MS = 30_000L;
+	private static final int DTK_MAX_PAGES = 1000;
+	private static final String DTK_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+			+ " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 	private static final List<String> ITEM_ARRAY_KEYS = List.of("items", "aweme_list", "list", "posts", "works");
 
 	public DtkDouyinDataProvider() {
@@ -67,7 +70,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		String cursor = blank(request.backfillCursor()) ? null : request.backfillCursor();
 		int pages = 0;
 		boolean hasMore = true;
-		while (hasMore && pages < request.maxPages() && (request.maxItems() <= 0 || newIds.size() < request.maxItems())) {
+		while (hasMore && pages < DTK_MAX_PAGES) {
 			int page = pages + 1;
 			logger.debug("[DTK] author-list-page-start page={} cursor={} knownCount={} maxItems={} maxPages={}",
 					page, maskIdentifier(cursor), known.size(), request.maxItems(), request.maxPages());
@@ -80,12 +83,24 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			}
 			params.add("count");
 			params.add("50");
+			params.add("include_raw");
+			params.add("true");
 			params.add("wait");
 			params.add(waitSeconds());
-			JSONObject response = get("/api/v1/douyin/user/posts", params.toArray(String[]::new));
+			JSONObject response;
+			try {
+				response = get("/api/v1/douyin/user/posts", params.toArray(String[]::new));
+			} catch (CollectFetchException error) {
+				logger.warn("[DTK] author-list-page-failed page={} cursor={} secUserId={} accumulatedItems={} code={} retryAfterSeconds={} message={}",
+						page, maskIdentifier(cursor), maskIdentifier(request.secUserId()), items.size(),
+						error.getErrorCode(), error.getRetryAfterSeconds(), diagnosticPreview(error.getMessage(), 320));
+				throw new CollectFetchException(error.getErrorCode(), "DTK 作者列表第 " + page
+						+ " 页失败 cursor=" + maskIdentifier(cursor) + ": " + error.getMessage(), error,
+						error.getRetryAfterSeconds());
+			}
 			JSONObject data = payload(response);
 			JSONArray rawItems = findItemArray(response, 0);
-			logger.debug("[DTK] author-list-page-response page={} cursor={} itemCount={} hasMore={} nextCursor={} responseKeys={}",
+			logger.info("[DTK] author-list-page-response page={} cursor={} itemCount={} hasMore={} nextCursor={} responseKeys={}",
 					page, maskIdentifier(cursor), rawItems == null ? -1 : rawItems.size(),
 					bool(data, "has_more") || bool(response, "has_more"),
 					maskIdentifier(firstText(data, "cursor", "max_cursor", "next_cursor", "nextCursor")),
@@ -105,7 +120,6 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				}
 				items.add(normalized);
 				if (!known.contains(id)) newIds.add(id);
-				if (request.maxItems() > 0 && newIds.size() >= request.maxItems()) break;
 			}
 			pages++;
 			String next = firstText(data, "cursor", "max_cursor", "next_cursor", "nextCursor");
@@ -115,10 +129,22 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			JSONObject metaCursor = object(meta, "cursor");
 			if (blank(next)) next = text(metaCursor, "next");
 			if (blank(next) && metaCursor == null) next = text(meta, "cursor");
-			hasMore = bool(data, "has_more") || bool(response, "has_more")
+			boolean upstreamHasMore = bool(data, "has_more") || bool(response, "has_more")
 					|| bool(meta, "has_more") || bool(metaCursor, "has_more");
-			if (blank(next) || next.equals(cursor)) hasMore = false;
+			if (upstreamHasMore && blank(next)) {
+				throw new CollectFetchException("DTK_PAGINATION_INCOMPLETE",
+						"DTK 作者列表声明仍有下一页，但未返回 cursor（第 " + page + " 页）");
+			}
+			if (upstreamHasMore && next.equals(cursor)) {
+				throw new CollectFetchException("DTK_PAGINATION_INCOMPLETE",
+						"DTK 作者列表下一页 cursor 未推进（第 " + page + " 页）");
+			}
+			hasMore = upstreamHasMore;
 			cursor = blank(next) ? cursor : next;
+		}
+		if (hasMore) {
+			throw new CollectFetchException("DTK_PAGINATION_INCOMPLETE",
+					"DTK 作者列表超过最大分页页数 " + DTK_MAX_PAGES + "，未完整获取");
 		}
 		JSONObject diagnostics = new JSONObject(true);
 		diagnostics.put("provider", name());
@@ -203,9 +229,18 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		CollectFetchException last = null;
 		for (int attempt = 0; attempt < nodes.size(); attempt++) {
 			DtkNode node = selectNode(attempted);
-			attempted.add(node.identity());
 			long cooldownRemaining = Math.max(0L,
 					nodeCooldownUntil.getOrDefault(node.identity(), 0L) - System.currentTimeMillis());
+			if (cooldownRemaining > 0) {
+				Long retryAfter = Math.max(1L, cooldownRemaining / 1000L
+						+ (cooldownRemaining % 1000L == 0 ? 0L : 1L));
+				logger.warn("[DTK] request-deferred id={} endpoint={} node={} apiKeyId={} code=DTK_NODE_COOLDOWN "
+						+ "retryAfterSeconds={} action=NODE_COOLDOWN params={}", requestId, path, node.baseUrl(),
+						apiKeyFingerprint(node), retryAfter, diagnosticParams(params));
+				throw new CollectFetchException("DTK_NODE_COOLDOWN",
+						"DTK 节点仍在冷却，约 " + retryAfter + " 秒后重试", retryAfter);
+			}
+			attempted.add(node.identity());
 			logger.debug("[DTK] request-node-selected id={} attempt={}/{} node={} cooldownRemainingMs={} excludedNodes={}",
 					requestId, attempt + 1, nodes.size(), node.baseUrl(), cooldownRemaining, attempted.size() - 1);
 			try {
@@ -216,12 +251,15 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			} catch (CollectFetchException error) {
 				last = error;
 				if (!isNodeRetryable(error) || attempt + 1 >= nodes.size()) {
-					logger.warn("[DTK] request-failed id={} endpoint={} node={} code={} totalDurationMs={} attemptedNodes={}",
-							requestId, path, node.baseUrl(), error.getErrorCode(), elapsedMs(startedAt), attempted.size());
+					logger.warn("[DTK] request-failed id={} endpoint={} node={} apiKeyId={} code={} totalDurationMs={} attemptedNodes={} configuredNodes={} params={}",
+							requestId, path, node.baseUrl(), apiKeyFingerprint(node), error.getErrorCode(),
+							elapsedMs(startedAt), attempted.size(), nodes.size(),
+							diagnosticParams(params));
 					throw error;
 				}
-				logger.warn("[DTK] node-failed-switching id={} endpoint={} node={} code={} elapsedMs={} nextAttempt={}/{}",
-						requestId, path, node.baseUrl(), error.getErrorCode(), elapsedMs(startedAt),
+				logger.warn("[DTK] node-failed-switching id={} endpoint={} node={} apiKeyId={} code={} retryAfterSeconds={} elapsedMs={} nextAttempt={}/{}",
+						requestId, path, node.baseUrl(), apiKeyFingerprint(node), error.getErrorCode(),
+						error.getRetryAfterSeconds(), elapsedMs(startedAt),
 						attempt + 2, nodes.size());
 			}
 		}
@@ -240,17 +278,23 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			}
 			HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url.toString()))
 					.timeout(Duration.ofMillis(Math.max(1000, Global.dtkTimeoutMs)))
-					.header("Accept", "application/json");
-			if (!blank(node.apiKey())) builder.header("X-API-Key", node.apiKey());
+					.header("Accept", "application/json")
+					.header("Accept-Language", "zh")
+					.header("User-Agent", DTK_USER_AGENT);
+			if (!blank(node.apiKey())) {
+				builder.header("Authorization", "Bearer " + node.apiKey());
+				builder.header("X-API-Key", node.apiKey());
+			}
 			HttpResponse<String> response = client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
 			String body = response.body();
-			logger.info("[DTK] response id={} endpoint={} status={} node={} durationMs={} bodyBytes={} bodySha256={}",
-					requestId, path, response.statusCode(), node.baseUrl(), elapsedMs(startedAt),
-					body == null ? 0 : body.getBytes(StandardCharsets.UTF_8).length, sha256(body));
+			logger.info("[DTK] response id={} endpoint={} status={} node={} apiKeyId={} durationMs={} bodyBytes={} bodySha256={} params={}",
+					requestId, path, response.statusCode(), node.baseUrl(), apiKeyFingerprint(node), elapsedMs(startedAt),
+					body == null ? 0 : body.getBytes(StandardCharsets.UTF_8).length, sha256(body), diagnosticParams(params));
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				logger.warn("[DTK] response-error id={} endpoint={} status={} node={} durationMs={} retryAfter={} body={}",
-						requestId, path, response.statusCode(), node.baseUrl(), elapsedMs(startedAt),
-						response.headers().firstValue("Retry-After").orElse(""), diagnosticPreview(body, 320));
+				logger.warn("[DTK] response-error id={} endpoint={} status={} node={} apiKeyId={} durationMs={} retryAfter={} headers={} params={} body={}",
+						requestId, path, response.statusCode(), node.baseUrl(), apiKeyFingerprint(node), elapsedMs(startedAt),
+						response.headers().firstValue("Retry-After").orElse(""), diagnosticResponseHeaders(response),
+						diagnosticParams(params), diagnosticPreview(body, 320));
 			}
 			if (response.statusCode() == 401 || response.statusCode() == 403) {
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
@@ -258,12 +302,28 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			}
 			if (response.statusCode() == 429) {
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
-				throw new CollectFetchException("DTK_RATE_LIMITED", "DTK API 被限流 Retry-After=" + response.headers().firstValue("Retry-After").orElse("unknown"));
+				throw new CollectFetchException("DTK_RATE_LIMITED", "DTK API 被限流 Retry-After="
+						+ response.headers().firstValue("Retry-After").orElse("unknown"),
+						parseRetryAfterSeconds(response, body));
 			}
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				String upstreamCode = structuredErrorCode(body);
+				if ("UPSTREAM_RISK_CONTROL".equalsIgnoreCase(upstreamCode)) {
+					Long retryAfterSeconds = parseRetryAfterSeconds(response, body);
+					long cooldownSeconds = Math.max(60L, retryAfterSeconds == null ? 0L : retryAfterSeconds);
+					retryAfterSeconds = cooldownSeconds;
+					nodeCooldownUntil.merge(node.identity(), safeCooldownDeadline(cooldownSeconds), Math::max);
+					logger.warn("[DTK] node-cooldown id={} endpoint={} node={} apiKeyId={} code=DTK_UPSTREAM_RISK_CONTROL "
+							+ "status={} cooldownSeconds={} retryAfterSeconds={} params={} action=NODE_COOLDOWN",
+							requestId, path, node.baseUrl(), apiKeyFingerprint(node), response.statusCode(),
+							cooldownSeconds, retryAfterSeconds, diagnosticParams(params));
+					throw new CollectFetchException("DTK_UPSTREAM_RISK_CONTROL",
+							"DTK API 上游风控 status=" + response.statusCode(), retryAfterSeconds);
+				}
 				nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 				throw new CollectFetchException("DTK_UPSTREAM_HTTP", "DTK API HTTP status=" + response.statusCode()
-						+ ", endpoint=" + path + ", body=" + diagnosticPreview(body, 1000));
+						+ ", endpoint=" + path + ", body=" + diagnosticPreview(body, 1000),
+						parseRetryAfterSeconds(response, body));
 			}
 			JSONObject parsed = JSON.parseObject(body);
 			if (parsed == null) throw new CollectFetchException("DTK_UPSTREAM_SCHEMA", "DTK 返回空 JSON");
@@ -281,7 +341,21 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			if (Boolean.FALSE.equals(success) || (errorCode != null && !errorCode.isBlank()
 					&& !isSuccessCode(errorCode))) {
 				String message = error == null ? parsed.getString("message") : error.getString("message");
-				throw new CollectFetchException("DTK_" + (errorCode == null ? "UPSTREAM_ERROR" : errorCode.toUpperCase()), message);
+				String normalizedCode = errorCode == null ? "UPSTREAM_ERROR" : errorCode.toUpperCase(java.util.Locale.ROOT);
+				Long retryAfterSeconds = parseRetryAfterSeconds(parsed, message);
+				String mappedCode = "DTK_" + normalizedCode;
+				if ("DTK_UPSTREAM_RISK_CONTROL".equals(mappedCode)) {
+					long cooldownSeconds = Math.max(60L, retryAfterSeconds == null ? 0L : retryAfterSeconds);
+					retryAfterSeconds = cooldownSeconds;
+					long cooldownUntil = safeCooldownDeadline(cooldownSeconds);
+					nodeCooldownUntil.merge(node.identity(), cooldownUntil, Math::max);
+					logger.warn("[DTK] node-cooldown id={} endpoint={} node={} apiKeyId={} code={} "
+							+ "cooldownSeconds={} retryAfterSeconds={} params={} action=NODE_COOLDOWN",
+							requestId, path, node.baseUrl(), apiKeyFingerprint(node), mappedCode,
+							cooldownSeconds, retryAfterSeconds, diagnosticParams(params));
+				}
+				throw new CollectFetchException(mappedCode,
+						(blank(message) ? "DTK API 返回业务错误 code=" + normalizedCode : message), retryAfterSeconds);
 			}
 			return parsed;
 		} catch (CollectFetchException e) {
@@ -324,9 +398,22 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				if (error == null) error = taskResponse.getJSONObject("error");
 				String code = error == null ? null : error.getString("code");
 				String message = error == null ? null : error.getString("message");
+				String normalizedCode = blank(code) ? "TASK_FAILED" : code.toUpperCase(java.util.Locale.ROOT);
+				Long retryAfterSeconds = parseRetryAfterSeconds(taskResponse, message);
+				if (retryAfterSeconds == null) retryAfterSeconds = parseRetryAfterSeconds(error, message);
+				if ("UPSTREAM_RISK_CONTROL".equals(normalizedCode)) {
+					long cooldownSeconds = Math.max(60L, retryAfterSeconds == null ? 0L : retryAfterSeconds);
+					retryAfterSeconds = cooldownSeconds;
+					nodeCooldownUntil.merge(node.identity(), safeCooldownDeadline(cooldownSeconds), Math::max);
+					logger.warn("[DTK] async-task-risk-control id={} taskId={} node={} apiKeyId={} "
+							+ "retryAfterSeconds={} action=NODE_COOLDOWN",
+							requestId, taskId, node.baseUrl(), apiKeyFingerprint(node), retryAfterSeconds);
+					throw new CollectFetchException("DTK_UPSTREAM_RISK_CONTROL",
+							blank(message) ? "DTK 异步任务触发上游风控" : message, retryAfterSeconds);
+				}
 				throw new CollectFetchException("DTK_TASK_FAILED",
 						"DTK 异步任务失败" + (blank(code) ? "" : " code=" + code)
-							+ (blank(message) ? "" : " message=" + message));
+							+ (blank(message) ? "" : " message=" + message), retryAfterSeconds);
 			}
 			if (System.nanoTime() >= deadline) {
 				throw new CollectFetchException("DTK_TASK_TIMEOUT", "DTK 异步任务轮询超时 task_id=" + taskId);
@@ -351,7 +438,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		String code = error.getErrorCode();
 		return "DTK_UPSTREAM_HTTP".equals(code) || "DTK_RATE_LIMITED".equals(code)
 				|| "DTK_AUTH_FAILED".equals(code) || "DTK_UNAVAILABLE".equals(code)
-				|| "DTK_UPSTREAM_SCHEMA".equals(code);
+				|| "DTK_UPSTREAM_SCHEMA".equals(code) || "DTK_UPSTREAM_RISK_CONTROL".equals(code);
 	}
 
 	private boolean isSuccessCode(String code) {
@@ -412,6 +499,88 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		return matcher.find() ? Integer.valueOf(matcher.group(1)) : null;
 	}
 
+	private static Long parseRetryAfterSeconds(HttpResponse<String> response, String body) {
+		String value = response.headers().firstValue("Retry-After").orElse(null);
+		if (value != null && !value.isBlank()) {
+			try {
+				return Math.max(0L, Long.parseLong(value.trim()));
+			} catch (NumberFormatException ignored) {
+				// Fall through to the structured error body.
+			}
+		}
+		try {
+			JSONObject parsed = JSON.parseObject(body);
+			return parseRetryAfterSeconds(parsed, parsed == null ? null : parsed.getString("message"));
+		} catch (RuntimeException ignored) {
+			// Non-JSON/plain-text upstream errors do not carry a retry hint.
+			return parseRetryAfterMessage(body);
+		}
+	}
+
+	private static String structuredErrorCode(String body) {
+		try {
+			JSONObject parsed = JSON.parseObject(body);
+			JSONObject error = parsed == null ? null : parsed.getJSONObject("error");
+			return error == null ? (parsed == null ? null : parsed.getString("code")) : error.getString("code");
+		} catch (RuntimeException ignored) {
+			return null;
+		}
+	}
+
+	private static Long parseRetryAfterSeconds(JSONObject parsed, String message) {
+		if (parsed != null) {
+			JSONObject error = parsed.getJSONObject("error");
+			Long retryAfter = retryAfterValue(error == null ? null : error.get("retry_after"));
+			if (retryAfter == null) retryAfter = retryAfterValue(error == null ? null : error.get("retry_after_seconds"));
+			JSONObject details = error == null ? null : error.getJSONObject("details");
+			if (retryAfter == null) retryAfter = retryAfterValue(details == null ? null : details.get("retry_after"));
+			if (retryAfter == null) retryAfter = retryAfterValue(details == null ? null : details.get("retry_after_seconds"));
+			if (retryAfter == null) retryAfter = retryAfterValue(parsed.get("retry_after"));
+			if (retryAfter == null) retryAfter = retryAfterValue(parsed.get("retry_after_seconds"));
+			JSONObject data = parsed.getJSONObject("data");
+			if (retryAfter == null) retryAfter = retryAfterValue(data == null ? null : data.get("retry_after"));
+			if (retryAfter == null) retryAfter = retryAfterValue(data == null ? null : data.get("retry_after_seconds"));
+			if (retryAfter != null) return retryAfter;
+			if (error != null) {
+				Long fromErrorMessage = parseRetryAfterMessage(error.getString("message"));
+				if (fromErrorMessage != null) return fromErrorMessage;
+			}
+		}
+		return parseRetryAfterMessage(message);
+	}
+
+	private static Long retryAfterValue(Object value) {
+		if (value instanceof Number number) return Math.max(0L, number.longValue());
+		if (value == null || value.toString().isBlank()) return null;
+		try {
+			return Math.max(0L, Long.parseLong(value.toString().trim()));
+		} catch (NumberFormatException ignored) {
+			return null;
+		}
+	}
+
+	private static Long parseRetryAfterMessage(String message) {
+		if (message == null || message.isBlank()) return null;
+		java.util.regex.Matcher minutes = java.util.regex.Pattern
+				.compile("(?i)(\\d+)\\s*(?:分钟|min(?:ute)?s?)").matcher(message);
+		if (minutes.find()) return Long.valueOf(minutes.group(1)) * 60L;
+		java.util.regex.Matcher seconds = java.util.regex.Pattern
+				.compile("(?i)(\\d+)\\s*(?:秒|sec(?:ond)?s?)").matcher(message);
+		return seconds.find() ? Long.valueOf(seconds.group(1)) : null;
+	}
+
+	private static long safeCooldownDeadline(long seconds) {
+		long now = System.currentTimeMillis();
+		long duration;
+		try {
+			duration = Math.multiplyExact(Math.max(0L, seconds), 1000L);
+		} catch (ArithmeticException overflow) {
+			duration = Long.MAX_VALUE;
+		}
+		return duration == Long.MAX_VALUE || now > Long.MAX_VALUE - duration
+				? Long.MAX_VALUE : now + duration;
+	}
+
 	private List<DtkNode> configuredNodes() {
 		List<DtkNode> nodes = new ArrayList<>();
 		String pool = Global.dtkApiPool == null ? "" : Global.dtkApiPool;
@@ -451,6 +620,18 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			else result.append(value == null ? "" : value);
 		}
 		return result.append('}').toString();
+	}
+
+	private Map<String, String> diagnosticResponseHeaders(HttpResponse<?> response) {
+		Map<String, String> headers = new LinkedHashMap<>();
+		for (String name : List.of("server", "via", "x-request-id", "cf-ray", "content-type")) {
+			response.headers().firstValue(name).ifPresent(value -> headers.put(name, preview(value, 160)));
+		}
+		return headers;
+	}
+
+	private String apiKeyFingerprint(DtkNode node) {
+		return blank(node.apiKey()) ? "none" : sha256(node.apiKey()).substring(0, 12);
 	}
 
 	private boolean isIdentifierParameter(String key) {

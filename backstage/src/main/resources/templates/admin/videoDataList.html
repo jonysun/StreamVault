@@ -215,11 +215,10 @@
 
         /* 操作按钮样式优化 */
         .action-buttons {
-            display: flex;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(58px, 1fr));
             gap: 6px;
-            flex-wrap: wrap;
-            justify-content: flex-start;
-            align-items: center;
+            align-items: stretch;
         }
 
         .action-buttons .btn {
@@ -313,18 +312,13 @@
                 display: none; /* 隐藏下载时间列 */
             }
 
-            /* 操作按钮在移动端垂直排列 */
-            .action-buttons {
-                flex-direction: column;
-                gap: 4px;
-                align-items: stretch;
-            }
-
             .action-buttons .btn {
-                width: 100%;
+                width: auto;
                 min-width: auto;
                 font-size: 11px;
-                padding: 6px 8px;
+                padding: 5px 3px;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
 
             /* 缩略图在移动端稍小 */
@@ -736,6 +730,9 @@
         <!--    模态框 start-->
         <div class="updateData" style="display: none;padding: 20px;">
             <input class="optionid" type="hidden">
+            <div class="form-group"><label>视频名称</label><input class="form-control edit-title" maxlength="2000"></div>
+            <div class="form-group"><label>发布时间</label><input class="form-control edit-publish-time" placeholder="例如：2026-10-09 12:30:00"></div>
+            <div class="form-group"><label>视频简介</label><textarea class="form-control edit-description" rows="3"></textarea></div>
             <div class="form-group mb-4">
                 <label>隐私设置</label>
                 <select class="form-control videoprivacy">
@@ -967,17 +964,23 @@
                 var id = $btn.data('id');
                 var videoprivacy = $btn.data('videoprivacy') || '0';
                 var videotag = $btn.data('videotag') || '';
+                var title = $btn.attr('data-title') || '';
+                var description = $btn.attr('data-description') || '';
+                var publishTime = $btn.attr('data-publish-time') || '';
 
                 // 打开编辑框
                 layer.open({
                     type: 1,
                     title: '编辑视频信息',
-                    area: ['500px', '400px'],
+                    area: ['96%', '82%'],
                     content: $('.updateData'),
                     success: function () {
                         // 设置表单值
                         $('.optionid').val(id);
                         $('.videoprivacy').val(videoprivacy);
+                        $('.edit-title').val(title);
+                        $('.edit-description').val(description);
+                        $('.edit-publish-time').val(publishTime);
 
                         // 初始化标签
                         var $tagsContainer = $('.tags-container').empty();
@@ -1023,7 +1026,7 @@
                         }
 
                         // 绑定标签输入事件
-                        $tagInput.on('keydown', function (e) {
+                        $tagInput.off('keydown.editTags').on('keydown.editTags', function (e) {
                             if (e.key === ' ' || e.key === 'Enter') {
                                 e.preventDefault();
                                 var text = $(this).val();
@@ -1035,7 +1038,7 @@
                         });
 
                         // 绑定删除标签事件
-                        $tagsContainer.on('click', '.remove-tag', function () {
+                        $tagsContainer.off('click.editTags').on('click.editTags', '.remove-tag', function () {
                             $(this).parent().remove();
                             updateHiddenInput();
                         });
@@ -1043,16 +1046,23 @@
                         // 绑定保存按钮事件
                         $('.save-btn').off('click').on('click', function () {
                             var formData = {
-                                id: $('.optionid').val(),
-                                videoprivacy: $('.videoprivacy').val(),
-                                videotag: $('.videotag').val()
+                                workType: 'video',
+                                id: Number($('.optionid').val()),
+                                overrides: {
+                                    title: $('.edit-title').val(),
+                                    description: $('.edit-description').val(),
+                                    publishTime: $('.edit-publish-time').val(),
+                                    privacy: $('.videoprivacy').val(),
+                                    tags: $('.videotag').val()
+                                }
                             };
 
                             var loadIndex = layer.load(1, { shade: [0.3, '#000'] });
                             $.ajax({
-                                url: '/admin/api/updateVideoData',
+                                url: '/admin/api/updateWorkMetadata',
                                 type: 'POST',
-                                data: formData,
+                                contentType: 'application/json',
+                                data: JSON.stringify(formData),
                                 success: function (res) {
                                     layer.close(loadIndex);
                                     if (res.resCode === "000001") {
@@ -1535,7 +1545,7 @@
 							html += '<td>' + formatTime(list[i].createtime) + '</td>';
                             html += '<td>';
                             html += '<div class="action-buttons">';
-                            html += '<a data-id="' + list[i].id + '" data-videoprivacy="' + list[i].videoprivacy + '" data-videotag="' + list[i].videotag + '" class="btn btn-outline-primary btn-sm editData" href="#!" title="编辑" data-toggle="tooltip"><i class="mdi mdi-pencil"></i> 编辑</a>';
+                            html += '<a data-id="' + list[i].id + '" data-videoprivacy="' + escapeHtml(list[i].videoprivacy || '0') + '" data-videotag="' + escapeHtml(list[i].videotag || '') + '" data-title="' + escapeHtml(list[i].videoname || '') + '" data-description="' + escapeHtml(list[i].videodesc || '') + '" data-publish-time="' + escapeHtml(list[i].publishtime || '') + '" class="btn btn-outline-primary btn-sm editData" href="#!" title="编辑" data-toggle="tooltip"><i class="mdi mdi-pencil"></i> 编辑</a>';
                             if (isPrivate) {
                                 html += '<a href="#!" class="btn btn-outline-info btn-sm toggle-privacy" ' +
                                     'data-id="' + list[i].id + '" ' +

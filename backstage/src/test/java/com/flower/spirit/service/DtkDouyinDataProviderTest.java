@@ -29,8 +29,15 @@ class DtkDouyinDataProviderTest {
 	private String oldApiPool;
 	private ExecutorService executor;
 	private AtomicReference<String> receivedApiKey;
+	private AtomicReference<String> receivedAuthorization;
+	private AtomicReference<String> receivedLanguage;
+	private AtomicReference<String> receivedUserAgent;
 	private AtomicReference<String> receivedPostsQuery;
 	private AtomicReference<Boolean> asyncPosts;
+	private AtomicReference<Boolean> paginatedPosts;
+	private AtomicReference<Boolean> paginatedCompletes;
+	private AtomicReference<Boolean> riskControlPosts;
+	private AtomicInteger postsCalls;
 	private AtomicInteger taskPolls;
 
 	@BeforeEach
@@ -41,8 +48,15 @@ class DtkDouyinDataProviderTest {
 		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		executor = Executors.newSingleThreadExecutor();
 		receivedApiKey = new AtomicReference<>();
+		receivedAuthorization = new AtomicReference<>();
+		receivedLanguage = new AtomicReference<>();
+		receivedUserAgent = new AtomicReference<>();
 		receivedPostsQuery = new AtomicReference<>();
 		asyncPosts = new AtomicReference<>(false);
+		paginatedPosts = new AtomicReference<>(false);
+		paginatedCompletes = new AtomicReference<>(false);
+		riskControlPosts = new AtomicReference<>(false);
+		postsCalls = new AtomicInteger();
 		taskPolls = new AtomicInteger();
 		server.setExecutor(executor);
 		server.createContext("/api/v1/douyin/video", exchange -> {
@@ -71,7 +85,33 @@ class DtkDouyinDataProviderTest {
 			try (var output = exchange.getResponseBody()) { output.write(body); }
 		});
 		server.createContext("/api/v1/douyin/user/posts", exchange -> {
+			receivedAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+			receivedLanguage.set(exchange.getRequestHeaders().getFirst("Accept-Language"));
+			receivedUserAgent.set(exchange.getRequestHeaders().getFirst("User-Agent"));
 			receivedPostsQuery.set(exchange.getRequestURI().getRawQuery());
+			int postCall = postsCalls.incrementAndGet();
+			if (Boolean.TRUE.equals(paginatedPosts.get())) {
+				String bodyText = postCall == 1
+						? "{\"success\":true,\"data\":{\"items\":[{\"aweme_id\":\"page-1\"}],\"max_cursor\":\"20\",\"has_more\":1}}"
+						: Boolean.TRUE.equals(riskControlPosts.get())
+								&& !"Bearer test-key-1".equals(receivedAuthorization.get())
+								? "{\"success\":false,\"error\":{\"code\":\"UPSTREAM_RISK_CONTROL\",\"message\":\"1分钟后重试；相关身份已进入冷却\"}}"
+						: "Bearer test-key-1".equals(receivedAuthorization.get())
+								? "{\"success\":true,\"data\":{\"items\":[{\"aweme_id\":\"page-2\"}],\"cursor\":null,\"has_more\":0}}"
+						: Boolean.TRUE.equals(paginatedCompletes.get())
+								? "{\"success\":true,\"data\":{\"items\":[{\"aweme_id\":\"page-2\"}],\"cursor\":null,\"has_more\":0}}"
+								: "error code: 502";
+				int status = postCall == 1 || Boolean.TRUE.equals(paginatedCompletes.get())
+						|| "Bearer test-key-1".equals(receivedAuthorization.get())
+						|| (Boolean.TRUE.equals(riskControlPosts.get())
+								&& !"Bearer test-key-1".equals(receivedAuthorization.get()))
+						? 200 : 502;
+				byte[] body = bodyText.getBytes(StandardCharsets.UTF_8);
+				if (status == 502) exchange.getResponseHeaders().set("Retry-After", "60");
+				exchange.sendResponseHeaders(status, body.length);
+				try (var output = exchange.getResponseBody()) { output.write(body); }
+				return;
+			}
 			if (Boolean.TRUE.equals(asyncPosts.get())) {
 				byte[] body = "{\"success\":true,\"data\":{\"task_id\":\"task-1\",\"state\":\"running\"},\"error\":null,\"meta\":{}}"
 						.getBytes(StandardCharsets.UTF_8);
@@ -193,6 +233,82 @@ class DtkDouyinDataProviderTest {
 				"sec-user", Set.of(), null, 0, 1, 1, DouyinFetchMode.INITIAL, 10, ""));
 
 		assertThat(receivedPostsQuery).hasValueSatisfying(query -> assertThat(query).doesNotContain("cursor="));
+		assertThat(receivedPostsQuery).hasValueSatisfying(query -> assertThat(query).contains("include_raw=true"));
+		assertThat(receivedAuthorization).hasValue("Bearer test-key");
+		assertThat(receivedLanguage).hasValue("zh");
+		assertThat(receivedUserAgent).hasValueContaining("Mozilla/5.0");
+	}
+
+	@Test
+	void fetchesAllAuthorPagesBeforeReportingSuccess() {
+		paginatedPosts.set(true);
+		paginatedCompletes.set(true);
+		DtkDouyinDataProvider provider = new DtkDouyinDataProvider(HttpClient.newHttpClient());
+
+		DouyinFetchEnvelope result = provider.fetchAuthorWorks(new DouyinFetchRequest(
+				"sec-user", Set.of(), null, 0, 1, 1, DouyinFetchMode.INITIAL, 1, ""));
+
+		assertThat(result.items()).extracting(item -> item.getString("aweme_id"))
+				.containsExactly("page-1", "page-2");
+		assertThat(result.backfillComplete()).isTrue();
+		assertThat(result.pagesFetched()).isEqualTo(2);
+		assertThat(postsCalls).hasValue(2);
+	}
+
+	@Test
+	void identifiesThePageAndMasksCursorWhenLaterPageFails() {
+		paginatedPosts.set(true);
+		DtkDouyinDataProvider provider = new DtkDouyinDataProvider(HttpClient.newHttpClient());
+
+		CollectFetchException failure;
+		try {
+			provider.fetchAuthorWorks(new DouyinFetchRequest(
+					"sec-user", Set.of(), null, 0, 3, 1, DouyinFetchMode.INITIAL, 10, ""));
+			throw new AssertionError("expected pagination failure");
+		} catch (CollectFetchException error) {
+			failure = error;
+		}
+		assertThat(failure)
+				.isNotNull()
+				.hasMessageContaining("第 2 页失败")
+				.hasMessageContaining("cursor=sha256:")
+				.hasMessageNotContaining("sec-user", "cursor=20");
+		assertThat(failure.getRetryAfterSeconds()).isEqualTo(60L);
+		assertThat(postsCalls).hasValue(2);
+		assertThat(receivedPostsQuery).hasValueSatisfying(query -> assertThat(query).contains("cursor=20"));
+	}
+
+	@Test
+	void propagatesRiskControlRetryHintAndMarksNodeCooldown() {
+		paginatedPosts.set(true);
+		riskControlPosts.set(true);
+		DtkDouyinDataProvider provider = new DtkDouyinDataProvider(HttpClient.newHttpClient());
+
+		assertThatThrownBy(() -> provider.fetchAuthorWorks(new DouyinFetchRequest(
+				"sec-user", Set.of(), null, 0, 3, 1, DouyinFetchMode.INITIAL, 10, "")))
+				.isInstanceOf(CollectFetchException.class)
+				.satisfies(error -> {
+					CollectFetchException failure = (CollectFetchException) error;
+					assertThat(failure.getErrorCode()).isEqualTo("DTK_UPSTREAM_RISK_CONTROL");
+					assertThat(failure.getRetryAfterSeconds()).isEqualTo(60L);
+					assertThat(failure).hasMessageContaining("第 2 页失败");
+				});
+	}
+
+	@Test
+	void rotatesToAnotherDtkPairDuringPagination() {
+		paginatedPosts.set(true);
+		riskControlPosts.set(true);
+		Global.dtkApiPool = baseUrl + "|test-key-1\n" + baseUrl + "|test-key-2";
+		DtkDouyinDataProvider provider = new DtkDouyinDataProvider(HttpClient.newHttpClient());
+
+		DouyinFetchEnvelope result = provider.fetchAuthorWorks(new DouyinFetchRequest(
+				"sec-user", Set.of(), null, 0, 3, 1, DouyinFetchMode.INITIAL, 10, ""));
+
+		assertThat(result.items()).extracting(item -> item.getString("aweme_id"))
+				.containsExactly("page-1", "page-2");
+		assertThat(postsCalls).hasValue(3);
+		assertThat(receivedAuthorization).hasValue("Bearer test-key-1");
 	}
 
 	@Test

@@ -289,8 +289,9 @@ public class CollectQueueTransaction {
 	public void deferForCooldown(CollectJobClaim claim, Instant availableAt, String reason, Instant now) {
 		Timestamp timestamp = Timestamp.from(now);
 		int runUpdated = jdbcTemplate.update("UPDATE biz_collect_run SET state = 'QUEUED', finished_at = NULL, "
-				+ "heartbeat_at = ?, error_code = NULL, error_message = NULL, error_detail = NULL "
-				+ "WHERE id = ? AND state IN ('QUEUED','FETCHING')", timestamp, claim.runId());
+				+ "heartbeat_at = ?, error_code = COALESCE(?, error_code), error_message = ?, error_detail = NULL "
+				+ "WHERE id = ? AND state IN ('QUEUED','FETCHING')", timestamp, claim.lastErrorCode(),
+				truncate(reason, 2048), claim.runId());
 		if (runUpdated != 1) {
 			throw new IllegalStateException("Collect run " + claim.runId() + " cannot be deferred for cooldown");
 		}
@@ -380,6 +381,14 @@ public class CollectQueueTransaction {
 				? CollectTriggerType.AUDIT : CollectTriggerType.RETRY;
 		long nextRunId = insertRun(claim.taskId(), retryTrigger, requestedLimit,
 				CollectRunState.QUEUED, now);
+		// Keep the retry row self-contained: the latest queued run must still show
+		// which provider failed and why, instead of hiding the diagnosis on the
+		// previous run row.
+		jdbcTemplate.update("UPDATE biz_collect_run SET provider_path = CASE WHEN provider_mode = 'AUTO' "
+				+ "THEN (SELECT provider_path FROM biz_collect_run WHERE id = ?) ELSE provider_path END, "
+				+ "provider_reason = ?, error_code = ?, error_message = ?, error_detail = "
+				+ "(SELECT error_detail FROM biz_collect_run WHERE id = ?) WHERE id = ?",
+				claim.runId(), errorCode, errorCode, truncate(message, 2048), claim.runId(), nextRunId);
 		JSONObject payload = payload(claim.taskId(), nextRunId, retryTrigger);
 		int updated = jdbcTemplate.update("UPDATE biz_job_queue SET payload = ?, state = 'RETRY_WAIT', "
 				+ "available_at = ?, locked_by = NULL, locked_at = NULL, last_error_code = ?, "
