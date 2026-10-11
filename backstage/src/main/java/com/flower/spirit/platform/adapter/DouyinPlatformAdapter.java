@@ -285,10 +285,11 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			String cookie) throws IOException {
 		List<WorkMediaResource> downloaded = new ArrayList<>();
 		for (WorkMediaResource source : metadata.getMediaResources()) {
-			if (source.getType() == WorkMediaResource.Type.AUDIO) continue;
 			String extension = extension(source);
-			Path target = request.getOutputDirectory().resolve(safeName(metadata.getWorkId())
-					+ "-index-" + source.getOrder() + "." + extension);
+			String filename = source.getType() == WorkMediaResource.Type.AUDIO
+					? safeName(metadata.getWorkId()) + "-audio." + extension
+					: safeName(metadata.getWorkId()) + "-index-" + source.getOrder() + "." + extension;
+			Path target = request.getOutputDirectory().resolve(filename);
 			logResourceDiagnostic(metadata, source);
 			Path local = gateway.download(source, target, cookie);
 			downloaded.add(new WorkMediaResource(source.getOrder(), source.getType(), source.getSourceUrl(),
@@ -565,7 +566,8 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 
 	private String extension(WorkMediaResource source) {
 		if (source.getExpectedExtension() != null) return source.getExpectedExtension();
-		return source.getType() == WorkMediaResource.Type.IMAGE ? "jpg" : "mp4";
+		if (source.getType() == WorkMediaResource.Type.IMAGE) return "jpg";
+		return source.getType() == WorkMediaResource.Type.AUDIO ? "mp3" : "mp4";
 	}
 
 	private String imageExtension(String url) {
