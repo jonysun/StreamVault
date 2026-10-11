@@ -64,8 +64,7 @@ public class AppConfig {
 		}
 		Global.douyinApiUrls = data.getDouyinapiurls() == null ? "" : data.getDouyinapiurls();
 		String provider = data.getDouyinProvider();
-		Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
-				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+		Global.douyinProvider = normalizeDouyinProvider(provider);
 		Global.dtkBaseUrl = data.getDtkBaseUrl() == null ? "" : data.getDtkBaseUrl().trim();
 		Global.dtkApiKey = data.getDtkApiKey() == null ? "" : data.getDtkApiKey().trim();
 		Global.dtkApiPool = data.getDtkApiPool() == null ? "" : data.getDtkApiPool().trim();
@@ -203,6 +202,12 @@ public class AppConfig {
 		
 		//全局通知
 		Global.notify = notifyConfigService.getData(null);
+	}
+
+	private static String normalizeDouyinProvider(String provider) {
+		if (provider == null) return "F2";
+		String value = provider.trim().toUpperCase();
+		return java.util.List.of("F2", "DTK", "AUTO", "RAND", "RANDOM", "ROUND", "ROUND_ROBIN").contains(value) ? value : "F2";
 	}
 	
     public static String buildProxyArgument(ConfigEntity data) {

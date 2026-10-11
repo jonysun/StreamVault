@@ -55,7 +55,9 @@ class DouyinDataProviderServiceTest {
 	}
 
 	@Test
-	void autoAlternatesPreferredProviderAcrossSuccessfulCalls() {
+	void roundRobinAlternatesPreferredProviderAcrossSuccessfulCalls() {
+		Global.douyinProvider = "ROUND";
+		service = new DouyinDataProviderService(f2, dtk);
 		DouyinFetchRequest request = request("cookie-value");
 		DouyinFetchEnvelope f2Result = envelope("F2");
 		DouyinFetchEnvelope dtkResult = envelope("DTK");

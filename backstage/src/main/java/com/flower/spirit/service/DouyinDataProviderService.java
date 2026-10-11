@@ -2,6 +2,7 @@ package com.flower.spirit.service;
 
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.stereotype.Service;
 
@@ -16,7 +17,7 @@ public class DouyinDataProviderService {
 	private static final Logger logger = LoggerFactory.getLogger(DouyinDataProviderService.class);
 	private final F2DouyinDataProvider f2;
 	private final DtkDouyinDataProvider dtk;
-	private final AtomicInteger autoProviderTurn = new AtomicInteger();
+	private final AtomicInteger roundRobinTurn = new AtomicInteger();
 
 	public DouyinDataProviderService(F2DouyinDataProvider f2, DtkDouyinDataProvider dtk) {
 		this.f2 = f2;
@@ -29,11 +30,24 @@ public class DouyinDataProviderService {
 
 	public boolean isDtk() { return isDtkOnly(); }
 	public boolean isDtkOnly() { return "DTK".equalsIgnoreCase(Global.douyinProvider); }
-	public boolean isAuto() { return "AUTO".equalsIgnoreCase(Global.douyinProvider); }
+	/** Mixed modes select one preferred provider for a fetch, with fallback only after failure. */
+	public boolean isAuto() {
+		String mode = providerMode();
+		return "AUTO".equals(mode) || "RAND".equals(mode) || "RANDOM".equals(mode)
+				|| "ROUND".equals(mode) || "ROUND_ROBIN".equals(mode);
+	}
+
+	public boolean isRoundRobin() { return "ROUND".equals(providerMode()) || "ROUND_ROBIN".equals(providerMode()); }
+	public boolean isRandom() { return "RAND".equals(providerMode()) || "RANDOM".equals(providerMode()); }
+
+	private String providerMode() {
+		String value = Global.douyinProvider == null ? "" : Global.douyinProvider.trim().toUpperCase();
+		return value;
+	}
 
 	public DouyinFetchEnvelope fetchAuthorWorks(DouyinFetchRequest request) {
 		if (!isAuto()) return markProvider(current().fetchAuthorWorks(request), isDtkOnly() ? "DTK" : "F2", null);
-		String first = nextAutoProvider();
+		String first = selectMixedProvider();
 		String second = "F2".equals(first) ? "DTK" : "F2";
 		RuntimeException firstFailure = null;
 		boolean attemptedFirst = false;
@@ -64,8 +78,11 @@ public class DouyinDataProviderService {
 		return "F2".equals(provider) ? f2.fetchAuthorWorks(request) : dtk.fetchAuthorWorks(request);
 	}
 
-	private String nextAutoProvider() {
-		return (autoProviderTurn.getAndIncrement() & 1) == 0 ? "F2" : "DTK";
+	private String selectMixedProvider() {
+		if (isRandom()) return ThreadLocalRandom.current().nextBoolean() ? "F2" : "DTK";
+		if (isRoundRobin()) return (roundRobinTurn.getAndIncrement() & 1) == 0 ? "F2" : "DTK";
+		// AUTO keeps the predictable F2-first failover behavior.
+		return "F2";
 	}
 
 	private DouyinFetchEnvelope markProvider(DouyinFetchEnvelope envelope, String path, String reason) {
@@ -90,7 +107,7 @@ public class DouyinDataProviderService {
 	public Map<String, String> fetchDirect(String url, String cookie) {
 		if (isDtkOnly()) return dtk.fetchDirect(url);
 		if (!isAuto()) return f2.fetchDirect(url, cookie);
-		String first = nextAutoProvider();
+		String first = selectMixedProvider();
 		String second = "F2".equals(first) ? "DTK" : "F2";
 		RuntimeException firstFailure = null;
 		if ("DTK".equals(first) || cookie != null && !cookie.isBlank()) {

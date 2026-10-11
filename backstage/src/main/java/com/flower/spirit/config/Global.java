@@ -198,7 +198,7 @@ public class Global {
 
 	public static String douyinApiUrls = "";
 
-	public static String douyinProvider = "F2";
+	public static String douyinProvider = "F2"; // F2, DTK, AUTO, RAND or ROUND_ROBIN
 
 	public static String dtkBaseUrl = "";
 

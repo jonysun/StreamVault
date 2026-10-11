@@ -108,7 +108,7 @@ public class ConfigEntity implements Serializable {
 	private String douyinapiurls; // 抖音解析API URL列表（多行）
 
 	@Column(name = "douyin_provider")
-	private String douyinProvider; // F2, DTK or AUTO
+	private String douyinProvider; // F2, DTK, AUTO, RAND or ROUND
 
 	@Column(name = "dtk_base_url")
 	private String dtkBaseUrl;

@@ -136,6 +136,20 @@
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
+        .form-search .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0 16px;
+            margin: 0;
+        }
+        .form-search .filter-grid > [class*="col-"] {
+            width: auto;
+            max-width: none;
+            padding-left: 0;
+            padding-right: 0;
+            flex: none;
+        }
+
         /* 响应式优化 */
         @media (max-width: 768px) {
             .form-search {
@@ -566,7 +580,7 @@
                             <div class="card">
                                 <div class="card-body">
                                     <form action="#!" method="post" class="form-horizontal form-search">
-                                        <div class="row">
+                                        <div class="filter-grid">
                                             <div class="col-lg-3 col-md-6 col-sm-12">
                                                 <div class="form-group mb-3">
                                                     <label class="control-label">视频名称</label>

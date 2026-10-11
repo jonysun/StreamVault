@@ -385,7 +385,7 @@ public class CollectQueueTransaction {
 		// Keep the retry row self-contained: the latest queued run must still show
 		// which provider failed and why, instead of hiding the diagnosis on the
 		// previous run row.
-		jdbcTemplate.update("UPDATE biz_collect_run SET provider_path = CASE WHEN provider_mode = 'AUTO' "
+		jdbcTemplate.update("UPDATE biz_collect_run SET provider_path = CASE WHEN provider_mode IN ('AUTO', 'RAND', 'RANDOM', 'ROUND', 'ROUND_ROBIN') "
 				+ "THEN (SELECT provider_path FROM biz_collect_run WHERE id = ?) ELSE provider_path END, "
 				+ "provider_reason = ?, error_code = ?, error_message = ?, error_detail = "
 				+ "(SELECT error_detail FROM biz_collect_run WHERE id = ?) WHERE id = ?",
@@ -692,7 +692,7 @@ public class CollectQueueTransaction {
 
 	private String configuredProvider() {
 		String value = Global.douyinProvider == null ? "" : Global.douyinProvider.trim().toUpperCase();
-		return List.of("F2", "DTK", "AUTO").contains(value) ? value : "UNKNOWN";
+		return List.of("F2", "DTK", "AUTO", "RAND", "RANDOM", "ROUND", "ROUND_ROBIN").contains(value) ? value : "UNKNOWN";
 	}
 
 	private String initialProviderPath(String mode) {

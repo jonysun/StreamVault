@@ -482,7 +482,9 @@
                                         <select class="form-control" id="douyinProvider" name="douyinProvider">
                                             <option value="F2" th:selected="${config.douyinProvider} eq 'F2'">F2（Cookie 池）</option>
                                             <option value="DTK" th:selected="${config.douyinProvider} eq 'DTK'">DTK（API 节点池）</option>
-                                            <option value="AUTO" th:selected="${config.douyinProvider} eq 'AUTO'">AUTO（F2 故障切换 DTK）</option>
+                                            <option value="AUTO" th:selected="${config.douyinProvider} eq 'AUTO'">AUTO（F2 优先，故障切换 DTK）</option>
+                                            <option value="ROUND_ROBIN" th:selected="${config.douyinProvider} eq 'ROUND_ROBIN'">ROUND（F2 / DTK 轮流请求）</option>
+                                            <option value="RAND" th:selected="${config.douyinProvider} eq 'RAND'">RAND（F2 / DTK 随机请求）</option>
                                         </select>
                                     </div>
                                     <div class="form-group">

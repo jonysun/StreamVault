@@ -341,6 +341,34 @@
 				font-size: 14px;
 			}
 		}
+
+		.search-form .filter-grid {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 0 16px;
+			margin: 0;
+		}
+		.search-form .filter-grid > [class*="col-"] {
+			width: auto;
+			max-width: none;
+			padding-left: 0;
+			padding-right: 0;
+			flex: none;
+		}
+		.search-form .filter-grid .filter-title { order: 1; }
+		.search-form .filter-grid .filter-author { order: 2; }
+		.search-form .filter-grid .filter-platform { order: 3; }
+		.search-form .filter-grid .filter-publish-start { order: 4; }
+		.search-form .filter-grid .filter-publish-end { order: 5; }
+		.search-form .filter-grid .filter-sort-field { order: 6; }
+		.search-form .filter-grid .filter-sort-order { order: 7; }
+		.search-form .filter-grid .filter-search { order: 8; }
+		@media (max-width: 992px) {
+			.search-form .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		}
+		@media (max-width: 576px) {
+			.search-form .filter-grid { grid-template-columns: 1fr; }
+		}
 		
 		/* 加载状态 */
 		.loading {
@@ -679,8 +707,8 @@
 						</div>
 					</div>
 					<form class="search-form">
-						<div class="row">
-							<div class="col-md-3 col-sm-6 col-12">
+						<div class="filter-grid">
+							<div class="col-md-3 col-sm-6 col-12 filter-platform">
 								<div class="form-group">
 									<label class="control-label">平台</label>
 									<select name="platform" class="form-control" id="platformFilter">
@@ -691,7 +719,7 @@
 									</select>
 								</div>
 							</div>
-							<div class="col-md-3 col-sm-6 col-12">
+							<div class="col-md-3 col-sm-6 col-12 filter-author">
 								<div class="form-group">
 									<label class="control-label">作者</label>
 									<div class="author-multi-select">
@@ -702,25 +730,25 @@
 									<input type="text" class="form-control mt-2" placeholder="补充作者（可手输，逗号分隔）" id="graphicAuthorExtra">
 								</div>
 							</div>
-							<div class="col-md-4 col-sm-8 col-12">
+							<div class="col-md-4 col-sm-8 col-12 filter-title">
 								<div class="form-group">
 									<label class="control-label">标题关键词</label>
 									<input type="text" name="title" class="form-control" placeholder="请输入标题关键词" id="titleFilter">
 								</div>
 							</div>
-							<div class="col-md-3 col-sm-6 col-12">
+							<div class="col-md-3 col-sm-6 col-12 filter-publish-start">
 								<div class="form-group">
 									<label class="control-label">发布日期起</label>
 									<input type="date" name="publishStart" class="form-control" id="publishStartFilter">
 								</div>
 							</div>
-							<div class="col-md-3 col-sm-6 col-12">
+							<div class="col-md-3 col-sm-6 col-12 filter-publish-end">
 								<div class="form-group">
 									<label class="control-label">发布日期止</label>
 									<input type="date" name="publishEnd" class="form-control" id="publishEndFilter">
 								</div>
 							</div>
-							<div class="col-md-3 col-sm-6 col-12">
+							<div class="col-md-3 col-sm-6 col-12 filter-sort-field">
 								<div class="form-group">
 									<label class="control-label">排序字段</label>
 									<select class="form-control" id="sortFieldFilter">
@@ -731,7 +759,7 @@
 									</select>
 								</div>
 							</div>
-							<div class="col-md-3 col-sm-6 col-12">
+							<div class="col-md-3 col-sm-6 col-12 filter-sort-order">
 								<div class="form-group">
 									<label class="control-label">排序方向</label>
 									<select class="form-control" id="sortOrderFilter">
@@ -740,7 +768,7 @@
 									</select>
 								</div>
 							</div>
-							<div class="col-md-2 col-sm-4 col-12">
+							<div class="col-md-2 col-sm-4 col-12 filter-search">
 								<div class="form-group">
 									<label class="control-label d-none d-sm-block">&nbsp;</label>
 									<div>

@@ -89,8 +89,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 
 	@Override
 	public OperationScope openOperationScope(String purpose) {
-		if (dataProviderService != null && (dataProviderService.isDtkOnly()
-				|| (dataProviderService.isAuto() && !cookieService.hasConfiguredDouyinCookie()))) return OperationScope.NOOP;
+		if (dataProviderService != null && dataProviderService.isDtkOnly()) return OperationScope.NOOP;
 		String previous = operationCookie.get();
 		if (previous != null && !previous.isBlank()) return OperationScope.NOOP;
 		String cookie = requireCookie(purpose == null || purpose.isBlank() ? "work_operation" : purpose);

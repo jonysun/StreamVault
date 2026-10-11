@@ -158,8 +158,7 @@ public class ConfigService {
 			Global.dtkApiKey = "";
 			Global.dtkApiPool = configData.getDtkApiPool() == null ? "" : configData.getDtkApiPool().trim();
 			String provider = configData.getDouyinProvider();
-			Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
-					: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+		Global.douyinProvider = normalizeDouyinProvider(provider);
 			try {
 				Global.dtkTimeoutMs = Math.max(1000, Integer.parseInt(configData.getDtkTimeoutMs()));
 			} catch (RuntimeException ignored) {
@@ -299,8 +298,7 @@ public class ConfigService {
 		}
 		Global.douyinApiUrls = configEntity.getDouyinapiurls() == null ? "" : configEntity.getDouyinapiurls();
 		String provider = configData.getDouyinProvider();
-		Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
-				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+			Global.douyinProvider = normalizeDouyinProvider(provider);
 		Global.dtkBaseUrl = configData.getDtkBaseUrl() == null ? "" : configData.getDtkBaseUrl().trim();
 		Global.dtkApiKey = configData.getDtkApiKey() == null ? "" : configData.getDtkApiKey().trim();
 		Global.dtkApiPool = configData.getDtkApiPool() == null ? "" : configData.getDtkApiPool().trim();
@@ -340,8 +338,7 @@ public class ConfigService {
 
 		Global.douyinApiUrls = configData.getDouyinapiurls() == null ? "" : configData.getDouyinapiurls();
 		String provider = configData.getDouyinProvider();
-		Global.douyinProvider = "DTK".equalsIgnoreCase(provider) ? "DTK"
-				: "AUTO".equalsIgnoreCase(provider) ? "AUTO" : "F2";
+		Global.douyinProvider = normalizeDouyinProvider(provider);
 		Global.dtkBaseUrl = configData.getDtkBaseUrl() == null ? "" : configData.getDtkBaseUrl().trim();
 		Global.dtkApiKey = configData.getDtkApiKey() == null ? "" : configData.getDtkApiKey().trim();
 		Global.dtkApiPool = configData.getDtkApiPool() == null ? "" : configData.getDtkApiPool().trim();
@@ -355,6 +352,12 @@ public class ConfigService {
 				"douyinProvider", configData.getDouyinProvider() == null ? "" : configData.getDouyinProvider(),
 				"dtkApiPoolConfigured", configData.getDtkApiPool() != null && !configData.getDtkApiPool().trim().isEmpty(),
 				"dtkTimeoutMs", configData.getDtkTimeoutMs() == null ? "" : configData.getDtkTimeoutMs()));
+	}
+
+	private String normalizeDouyinProvider(String provider) {
+		if (provider == null) return "F2";
+		String value = provider.trim().toUpperCase(java.util.Locale.ROOT);
+		return java.util.List.of("F2", "DTK", "AUTO", "RAND", "RANDOM", "ROUND", "ROUND_ROBIN").contains(value) ? value : "F2";
 	}
 
 	public AjaxEntity saveDtkAdminConfig(ConfigEntity incoming) {
