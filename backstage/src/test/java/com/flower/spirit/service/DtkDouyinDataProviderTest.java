@@ -67,6 +67,19 @@ class DtkDouyinDataProviderTest {
 					+ "\"video\":{\"play_addr\":{\"url_list\":[\"https://media.example/video.mp4\"]}},"
 					+ "\"cover\":[\"https://media.example/top-level-cover.jpg\"],"
 					+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}"
+			: query != null && query.contains("aweme_id=graphic-duplicate")
+					? "{\"success\":true,\"data\":{\"aweme_id\":\"graphic-duplicate\",\"desc\":\"graphic\","
+							+ "\"images\":[{\"url_list\":[\"https://media.example/1.jpg\"]},"
+							+ "{\"url_list\":[\"https://media.example/2.jpg\"]},"
+							+ "{\"url_list\":[\"https://media.example/3.jpg\"]},"
+							+ "{\"url_list\":[\"https://media.example/4.jpg\"]},"
+							+ "{\"url_list\":[\"https://media.example/5.jpg\"]}],"
+							+ "\"media\":[{\"url\":\"https://media.example/1.jpg\"},"
+							+ "{\"url\":\"https://media.example/2.jpg\"},"
+							+ "{\"url\":\"https://media.example/3.jpg\"},"
+							+ "{\"url\":\"https://media.example/4.jpg\"},"
+							+ "{\"url\":\"https://media.example/5.jpg\"}],"
+							+ "\"author\":{\"id\":\"author-1\",\"username\":\"author\"}},\"error\":null,\"meta\":{}}"
 			: query != null && query.contains("aweme_id=urls-only")
 					? "{\"success\":true,\"data\":{\"aweme_id\":\"urls-only\",\"desc\":\"title\","
 							+ "\"video\":{\"urls\":[\"https://media.example/cdn-video\",\"https://www.douyin.com/aweme/v1/play/?signed=1\"]},"
@@ -201,6 +214,14 @@ class DtkDouyinDataProviderTest {
 	void normalizesNoWatermarkVideoWithoutFileExtension() {
 		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("no-watermark");
 		assertThat(raw).contains("video-no-extension").contains("video_play_addr");
+	}
+
+	@Test
+	void doesNotDuplicateGraphicImagesWhenDtkReturnsImagesAndMedia() {
+		String raw = new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchWorkData("graphic-duplicate");
+		JSONObject detail = JSONObject.parseObject(raw).getJSONObject("aweme_detail");
+
+		assertThat(detail.getJSONArray("images")).hasSize(5);
 	}
 
 	@Test

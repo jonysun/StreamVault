@@ -824,6 +824,13 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		if (entries.isEmpty()) return;
 		JSONArray images = detail.getJSONArray("images");
 		if (images == null) images = new JSONArray();
+		Set<String> existingImageUrls = new LinkedHashSet<>();
+		for (Object value : images) {
+			if (value instanceof JSONObject image) {
+				String existingUrl = mediaUrl(image);
+				if (!blank(existingUrl)) existingImageUrls.add(existingUrl);
+			}
+		}
 		for (JSONObject entry : entries) {
 			String url = mediaUrl(entry);
 			if (blank(url)) url = firstText(entry, "url", "download_url", "downloadUrl", "play_url", "playUrl",
@@ -851,7 +858,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				play.put("url_list", urls);
 				videoObject.put("play_addr", play);
 				detail.put("video", videoObject);
-			} else if (!video) {
+			} else if (!video && existingImageUrls.add(url)) {
 				JSONObject image = new JSONObject(true);
 				JSONArray urls = new JSONArray();
 				urls.add(url);

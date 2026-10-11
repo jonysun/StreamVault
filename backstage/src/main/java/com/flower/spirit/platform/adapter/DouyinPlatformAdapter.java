@@ -5,8 +5,10 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -283,7 +285,15 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 	private List<WorkMediaResource> downloadResources(WorkMetadata metadata, WorkDownloadRequest request,
 			String cookie) throws IOException {
 		List<WorkMediaResource> downloaded = new ArrayList<>();
+		Set<String> downloadedSourceKeys = new LinkedHashSet<>();
 		for (WorkMediaResource source : metadata.getMediaResources()) {
+			String sourceUrl = source.getSourceUrl();
+			String sourceKey = source.getType() + "\u0000" + (sourceUrl == null ? "" : sourceUrl.trim());
+			if (!sourceUrlIsBlank(sourceUrl) && !downloadedSourceKeys.add(sourceKey)) {
+				logger.info("[DouyinMedia] skip duplicate resource workId={} order={} type={}", metadata.getWorkId(),
+						source.getOrder(), source.getType());
+				continue;
+			}
 			String extension = extension(source);
 			String filename = source.getType() == WorkMediaResource.Type.AUDIO
 					? safeName(metadata.getWorkId()) + "-audio." + extension
@@ -315,6 +325,10 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			}
 		}
 		return downloaded;
+	}
+
+	private boolean sourceUrlIsBlank(String value) {
+		return value == null || value.trim().isEmpty();
 	}
 
 	private void logResourceDiagnostic(WorkMetadata metadata, WorkMediaResource resource) {

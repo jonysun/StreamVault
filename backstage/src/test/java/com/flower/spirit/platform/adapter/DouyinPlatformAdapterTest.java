@@ -180,6 +180,30 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void downloadsDuplicateGraphicResourceUrlOnlyOnce() throws Exception {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
+		FakeGateway gateway = new FakeGateway("{}", "https://www.douyin.com/note/7300000000000000006");
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+		WorkMetadata metadata = WorkMetadata.builder()
+				.platformKey("douyin")
+				.workId("7300000000000000006")
+				.contentType(WorkContentType.GRAPHIC)
+				.mediaResources(List.of(
+						new WorkMediaResource(0, WorkMediaResource.Type.IMAGE,
+								"https://media.example/image.jpg", null, "jpg", java.util.Map.of()),
+						new WorkMediaResource(1, WorkMediaResource.Type.IMAGE,
+								"https://media.example/image.jpg", null, "jpg", java.util.Map.of())))
+				.build();
+
+		DownloadResult result = adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
+
+		assertThat(result.getMediaResources()).hasSize(1);
+		assertThat(gateway.downloadCalls).isEqualTo(1);
+	}
+
+	@Test
 	void operationScopeReusesOneCookieForParseAndEveryDownloadRequest() throws Exception {
 		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
