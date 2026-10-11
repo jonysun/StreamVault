@@ -124,6 +124,15 @@ public class ConfigEntity implements Serializable {
 	@Column(name = "dtk_detail_refresh_enabled")
 	private String dtkDetailRefreshEnabled;
 
+	@Column(name = "dtk_admin_base_url")
+	private String dtkAdminBaseUrl;
+
+	@Column(name = "dtk_admin_api_key")
+	private String dtkAdminApiKey;
+
+	@Column(name = "dtk_admin_watchlist_sync_enabled")
+	private String dtkAdminWatchlistSyncEnabled;
+
 	public Integer getId() {
 		return id;
 	}
@@ -448,6 +457,12 @@ public class ConfigEntity implements Serializable {
 	public void setDtkTimeoutMs(String dtkTimeoutMs) { this.dtkTimeoutMs = dtkTimeoutMs; }
 	public String getDtkDetailRefreshEnabled() { return dtkDetailRefreshEnabled; }
 	public void setDtkDetailRefreshEnabled(String dtkDetailRefreshEnabled) { this.dtkDetailRefreshEnabled = dtkDetailRefreshEnabled; }
+	public String getDtkAdminBaseUrl() { return dtkAdminBaseUrl; }
+	public void setDtkAdminBaseUrl(String dtkAdminBaseUrl) { this.dtkAdminBaseUrl = dtkAdminBaseUrl; }
+	public String getDtkAdminApiKey() { return dtkAdminApiKey; }
+	public void setDtkAdminApiKey(String dtkAdminApiKey) { this.dtkAdminApiKey = dtkAdminApiKey; }
+	public String getDtkAdminWatchlistSyncEnabled() { return dtkAdminWatchlistSyncEnabled; }
+	public void setDtkAdminWatchlistSyncEnabled(String dtkAdminWatchlistSyncEnabled) { this.dtkAdminWatchlistSyncEnabled = dtkAdminWatchlistSyncEnabled; }
 
 	// public String getYtdlpargs() {
 	// 	return ytdlpargs;

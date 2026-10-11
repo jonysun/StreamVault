@@ -38,6 +38,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.flower.spirit.common.AjaxEntity;
@@ -131,6 +133,9 @@ public class CollectDataService {
 	private DouyinDataProviderService douyinDataProviderService;
 
 	@Autowired
+	private DtkAdminWatchlistService dtkAdminWatchlistService;
+
+	@Autowired
 	private DouyinF2RequestCoordinator douyinF2RequestCoordinator = new DouyinF2RequestCoordinator();
 
 	@Autowired
@@ -205,8 +210,18 @@ public class CollectDataService {
 		if (entity.getTaskenabled() == null || entity.getTaskenabled().trim().isEmpty()) {
 			entity.setTaskenabled("Y");
 		}
-		collectdDataDao.save(entity);
+		CollectDataEntity saved = collectdDataDao.save(entity);
 		quartzTaskService.scheduleTask(entity);
+		if (TransactionSynchronizationManager.isSynchronizationActive()) {
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				@Override
+				public void afterCommit() {
+					dtkAdminWatchlistService.enqueueNewAuthor(saved);
+				}
+			});
+		} else {
+			dtkAdminWatchlistService.enqueueNewAuthor(saved);
+		}
 		return new AjaxEntity(Global.ajax_success, "任务创建成功", entity);
 	}
 

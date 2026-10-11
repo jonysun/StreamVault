@@ -499,6 +499,21 @@
                                         <div style="flex:1 1 220px;"><label>DTK 详情刷新</label><select class="form-control" id="dtkDetailRefreshEnabled" name="dtkDetailRefreshEnabled"><option value="1" th:selected="${config.dtkDetailRefreshEnabled} eq '1'">启用</option><option value="0" th:selected="${config.dtkDetailRefreshEnabled} eq '0'">禁用</option></select></div>
                                         <button type="button" class="btn btn-info btn-sm" onclick="checkDtkNodes()"><i class="mdi mdi-connection" style="margin-right:2px;"></i>检测 DTK 节点</button>
                                     </div>
+                                    <div class="form-group" style="border:1px solid #e6eaf0;border-radius:4px;padding:12px;margin-top:14px;">
+                                        <label style="display:block;margin-bottom:10px;">DTK 管理配置 <i class="mdi mdi-help-circle help-icon" onclick="layer.alert('这里连接自建 DTK 的 Admin API，与上面的解析 API 节点池使用不同的 URL 和 Key。同步方向始终是本地收藏任务到 DTK。')"></i></label>
+                                        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+                                            <div style="flex:1 1 280px;"><label>Admin Base URL</label><input class="form-control" id="dtkAdminBaseUrl" type="url" autocomplete="off" th:value="${config.dtkAdminBaseUrl}"></div>
+                                            <div style="flex:1 1 280px;"><label>Admin Key <small class="text-muted" th:if="${config.dtkAdminApiKey != null && !#strings.isEmpty(config.dtkAdminApiKey)}">（已配置，留空不修改）</small></label><input class="form-control" id="dtkAdminApiKey" type="password" autocomplete="new-password" placeholder="留空保留现有 Key"></div>
+                                        </div>
+                                        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+                                            <label style="margin:0;"><input type="checkbox" id="dtkAdminWatchlistSyncEnabled" th:checked="${config.dtkAdminWatchlistSyncEnabled == '1'}"> 自动同步新增收藏作者到 DTK 关注</label>
+                                            <button type="button" class="btn btn-default btn-sm" onclick="saveDtkAdminConfig()"><i class="mdi mdi-content-save-outline"></i>保存管理配置</button>
+                                            <button type="button" class="btn btn-info btn-sm" onclick="testDtkAdmin()"><i class="mdi mdi-connection"></i>测试连接</button>
+                                            <button type="button" class="btn btn-default btn-sm" onclick="startDtkAdminSync('incremental')"><i class="mdi mdi-sync"></i>增量同步</button>
+                                            <button type="button" class="btn btn-warning btn-sm" onclick="startDtkAdminSync('full')"><i class="mdi mdi-sync-alert"></i>完全同步</button>
+                                        </div>
+                                        <div id="dtkAdminSyncStatus" class="text-muted" style="margin-top:8px;">最近同步：加载中...</div>
+                                    </div>
                                     <div class="form-group">
                                         <label>抖音Cookie模式</label>
                                         <select class="form-control tiktokcookiestrategy">
@@ -1041,6 +1056,56 @@
         });
     }
 
+    function saveDtkAdminConfig(){
+        $.post('/admin/api/saveDtkAdminConfig', {
+            dtkAdminBaseUrl: $('#dtkAdminBaseUrl').val(),
+            dtkAdminApiKey: $('#dtkAdminApiKey').val(),
+            dtkAdminWatchlistSyncEnabled: $('#dtkAdminWatchlistSyncEnabled').is(':checked') ? '1' : '0'
+        }, function(res){
+            layer.msg(res.resCode === '000001' ? 'DTK 管理配置已保存' : (res.message || '保存失败'));
+            if(res.resCode === '000001') $('#dtkAdminApiKey').val('');
+        }).fail(function(){ layer.msg('DTK 管理配置保存失败'); });
+    }
+
+    function testDtkAdmin(){
+        var loading = layer.msg('正在测试 DTK Admin...', {icon:16, time:0});
+        $.post('/admin/api/testDtkAdmin', function(res){
+            layer.close(loading);
+            layer.msg(res.resCode === '000001' ? 'DTK Admin 连接成功' : (res.message || '连接失败'));
+        }).fail(function(){ layer.close(loading); layer.msg('DTK Admin 连接失败'); });
+    }
+
+    function startDtkAdminSync(mode){
+        if(mode === 'full' && !window.confirm('完全同步会删除 DTK 中不属于本地收藏任务的同平台作者关注，但不会修改本项目收藏。确认继续？')) return;
+        var loading = layer.msg('正在启动 DTK 同步...', {icon:16, time:0});
+        $.post('/admin/api/dtkAdminWatchlistSync/' + mode, function(res){
+            layer.close(loading);
+            if(res.resCode !== '000001') { layer.msg(res.message || '同步启动失败'); return; }
+            var job = res.record || {};
+            layer.msg('同步任务已启动');
+            pollDtkAdminSync(job.id);
+        }).fail(function(){ layer.close(loading); layer.msg('同步启动失败'); });
+    }
+
+    function pollDtkAdminSync(jobId){
+        if(!jobId) return;
+        $.get('/admin/api/dtkAdminWatchlistSync/status/' + encodeURIComponent(jobId), function(res){
+            if(res.resCode !== '000001') return;
+            var j = res.record || {};
+            $('#dtkAdminSyncStatus').text('最近同步：' + (j.mode || '--') + ' / ' + (j.status || '--') + '；扫描 ' + (j.scannedCount || 0) + '，新增 ' + (j.addedCount || 0) + '，删除 ' + (j.deletedCount || 0) + '，失败 ' + (j.failedCount || 0) + (j.errorCode ? '；' + j.errorCode : ''));
+            if(j.status === 'QUEUED' || j.status === 'RUNNING') window.setTimeout(function(){ pollDtkAdminSync(jobId); }, 1500);
+        });
+    }
+
+    function loadLatestDtkAdminSync(){
+        $.get('/admin/api/dtkAdminWatchlistSync/latest', function(res){
+            if(res.resCode !== '000001' || !res.record) { $('#dtkAdminSyncStatus').text('最近同步：暂无'); return; }
+            var j = res.record;
+            $('#dtkAdminSyncStatus').text('最近同步：' + (j.mode || '--') + ' / ' + (j.status || '--') + '；扫描 ' + (j.scannedCount || 0) + '，新增 ' + (j.addedCount || 0) + '，删除 ' + (j.deletedCount || 0) + '，失败 ' + (j.failedCount || 0));
+            if(j.status === 'QUEUED' || j.status === 'RUNNING') pollDtkAdminSync(j.id);
+        });
+    }
+
     function checkDouyinCookies(){
         var loading = layer.msg('正在检测抖音 Cookie...', {icon: 16, time: 0});
         $.ajax({
@@ -1512,6 +1577,7 @@
         updateFileNameTemplatePreview();
         $('#filenametemplate').on('input', updateFileNameTemplatePreview);
         loadHlsStats();
+        loadLatestDtkAdminSync();
         $('#hlsEnqueueMissingBtn').on('click', function() {
             var limit = $('#hlsBatchLimit').val() || '200';
             $.post('/admin/api/hlsEnqueueMissingLatest', { limit: limit }, function(res) {

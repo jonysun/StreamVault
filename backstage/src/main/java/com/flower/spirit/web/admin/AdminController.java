@@ -56,6 +56,8 @@ import com.flower.spirit.service.CookiesConfigService;
 import com.flower.spirit.service.DouYinService;
 import com.flower.spirit.service.DouyinCookieHealthService;
 import com.flower.spirit.service.DtkDouyinDataProvider;
+import com.flower.spirit.service.DtkAdminClient;
+import com.flower.spirit.service.DtkAdminWatchlistService;
 import com.flower.spirit.service.DouyinAuthorReconciliationService;
 import com.flower.spirit.service.DouyinAuthorProfileRefreshService;
 import com.flower.spirit.service.DouyinWorkMaintenanceService;
@@ -203,6 +205,12 @@ public class AdminController {
 	private DtkDouyinDataProvider dtkDouyinDataProvider;
 
 	@Autowired
+	private DtkAdminClient dtkAdminClient;
+
+	@Autowired
+	private DtkAdminWatchlistService dtkAdminWatchlistService;
+
+	@Autowired
 	private PlatformCookieService platformCookieService;
 
 	@Autowired
@@ -334,6 +342,41 @@ public class AdminController {
 	@PostMapping(value = "/saveDouyinDownloadConfig")
 	public AjaxEntity saveDouyinDownloadConfig(ConfigEntity configEntity) {
 		return configService.saveDouyinDownloadConfig(configEntity);
+	}
+
+	@PostMapping(value = "/saveDtkAdminConfig")
+	public AjaxEntity saveDtkAdminConfig(ConfigEntity configEntity) {
+		return configService.saveDtkAdminConfig(configEntity);
+	}
+
+	@PostMapping(value = "/testDtkAdmin")
+	public AjaxEntity testDtkAdmin() {
+		try {
+			dtkAdminClient.testConnection();
+			return new AjaxEntity(Global.ajax_success, "DTK Admin 连接成功", null);
+		} catch (DtkAdminClient.DtkAdminException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getErrorCode() + ": " + e.getMessage(), null);
+		}
+	}
+
+	@PostMapping(value = "/dtkAdminWatchlistSync/incremental")
+	public AjaxEntity startDtkAdminIncrementalSync() {
+		return dtkAdminWatchlistService.start("INCREMENTAL");
+	}
+
+	@PostMapping(value = "/dtkAdminWatchlistSync/full")
+	public AjaxEntity startDtkAdminFullSync() {
+		return dtkAdminWatchlistService.start("FULL");
+	}
+
+	@GetMapping(value = "/dtkAdminWatchlistSync/status/{jobId}")
+	public AjaxEntity getDtkAdminSyncStatus(@PathVariable String jobId) {
+		return dtkAdminWatchlistService.status(jobId);
+	}
+
+	@GetMapping(value = "/dtkAdminWatchlistSync/latest")
+	public AjaxEntity getLatestDtkAdminSyncStatus() {
+		return dtkAdminWatchlistService.latest();
 	}
 	/**
 	 * 分页获取已缓存的视频历史记录

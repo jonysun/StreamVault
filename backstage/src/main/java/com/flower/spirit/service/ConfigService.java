@@ -73,6 +73,9 @@ public class ConfigService {
 		if (cfg.getDtkApiKey() == null) cfg.setDtkApiKey("");
 		if (cfg.getDtkTimeoutMs() == null || cfg.getDtkTimeoutMs().trim().isEmpty()) cfg.setDtkTimeoutMs("15000");
 		if (cfg.getDtkDetailRefreshEnabled() == null || cfg.getDtkDetailRefreshEnabled().trim().isEmpty()) cfg.setDtkDetailRefreshEnabled("1");
+		if (cfg.getDtkAdminBaseUrl() == null) cfg.setDtkAdminBaseUrl("");
+		if (cfg.getDtkAdminApiKey() == null) cfg.setDtkAdminApiKey("");
+		if (cfg.getDtkAdminWatchlistSyncEnabled() == null || cfg.getDtkAdminWatchlistSyncEnabled().trim().isEmpty()) cfg.setDtkAdminWatchlistSyncEnabled("0");
 		if (cfg.getVideolistsortfield() == null || cfg.getVideolistsortfield().trim().isEmpty()) {
 			cfg.setVideolistsortfield("id");
 		}
@@ -348,7 +351,29 @@ public class ConfigService {
 			Global.dtkTimeoutMs = 15000;
 		}
 		Global.dtkDetailRefreshEnabled = !"0".equals(configData.getDtkDetailRefreshEnabled());
-		return new AjaxEntity(Global.ajax_option_success, "抖音下载配置保存成功", configData);
+		return new AjaxEntity(Global.ajax_option_success, "抖音下载配置保存成功", java.util.Map.of(
+				"douyinProvider", configData.getDouyinProvider() == null ? "" : configData.getDouyinProvider(),
+				"dtkApiPoolConfigured", configData.getDtkApiPool() != null && !configData.getDtkApiPool().trim().isEmpty(),
+				"dtkTimeoutMs", configData.getDtkTimeoutMs() == null ? "" : configData.getDtkTimeoutMs()));
+	}
+
+	public AjaxEntity saveDtkAdminConfig(ConfigEntity incoming) {
+		List<ConfigEntity> list = configDao.findAll();
+		ConfigEntity configData = list.isEmpty() ? new ConfigEntity() : list.get(0);
+		if (incoming != null && incoming.getDtkAdminBaseUrl() != null) {
+			configData.setDtkAdminBaseUrl(incoming.getDtkAdminBaseUrl().trim());
+		}
+		if (incoming != null && incoming.getDtkAdminApiKey() != null && !incoming.getDtkAdminApiKey().trim().isEmpty()) {
+			configData.setDtkAdminApiKey(incoming.getDtkAdminApiKey().trim());
+		}
+		if (incoming != null && incoming.getDtkAdminWatchlistSyncEnabled() != null) {
+			configData.setDtkAdminWatchlistSyncEnabled("1".equals(incoming.getDtkAdminWatchlistSyncEnabled()) ? "1" : "0");
+		}
+		configDao.save(configData);
+		return new AjaxEntity(Global.ajax_option_success, "DTK 管理配置保存成功", java.util.Map.of(
+				"baseUrl", configData.getDtkAdminBaseUrl() == null ? "" : configData.getDtkAdminBaseUrl(),
+				"apiKeyConfigured", configData.getDtkAdminApiKey() != null && !configData.getDtkAdminApiKey().trim().isEmpty(),
+				"watchlistSyncEnabled", "1".equals(configData.getDtkAdminWatchlistSyncEnabled())));
 	}
 
 	private String normalizeVideoListSortField(String value) {
