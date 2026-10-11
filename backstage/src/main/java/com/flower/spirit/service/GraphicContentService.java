@@ -344,6 +344,10 @@ public class GraphicContentService {
 		return douyinWorkMaintenanceService.redownloadGraphic(id);
 	}
 
+	public AjaxEntity supplementGraphicAudio(Integer id) {
+		return douyinWorkMaintenanceService.supplementGraphicAudio(id);
+	}
+
 
 
 	public Map<String, Long> countByPlatformGroupBy() {

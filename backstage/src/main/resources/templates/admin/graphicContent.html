@@ -792,6 +792,12 @@
 							<button type="button" class="btn btn-sm btn-danger" id="batchDeleteGraphicBtn">
 								<i class="mdi mdi-delete"></i> 批量删除
 							</button>
+							<button type="button" class="btn btn-sm btn-outline-primary" id="batchRedownloadGraphicBtn">
+								<i class="mdi mdi-download"></i> 批量重新下载
+							</button>
+							<button type="button" class="btn btn-sm btn-outline-warning" id="batchSupplementGraphicAudioBtn">
+								<i class="mdi mdi-music-note-plus"></i> 批量补充 BGM
+							</button>
 						</div>
 						<div class="batch-count" id="batchSelectedCount">已选 0 项</div>
 					</div>
@@ -1093,11 +1099,17 @@ function loadGraphicContentList() {
 			var record = data.record;
 			var contentList = record.content || [];
 			
+			renderPagination(record);
 			if (contentList.length > 0) {
 				renderGraphicContentList(contentList);
-				renderPagination(record);
 				hideLoading();
 			} else {
+				var pageInfo = getGraphicPageInfo(record);
+				if (pageInfo.totalElements > 0 && currentPage >= pageInfo.totalPages) {
+					currentPage = pageInfo.totalPages - 1;
+					loadGraphicContentList();
+					return;
+				}
 				showEmptyState();
 			}
 		} else {
@@ -1158,6 +1170,7 @@ function generateGraphicCard(item) {
 	var originalUrl = buildGraphicOriginalUrl(item);
 	var platformClass = item.platform === 'douyin' ? 'platform-douyin' : 'platform-default';
 	var platformName = item.platform === 'douyin' ? '抖音' : item.platform;
+	var selectedAttr = selectedGraphicIds.has(String(item.id)) ? ' checked' : '';
 	
 	// 检查是否为stream-vault类型的纯媒体内容
 	// 如果title或content以'-stream-vault'结尾，则表示该数据是纯图片、纯视频或混合内容，且没有标题和内容
@@ -1197,7 +1210,7 @@ function generateGraphicCard(item) {
 			<div class="graphic-card" data-id="${item.id}" data-stream-vault="true">
 				<div class="graphic-header" style="padding:10px 15px; border-bottom:1px solid #eee;">
 					<label style="margin:0; display:flex; align-items:center; gap:8px;">
-						<input type="checkbox" class="card-check" data-id="${item.id}"> 
+						<input type="checkbox" class="card-check" data-id="${item.id}"${selectedAttr}>
 						<span style="font-size:13px;color:#666;">选择此图文集</span>
 					</label>
 				</div>
@@ -1238,7 +1251,7 @@ function generateGraphicCard(item) {
 			<div class="graphic-card" data-id="${item.id}">
 				<div class="graphic-header">
 					<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-						<input type="checkbox" class="card-check" data-id="${item.id}">
+						<input type="checkbox" class="card-check" data-id="${item.id}"${selectedAttr}>
 						<h6 class="graphic-title" style="margin:0;" title="${displayTitle}">${displayTitle}</h6>
 					</div>
 					<div class="graphic-meta">
@@ -1521,6 +1534,34 @@ function bindCardEvents() {
 			batchDeleteGraphic(Array.from(selectedGraphicIds), $('#batchGraphicBlockWork').is(':checked') ? '1' : '0');
 		});
 	});
+
+	$('#batchRedownloadGraphicBtn').off('click').on('click', function(){
+		if (selectedGraphicIds.size === 0) {
+			layer.msg('请先选择要重新下载的图文项');
+			return;
+		}
+		layer.confirm('确认重新下载已选择的 ' + selectedGraphicIds.size + ' 项图文吗？', {
+			icon: 3,
+			title: '批量重新下载确认'
+		}, function(index){
+			layer.close(index);
+			batchGraphicRequest(Array.from(selectedGraphicIds), '/admin/api/redownloadGraphicContent', '批量重新下载中...', '批量重新下载完成');
+		});
+	});
+
+	$('#batchSupplementGraphicAudioBtn').off('click').on('click', function(){
+		if (selectedGraphicIds.size === 0) {
+			layer.msg('请先选择要补充BGM的图文项');
+			return;
+		}
+		layer.confirm('确认给已选择的 ' + selectedGraphicIds.size + ' 项图文补充 BGM 吗？', {
+			icon: 3,
+			title: '批量补充 BGM 确认'
+		}, function(index){
+			layer.close(index);
+			batchGraphicRequest(Array.from(selectedGraphicIds), '/admin/api/supplementGraphicAudio', '批量补充 BGM 中...', '批量补充 BGM 完成');
+		});
+	});
 }
 
 function getMediaPreviewLimit() {
@@ -1541,6 +1582,9 @@ function formatTimeDisplay(timeStr) {
 
 function updateBatchCount(){
 	$('#batchSelectedCount').text('已选 ' + selectedGraphicIds.size + ' 项');
+	var visibleChecks = $('.card-check');
+	var checkedVisible = visibleChecks.filter(':checked').length;
+	$('#selectAllGraphic').prop('checked', visibleChecks.length > 0 && checkedVisible === visibleChecks.length);
 }
 
 function batchDeleteGraphic(ids, blockwork){
@@ -1562,6 +1606,35 @@ function batchDeleteGraphic(ids, blockwork){
 		}
 		var id = ids[idx++];
 		$.get('/admin/api/deleteGraphicContent', {id:id, blockwork:blockwork || '1'}, function(res){
+			if (res.resCode === '000001') success++; else fail++;
+			next();
+		}).fail(function(){
+			fail++;
+			next();
+		});
+	}
+	next();
+}
+
+function batchGraphicRequest(ids, endpoint, loadingText, doneText){
+	if (!ids || ids.length === 0) return;
+	var loadingIndex = layer.load(1, {shade:[0.3,'#000'], content:loadingText});
+	var success = 0;
+	var fail = 0;
+	var idx = 0;
+
+	function next(){
+		if (idx >= ids.length){
+			layer.close(loadingIndex);
+			layer.msg(doneText + '，成功 ' + success + '，失败 ' + fail);
+			selectedGraphicIds.clear();
+			$('#selectAllGraphic').prop('checked', false);
+			updateBatchCount();
+			loadGraphicContentList();
+			return;
+		}
+		var id = ids[idx++];
+		$.post(endpoint, {id:id}, function(res){
 			if (res.resCode === '000001') success++; else fail++;
 			next();
 		}).fail(function(){
@@ -1946,10 +2019,10 @@ function copyToClipboard(text) {
  */
 function renderPagination(pageData) {
 	console.log('渲染分页信息:', pageData);
-	var page = pageData.page || {};
-	var totalPages = Math.max(1, page.totalPages || 1);
-	var currentPageNum = (page.number || 0) + 1;
-	var totalElements = page.totalElements || 0;
+	var pageInfo = getGraphicPageInfo(pageData);
+	var totalPages = pageInfo.totalPages;
+	var currentPageNum = pageInfo.number + 1;
+	var totalElements = pageInfo.totalElements;
 	$('#pager').data('total-pages', totalPages);
 	$('#graphicPageInput').val(currentPageNum);
 	var html = '';
@@ -1971,6 +2044,19 @@ function renderPagination(pageData) {
 	html += `<li class="page-item disabled"><span class="page-link">共 ${totalElements} 条</span></li>`;
 	
 	$('#pager').html(html);
+}
+
+function getGraphicPageInfo(pageData) {
+	var record = pageData || {};
+	var page = record.page || record;
+	var totalPages = Number(record.totalPages || page.totalPages || 0);
+	var totalElements = Number(record.totalElements || page.totalElements || 0);
+	var number = Number(record.number != null ? record.number : (page.number != null ? page.number : currentPage));
+	return {
+		totalPages: Math.max(1, totalPages || (totalElements > 0 ? Math.ceil(totalElements / pageSize) : 1)),
+		totalElements: Math.max(0, totalElements),
+		number: Math.max(0, number)
+	};
 }
 
 /**

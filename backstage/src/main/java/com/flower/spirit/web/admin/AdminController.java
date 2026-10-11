@@ -1297,6 +1297,11 @@ public class AdminController {
 		return graphicContentService.redownloadGraphicContent(id);
 	}
 
+	@PostMapping(value = "/supplementGraphicAudio")
+	public AjaxEntity supplementGraphicAudio(Integer id) {
+		return graphicContentService.supplementGraphicAudio(id);
+	}
+
 	/**
 	 * 获取数据统计信息
 	 * 

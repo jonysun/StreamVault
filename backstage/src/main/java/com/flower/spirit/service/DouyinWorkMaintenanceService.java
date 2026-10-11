@@ -3,6 +3,7 @@ package com.flower.spirit.service;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Date;
 import java.util.HashMap;
@@ -58,6 +59,9 @@ public class DouyinWorkMaintenanceService {
 
 	@Autowired
 	private RawPayloadService rawPayloadService;
+
+	@Autowired
+	private MediaPathService mediaPathService;
 
 	public AjaxEntity redownloadVideo(Integer id) {
 		if (id == null) {
@@ -126,6 +130,68 @@ public class DouyinWorkMaintenanceService {
 		} catch (Exception e) {
 			logger.error("redownload douyin graphic failed id={} postId={} source={}", id, postId, source, e);
 			return new AjaxEntity(Global.ajax_uri_error, "图文重新下载失败: " + e.getMessage(), null);
+		}
+	}
+
+	public AjaxEntity supplementGraphicAudio(Integer id) {
+		if (id == null) {
+			return new AjaxEntity(Global.ajax_uri_error, "图文ID不能为空", null);
+		}
+		Optional<GraphicContentEntity> optional = graphicContentDao.findById(id);
+		if (optional.isEmpty()) {
+			return new AjaxEntity(Global.ajax_uri_error, "图文不存在", null);
+		}
+		GraphicContentEntity existing = optional.get();
+		if (!isDouyinPlatform(existing.getPlatform())) {
+			return new AjaxEntity(Global.ajax_uri_error, "仅支持抖音图文补充BGM", null);
+		}
+		String postId = existing.getVideoid();
+		if (isBlank(postId) || isBlank(existing.getMarkroute())) {
+			return new AjaxEntity(Global.ajax_uri_error, "缺少图文ID或本地目录，无法补充BGM", null);
+		}
+		try {
+			Path directory = mediaPathService == null
+					? Paths.get(existing.getMarkroute()).toAbsolutePath().normalize()
+					: mediaPathService.requireOwnedLocalPath(existing.getMarkroute());
+			Path existingAudio = findGraphicAudio(directory, postId);
+			if (existingAudio != null) {
+				return new AjaxEntity(Global.ajax_success, "BGM已存在，无需重复下载", existing);
+			}
+
+			JSONObject detail = detailFromJson(existing.getJsonData());
+			String musicUrl = extractMusicUrl(detail);
+			String cookie = platformCookieService.currentDouyinCookie("supplement_graphic_audio");
+			if (isBlank(musicUrl)) {
+				JSONObject refreshed = fetchDtkWorkData(postId);
+				if (refreshed != null) {
+					detail = DouUtil.findAwemeDetail(refreshed);
+					musicUrl = extractMusicUrl(detail);
+					if (detail != null) existing.setJsonData(refreshed.toJSONString());
+				}
+			}
+			if (isBlank(musicUrl)) {
+				FetchedGraphicDetail fetched = fetchF2GraphicDetail(postId);
+				if (fetched != null) {
+					detail = fetched.detail();
+					musicUrl = extractMusicUrl(detail);
+					cookie = fetched.cookie();
+					if (fetched.rawJson() != null) existing.setJsonData(fetched.rawJson());
+				}
+			}
+			if (isBlank(musicUrl)) {
+				return new AjaxEntity(Global.ajax_uri_error, "未找到抖音BGM地址", null);
+			}
+			HttpUtil.downloadFileWithOkHttp(musicUrl, postId + "-audio.mp3", directory.toString(),
+					douyinHeaders(cookie));
+			Path downloaded = directory.resolve(postId + "-audio.mp3").normalize();
+			if (!downloaded.startsWith(directory) || !Files.isRegularFile(downloaded) || Files.size(downloaded) <= 0) {
+				return new AjaxEntity(Global.ajax_uri_error, "BGM下载结果为空", null);
+			}
+			graphicContentDao.save(existing);
+			return new AjaxEntity(Global.ajax_success, "BGM补充完成", existing);
+		} catch (Exception e) {
+			logger.error("supplement douyin graphic audio failed id={} postId={}", id, postId, e);
+			return new AjaxEntity(Global.ajax_uri_error, "BGM补充失败: " + e.getMessage(), null);
 		}
 	}
 
@@ -351,6 +417,7 @@ public class DouyinWorkMaintenanceService {
 				imageList.add(cos);
 			}
 		}
+
 		AuthorSnapshot snapshot = resolveAuthorSnapshot(detail, nickname);
 		String sourceUrl = DouyinSourceUrlUtil.graphic(snapshot.authorUid, postId);
 		JSONObject hybrid = fetchDtkWorkData(postId);
@@ -377,6 +444,71 @@ public class DouyinWorkMaintenanceService {
 					snapshot.signature);
 		}
 		Files.deleteIfExists(Paths.get(taskout));
+	}
+
+	private Path findGraphicAudio(Path directory, String postId) throws IOException {
+		if (directory == null || postId == null) return null;
+		for (String extension : List.of("mp3", "m4a", "aac", "ogg", "wav")) {
+			Path candidate = directory.resolve(postId.trim() + "-audio." + extension).normalize();
+			if (candidate.startsWith(directory) && Files.isRegularFile(candidate) && Files.size(candidate) > 0) {
+				return candidate;
+			}
+		}
+		return null;
+	}
+
+	private JSONObject detailFromJson(String rawJson) {
+		if (isBlank(rawJson)) return null;
+		try {
+			return DouUtil.findAwemeDetail(JSONObject.parseObject(rawJson));
+		} catch (RuntimeException error) {
+			return null;
+		}
+	}
+
+	private String extractMusicUrl(JSONObject detail) {
+		if (detail == null) return null;
+		JSONObject music = detail.getJSONObject("music");
+		return music == null ? null : extractMediaUrl(music.get("play_url"));
+	}
+
+	private String extractMediaUrl(Object value) {
+		if (value == null) return null;
+		if (value instanceof String text) return isBlank(text) ? null : text.trim();
+		if (value instanceof JSONArray array) {
+			for (Object item : array) {
+				String url = extractMediaUrl(item);
+				if (!isBlank(url)) return url;
+			}
+			return null;
+		}
+		if (value instanceof JSONObject object) {
+			for (String key : List.of("url_list", "download_url_list", "uri", "url")) {
+				String url = extractMediaUrl(object.get(key));
+				if (!isBlank(url)) return url;
+			}
+		}
+		return null;
+	}
+
+	private FetchedGraphicDetail fetchF2GraphicDetail(String postId) {
+		String taskout = Global.apppath + "lot" + File.separator + "imageText_audio_" + postId + ".json";
+		String cookie = platformCookieService.currentDouyinCookie("supplement_graphic_audio_f2");
+		try {
+			String result = CommandUtil.f2cmd(cookie, postId, "fetch_post_data", null, null, null, taskout);
+			if (result == null || !result.contains("stream-vault-ok")) return null;
+			String rawJson = FileUtil.readJson(taskout);
+			JSONObject detail = detailFromJson(rawJson);
+			return detail == null ? null : new FetchedGraphicDetail(detail, cookie, rawJson);
+		} catch (Exception error) {
+			logger.warn("F2 graphic audio metadata fetch failed postId={}", postId, error);
+			return null;
+		} finally {
+			try {
+				Files.deleteIfExists(Paths.get(taskout));
+			} catch (IOException ignored) {
+			}
+		}
 	}
 
 	private boolean applyVideoAuthorFromHybrid(VideoDataEntity video, JSONObject hybrid) {
@@ -512,5 +644,8 @@ public class DouyinWorkMaintenanceService {
 		String uid;
 		String avatar;
 		String signature;
+	}
+
+	private record FetchedGraphicDetail(JSONObject detail, String cookie, String rawJson) {
 	}
 }
