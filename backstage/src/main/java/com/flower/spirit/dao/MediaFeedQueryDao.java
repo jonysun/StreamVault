@@ -56,7 +56,7 @@ public class MediaFeedQueryDao {
 				.append("videocover AS cover_url, videounrealaddr AS fallback_url, sourceurl AS source_url, ")
 				.append("originaladdress AS original_address, favorite, videoprivacy AS privacy, ")
 				.append("contenttype AS content_type, authorhomepage AS author_homepage, NULL AS slides_json, ")
-				.append("videoaddr AS local_path FROM biz_video");
+				.append("videoaddr AS local_path, NULL AS graphic_media_root FROM biz_video");
 		return queryBranch(sql, request, cursor, "video", limit);
 	}
 
@@ -70,7 +70,7 @@ public class MediaFeedQueryDao {
 				.append("publishtime AS publish_time, createtime AS downloaded_at, NULL AS cover_url, ")
 				.append("NULL AS fallback_url, sourceurl AS source_url, originaladdress AS original_address, ")
 				.append("favorite, privacy, contenttype AS content_type, authorhomepage AS author_homepage, ")
-				.append("images AS slides_json, NULL AS local_path FROM biz_graphic_content");
+				.append("images AS slides_json, NULL AS local_path, markroute AS graphic_media_root FROM biz_graphic_content");
 		return queryBranch(sql, request, cursor, "graphic", limit);
 	}
 
@@ -169,7 +169,8 @@ public class MediaFeedQueryDao {
 				row.getString("summary"), publishTime, parseInstant(row.getObject("downloaded_at")), cover,
 				row.getString("fallback_url"), row.getString("source_url"), row.getString("original_address"),
 				row.getString("favorite"), row.getString("privacy"), row.getString("content_type"),
-				row.getString("author_homepage"), slides, row.getString("local_path"), sortTime);
+				row.getString("author_homepage"), slides, row.getString("local_path"),
+				row.getString("graphic_media_root"), sortTime);
 	}
 
 	private List<MediaSlideRow> parseSlides(String raw) {

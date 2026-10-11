@@ -8,5 +8,5 @@ public record MediaFeedRow(String mediaKey, String mediaType, Integer internalId
 		String authorDisplayName, String authorAvatar, String title, String summary, Instant publishTime,
 		Instant downloadedAt, String coverUrl, String fallbackUrl, String sourceUrl, String originalAddress,
 		String favorite, String privacy, String contentType, String authorHomepage, List<MediaSlideRow> slides,
-		String localVideoPath, long sortTimeMillis) {
+		String localVideoPath, String graphicMediaRoot, long sortTimeMillis) {
 }

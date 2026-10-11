@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.Set;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -73,6 +75,9 @@ public class MediaFeedService {
 
 	@Autowired
 	private HlsTranscodeService hlsTranscodeService;
+
+	@Autowired
+	private MediaPathService mediaPathService;
 
 	@Value("${streamvault.feed.keyset.enabled:true}")
 	private boolean keysetEnabled;
@@ -175,6 +180,9 @@ public class MediaFeedService {
 		item.setPrivacy(row.privacy());
 		item.setContenttype(row.contentType());
 		item.setFallbackUrl(row.fallbackUrl());
+		if ("graphic".equals(row.mediaType())) {
+			item.setAudioUrl(resolveGraphicAudioUrl(row.graphicMediaRoot(), row.workId()));
+		}
 		item.setSlides(row.slides().stream().map(slide -> new AdminMediaSlide(slide.type(), slide.url())).toList());
 		if ("video".equals(row.mediaType())) applyCursorPlayback(item, row, queuedIds, runningIds);
 		if (!"video".equals(row.mediaType()) && !hasText(item.getContenttype())) {
@@ -358,11 +366,28 @@ public class MediaFeedService {
 		item.setCover(slides.isEmpty() ? null : slides.get(0).getUrl());
 		item.setSourceurl(graphic.getSourceurl());
 		item.setOriginaladdress(graphic.getOriginaladdress());
+		item.setAudioUrl(resolveGraphicAudioUrl(graphic.getMarkroute(), graphic.getVideoid()));
 		item.setFavorite(graphic.getFavorite());
 		item.setPrivacy(graphic.getPrivacy());
 		item.setSlides(slides);
 		normalizeAuthorIdentity(item);
 		return item;
+	}
+
+	private String resolveGraphicAudioUrl(String mediaRoot, String workId) {
+		if (mediaPathService == null || !hasText(mediaRoot) || !hasText(workId)) return null;
+		try {
+			Path directory = mediaPathService.requireOwnedLocalPath(mediaRoot);
+			for (String extension : List.of("mp3", "m4a", "aac", "ogg", "wav")) {
+				Path audio = directory.resolve(workId.trim() + "-audio." + extension).normalize();
+				if (audio.startsWith(directory) && Files.isRegularFile(audio) && Files.size(audio) > 0) {
+					return mediaPathService.toPublicPath(audio);
+				}
+			}
+		} catch (Exception error) {
+			logger.debug("Could not resolve graphic audio mediaRoot={} workId={}", mediaRoot, workId, error);
+		}
+		return null;
 	}
 
 	public AdminMediaFeedItem toVideoFeedItemForTest(VideoDataEntity video) {

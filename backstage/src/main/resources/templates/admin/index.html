@@ -3065,6 +3065,9 @@
             $('#videoFeed .feed-graphic-slide video').each(function() {
                 this.muted = feedMuted;
             });
+            if (feedGraphicAudio) {
+                feedGraphicAudio.muted = feedMuted;
+            }
             updateFeedButtons();
             renderAllFeedControls();
         });

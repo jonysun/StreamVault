@@ -12,9 +12,12 @@ import java.util.Date;
 import java.util.List;
 import java.util.Set;
 import java.time.Instant;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -43,6 +46,9 @@ import com.flower.spirit.entity.VideoDataEntity;
 @ExtendWith(MockitoExtension.class)
 class MediaFeedServiceTest {
 
+	@TempDir
+	Path tempDir;
+
 	@Mock
 	private VideoDataService videoDataService;
 
@@ -60,6 +66,9 @@ class MediaFeedServiceTest {
 
 	@Mock
 	private HlsTranscodeService hlsTranscodeService;
+
+	@Mock
+	private MediaPathService mediaPathService;
 
 	@InjectMocks
 	private MediaFeedService service;
@@ -91,6 +100,33 @@ class MediaFeedServiceTest {
 	}
 
 	@Test
+	void cursorFeedReturnsLocalGraphicAudioUrlWhenFileExists() throws Exception {
+		String workId = "7300000000000000008";
+		Path audio = tempDir.resolve(workId + "-audio.mp3");
+		Files.writeString(audio, "audio");
+		when(mediaPathService.requireOwnedLocalPath(tempDir.toString())).thenReturn(tempDir);
+		when(mediaPathService.toPublicPath(audio)).thenReturn("/cos/douyin/" + workId + "/" + audio.getFileName());
+		MediaFeedRequest request = new MediaFeedRequest();
+		request.setType("graphic");
+		request.setOrder("desc");
+		request.setLimit(10);
+		when(feedCursorCodec.decode(isNull())).thenReturn(null);
+		when(mediaFeedQueryDao.find(any(MediaFeedRequest.class), isNull(), eq(11)))
+				.thenReturn(List.of(new MediaFeedRow("graphic:8", "graphic", 8, "douyin", "抖音", workId,
+						"MS4-author", "author-user", "author", null, "title", "summary",
+						Instant.ofEpochMilli(8000), Instant.ofEpochMilli(8000), "/cover.jpg", null,
+						"https://example.test/work/8", null, "0", "0", "graphic", null, List.of(), null,
+						tempDir.toString(), 8000)));
+		when(hlsTranscodeService.queuedIdsSnapshot()).thenReturn(Set.of());
+		when(hlsTranscodeService.runningVideoIdsSnapshot()).thenReturn(Set.of());
+
+		MediaFeedCursorPage page = service.findCursorPage(request);
+
+		assertThat(page.items()).singleElement().extracting(AdminMediaFeedItem::getAudioUrl)
+				.isEqualTo("/cos/douyin/" + workId + "/" + audio.getFileName());
+	}
+
+	@Test
 	void cursorFromDifferentFilterIsRejectedBeforeQuery() {
 		MediaFeedRequest request = new MediaFeedRequest();
 		request.setType("video");
@@ -110,7 +146,7 @@ class MediaFeedServiceTest {
 				"MS4-author", "author-user", "author", null, "title-" + id, "summary-" + id,
 				Instant.ofEpochMilli(sortTime), Instant.ofEpochMilli(sortTime), "/cover.jpg",
 				"video".equals(type) ? "/video.mp4" : null, "https://example.test/work/" + id,
-				null, "0", "0", type, null, List.of(), null, sortTime);
+				null, "0", "0", type, null, List.of(), null, null, sortTime);
 	}
 
 	@Test
@@ -147,6 +183,27 @@ class MediaFeedServiceTest {
 		assertThat(item.getContenttype()).isEqualTo("mixed");
 		assertThat(item.getPrivacy()).isEqualTo("1");
 		assertThat(item.getFavorite()).isEqualTo("1");
+	}
+
+	@Test
+	void graphicFeedItemMapsDownloadedAudioFromItsWorkDirectory() throws Exception {
+		String workId = "7300000000000000007";
+		Path audio = tempDir.resolve(workId + "-audio.mp3");
+		Files.writeString(audio, "audio");
+		when(mediaPathService.requireOwnedLocalPath(tempDir.toString())).thenReturn(tempDir);
+		when(mediaPathService.toPublicPath(audio)).thenReturn("/cos/douyin/" + workId + "/" + audio.getFileName());
+
+		GraphicContentEntity graphic = new GraphicContentEntity();
+		graphic.setId(10);
+		graphic.setVideoid(workId);
+		graphic.setPlatform("抖音");
+		graphic.setPlatformkey("douyin");
+		graphic.setMarkroute(tempDir.toString());
+		graphic.setImages("[\"/first.jpg\"]");
+
+		AdminMediaFeedItem item = service.toGraphicFeedItemForTest(graphic);
+
+		assertThat(item.getAudioUrl()).isEqualTo("/cos/douyin/" + workId + "/" + audio.getFileName());
 	}
 
 	@Test

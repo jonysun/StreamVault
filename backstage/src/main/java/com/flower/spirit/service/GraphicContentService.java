@@ -156,6 +156,7 @@ public class GraphicContentService {
 				root.get("platformkey").alias("platformkey"),
 				root.get("contenttype").alias("contenttype"),
 				root.get("authorhomepage").alias("authorhomepage"),
+				root.get("markroute").alias("markroute"),
 				root.get("privacy").alias("privacy"),
 				root.get("favorite").alias("favorite"));
 
@@ -264,6 +265,7 @@ public class GraphicContentService {
 		item.setPlatformkey(tuple.get("platformkey", String.class));
 		item.setContenttype(tuple.get("contenttype", String.class));
 		item.setAuthorhomepage(tuple.get("authorhomepage", String.class));
+		item.setMarkroute(tuple.get("markroute", String.class));
 		item.setPrivacy(tuple.get("privacy", String.class));
 		item.setFavorite(tuple.get("favorite", String.class));
 		normalizeResponseIdentity(item, item);
