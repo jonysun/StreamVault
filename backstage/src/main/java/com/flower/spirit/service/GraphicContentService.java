@@ -5,10 +5,14 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Tuple;
@@ -173,6 +177,69 @@ public class GraphicContentService {
 		}
 		Page<GraphicContentEntity> page = new PageImpl<>(items, pageRequest, totalElements);
 		return new AjaxEntity(Global.ajax_success, "数据获取成功", page);
+	}
+
+	public Map<String, Object> findGraphicDetail(Integer id) {
+		if (id == null || id <= 0) {
+			throw new IllegalArgumentException("图文ID必须为正数");
+		}
+		GraphicContentEntity graphic = graphicContentDao.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("图文不存在: " + id));
+		Map<String, Object> detail = new HashMap<>();
+		detail.put("id", graphic.getId());
+		detail.put("videoid", graphic.getVideoid());
+		detail.put("platform", graphic.getPlatform());
+		detail.put("title", graphic.getTitle());
+		detail.put("content", graphic.getContent());
+		detail.put("author", graphic.getAuthor());
+		detail.put("authoruid", graphic.getAuthoruid());
+		detail.put("authorusername", graphic.getAuthorusername());
+		detail.put("publishtime", graphic.getPublishtime());
+		detail.put("createtime", graphic.getCreatetime());
+		detail.put("sourceurl", graphic.getSourceurl());
+		detail.put("images", graphic.getImages());
+
+		JSONObject music = null;
+		try {
+			if (graphic.getJsonData() != null && !graphic.getJsonData().isBlank()) {
+				JSONObject root = JSONObject.parseObject(graphic.getJsonData());
+				JSONObject aweme = root == null ? null : root.getJSONObject("aweme_detail");
+				music = aweme == null ? null : aweme.getJSONObject("music");
+			}
+		} catch (RuntimeException ignored) {
+			// Keep the detail endpoint useful even when a legacy raw payload is malformed.
+		}
+		if (music != null) {
+			detail.put("music", music);
+			detail.put("musicName", music.getString("title"));
+			detail.put("musicAuthor", music.getString("author"));
+			detail.put("musicId", music.getString("id"));
+			detail.put("musicDuration", music.get("duration"));
+			Object playUrl = music.get("play_url");
+			detail.put("musicPlayUrl", extractMusicUrls(playUrl));
+		} else {
+			detail.put("music", null);
+			detail.put("musicPlayUrl", List.of());
+		}
+		return detail;
+	}
+
+	private List<String> extractMusicUrls(Object value) {
+		Set<String> urls = new LinkedHashSet<>();
+		collectMusicUrls(value, urls);
+		return new ArrayList<>(urls);
+	}
+
+	private void collectMusicUrls(Object value, Set<String> urls) {
+		if (value instanceof String text) {
+			if (!text.isBlank() && (text.startsWith("http://") || text.startsWith("https://"))) urls.add(text);
+		} else if (value instanceof JSONArray array) {
+			for (Object item : array) collectMusicUrls(item, urls);
+		} else if (value instanceof JSONObject object) {
+			for (String key : List.of("url_list", "download_url_list", "uri", "url")) {
+				collectMusicUrls(object.get(key), urls);
+			}
+		}
 	}
 
 	private long countLiteItems(GraphicContentEntity res) {

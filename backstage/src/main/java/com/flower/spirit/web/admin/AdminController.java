@@ -1302,6 +1302,19 @@ public class AdminController {
 		return graphicContentService.supplementGraphicAudio(id);
 	}
 
+	@GetMapping(value = "/graphicContentDetail")
+	public AjaxEntity graphicContentDetail(Integer id, HttpServletRequest request) {
+		if (!hasAuthenticatedAdmin(request)) {
+			return new AjaxEntity(Global.ajax_login_err, "Unauthorized", null);
+		}
+		try {
+			return new AjaxEntity(Global.ajax_success, "图文详情获取成功",
+					graphicContentService.findGraphicDetail(id));
+		} catch (IllegalArgumentException e) {
+			return new AjaxEntity(Global.ajax_uri_error, e.getMessage(), null);
+		}
+	}
+
 	/**
 	 * 获取数据统计信息
 	 * 

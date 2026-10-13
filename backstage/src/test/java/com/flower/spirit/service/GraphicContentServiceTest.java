@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import java.util.Map;
+import java.util.Optional;
+
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -80,5 +83,40 @@ class GraphicContentServiceTest {
 
 		assertThat(response.getContent().get(0).getAuthoruid()).isNull();
 		assertThat(response.getContent().get(0).getSecuid()).isNull();
+	}
+
+	@Test
+	void findGraphicDetailExtractsMusicFieldsAndPlaybackUrls() {
+		GraphicContentEntity graphic = new GraphicContentEntity();
+		graphic.setId(11686);
+		graphic.setVideoid("7695790567728543458");
+		graphic.setPlatform("抖音");
+		graphic.setJsonData("{\"aweme_detail\":{\"music\":{\"id\":\"music-1\","
+				+ "\"title\":\"Track\",\"author\":\"Artist\",\"duration\":123,"
+				+ "\"play_url\":{\"url_list\":[\"https://media.example/a.mp3\","
+				+ "\"https://backup.example/a.mp3\"]}}}}");
+		when(graphicContentDao.findById(11686)).thenReturn(Optional.of(graphic));
+
+		Map<String, Object> detail = service.findGraphicDetail(11686);
+
+		assertThat(detail).containsEntry("musicName", "Track")
+				.containsEntry("musicAuthor", "Artist")
+				.containsEntry("musicId", "music-1")
+				.containsEntry("musicDuration", 123)
+				.containsEntry("musicPlayUrl", List.of("https://media.example/a.mp3",
+						"https://backup.example/a.mp3"));
+	}
+
+	@Test
+	void findGraphicDetailReturnsEmptyMusicWhenRawMetadataHasNoMusic() {
+		GraphicContentEntity graphic = new GraphicContentEntity();
+		graphic.setId(11686);
+		graphic.setJsonData("{\"aweme_detail\":{\"desc\":\"no music\"}}");
+		when(graphicContentDao.findById(11686)).thenReturn(Optional.of(graphic));
+
+		Map<String, Object> detail = service.findGraphicDetail(11686);
+
+		assertThat(detail).containsEntry("music", null)
+				.containsEntry("musicPlayUrl", List.of());
 	}
 }

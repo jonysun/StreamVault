@@ -69,6 +69,25 @@
 			font-size: 12px;
 			color: #666;
 		}
+		.graphic-meta-line {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			white-space: nowrap;
+			overflow-x: auto;
+			max-width: 100%;
+		}
+		.graphic-detail-panel { padding:16px; max-height:76vh; overflow:auto; color:#343a40; }
+		.graphic-detail-panel h5 { margin:8px 0 12px; font-size:15px; }
+		.graphic-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border-top:1px solid #e5e8eb; margin-bottom:20px; }
+		.graphic-detail-row { min-width:0; padding:10px 8px; border-bottom:1px solid #e5e8eb; overflow-wrap:anywhere; }
+		.graphic-detail-row strong { display:block; margin-bottom:4px; color:#69727b; font-size:12px; font-weight:600; }
+		.graphic-detail-url { overflow-wrap:anywhere; margin-bottom:6px; }
+		.graphic-detail-raw { margin:12px 0 20px; }
+		.graphic-detail-raw summary { cursor:pointer; color:#1769aa; }
+		.graphic-detail-raw pre { max-height:300px; overflow:auto; padding:10px; background:#f5f6f7; border:1px solid #e5e8eb; border-radius:4px; white-space:pre-wrap; overflow-wrap:anywhere; }
+		.graphic-detail-media { max-height:180px; overflow:auto; overflow-wrap:anywhere; }
+		@media(max-width:600px) { .graphic-detail-grid { grid-template-columns:minmax(0,1fr); } }
 		
 		.platform-badge {
 			display: inline-block;
@@ -228,11 +247,12 @@
 			.action-buttons {
 				display: flex;
 				justify-content: space-between;
+				flex-wrap: wrap;
 				gap: 4px;
 			}
 			
 			.action-buttons .btn {
-				flex: 1;
+				flex: 1 1 calc(50% - 4px);
 				padding: 6px 4px;
 				font-size: 11px;
 				white-space: nowrap;
@@ -1220,12 +1240,16 @@ function generateGraphicCard(item) {
 				
 				<div class="graphic-footer">
 					<div class="author-info">
-						<span class="platform-badge ${platformClass}">${platformName}</span>
-						<span class="ml-2">ID: ${item.videoid || 'N/A'}</span>
-						<span class="badge badge-info ml-2">媒体</span>
-						<div style="margin-top:4px; color:#666;">发布时间：${publishText} ｜ 下载时间：${downloadText}</div>
+						<div class="graphic-meta-line">
+							<span class="platform-badge ${platformClass}">${platformName}</span>
+							<span>ID: ${item.videoid || 'N/A'}</span>
+							<span>发布时间：${publishText}</span><span>｜</span><span>下载时间：${downloadText}</span>
+						</div>
 					</div>
 					<div class="action-buttons">
+					<button class="btn btn-sm btn-outline-secondary graphic-detail" data-id="${item.id}">
+						<i class="mdi mdi-information-outline"></i> 详情
+					</button>
 						<button class="btn btn-sm btn-outline-primary download-package" data-id="${item.id}" data-title="${displayTitle}" data-images='${JSON.stringify(mediaList)}'>
 							<i class="mdi mdi-download"></i> 打包下载
 						</button>
@@ -1255,9 +1279,11 @@ function generateGraphicCard(item) {
 						<h6 class="graphic-title" style="margin:0;" title="${displayTitle}">${displayTitle}</h6>
 					</div>
 					<div class="graphic-meta">
-						<span class="platform-badge ${platformClass}">${platformName}</span>
-						<span>ID: ${item.videoid || 'N/A'}</span>
-						<span style="display:block; margin-top:4px; color:#666;">发布时间：${publishText} ｜ 下载时间：${downloadText}</span>
+						<div class="graphic-meta-line">
+							<span class="platform-badge ${platformClass}">${platformName}</span>
+							<span>ID: ${item.videoid || 'N/A'}</span>
+							<span>发布时间：${publishText}</span><span>｜</span><span>下载时间：${downloadText}</span>
+						</div>
 					</div>
 				</div>
 				
@@ -1271,6 +1297,9 @@ function generateGraphicCard(item) {
 						<i class="mdi mdi-account"></i> ${item.author || '未知作者'}
 					</div>
 					<div class="action-buttons">
+					<button class="btn btn-sm btn-outline-secondary graphic-detail" data-id="${item.id}">
+						<i class="mdi mdi-information-outline"></i> 详情
+					</button>
 						<button class="btn btn-sm btn-outline-primary download-package" data-id="${item.id}" data-title="${displayTitle}" data-images='${JSON.stringify(mediaList)}'>
 							<i class="mdi mdi-download"></i> 打包下载
 						</button>
@@ -1420,6 +1449,11 @@ function bindCardEvents() {
 		updateBatchCount();
 	});
 
+	$('.graphic-detail').off('click').on('click', function(e) {
+		e.preventDefault();
+		showGraphicDetail($(this).data('id'));
+	});
+
 	// 图片预览
 	$('.preview-image').click(function() {
 		var imageSrc = $(this).data('src');
@@ -1562,6 +1596,79 @@ function bindCardEvents() {
 			batchGraphicRequest(Array.from(selectedGraphicIds), '/admin/api/supplementGraphicAudio', '批量补充 BGM 中...', '批量补充 BGM 完成');
 		});
 	});
+}
+
+function showGraphicDetail(id) {
+	var loading = layer.load(1, {shade:[0.2, '#000']});
+	$.get('/admin/api/graphicContentDetail', {id: id}, function(response) {
+		layer.close(loading);
+		if (!response || response.resCode !== '000001' || !response.record) {
+			layer.alert(escapeHtml(response && response.message ? response.message : '详情加载失败'));
+			return;
+		}
+		var detail = response.record;
+		var music = detail.music || null;
+		var urls = Array.isArray(detail.musicPlayUrl) ? detail.musicPlayUrl : [];
+		var musicRows = music ? [
+			['名称', escapeHtml(detail.musicName || '未提供')],
+			['作者', escapeHtml(detail.musicAuthor || '未提供')],
+			['音乐 ID', escapeHtml(detail.musicId || '未提供')],
+			['时长', escapeHtml(detail.musicDuration == null ? '未提供' : detail.musicDuration + ' 秒')],
+			['播放 URL', urls.length ? urls.map(function(url) {
+				var safeUrl = escapeHtml(url);
+				return '<div class="graphic-detail-url"><a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a></div>';
+			}).join('') : '未提供']
+		] : [['BGM', '保存的作品详情中没有 music 字段']];
+		var musicHtml = musicRows.map(function(row) {
+			return '<div class="graphic-detail-row"><strong>' + escapeHtml(row[0]) + '</strong><div>' + row[1] + '</div></div>';
+		}).join('');
+		var media = [];
+		try { media = detail.images ? JSON.parse(detail.images) : []; } catch (error) {}
+		var mediaHtml = Array.isArray(media) && media.length
+			? media.map(function(path) { return '<div class="graphic-detail-url">' + escapeHtml(path) + '</div>'; }).join('')
+			: '无媒体路径';
+		var originalUrl = detail.sourceurl || '';
+		var rawMusicHtml = music
+			? '<details class="graphic-detail-raw"><summary>查看原始 music JSON</summary><pre>' + escapeHtml(JSON.stringify(music, null, 2)) + '</pre></details>'
+			: '';
+		var content = '<div class="graphic-detail-panel">'
+			+ '<h5>作品信息</h5>'
+			+ '<div class="graphic-detail-grid">'
+			+ graphicDetailRow('平台', detail.platform)
+			+ graphicDetailRow('作品 ID', detail.videoid)
+			+ graphicDetailRow('数据库 ID', detail.id)
+			+ graphicDetailRow('标题', detail.title)
+			+ graphicDetailRow('作者', detail.author)
+			+ graphicDetailRow('作者账号', detail.authorusername)
+			+ graphicDetailRow('作者 UID', detail.authoruid)
+			+ graphicDetailRow('发布时间', formatTimeDisplay(detail.publishtime))
+			+ graphicDetailRow('下载时间', formatTimeDisplay(detail.createtime))
+			+ graphicDetailLinkRow('原作品链接', originalUrl)
+			+ '</div><h5>BGM 信息</h5><div class="graphic-detail-grid">' + musicHtml + '</div>'
+			+ rawMusicHtml
+			+ '<h5>已保存媒体（' + (Array.isArray(media) ? media.length : 0) + '）</h5><div class="graphic-detail-media">' + mediaHtml + '</div>'
+			+ '</div>';
+		layer.open({
+			type: 1,
+			title: '作品详情 - ' + escapeHtml(detail.videoid || detail.id),
+			area: [window.innerWidth < 768 ? '94vw' : '760px', '82vh'],
+			shadeClose: true,
+			content: content
+		});
+	}).fail(function() {
+		layer.close(loading);
+		layer.msg('网络错误，详情加载失败');
+	});
+}
+
+function graphicDetailRow(label, value) {
+	return '<div class="graphic-detail-row"><strong>' + escapeHtml(label) + '</strong><div>' + escapeHtml(value || '未提供') + '</div></div>';
+}
+
+function graphicDetailLinkRow(label, url) {
+	var safeUrl = escapeHtml(url || '');
+	var value = safeUrl ? '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a>' : '未提供';
+	return '<div class="graphic-detail-row"><strong>' + escapeHtml(label) + '</strong><div>' + value + '</div></div>';
 }
 
 function getMediaPreviewLimit() {
