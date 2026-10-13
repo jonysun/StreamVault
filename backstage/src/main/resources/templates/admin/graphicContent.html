@@ -1618,7 +1618,10 @@ function showGraphicDetail(id) {
 				var safeUrl = escapeHtml(url);
 				return '<div class="graphic-detail-url"><a href="' + safeUrl + '" target="_blank" rel="noopener">' + safeUrl + '</a></div>';
 			}).join('') : '未提供']
-		] : [['BGM', '保存的作品详情中没有 music 字段']];
+		] : [];
+		if (!music) {
+			musicRows.push(['BGM', '保存的作品详情中没有 music 字段']);
+		}
 		var musicHtml = musicRows.map(function(row) {
 			return '<div class="graphic-detail-row"><strong>' + escapeHtml(row[0]) + '</strong><div>' + row[1] + '</div></div>';
 		}).join('');
