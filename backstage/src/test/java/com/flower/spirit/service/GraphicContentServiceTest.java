@@ -119,4 +119,34 @@ class GraphicContentServiceTest {
 		assertThat(detail).containsEntry("music", null)
 				.containsEntry("musicPlayUrl", List.of());
 	}
+
+	@Test
+	void findGraphicDetailExtractsMusicFromNestedProviderPayload() {
+		GraphicContentEntity graphic = new GraphicContentEntity();
+		graphic.setId(11687);
+		graphic.setJsonData("{\"data\":{\"aweme_detail\":{\"music\":{"
+				+ "\"id\":\"nested-music\",\"title\":\"Nested Track\","
+				+ "\"play_url\":{\"url_list\":[\"https://media.example/nested.mp3\"]}}}}}");
+		when(graphicContentDao.findById(11687)).thenReturn(Optional.of(graphic));
+
+		Map<String, Object> detail = service.findGraphicDetail(11687);
+
+		assertThat(detail).containsEntry("musicName", "Nested Track")
+				.containsEntry("musicId", "nested-music")
+				.containsEntry("musicPlayUrl", List.of("https://media.example/nested.mp3"));
+	}
+
+	@Test
+	void findGraphicDetailExtractsMusicFromDownloadSnapshotFallback() {
+		GraphicContentEntity graphic = new GraphicContentEntity();
+		graphic.setId(11688);
+		graphic.setJsonData("{\"download_snapshot\":{\"music\":{"
+				+ "\"id\":\"snapshot-music\",\"title\":\"Snapshot Track\"}}}");
+		when(graphicContentDao.findById(11688)).thenReturn(Optional.of(graphic));
+
+		Map<String, Object> detail = service.findGraphicDetail(11688);
+
+		assertThat(detail).containsEntry("musicName", "Snapshot Track")
+				.containsEntry("musicId", "snapshot-music");
+	}
 }

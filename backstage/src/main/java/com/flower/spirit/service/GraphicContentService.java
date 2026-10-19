@@ -35,6 +35,7 @@ import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.utils.AuthorIdentityUtil;
 import com.flower.spirit.utils.CommandUtil;
+import com.flower.spirit.utils.DouUtil;
 import com.flower.spirit.utils.StringUtil;
 
 @Service
@@ -203,8 +204,7 @@ public class GraphicContentService {
 		try {
 			if (graphic.getJsonData() != null && !graphic.getJsonData().isBlank()) {
 				JSONObject root = JSONObject.parseObject(graphic.getJsonData());
-				JSONObject aweme = root == null ? null : root.getJSONObject("aweme_detail");
-				music = aweme == null ? null : aweme.getJSONObject("music");
+				music = extractGraphicMusic(root);
 			}
 		} catch (RuntimeException ignored) {
 			// Keep the detail endpoint useful even when a legacy raw payload is malformed.
@@ -222,6 +222,25 @@ public class GraphicContentService {
 			detail.put("musicPlayUrl", List.of());
 		}
 		return detail;
+	}
+
+	private JSONObject extractGraphicMusic(JSONObject root) {
+		if (root == null) return null;
+		JSONObject aweme = DouUtil.findAwemeDetail(root);
+		JSONObject music = aweme == null ? null : aweme.getJSONObject("music");
+		return music == null ? findNestedMusic(root, 0) : music;
+	}
+
+	private JSONObject findNestedMusic(JSONObject object, int depth) {
+		if (object == null || depth > 6) return null;
+		JSONObject direct = object.getJSONObject("music");
+		if (direct != null) return direct;
+		for (String key : List.of("download_snapshot", "data", "record", "item", "aweme", "aweme_info", "work", "post")) {
+			JSONObject nested = object.getJSONObject(key);
+			JSONObject music = findNestedMusic(nested, depth + 1);
+			if (music != null) return music;
+		}
+		return null;
 	}
 
 	private List<String> extractMusicUrls(Object value) {
