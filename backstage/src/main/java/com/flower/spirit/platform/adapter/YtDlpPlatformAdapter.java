@@ -1,6 +1,7 @@
 package com.flower.spirit.platform.adapter;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -78,6 +79,11 @@ public class YtDlpPlatformAdapter implements PlatformWorkAdapter {
 				Path file = files.get(i);
 				resources.add(new WorkMediaResource(i, WorkMediaResource.Type.VIDEO, null, file,
 						extension(file), java.util.Map.of()));
+				Path thumbnail = thumbnailPath(file);
+				if (Files.isRegularFile(thumbnail) && Files.size(thumbnail) > 0) {
+					resources.add(new WorkMediaResource(resources.size(), WorkMediaResource.Type.IMAGE,
+							metadata.getCoverUrl(), thumbnail, "jpg", java.util.Map.of()));
+				}
 			}
 			return DownloadResult.completed(resources);
 		} catch (InterruptedException e) {
@@ -113,6 +119,13 @@ public class YtDlpPlatformAdapter implements PlatformWorkAdapter {
 		String name = path.getFileName().toString();
 		int dot = name.lastIndexOf('.');
 		return dot < 0 || dot == name.length() - 1 ? null : name.substring(dot + 1);
+	}
+
+	private Path thumbnailPath(Path video) {
+		String name = video.getFileName().toString();
+		int dot = name.lastIndexOf('.');
+		String base = dot <= 0 ? name : name.substring(0, dot);
+		return video.resolveSibling(base + ".jpg");
 	}
 
 	public static Gateway systemGateway() {

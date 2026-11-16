@@ -57,6 +57,9 @@ public class YtDlpUtil {
 		command.add("bestvideo+bestaudio/best");
 		command.add("--merge-output-format");
 		command.add("mp4");
+		command.add("--write-thumbnail");
+		command.add("--convert-thumbnails");
+		command.add("jpg");
 		command.add("--print");
 		command.add("after_move:" + DOWNLOADED_FILE_PREFIX + "%(filepath)s");
 		command.add("-o");

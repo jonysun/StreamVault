@@ -15,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.flower.spirit.platform.DownloadResult;
 import com.flower.spirit.platform.PlatformResolver;
 import com.flower.spirit.platform.WorkDownloadRequest;
+import com.flower.spirit.platform.WorkMediaResource;
 import com.flower.spirit.platform.WorkMetadata;
 import com.flower.spirit.platform.WorkMetadataValidationException;
 import com.flower.spirit.platform.WorkParseRequest;
@@ -60,14 +61,17 @@ class YtDlpPlatformAdapterTest {
 		YtDlpPlatformAdapter youtube = adapter("youtube", gateway);
 		WorkMetadata metadata = youtube.parse(new WorkParseRequest("input",
 				"https://youtube.com/watch?v=vid-ordinary", false));
+		Files.writeString(tempDir.resolve("vid-ordinary.jpg"), "thumbnail");
 
 		DownloadResult result = youtube.download(metadata, new WorkDownloadRequest(tempDir, false));
 
 		assertThat(result.getStatus()).isEqualTo(DownloadResult.Status.COMPLETED);
-		assertThat(result.getMediaResources()).singleElement().satisfies(resource -> {
-			assertThat(resource.getLocalPath()).isEqualTo(tempDir.resolve("vid-ordinary.mp4"));
-			assertThat(resource.getExpectedExtension()).isEqualTo("mp4");
-		});
+		assertThat(result.getMediaResources()).extracting(WorkMediaResource::getType)
+				.containsExactly(WorkMediaResource.Type.VIDEO, WorkMediaResource.Type.IMAGE);
+		assertThat(result.getMediaResources().get(0).getLocalPath()).isEqualTo(tempDir.resolve("vid-ordinary.mp4"));
+		assertThat(result.getMediaResources().get(0).getExpectedExtension()).isEqualTo("mp4");
+		assertThat(result.getMediaResources().get(1).getLocalPath()).isEqualTo(tempDir.resolve("vid-ordinary.jpg"));
+		assertThat(result.getMediaResources().get(1).getExpectedExtension()).isEqualTo("jpg");
 		assertThat(gateway.downloadCalls).isEqualTo(1);
 	}
 
