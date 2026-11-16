@@ -42,10 +42,21 @@ public class DirectDownloadQueueService {
 		DirectDownloadSource normalizedSource = DirectDownloadSource.from(sourceType);
 		ProcessHistoryEntity history = processHistoryService.beginPlatformProcess(input, platformName, "QUEUED");
 		Integer historyId = history == null ? null : history.getId();
-		DirectDownloadEnqueueResult result = databaseWriteExecutor.execute("direct-download-enqueue",
-				() -> transaction.enqueue(input, platformKey, platformName, StringUtils.trimToNull(title),
-						StringUtils.trimToNull(author), normalizedSource, StringUtils.trimToNull(batchId), historyId,
-						Instant.now(), maxAttempts));
+		DirectDownloadEnqueueResult result;
+		try {
+			result = databaseWriteExecutor.execute("direct-download-enqueue",
+					() -> transaction.enqueue(input, platformKey, platformName, StringUtils.trimToNull(title),
+							StringUtils.trimToNull(author), normalizedSource, StringUtils.trimToNull(batchId), historyId,
+							Instant.now(), maxAttempts));
+		} catch (RuntimeException error) {
+			// History is saved separately, so a rolled-back queue insert must not leave it QUEUED.
+			try {
+				processHistoryService.failPlatformProcess(historyId, "ENQUEUE_FAILED", error.getMessage());
+			} catch (RuntimeException historyError) {
+				error.addSuppressed(historyError);
+			}
+			throw error;
+		}
 		if (!result.created() && historyId != null) {
 			processHistoryService.completeProcess(historyId, "Duplicate submission; an active download is already queued");
 		}

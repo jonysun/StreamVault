@@ -9,6 +9,8 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Set;
@@ -27,6 +29,7 @@ class DtkDouyinDataProviderTest {
 	private String oldBaseUrl;
 	private String oldApiKey;
 	private String oldApiPool;
+	private int oldTimeoutMs;
 	private ExecutorService executor;
 	private AtomicReference<String> receivedApiKey;
 	private AtomicReference<String> receivedAuthorization;
@@ -45,6 +48,7 @@ class DtkDouyinDataProviderTest {
 		oldBaseUrl = Global.dtkBaseUrl;
 		oldApiKey = Global.dtkApiKey;
 		oldApiPool = Global.dtkApiPool;
+		oldTimeoutMs = Global.dtkTimeoutMs;
 		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		executor = Executors.newSingleThreadExecutor();
 		receivedApiKey = new AtomicReference<>();
@@ -149,7 +153,7 @@ class DtkDouyinDataProviderTest {
 					: "{\"success\":true,\"data\":{\"task_id\":\"task-1\",\"state\":\"done\","
 							+ "\"data\":{\"items\":[{\"content_id\":\"async-456\",\"kind\":\"video\","
 							+ "\"media\":{\"type\":\"video\",\"url\":\"https://media.example/async.mp4\"}}],"
-							+ "\"cursor\":null,\"has_more\":false}},\"result_meta\":{}},"
+							+ "\"cursor\":null,\"has_more\":false},\"result_meta\":{}},"
 							+ "\"error\":null,\"meta\":{}}";
 			byte[] body = bodyText.getBytes(StandardCharsets.UTF_8);
 			exchange.sendResponseHeaders(200, body.length);
@@ -181,8 +185,50 @@ class DtkDouyinDataProviderTest {
 		Global.dtkBaseUrl = oldBaseUrl;
 		Global.dtkApiKey = oldApiKey;
 		Global.dtkApiPool = oldApiPool;
+		Global.dtkTimeoutMs = oldTimeoutMs;
 		if (server != null) server.stop(0);
 		if (executor != null) executor.shutdownNow();
+	}
+
+	@Test
+	void incompleteResponseBodyTimesOutAndReleasesTheCaller() throws Exception {
+		Global.dtkTimeoutMs = 1000;
+		CountDownLatch bodyStarted = new CountDownLatch(1);
+		CountDownLatch releaseBody = new CountDownLatch(1);
+		server.removeContext("/api/v1/douyin/user/posts");
+		server.createContext("/api/v1/douyin/user/posts", exchange -> {
+			exchange.sendResponseHeaders(200, 0);
+			try (var output = exchange.getResponseBody()) {
+				output.write("{\"success\":".getBytes(StandardCharsets.UTF_8));
+				output.flush();
+				bodyStarted.countDown();
+				releaseBody.await(10, TimeUnit.SECONDS);
+			} catch (InterruptedException interrupted) {
+				Thread.currentThread().interrupt();
+			}
+		});
+		ExecutorService caller = Executors.newSingleThreadExecutor();
+		var result = caller.submit(() -> {
+			try {
+				new DtkDouyinDataProvider(HttpClient.newHttpClient()).fetchAuthorWorks(
+						new DouyinFetchRequest("MS4-stalled", Set.of(), null, 3, 10, 2,
+								DouyinFetchMode.INITIAL, 50, null, false, false, 0, null));
+				return null;
+			} catch (CollectFetchException error) {
+				return error;
+			}
+		});
+		try {
+			assertThat(bodyStarted.await(3, TimeUnit.SECONDS)).isTrue();
+			CollectFetchException error = result.get(4, TimeUnit.SECONDS);
+			assertThat(error).isNotNull();
+			assertThat(error.getErrorCode()).isEqualTo("DTK_UNAVAILABLE");
+			assertThat(error).hasRootCauseInstanceOf(java.net.http.HttpTimeoutException.class);
+		} finally {
+			releaseBody.countDown();
+			result.cancel(true);
+			caller.shutdownNow();
+		}
 	}
 
 	@Test

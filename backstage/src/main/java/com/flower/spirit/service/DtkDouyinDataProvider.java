@@ -1,10 +1,12 @@
 package com.flower.spirit.service;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -18,6 +20,9 @@ import java.util.Set;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -285,7 +290,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				builder.header("Authorization", "Bearer " + node.apiKey());
 				builder.header("X-API-Key", node.apiKey());
 			}
-			HttpResponse<String> response = client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
+			HttpResponse<String> response = sendWithBodyTimeout(builder.GET().build());
 			String body = response.body();
 			logger.info("[DTK] response id={} endpoint={} status={} node={} apiKeyId={} durationMs={} bodyBytes={} bodySha256={} params={}",
 					requestId, path, response.statusCode(), node.baseUrl(), apiKeyFingerprint(node), elapsedMs(startedAt),
@@ -360,11 +365,33 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			return parsed;
 		} catch (CollectFetchException e) {
 			throw e;
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new CollectFetchException("DTK_TASK_INTERRUPTED", "DTK API 请求被中断", e);
 		} catch (Exception e) {
 			nodeCooldownUntil.put(node.identity(), System.currentTimeMillis() + NODE_COOLDOWN_MS);
 			logger.warn("[DTK] transport-error id={} endpoint={} node={} durationMs={} exception={}",
 					requestId, path, node.baseUrl(), elapsedMs(startedAt), e.getClass().getSimpleName());
 			throw new CollectFetchException("DTK_UNAVAILABLE", "DTK API 请求失败: " + e.getClass().getSimpleName(), e);
+		}
+	}
+
+	private HttpResponse<String> sendWithBodyTimeout(HttpRequest request) throws IOException, InterruptedException {
+		// HttpRequest.timeout alone can stop timing after headers arrive on Java 17.
+		// The async response completes only after ofString has consumed the entire body.
+		var response = client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+		try {
+			return response.get(request.timeout().orElseThrow().toMillis(), TimeUnit.MILLISECONDS);
+		} catch (TimeoutException e) {
+			response.cancel(true);
+			throw new HttpTimeoutException("DTK response body timed out");
+		} catch (InterruptedException e) {
+			response.cancel(true);
+			throw e;
+		} catch (ExecutionException e) {
+			if (e.getCause() instanceof IOException cause) throw cause;
+			if (e.getCause() instanceof RuntimeException cause) throw cause;
+			throw new IOException("DTK request failed", e.getCause());
 		}
 	}
 

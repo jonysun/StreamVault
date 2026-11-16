@@ -71,9 +71,8 @@ public class DirectDownloadQueueTransaction {
 			statement.setTimestamp(7, timestamp);
 			return statement;
 		}, keys);
-		Number id = keys.getKey();
-		if (id == null) throw new IllegalStateException("Direct download queue insert returned no id");
-		return new DirectDownloadEnqueueResult(id.longValue(), historyId, true, sourceType);
+		long id = GeneratedIdExtractor.requireId(keys, "direct download job");
+		return new DirectDownloadEnqueueResult(id, historyId, true, sourceType);
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)

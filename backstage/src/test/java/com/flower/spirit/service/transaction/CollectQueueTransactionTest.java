@@ -630,7 +630,7 @@ class CollectQueueTransactionTest {
 			assertThat(jdbc.queryForObject("SELECT taskstatus FROM biz_collect_data WHERE id = 42", String.class))
 					.isEqualTo("抓取失败");
 			assertThat(jdbc.queryForObject("SELECT event_code FROM biz_collect_run_event WHERE run_id = ? "
-					+ "AND event_code = 'FETCH_FAILED'", String.class, retry.runId())).isEqualTo("FETCH_FAILED");
+					+ "AND stage = 'FETCH_FAILED'", String.class, retry.runId())).isEqualTo("F2_UPSTREAM_SOFT_BLOCK");
 		}
 	}
 

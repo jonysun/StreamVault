@@ -8,7 +8,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementCreator;
+import org.springframework.jdbc.support.KeyHolder;
 import org.sqlite.SQLiteDataSource;
 
 import com.flower.spirit.service.DirectDownloadClaim;
@@ -16,6 +20,46 @@ import com.flower.spirit.service.DirectDownloadEnqueueResult;
 import com.flower.spirit.service.DirectDownloadSource;
 
 class DirectDownloadQueueTransactionTest {
+
+	@ParameterizedTest
+	@CsvSource({
+			"https://v.douyin.com/example/, douyin, 抖音",
+			"https://youtu.be/work-1, youtube, YouTube"
+	})
+	void singleLinkCanBeClaimedWhenGeneratedKeysIncludeMultipleColumns(String url, String platform,
+			String platformName) throws Exception {
+		// PostgreSQL RETURN_GENERATED_KEYS returns the inserted row, not just its ID.
+		JdbcTemplate jdbc = new JdbcTemplate(jdbcTemplate().getDataSource()) {
+			@Override
+			public int update(PreparedStatementCreator statement, KeyHolder keys) {
+				int updated = super.update(statement, keys);
+				Object id = keys.getKey();
+				keys.getKeyList().clear();
+				keys.getKeyList().add(java.util.Map.of("id", id, "state", "QUEUED", "attempt_count", 0));
+				return updated;
+			}
+		};
+		createSchema(jdbc);
+		DirectDownloadQueueTransaction transaction = new DirectDownloadQueueTransaction(jdbc);
+		Instant now = Instant.parse("2026-11-16T01:00:00Z");
+
+		DirectDownloadEnqueueResult queued = transaction.enqueue(url, platform, platformName,
+				null, null, DirectDownloadSource.SINGLE_LINK, null, 42, now, 3);
+		DirectDownloadClaim claim = transaction.claimNext("worker", now.plusSeconds(1));
+
+		assertThat(queued.created()).isTrue();
+		assertThat(claim).isNotNull();
+		assertThat(claim.jobId()).isEqualTo(queued.jobId());
+		assertThat(claim.sourceUrl()).isEqualTo(url);
+		assertThat(claim.platformKey()).isEqualTo(platform);
+		assertThat(claim.sourceType()).isEqualTo(DirectDownloadSource.SINGLE_LINK);
+		assertThat(claim.historyId()).isEqualTo(42);
+		assertThat(jdbc.queryForObject("SELECT state FROM biz_job_queue WHERE id=?", String.class,
+				queued.jobId())).isEqualTo("RUNNING");
+		transaction.complete(claim, now.plusSeconds(2));
+		assertThat(jdbc.queryForObject("SELECT state FROM biz_job_queue WHERE id=?", String.class,
+				queued.jobId())).isEqualTo("COMPLETED");
+	}
 
 	@Test
 	void enqueueDeduplicatesActiveWorkAndPersistsRetryLifecycle() throws Exception {
