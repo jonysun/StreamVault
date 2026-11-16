@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.flower.spirit.dao.GraphicContentDao;
 import com.flower.spirit.dao.VideoDataDao;
+import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.platform.PlatformCatalog;
 import com.flower.spirit.platform.WorkContentType;
@@ -85,6 +86,22 @@ class WorkDeduplicationServiceTest {
 				List.of("vimeo", "Vimeo"))).thenReturn(List.of(existing));
 
 		assertThat(service.findExisting(generic).orElseThrow().video()).isSameAs(existing);
+	}
+
+	@Test
+	void findsExistingGraphicEvenWhenIncomingContentTypeDiffers() {
+		GraphicContentEntity existing = new GraphicContentEntity();
+		existing.setId(10);
+		existing.setContenttype("mixed");
+		WorkMetadata incoming = WorkMetadata.builder()
+				.platform(PlatformCatalog.requireByKey("douyin"))
+				.workId("work-graphic")
+				.contentType(WorkContentType.GRAPHIC)
+				.build();
+		when(graphicContentDao.findByPlatformkeyAndVideoid("douyin", "work-graphic"))
+				.thenReturn(List.of(existing));
+
+		assertThat(service.findExisting(incoming).orElseThrow().graphic()).isSameAs(existing);
 	}
 
 	private WorkMetadata metadata() {

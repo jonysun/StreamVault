@@ -87,21 +87,19 @@ public class WorkDeduplicationService {
 		List<String> aliases = platformAliases(metadata);
 		if (hasText(metadata.getWorkId())) {
 			Optional<GraphicContentEntity> exact = firstMatchingGraphic(
-					graphicContentDao.findByPlatformkeyAndVideoid(metadata.getPlatformKey(), metadata.getWorkId()),
-					metadata.getContentType());
+					graphicContentDao.findByPlatformkeyAndVideoid(metadata.getPlatformKey(), metadata.getWorkId()));
 			if (exact.isPresent()) {
 				return exact.map(ExistingWork::graphic);
 			}
 			Optional<GraphicContentEntity> legacy = firstMatchingGraphic(
-					graphicContentDao.findByVideoidAndPlatformIn(metadata.getWorkId(), aliases), metadata.getContentType());
+					graphicContentDao.findByVideoidAndPlatformIn(metadata.getWorkId(), aliases));
 			if (legacy.isPresent()) {
 				return legacy.map(ExistingWork::graphic);
 			}
 		}
 		if (hasText(metadata.getOriginalAddress())) {
 			return firstMatchingGraphic(graphicContentDao.findByOriginaladdressAndPlatformIn(
-					metadata.getOriginalAddress(), aliases),
-					metadata.getContentType()).map(ExistingWork::graphic);
+					metadata.getOriginalAddress(), aliases)).map(ExistingWork::graphic);
 		}
 		return Optional.empty();
 	}
@@ -113,12 +111,12 @@ public class WorkDeduplicationService {
 		return rows.stream().filter(row -> row != null && matchesContentType(row.getContenttype(), contentType)).findFirst();
 	}
 
-	private Optional<GraphicContentEntity> firstMatchingGraphic(List<GraphicContentEntity> rows,
-			WorkContentType contentType) {
+	private Optional<GraphicContentEntity> firstMatchingGraphic(List<GraphicContentEntity> rows) {
 		if (rows == null) {
 			return Optional.empty();
 		}
-		return rows.stream().filter(row -> row != null && matchesContentType(row.getContenttype(), contentType)).findFirst();
+		// Graphic and mixed works share one table and the same platform/work-id uniqueness constraint.
+		return rows.stream().filter(row -> row != null).findFirst();
 	}
 
 	private boolean matchesContentType(String storedType, WorkContentType requestedType) {
