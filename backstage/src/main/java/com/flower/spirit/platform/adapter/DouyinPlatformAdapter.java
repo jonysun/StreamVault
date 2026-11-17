@@ -352,6 +352,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				|| message.contains("http/1.1 403") || message.contains("http/1.1 404")
 				|| message.contains("status=403") || message.contains("status=404")
 				|| message.contains("status=410") || message.contains("upstream challenge")
+				|| message.contains("unexpected content")
 				|| message.contains("non-media content") || message.contains("response was empty");
 	}
 
@@ -399,7 +400,7 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 				JSONObject item = images.getJSONObject(i);
 				JSONObject itemVideo = item == null ? null : item.getJSONObject("video");
 				if (itemVideo != null) {
-					String url = mediaUrl(itemVideo.getJSONObject("play_addr"));
+					String url = videoMediaUrl(itemVideo.getJSONObject("play_addr"));
 					if (url == null) {
 						logger.warn("[DouyinMedia] parsed resource missing workId={} order={} type=VIDEO "
 								+ "videoObjectPresent=true playAddrPresent={}", workId,
@@ -421,14 +422,15 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			}
 		} else {
 			JSONObject video = detail.getJSONObject("video");
-			String url = video == null ? null : mediaUrl(video.getJSONObject("play_addr"));
+			String url = video == null ? null : videoMediaUrl(video.getJSONObject("play_addr"));
 			if (url == null) {
 				JSONArray playAddresses = detail.getJSONArray("video_play_addr");
+				url = videoMediaUrl(playAddresses);
 				logger.warn("[DouyinMedia] parsed resource missing workId={} type=VIDEO videoObjectPresent={} "
 						+ "playAddrPresent={} normalizedPlayAddrCount={}", workId, video != null,
-						video != null && video.getJSONObject("play_addr") != null,
+						url != null,
 						playAddresses == null ? 0 : playAddresses.size());
-				throw new WorkMetadataValidationException("Douyin video has no playable URL");
+				if (url == null) throw new WorkMetadataValidationException("Douyin video has no playable URL");
 			}
 			resources.add(resource(0, WorkMediaResource.Type.VIDEO, url, "mp4"));
 			hasVideoResource = true;
@@ -529,6 +531,46 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 			if (value != null && !value.isBlank()) return value;
 		}
 		return null;
+	}
+
+	/** Select a playable URL, excluding image CDN URLs that can appear in malformed list snapshots. */
+	private String videoMediaUrl(JSONObject object) {
+		if (object == null) return null;
+		JSONArray urls = object.getJSONArray("url_list");
+		if (urls == null || urls.isEmpty()) urls = object.getJSONArray("urls");
+		if (urls == null || urls.isEmpty()) {
+			Object download = object.get("download_url_list");
+			if (download instanceof JSONObject value) urls = value.getJSONArray("url_list");
+			if (download instanceof JSONArray value) urls = value;
+		}
+		if (urls == null || urls.isEmpty()) {
+			String direct = object.getString("url");
+			return direct == null || direct.isBlank() || isLikelyImageUrl(direct) ? null : direct.trim();
+		}
+		return videoMediaUrl(urls);
+	}
+
+	private String videoMediaUrl(JSONArray urls) {
+		if (urls == null || urls.isEmpty()) return null;
+		for (int i = urls.size() - 1; i >= 0; i--) {
+			String value = urls.getString(i);
+			if (value != null && !value.isBlank() && !isLikelyImageUrl(value)) return value;
+		}
+		return null;
+	}
+
+	private boolean isLikelyImageUrl(String value) {
+		if (value == null || value.isBlank()) return false;
+		try {
+			URI uri = URI.create(value.trim());
+			String host = uri.getHost();
+			String path = uri.getPath();
+			String normalizedPath = path == null ? "" : path.toLowerCase(java.util.Locale.ROOT);
+			return (host != null && host.toLowerCase(java.util.Locale.ROOT).endsWith(".douyinpic.com"))
+					|| normalizedPath.matches(".*\\.(?:avif|bmp|gif|heic|heif|jpe?g|png|webp)$");
+		} catch (IllegalArgumentException ignored) {
+			return false;
+		}
 	}
 
 	private JSONObject parseObject(String raw) {

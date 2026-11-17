@@ -84,6 +84,45 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void refreshesWorkDetailWhenVideoAddressReturnsAnImage() throws Exception {
+		String refreshed = "{\"aweme_detail\":{\"aweme_id\":\"7300000000000000001\","
+				+ "\"video\":{\"play_addr\":{\"url_list\":[\"https://media.example/refreshed.mp4\"]},"
+				+ "\"cover\":{\"url_list\":[\"https://media.example/cover.jpg\"]}}}}";
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
+		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
+		FakeGateway gateway = new FakeGateway(resourceUnchecked("video.json"),
+				"https://www.douyin.com/video/7300000000000000001") {
+			@Override public String fetch(String workId, String cookie) {
+				fetchCalls++;
+				return refreshed;
+			}
+
+			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
+				downloadCalls++;
+				if (downloadCalls == 1) {
+					throw new IOException("media request returned unexpected content contentType=image/webp expectedType=VIDEO");
+				}
+				Files.createDirectories(destination.getParent());
+				return Files.writeString(destination, source.getType().name());
+			}
+		};
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+		WorkMetadata metadata = adapter.parse(new WorkParseRequest("input",
+				"https://www.douyin.com/video/7300000000000000001", false));
+
+		DownloadResult result = adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
+
+		assertThat(result.getStatus()).isEqualTo(DownloadResult.Status.COMPLETED);
+		assertThat(gateway.fetchCalls).isEqualTo(1);
+		assertThat(gateway.downloadCalls).isEqualTo(3);
+		assertThat(result.getMediaResources()).extracting(WorkMediaResource::getType)
+				.containsExactly(WorkMediaResource.Type.VIDEO, WorkMediaResource.Type.IMAGE);
+		assertThat(Files.readString(tempDir.resolve("7300000000000000001-index-0.mp4"))).isEqualTo("VIDEO");
+	}
+
+	@Test
 	void parsesValidatedListSnapshotWithoutResolvingOrFetchingSingleWorkDetail() throws Exception {
 		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		FakeGateway gateway = new FakeGateway("remote response must not be used",
@@ -101,6 +140,47 @@ class DouyinPlatformAdapterTest {
 		assertThat(gateway.resolveCalls).isZero();
 		verify(cookies, never()).currentDouyinCookie(any());
 		verify(cookies, never()).reportSuccess(any(), any());
+	}
+
+	@Test
+	void rejectsImageCdnAddressInVideoSnapshotAndFetchesFreshWorkDetail() throws Exception {
+		String imageAddressSnapshot = "{\"aweme_detail\":{\"aweme_id\":\"7300000000000000001\","
+				+ "\"video\":{\"play_addr\":{\"url_list\":["
+				+ "\"https://p3-pc-sign.douyinpic.com/cover.webp?from=snapshot\"]}}}}";
+		FakeGateway gateway = new FakeGateway(resourceUnchecked("video.json"),
+				"https://www.douyin.com/video/7300000000000000001");
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+
+		WorkMetadata metadata = adapter.parse(new WorkParseRequest("collection item",
+				"https://www.douyin.com/video/7300000000000000001", false, imageAddressSnapshot));
+
+		assertThat(metadata.getMediaResources()).singleElement()
+				.extracting(WorkMediaResource::getSourceUrl)
+				.isEqualTo("https://media.example/douyin-video.mp4");
+		assertThat(gateway.fetchCalls).isEqualTo(1);
+	}
+
+	@Test
+	void rejectsImageCdnAddressInFallbackVideoPlayAddressesAndFetchesFreshWorkDetail() throws Exception {
+		String imageAddressSnapshot = "{\"aweme_detail\":{\"aweme_id\":\"7300000000000000001\","
+				+ "\"video_play_addr\":[\"https://p3-pc-sign.douyinpic.com/cover.webp?from=snapshot\"]}}";
+		FakeGateway gateway = new FakeGateway(resourceUnchecked("video.json"),
+				"https://www.douyin.com/video/7300000000000000001");
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+
+		WorkMetadata metadata = adapter.parse(new WorkParseRequest("collection item",
+				"https://www.douyin.com/video/7300000000000000001", false, imageAddressSnapshot));
+
+		assertThat(metadata.getMediaResources()).singleElement()
+				.extracting(WorkMediaResource::getSourceUrl)
+				.isEqualTo("https://media.example/douyin-video.mp4");
+		assertThat(gateway.fetchCalls).isEqualTo(1);
 	}
 
 	@Test
