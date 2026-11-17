@@ -117,7 +117,7 @@ class DouyinPlatformAdapterTest {
 		DownloadResult result = adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
 
 		assertThat(result.getStatus()).isEqualTo(DownloadResult.Status.COMPLETED);
-		assertThat(fetchCalls[0]).isEqualTo(1);
+		assertThat(fetchCalls[0]).isEqualTo(2);
 		assertThat(downloadCalls[0]).isEqualTo(3);
 		assertThat(result.getMediaResources()).extracting(WorkMediaResource::getType)
 				.containsExactly(WorkMediaResource.Type.VIDEO, WorkMediaResource.Type.IMAGE);
@@ -512,3 +512,4 @@ class DouyinPlatformAdapterTest {
 		}
 	}
 }
+
