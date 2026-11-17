@@ -51,7 +51,9 @@ COPY --from=denoland/deno:bin-2.6.9 /deno /usr/local/bin/deno
 VOLUME ["/tmp", "/app"]
 COPY db /home/app/db/
 COPY script /home/app/script/
-RUN mkdir -p /app/resources
+RUN chmod +x /home/app/script/streamvault-backfill-thumbnails.py && \
+    ln -sf /home/app/script/streamvault-backfill-thumbnails.py /usr/local/bin/streamvault-backfill-thumbnails && \
+    mkdir -p /app/resources
 
 ADD StreamVault-0.0.1-SNAPSHOT.jar app.jar
 

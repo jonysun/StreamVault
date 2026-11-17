@@ -36,6 +36,22 @@ docker compose -f docker-compose.yaml up -d --no-deps stream-vault
 
 如果曾自行安装 JAR 覆盖，请先撤销该覆盖，否则挂载的旧 JAR 会遮住新镜像中的程序。
 
+## 批量补齐视频缩略图
+
+最新镜像内置 `streamvault-backfill-thumbnails` 命令。它先复用或下载数据库中的远程封面 URL，失败后才用 ffmpeg 从视频抽帧，并把本地封面路径写回 `videocover`：
+
+```sh
+docker exec my-stream-vault streamvault-backfill-thumbnails
+```
+
+先预览而不写文件或数据库：
+
+```sh
+docker exec my-stream-vault streamvault-backfill-thumbnails --dry-run
+```
+
+分批执行可加 `--limit 100`。命令只处理 `biz_video` 中已有本地视频文件的记录，不会重新下载视频。
+
 ## 验证
 
 ```sh
