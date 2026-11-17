@@ -92,16 +92,18 @@ class DouyinPlatformAdapterTest {
 		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
 		when(cookies.currentDouyinCookie("single_work_parse")).thenReturn("cookie-value");
 		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
+		int[] fetchCalls = { 0 };
+		int[] downloadCalls = { 0 };
 		FakeGateway gateway = new FakeGateway(resourceUnchecked("video.json"),
 				"https://www.douyin.com/video/7300000000000000001") {
 			@Override public String fetch(String workId, String cookie) {
-				fetchCalls++;
+				fetchCalls[0]++;
 				return refreshed;
 			}
 
 			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
-				downloadCalls++;
-				if (downloadCalls == 1) {
+				downloadCalls[0]++;
+				if (downloadCalls[0] == 1) {
 					throw new IOException("media request returned unexpected content contentType=image/webp expectedType=VIDEO");
 				}
 				Files.createDirectories(destination.getParent());
@@ -115,8 +117,8 @@ class DouyinPlatformAdapterTest {
 		DownloadResult result = adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
 
 		assertThat(result.getStatus()).isEqualTo(DownloadResult.Status.COMPLETED);
-		assertThat(gateway.fetchCalls).isEqualTo(1);
-		assertThat(gateway.downloadCalls).isEqualTo(3);
+		assertThat(fetchCalls[0]).isEqualTo(1);
+		assertThat(downloadCalls[0]).isEqualTo(3);
 		assertThat(result.getMediaResources()).extracting(WorkMediaResource::getType)
 				.containsExactly(WorkMediaResource.Type.VIDEO, WorkMediaResource.Type.IMAGE);
 		assertThat(Files.readString(tempDir.resolve("7300000000000000001-index-0.mp4"))).isEqualTo("VIDEO");
