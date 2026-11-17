@@ -423,6 +423,8 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		} else {
 			JSONObject video = detail.getJSONObject("video");
 			String url = video == null ? null : videoMediaUrl(video.getJSONObject("play_addr"));
+			if (url == null && video != null) url = videoMediaUrl(video.getJSONObject("download_addr"));
+			if (url == null && video != null) url = videoMediaUrl(video);
 			if (url == null) {
 				JSONArray playAddresses = detail.getJSONArray("video_play_addr");
 				url = videoMediaUrl(playAddresses);
@@ -545,6 +547,8 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		}
 		if (urls == null || urls.isEmpty()) {
 			String direct = object.getString("url");
+			if (direct == null || direct.isBlank() || isLikelyImageUrl(direct)) direct = firstVideoText(object,
+					"download_url", "downloadUrl", "play_url", "playUrl", "no_watermark", "noWatermark", "video_url", "videoUrl");
 			return direct == null || direct.isBlank() || isLikelyImageUrl(direct) ? null : direct.trim();
 		}
 		return videoMediaUrl(urls);
@@ -555,6 +559,15 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		for (int i = urls.size() - 1; i >= 0; i--) {
 			String value = urls.getString(i);
 			if (value != null && !value.isBlank() && !isLikelyImageUrl(value)) return value;
+		}
+		return null;
+	}
+
+	private String firstVideoText(JSONObject object, String... keys) {
+		if (object == null || keys == null) return null;
+		for (String key : keys) {
+			String value = object.getString(key);
+			if (value != null && !value.isBlank() && !isLikelyImageUrl(value)) return value.trim();
 		}
 		return null;
 	}
@@ -663,3 +676,4 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 		Path download(WorkMediaResource source, Path destination, String cookie) throws IOException;
 	}
 }
+
