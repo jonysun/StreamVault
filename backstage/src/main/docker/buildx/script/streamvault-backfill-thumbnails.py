@@ -139,6 +139,7 @@ def main():
 
     database = Database()
     counts = {"downloaded": 0, "generated": 0, "updated": 0, "skipped": 0, "failed": 0}
+    planned = {"would_download": 0, "would_generate": 0, "would_update": 0}
     try:
         rows = database.rows()
         if args.limit:
@@ -163,7 +164,15 @@ def main():
                     if ready:
                         counts["generated"] += 1
             elif not ready and args.dry_run:
-                counts["generated"] += 1
+                # A dry run must not report planned work as failed. It cannot
+                # know whether a remote URL or ffmpeg will succeed without
+                # performing the actual work, so report the intended action.
+                if str(raw_cover or "").strip().startswith(("http://", "https://")):
+                    planned["would_download"] += 1
+                else:
+                    planned["would_generate"] += 1
+                planned["would_update"] += 1
+                continue
 
             if not ready:
                 counts["failed"] += 1
@@ -177,6 +186,8 @@ def main():
             database.commit()
     finally:
         database.close()
+    if args.dry_run:
+        counts.update(planned)
     print(" ".join(f"{key}={value}" for key, value in counts.items()))
 
 
