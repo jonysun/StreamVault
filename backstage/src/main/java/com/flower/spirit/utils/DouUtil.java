@@ -693,7 +693,7 @@ public class DouUtil {
 			 res.put("sec_uid", secUid);
 			 res.put("unique_id", uniqueId);
 			 res.put("create_time", create_time);
-			 res.put("avatar_thumb", data.getString("avatar_thumb"));
+			 res.put("avatar_thumb", firstNotBlank(extractAvatar(data), extractAvatar(author)));
 			 res.put("jsonData", data.toJSONString());
 			 return res;
 		 }
@@ -736,7 +736,7 @@ public class DouUtil {
 
 	public static String extractAvatar(JSONObject author) {
 		if (author == null) return null;
-		String[] keys = {"avatar_300x300", "avatar_medium", "avatar_thumb"};
+		String[] keys = {"avatar_300x300", "avatar_medium", "avatar_thumb", "avatar"};
 		for (String key : keys) {
 			Object value = author.get(key);
 			String url = extractUrl(value);
@@ -745,12 +745,39 @@ public class DouUtil {
 		return null;
 	}
 
+	public static JSONObject authorWithSupplement(JSONObject detail, JSONObject supplement) {
+		JSONObject author = detail == null ? null : detail.getJSONObject("author");
+		JSONObject extraDetail = findAwemeDetail(supplement);
+		if (extraDetail == null || detail == null) return author;
+		String workId = detail.getString("aweme_id");
+		if (workId == null || !workId.equals(extraDetail.getString("aweme_id"))) return author;
+		JSONObject extra = extraDetail.getJSONObject("author");
+		if (extra == null) return author;
+		String uid = author == null ? null : AuthorIdentityUtil.canonicalAuthorUid("douyin",
+				author.getString("uid"), author.getString("sec_uid"));
+		String extraUid = AuthorIdentityUtil.canonicalAuthorUid("douyin", extra.getString("uid"), extra.getString("sec_uid"));
+		if (uid != null && extraUid != null && !uid.equals(extraUid)) return author;
+		JSONObject merged = new JSONObject(true);
+		merged.putAll(extra);
+		if (author != null) {
+			for (var entry : author.entrySet()) {
+				Object value = entry.getValue();
+				if (value != null && (!(value instanceof String text) || !text.isBlank())) {
+					merged.put(entry.getKey(), value);
+				}
+			}
+		}
+		return merged;
+	}
+
 	private static String extractUrl(Object value) {
 		if (value == null) return null;
 		if (value instanceof String) return (String) value;
 		if (value instanceof JSONObject) {
 			JSONArray urls = ((JSONObject) value).getJSONArray("url_list");
+			if (urls == null || urls.isEmpty()) urls = ((JSONObject) value).getJSONArray("urls");
 			if (urls != null && !urls.isEmpty()) return urls.getString(urls.size() - 1);
+			return ((JSONObject) value).getString("url");
 		}
 		if (value instanceof JSONArray && !((JSONArray) value).isEmpty()) return ((JSONArray) value).getString(((JSONArray) value).size() - 1);
 		return null;

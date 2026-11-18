@@ -65,6 +65,7 @@ class WorkPersistenceServiceTest {
 				List.of(resource(0, WorkMediaResource.Type.VIDEO, mediaFile("video.mp4")))));
 
 		VideoDataEntity video = result.video();
+		verify(authorProfileService).prepareVideoAuthorForSave(video);
 		assertThat(result.created()).isTrue();
 		assertThat(video.getPlatformkey()).isEqualTo("youtube");
 		assertThat(video.getVideoplatform()).isEqualTo("YouTube");
@@ -95,6 +96,7 @@ class WorkPersistenceServiceTest {
 				resource(0, WorkMediaResource.Type.IMAGE, mediaFile("first.jpg")))));
 
 		GraphicContentEntity graphic = result.graphic();
+		verify(authorProfileService).prepareGraphicAuthorForSave(graphic);
 		assertThat(result.contentType()).isEqualTo(WorkContentType.MIXED);
 		assertThat(graphic.getContenttype()).isEqualTo("mixed");
 		assertThat(JSON.parseArray(graphic.getImages(), String.class))

@@ -356,16 +356,17 @@ public class DouyinWorkMaintenanceService {
 		rawPayload().storeVideoRawPayload(target, jsonData);
 		target.setPublishtime(DateUtils.normalizePublishTime(createTime));
 		target.setSourceurl(DouyinSourceUrlUtil.video(awemeId));
-		target.setVideoauthor(nickname);
-		target.setAuthoruid(authorUidForSave);
-		target.setSecuid(authorUidForSave);
-		target.setAuthorusername(uniqueId);
-		target.setUniqueid(uniqueId);
-		target.setAuthoravatar(avatar);
+		target.setVideoauthor(firstNotBlank(nickname, target.getVideoauthor()));
+		target.setAuthoruid(firstNotBlank(authorUidForSave, target.getAuthoruid()));
+		target.setSecuid(firstNotBlank(authorUidForSave, target.getSecuid()));
+		target.setAuthorusername(firstNotBlank(uniqueId, target.getAuthorusername()));
+		target.setUniqueid(firstNotBlank(uniqueId, target.getUniqueid()));
+		target.setAuthoravatar(firstNotBlank(avatar, target.getAuthoravatar()));
 		target.setCreatetime(new Date());
 		if (authorProfileService != null) {
 			authorProfileService.upsertAuthor("抖音", authorUidForSave, uniqueId, nickname, avatar,
 					AuthorIdentityUtil.douyinHomepage(authorUidForSave), signature);
+			authorProfileService.prepareVideoAuthorForSave(target);
 		}
 	}
 
@@ -418,9 +419,9 @@ public class DouyinWorkMaintenanceService {
 			}
 		}
 
-		AuthorSnapshot snapshot = resolveAuthorSnapshot(detail, nickname);
-		String sourceUrl = DouyinSourceUrlUtil.graphic(snapshot.authorUid, postId);
 		JSONObject hybrid = fetchDtkWorkData(postId);
+		AuthorSnapshot snapshot = resolveAuthorSnapshot(detail, hybrid, nickname);
+		String sourceUrl = DouyinSourceUrlUtil.graphic(snapshot.authorUid, postId);
 		target.setVideoid(postId);
 		target.setPlatform("抖音");
 		target.setOriginaladdress(source);
@@ -428,12 +429,12 @@ public class DouyinWorkMaintenanceService {
 		target.setContent(desc);
 		target.setImages(imageList.toJSONString());
 		target.setMarkroute(markroute);
-		target.setAuthor(snapshot.nickname);
-		target.setAuthoruid(snapshot.authorUid);
-		target.setSecuid(snapshot.secUid);
-		target.setAuthorusername(snapshot.uniqueId);
-		target.setUniqueid(snapshot.uniqueId);
-		target.setAuthoravatar(snapshot.avatar);
+		target.setAuthor(firstNotBlank(snapshot.nickname, target.getAuthor()));
+		target.setAuthoruid(firstNotBlank(snapshot.authorUid, target.getAuthoruid()));
+		target.setSecuid(firstNotBlank(snapshot.secUid, target.getSecuid()));
+		target.setAuthorusername(firstNotBlank(snapshot.uniqueId, target.getAuthorusername()));
+		target.setUniqueid(firstNotBlank(snapshot.uniqueId, target.getUniqueid()));
+		target.setAuthoravatar(firstNotBlank(snapshot.avatar, target.getAuthoravatar()));
 		target.setJsonData(hybrid == null ? json : hybrid.toJSONString());
 		target.setPublishtime(DateUtils.normalizePublishTime(detail.getString("create_time")));
 		target.setSourceurl(firstNotBlank(sourceUrl, source));
@@ -442,6 +443,7 @@ public class DouyinWorkMaintenanceService {
 			authorProfileService.upsertAuthor("抖音", snapshot.authorUid, snapshot.uniqueId, snapshot.nickname, snapshot.avatar,
 					AuthorIdentityUtil.douyinHomepage(snapshot.authorUid),
 					snapshot.signature);
+			authorProfileService.prepareGraphicAuthorForSave(target);
 		}
 		Files.deleteIfExists(Paths.get(taskout));
 	}
@@ -556,8 +558,8 @@ public class DouyinWorkMaintenanceService {
 		return changed;
 	}
 
-	private AuthorSnapshot resolveAuthorSnapshot(JSONObject detail, String fallbackName) {
-		JSONObject author = detail == null ? null : detail.getJSONObject("author");
+	private AuthorSnapshot resolveAuthorSnapshot(JSONObject detail, JSONObject supplement, String fallbackName) {
+		JSONObject author = DouUtil.authorWithSupplement(detail, supplement);
 		AuthorSnapshot snapshot = new AuthorSnapshot();
 		snapshot.nickname = author == null ? fallbackName : firstNotBlank(author.getString("nickname"), fallbackName);
 		snapshot.secUid = author == null ? null : author.getString("sec_uid");

@@ -1093,6 +1093,7 @@ public class CollectDataService {
 					} else {
 						videoDataEntity.setVideoauthor(dyNickname);
 					}
+					if (authorProfileService != null) authorProfileService.prepareVideoAuthorForSave(videoDataEntity);
 					VideoDataEntity saved = videoDataDao.save(videoDataEntity);
 					if (saved != null && saved.getId() != null) {
 						hlsTranscodeService.enqueueByIds(String.valueOf(saved.getId()));

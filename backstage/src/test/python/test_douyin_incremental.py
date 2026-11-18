@@ -73,6 +73,16 @@ def fake_fetch(pages):
 
 
 class NormalizeAwemeTest(unittest.TestCase):
+    def test_preserves_author_identity_in_collection_summary(self):
+        raw = work("author-fields", 100)
+        raw["author"].update(unique_id="public-name", signature="bio")
+
+        normalized = normalize_aweme(raw)
+
+        self.assertEqual("public-name", normalized.get("unique_id"))
+        self.assertEqual("MS4-author", normalized.get("sec_uid"))
+        self.assertEqual("bio", normalized.get("signature"))
+
     def test_normalizes_required_fields_and_image_media_type(self):
         normalized = normalize_aweme(
             work(
@@ -94,6 +104,9 @@ class NormalizeAwemeTest(unittest.TestCase):
                 "create_time": "1720000000",
                 "nickname": "display name",
                 "uid": "MS4-sec-uid",
+                "sec_uid": "MS4-sec-uid",
+                "unique_id": "",
+                "signature": "",
                 "avatar_thumb": "avatar-url",
                 "cover": ["cover-1", "cover-2"],
                 "media_type": "image",
@@ -177,6 +190,17 @@ class NormalizeAwemeTest(unittest.TestCase):
 
 
 class DownloadSnapshotTest(unittest.TestCase):
+    def test_keeps_alternative_avatar_from_upstream(self):
+        raw = work("avatar-variants", 100)
+        raw["author"].pop("avatar_thumb")
+        raw["author"]["avatar_medium"] = {"url_list": ["https://media.test/medium.jpg"]}
+        raw["author"]["avatar_300x300"] = "https://media.test/large.jpg"
+
+        author = build_download_snapshot(raw)["aweme_detail"]["author"]
+
+        self.assertEqual(raw["author"]["avatar_medium"], author.get("avatar_medium"))
+        self.assertEqual("https://media.test/large.jpg", author.get("avatar_300x300"))
+
     def test_builds_allowlisted_video_snapshot(self):
         raw = work("video-1", 1720000000, desc="caption")
         raw["author"].update(
@@ -1180,6 +1204,63 @@ class IncrementalPaginatorTest(unittest.IsolatedAsyncioTestCase):
 class DouyinCommandIntegrationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.module_path = SCRIPT_DIR / "douyin.py"
+
+    async def test_direct_video_preserves_raw_author_in_json_output(self):
+        module, _ = self._load_command_module({}, [])
+        raw = work("direct", 100)
+        raw["author"].update(uid="numeric-id", unique_id="public-name")
+        video = mock.Mock(
+            cover="https://media.test/cover.jpg", aweme_id="direct", desc="caption",
+            video_play_addr=["https://media.test/video.mp4"], nickname="author", create_time=100,
+        )
+        video._to_raw.return_value = {"aweme_detail": raw}
+        video._get_attr_value.side_effect = lambda path: {
+            "$.aweme_detail.author.avatar_thumb.url_list[0]": "https://example.test/avatar.jpg",
+            "$.aweme_detail.author.sec_uid": "MS4-author",
+        }.get(path)
+        handler = mock.Mock()
+        handler.fetch_one_video = mock.AsyncMock(return_value=video)
+        stdout = io.StringIO()
+        with mock.patch.object(module, "DouyinHandler", return_value=handler), contextlib.redirect_stdout(stdout):
+            await module.fetch_video("cookie", "direct")
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual("public-name", payload.get("unique_id"))
+        self.assertEqual("MS4-author", payload.get("sec_uid"))
+        self.assertEqual("numeric-id", payload.get("uid"))
+        self.assertEqual("public-name", payload["author"]["unique_id"])
+
+    async def test_legacy_collection_commands_preserve_raw_author(self):
+        module, _ = self._load_command_module({}, [])
+        raw = work("collection", 100)
+        raw["author"].update(uid="numeric-id", unique_id="public-name")
+        response = mock.Mock()
+        response._to_raw.return_value = {"aweme_list": [raw]}
+        response._to_list.return_value = [{
+            "aweme_id": "collection", "cover": "cover", "desc": "caption",
+            "video_play_addr": ["video"], "nickname": "author", "author_avatar_thumb": "avatar",
+            "uid": "MS4-author", "create_time": 100,
+        }]
+        async def pages(*args, **kwargs):
+            yield response
+        handler = types.SimpleNamespace(**{name: pages for name in (
+            "fetch_user_like_videos", "fetch_user_post_videos",
+            "fetch_user_collects_videos", "fetch_user_feed_videos",
+        )})
+        for name, args in (
+            ("fetch_user_like_videos", ("cookie", "MS4-owner", "20", "out")),
+            ("fetch_user_post_videos", ("cookie", "MS4-owner", "20", "out")),
+            ("fetch_user_collects_videos", ("cookie", "collection-id", "20", "out")),
+            ("fetch_user_feed_videos", ("cookie", "MS4-owner", "out")),
+        ):
+            with self.subTest(command=name), mock.patch.object(module, "DouyinHandler", return_value=handler), \
+                    mock.patch.object(module, "write_to_file", return_value=True) as write, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                await getattr(module, name)(*args)
+                payload = write.call_args.args[0][0]
+                self.assertEqual("public-name", payload.get("unique_id"))
+                self.assertEqual("MS4-author", payload.get("sec_uid"))
+                self.assertEqual("public-name", payload["author"]["unique_id"])
 
     async def test_cookie_probe_treats_null_collection_list_as_indeterminate(self):
         module, _ = self._load_command_module(

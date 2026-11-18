@@ -1025,6 +1025,7 @@ public class AnalysisService {
 		videofile = videofile + filename + ".mp4";
 
 
+		authorProfileService.prepareVideoAuthorForSave(videoDataEntity);
 		videoDataDao.save(videoDataEntity);
 		logger.info("下载流程结束");
 	}

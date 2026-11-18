@@ -268,6 +268,9 @@ def normalize_aweme(aweme):
         "create_time": create_time,
         "nickname": nickname,
         "uid": uid,
+        "sec_uid": uid,
+        "unique_id": _normalize_optional_string(author.get("unique_id"), "author.unique_id"),
+        "signature": _normalize_optional_string(author.get("signature"), "author.signature"),
         "avatar_thumb": avatar_urls[0] if avatar_urls else "",
         "cover": cover,
         "media_type": "image" if images else "video",
@@ -317,9 +320,11 @@ def build_download_snapshot(aweme):
             value = _snapshot_text(raw_author.get(key))
             if value is not None:
                 author[key] = value
-        avatar = _snapshot_url_container(raw_author.get("avatar_thumb"))
-        if avatar is not None:
-            author["avatar_thumb"] = avatar
+        for key in ("avatar_300x300", "avatar_medium", "avatar_thumb"):
+            value = raw_author.get(key)
+            avatar = value if isinstance(value, str) and value else _snapshot_url_container(value)
+            if avatar is not None:
+                author[key] = avatar
         if author:
             detail["author"] = author
 

@@ -788,6 +788,14 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 		if (detail.getJSONObject("author") == null && source.getJSONObject("user") != null) {
 			detail.put("author", source.getJSONObject("user"));
 		}
+		if (detail.getJSONObject("author") == null) {
+			JSONObject flatAuthor = new JSONObject(true);
+			for (String key : List.of("uid", "sec_uid", "unique_id", "nickname", "signature",
+					"avatar_300x300", "avatar_medium", "avatar_thumb")) {
+				if (source.get(key) != null) flatAuthor.put(key, source.get(key));
+			}
+			if (!flatAuthor.isEmpty()) detail.put("author", flatAuthor);
+		}
 		JSONObject author = detail.getJSONObject("author");
 		if (author != null) {
 			String uid = firstText(author, "uid", "id", "user_id", "userId");
@@ -1181,8 +1189,7 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	}
 
 	private String avatar(JSONObject author) {
-		JSONObject avatar = author == null ? null : author.getJSONObject("avatar_thumb");
-		return mediaUrl(avatar);
+		return com.flower.spirit.utils.DouUtil.extractAvatar(author);
 	}
 
 	private JSONObject object(JSONObject o, String key) { return o == null ? null : o.getJSONObject(key); }
@@ -1197,4 +1204,3 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 	private boolean blank(String value) { return value == null || value.trim().isEmpty(); }
 	private String trimSlash(String value) { return value == null ? "" : value.replaceAll("/+$", ""); }
 }
-

@@ -1379,6 +1379,32 @@ def write_to_file(data, output_file: str) -> bool:
         print(f"写入文件时出错: {e}")
         return False
 
+def _legacy_author_fields(detail):
+    # Read the raw response: F2's flattened list does not expose unique_id.
+    author = detail.get("author") if isinstance(detail, dict) else None
+    if not isinstance(author, dict):
+        return {}
+    fields = {key: author[key] for key in ("uid", "sec_uid", "unique_id", "nickname", "signature")
+              if author.get(key) not in (None, "")}
+    fields["author"] = author
+    for key in ("avatar_300x300", "avatar_medium", "avatar_thumb"):
+        avatar = author.get(key)
+        urls = avatar.get("url_list") if isinstance(avatar, dict) else None
+        url = avatar if isinstance(avatar, str) else next(
+            (value for value in (urls or []) if isinstance(value, str) and value), None
+        )
+        if url:
+            fields["avatar_thumb"] = url
+            break
+    return fields
+
+
+def _legacy_page_details(page):
+    raw = page._to_raw()
+    items = raw.get("aweme_list") if isinstance(raw, dict) else None
+    return {str(item.get("aweme_id")): item for item in (items or []) if isinstance(item, dict)}
+
+
 # 获取视频信息的方法
 async def fetch_video(cookie: str, aweme_id: str):
     kwargs = {
@@ -1405,7 +1431,10 @@ async def fetch_video(cookie: str, aweme_id: str):
         "uid": video._get_attr_value("$.aweme_detail.author.sec_uid"),
         "create_time": video.create_time
     }
-    print(jsonres)
+    raw = video._to_raw()
+    detail = raw.get("aweme_detail", raw) if isinstance(raw, dict) else {}
+    jsonres.update(_legacy_author_fields(detail))
+    print(json.dumps(jsonres, ensure_ascii=False))
     
 # 获取视频信息的方法
 async def fetch_post_data(cookie: str, aweme_id: str, output_file: str):
@@ -1493,6 +1522,7 @@ async def fetch_user_like_videos(cookie: str, uid: str, maxc: str, output_file: 
     async for aweme_data_list in handler.fetch_user_like_videos(
         uid, 0,  20, int(maxc)
     ):
+        details = _legacy_page_details(aweme_data_list)
         videos = aweme_data_list._to_list()
         for video in videos:
             jsonres = {
@@ -1505,6 +1535,7 @@ async def fetch_user_like_videos(cookie: str, uid: str, maxc: str, output_file: 
                 "uid": video["uid"],
                 "create_time": video["create_time"]
             }
+            jsonres.update(_legacy_author_fields(details.get(str(video["aweme_id"]))))
             all_videos.append(jsonres)
     
     if write_to_file(all_videos, output_file):
@@ -1528,6 +1559,7 @@ async def fetch_user_post_videos(cookie: str, uid: str, maxc: str, output_file: 
     async for aweme_data_list in handler.fetch_user_post_videos(
         uid, 0, 0,  20, int(maxc)
     ):
+        details = _legacy_page_details(aweme_data_list)
         videos = aweme_data_list._to_list()
         for video in videos:
             jsonres = {
@@ -1540,6 +1572,7 @@ async def fetch_user_post_videos(cookie: str, uid: str, maxc: str, output_file: 
                 "uid": video["uid"],
                 "create_time": video["create_time"]
             }
+            jsonres.update(_legacy_author_fields(details.get(str(video["aweme_id"]))))
             all_videos.append(jsonres)
     
     if write_to_file(all_videos, output_file):
@@ -1667,7 +1700,7 @@ async def fetch_user_collects_videos(cookie: str, cid: str, maxc:str, output_fil
         page_counts=10,
         max_counts=int(maxc)
     ):
-        print(collection_list._to_raw())
+        details = _legacy_page_details(collection_list)
         videos = collection_list._to_list()
         for video in videos:
             jsonres = {
@@ -1680,6 +1713,7 @@ async def fetch_user_collects_videos(cookie: str, cid: str, maxc:str, output_fil
                 "uid": video["uid"],
                 "create_time": video["create_time"]
             }
+            jsonres.update(_legacy_author_fields(details.get(str(video["aweme_id"]))))
             all_videos.append(jsonres)
     
     if write_to_file(all_videos, output_file):
@@ -1708,7 +1742,7 @@ async def fetch_user_feed_videos(cookie: str, sec_user_id: str, output_file: str
         page_counts=10,
         max_counts=20,
     ):
-        print(feed_list._to_raw())
+        details = _legacy_page_details(feed_list)
         videos = feed_list._to_list()
         for video in videos:
             jsonres = {
@@ -1720,6 +1754,7 @@ async def fetch_user_feed_videos(cookie: str, sec_user_id: str, output_file: str
                 "uid": video["uid"],
                 "create_time": video["create_time"]
             }
+            jsonres.update(_legacy_author_fields(details.get(str(video["aweme_id"]))))
             all_videos.append(jsonres)
     
     if write_to_file(all_videos, output_file):

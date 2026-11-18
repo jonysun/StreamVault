@@ -81,6 +81,46 @@ public class AuthorProfileService {
 	@Autowired
 	private RawPayloadService rawPayloadService;
 
+	// Author completeness governs remote requests. Persisting a work must also
+	// preserve the metadata already known locally for that exact author identity.
+	public void prepareVideoAuthorForSave(VideoDataEntity video) {
+		if (video == null || !"douyin".equals(AuthorIdentityUtil.canonicalPlatformKey(
+				video.getPlatformkey(), video.getVideoplatform()))) return;
+		String uid = AuthorIdentityUtil.canonicalAuthorUid("douyin", video.getAuthoruid(), video.getSecuid());
+		if (uid == null) return;
+		video.setAuthoruid(uid);
+		video.setSecuid(uid);
+		AuthorProfileEntity profile = findPreferredProfile("douyin", "抖音", uid).orElse(null);
+		String username = firstNotBlank(AuthorIdentityUtil.canonicalUsername(video.getAuthorusername(),
+				video.getUniqueid()), profile == null ? null : profile.getUsername());
+		video.setAuthorusername(username);
+		video.setUniqueid(username);
+		if (profile != null) {
+			video.setVideoauthor(firstNotBlank(video.getVideoauthor(), profile.getDisplayname()));
+			video.setAuthoravatar(firstNotBlank(video.getAuthoravatar(), profile.getAvatar()));
+		}
+		video.setAuthorhomepage(AuthorIdentityUtil.douyinHomepage(uid));
+	}
+
+	public void prepareGraphicAuthorForSave(GraphicContentEntity graphic) {
+		if (graphic == null || !"douyin".equals(AuthorIdentityUtil.canonicalPlatformKey(
+				graphic.getPlatformkey(), graphic.getPlatform()))) return;
+		String uid = AuthorIdentityUtil.canonicalAuthorUid("douyin", graphic.getAuthoruid(), graphic.getSecuid());
+		if (uid == null) return;
+		graphic.setAuthoruid(uid);
+		graphic.setSecuid(uid);
+		AuthorProfileEntity profile = findPreferredProfile("douyin", "抖音", uid).orElse(null);
+		String username = firstNotBlank(AuthorIdentityUtil.canonicalUsername(graphic.getAuthorusername(),
+				graphic.getUniqueid()), profile == null ? null : profile.getUsername());
+		graphic.setAuthorusername(username);
+		graphic.setUniqueid(username);
+		if (profile != null) {
+			graphic.setAuthor(firstNotBlank(graphic.getAuthor(), profile.getDisplayname()));
+			graphic.setAuthoravatar(firstNotBlank(graphic.getAuthoravatar(), profile.getAvatar()));
+		}
+		graphic.setAuthorhomepage(AuthorIdentityUtil.douyinHomepage(uid));
+	}
+
 	public synchronized void upsertAuthor(String platform, String authoruid, String username, String displayName,
 			String avatar, String homepage) {
 		upsertAuthor(platform, authoruid, username, displayName, avatar, homepage, null);

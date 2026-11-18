@@ -182,7 +182,8 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, originaladdress);
+			JSONObject hybridData = fetchDtkWorkData(post);
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, hybridData, nickname, originaladdress);
 			graphicContentEntity.setAuthor(authorSnapshot.nickname);
 			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
 			graphicContentEntity.setSecuid(authorSnapshot.secUid);
@@ -193,7 +194,6 @@ public class DouYinExecutor {
 			graphicContentEntity.setPlatformkey("douyin");
 			graphicContentEntity.setContenttype("graphic");
 			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
-			JSONObject hybridData = fetchDtkWorkData(post);
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
@@ -204,6 +204,7 @@ public class DouYinExecutor {
 			}
 			graphicContentEntity.setSourceurl(firstNotBlank(sourceUrl, originaladdress));
 			graphicContentEntity.setCreatetime(new Date());
+			if (staticAuthorProfileService != null) staticAuthorProfileService.prepareGraphicAuthorForSave(graphicContentEntity);
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
 			sendNotify.sendNotifyData(filename, originaladdress, "抖音");
@@ -311,7 +312,8 @@ public class DouYinExecutor {
 			graphicContentEntity.setContent(desc);
 			graphicContentEntity.setImages(imageList.toJSONString());
 			graphicContentEntity.setAuthor(nickname);
-			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, nickname, type);
+			JSONObject hybridData = fetchDtkWorkData(post);
+			AuthorSnapshot authorSnapshot = resolveAuthor(aweme_detail, hybridData, nickname, type);
 			graphicContentEntity.setAuthor(authorSnapshot.nickname);
 			graphicContentEntity.setAuthoruid(authorSnapshot.authorUid);
 			graphicContentEntity.setSecuid(authorSnapshot.secUid);
@@ -322,7 +324,6 @@ public class DouYinExecutor {
 			graphicContentEntity.setPlatformkey("douyin");
 			graphicContentEntity.setContenttype("graphic");
 			String sourceUrl = DouyinSourceUrlUtil.graphic(authorSnapshot.authorUid, post);
-			JSONObject hybridData = fetchDtkWorkData(post);
 			graphicContentEntity.setJsonData(hybridData == null ? json : hybridData.toJSONString());
 			graphicContentEntity.setPublishtime(formatPublishTimeFromEpochSeconds(aweme_detail.getString("create_time")));
 			if (staticAuthorProfileService != null) {
@@ -333,6 +334,7 @@ public class DouYinExecutor {
 			}
 			graphicContentEntity.setSourceurl(firstNotBlank(sourceUrl, type));
 			graphicContentEntity.setCreatetime(new Date());
+			if (staticAuthorProfileService != null) staticAuthorProfileService.prepareGraphicAuthorForSave(graphicContentEntity);
 			staticGraphicContentDao.save(graphicContentEntity);
 			Files.deleteIfExists(Paths.get(taskout));
 			logger.info("[DouyinImageText] finish postId={} savedCount={}", post, imageList.size());
@@ -386,8 +388,8 @@ public class DouYinExecutor {
 		}
 	}
 
-	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, String fallbackName, String taskAddress) {
-		JSONObject author = awemeDetail == null ? null : awemeDetail.getJSONObject("author");
+	private static AuthorSnapshot resolveAuthor(JSONObject awemeDetail, JSONObject supplement, String fallbackName, String taskAddress) {
+		JSONObject author = DouUtil.authorWithSupplement(awemeDetail, supplement);
 		AuthorSnapshot snapshot = new AuthorSnapshot();
 		snapshot.nickname = author == null ? fallbackName : firstNotBlank(author.getString("nickname"), fallbackName);
 		snapshot.secUid = author == null ? null : author.getString("sec_uid");

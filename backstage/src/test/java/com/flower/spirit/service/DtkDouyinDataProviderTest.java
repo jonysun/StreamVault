@@ -24,6 +24,81 @@ import com.alibaba.fastjson.JSONObject;
 import com.sun.net.httpserver.HttpServer;
 
 class DtkDouyinDataProviderTest {
+	@Test
+	void normalizedAuthorProfileSuppliesUsernameSeparatelyFromAbbreviatedWork() {
+		server.removeContext("/api/v1/douyin/user");
+		server.createContext("/api/v1/douyin/user", exchange -> {
+			byte[] body = """
+					{"success":true,"data":{"platform":"douyin","uid":"MS4-profile",
+					"sec_uid":"MS4-profile","unique_id":"profile-user","nickname":"Profile User",
+					"avatar":{"url":"https://media.example/profile.jpg",
+					"urls":["https://media.example/profile.jpg"]}}}
+					""".getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
+		var profile = new DtkDouyinDataProvider().fetchAuthorProfile("MS4-profile");
+		assertThat(profile.getString("unique_id")).isEqualTo("profile-user");
+		assertThat(profile.getString("sec_uid")).isEqualTo("MS4-profile");
+		assertThat(com.flower.spirit.utils.DouUtil.extractAvatar(profile))
+				.isEqualTo("https://media.example/profile.jpg");
+	}
+
+	@Test
+	void normalizedAuthorAvatarIsPreservedWhenWorkResponseOmitsPublicUsername() {
+		// Same author/media structure as the user's stored work, not a raw Douyin aweme_detail.
+		serveAuthorWork("""
+				{"content_id":"7298556660748913954","kind":"video","nickname":"Author",
+				 "fetched_at":"2026-10-14T07:13:10Z","create_time":"2023-11-07T03:27:37Z",
+				 "author":{"uid":"MS4-normalized","sec_uid":"MS4-normalized","nickname":"Author",
+				 "web_url":"https://www.douyin.com/user/MS4-normalized","verified":false,
+				 "avatar":{"urls":["https://media.example/normalized-avatar.jpg"]}},
+				 "media":{"type":"video","url":"https://media.example/video.mp4"}}
+				""");
+		var provider = new DtkDouyinDataProvider();
+		var result = provider.fetchDirect("https://www.douyin.com/video/7298556660748913954");
+		assertThat(result).containsEntry("sec_uid", "MS4-normalized")
+				.containsEntry("avatar_thumb", "https://media.example/normalized-avatar.jpg");
+		assertThat(result.get("unique_id")).isNullOrEmpty();
+		var detail = JSONObject.parseObject(provider.fetchWorkData("7298556660748913954"))
+				.getJSONObject("aweme_detail");
+		assertThat(com.flower.spirit.utils.DouUtil.extractAvatar(detail.getJSONObject("author")))
+				.isEqualTo("https://media.example/normalized-avatar.jpg");
+	}
+
+	@Test
+	void directVideoPreservesFlattenedAuthorFields() {
+		serveAuthorWork("""
+				{"aweme_id":"flat","sec_uid":"MS4-flat","uid":"123","unique_id":"public-name",
+				 "nickname":"Author","avatar_medium":{"url_list":["https://media.example/avatar.jpg"]},
+				 "video":{"play_addr":{"url_list":["https://media.example/video.mp4"]}}}
+				""");
+		var result = new DtkDouyinDataProvider().fetchDirect("https://www.douyin.com/video/flat");
+		assertThat(result).containsEntry("sec_uid", "MS4-flat").containsEntry("unique_id", "public-name")
+				.containsEntry("avatar_thumb", "https://media.example/avatar.jpg");
+	}
+
+	@Test
+	void directVideoPreservesAlternativeNestedAvatar() {
+		serveAuthorWork("""
+				{"aweme_id":"nested","author":{"sec_uid":"MS4-nested","unique_id":"public-name",
+				 "avatar_medium":{"url_list":["https://media.example/avatar.jpg"]}},
+				 "video":{"play_addr":{"url_list":["https://media.example/video.mp4"]}}}
+				""");
+		var result = new DtkDouyinDataProvider().fetchDirect("https://www.douyin.com/video/nested");
+		assertThat(result).containsEntry("unique_id", "public-name")
+				.containsEntry("avatar_thumb", "https://media.example/avatar.jpg");
+	}
+
+	private void serveAuthorWork(String detail) {
+		server.removeContext("/api/v1/douyin/video");
+		server.createContext("/api/v1/douyin/video", exchange -> {
+			byte[] body = ("{\"success\":true,\"data\":" + detail + "}").getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
+	}
+
 	private HttpServer server;
 	private String baseUrl;
 	private String oldBaseUrl;

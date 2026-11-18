@@ -105,6 +105,7 @@ public class WorkPersistenceService {
 		if (created) {
 			entity.setCreatetime(new Date());
 		}
+		authorProfileService.prepareVideoAuthorForSave(entity);
 		VideoDataEntity saved = videoDataDao.save(entity);
 		return PersistenceResult.video(created, saved);
 	}
@@ -165,6 +166,7 @@ public class WorkPersistenceService {
 		if (created) {
 			entity.setCreatetime(new Date());
 		}
+		authorProfileService.prepareGraphicAuthorForSave(entity);
 		GraphicContentEntity saved = graphicContentDao.save(entity);
 		validateGraphicMedia(saved, metadata);
 		logger.info("[WorkPersistence] graphic persisted workId={} id={} created={} mediaCount={}",

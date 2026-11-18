@@ -5,6 +5,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class DouUtilTest {
+	@Test
+	void normalizedAuthorAvatarSupportsUrlsWhilePreferringCanonicalAvatar() {
+		var author = com.alibaba.fastjson.JSONObject.parseObject("""
+				{"avatar":{"urls":["https://media.example/avatar.jpg"]}}
+				""");
+		assertThat(DouUtil.extractAvatar(author)).isEqualTo("https://media.example/avatar.jpg");
+		author.put("avatar_thumb", "https://media.example/thumb.jpg");
+		assertThat(DouUtil.extractAvatar(author)).isEqualTo("https://media.example/thumb.jpg");
+	}
+
+	@Test
+	void graphicAuthorUsesAlreadyFetchedSupplementWithoutReplacingObservedValues() {
+		var detail = com.alibaba.fastjson.JSONObject.parseObject("""
+				{"aweme_id":"work","author":{"sec_uid":"MS4-author","nickname":"Observed","unique_id":""}}
+				""");
+		var supplement = com.alibaba.fastjson.JSONObject.parseObject("""
+				{"aweme_detail":{"aweme_id":"work","author":{"sec_uid":"MS4-author",
+				"nickname":"Other Name","unique_id":"public-name"}}}
+				""");
+		var author = DouUtil.authorWithSupplement(detail, supplement);
+		assertThat(author.getString("unique_id")).isEqualTo("public-name");
+		assertThat(author.getString("nickname")).isEqualTo("Observed");
+		assertThat(detail.getJSONObject("author").getString("unique_id")).isEmpty();
+	}
+
+	@Test
+	void graphicAuthorRejectsSupplementForAnotherWorkOrAuthor() {
+		var detail = com.alibaba.fastjson.JSONObject.parseObject("""
+				{"aweme_id":"work","author":{"sec_uid":"MS4-author"}}
+				""");
+		var supplement = com.alibaba.fastjson.JSONObject.parseObject("""
+				{"aweme_detail":{"aweme_id":"other","author":{"sec_uid":"MS4-other","unique_id":"wrong"}}}
+				""");
+		assertThat(DouUtil.authorWithSupplement(detail, supplement).getString("unique_id")).isNull();
+		supplement.getJSONObject("aweme_detail").put("aweme_id", "work");
+		assertThat(DouUtil.authorWithSupplement(detail, supplement).getString("unique_id")).isNull();
+	}
 
 	@Test
 	void extractsTheFinalJsonObjectAfterSafeF2Diagnostics() {

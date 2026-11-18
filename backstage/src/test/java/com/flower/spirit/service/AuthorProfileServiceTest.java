@@ -37,6 +37,7 @@ import com.flower.spirit.dao.VideoDataDao;
 import com.flower.spirit.dto.AdminAuthorProfileSummary;
 import com.flower.spirit.entity.AuthorNameHistoryEntity;
 import com.flower.spirit.entity.AuthorProfileEntity;
+import com.flower.spirit.entity.GraphicContentEntity;
 import com.flower.spirit.entity.VideoDataEntity;
 import com.flower.spirit.service.transaction.AuthorWriteTransaction;
 
@@ -83,6 +84,70 @@ class AuthorProfileServiceTest {
 				((Supplier<?>) invocation.getArgument(1)).get());
 		org.mockito.Mockito.lenient().when(authorWriteTransaction.execute(any())).thenAnswer(invocation ->
 				((Supplier<?>) invocation.getArgument(0)).get());
+	}
+
+	@Test
+	void newVideoUsesKnownAuthorEvenWhenProfileNeedsNoRemoteEnrichment() {
+		AuthorProfileEntity profile = knownDouyinAuthor();
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "MS4-known"))
+				.thenReturn(List.of(profile));
+		VideoDataEntity video = new VideoDataEntity();
+		video.setVideoplatform("抖音");
+		video.setSecuid("MS4-known");
+
+		service.prepareVideoAuthorForSave(video);
+
+		assertThat(video.getAuthorusername()).isEqualTo("known-name");
+		assertThat(video.getUniqueid()).isEqualTo("known-name");
+		assertThat(video.getAuthoravatar()).isEqualTo("https://media.example/known.jpg");
+		assertThat(video.getAuthoruid()).isEqualTo("MS4-known");
+		org.mockito.Mockito.verifyNoInteractions(douyinProfileGateway, authorEnrichmentQueueService,
+				videoDataDao, graphicContentDao);
+	}
+
+	@Test
+	void newGraphicPreservesObservedAuthorFieldsAndUsesOnlyMatchingProfile() {
+		when(authorProfileDao.findAllByPlatformkeyAndAuthoruidOrderByUpdatetimeDescIdDesc("douyin", "MS4-known"))
+				.thenReturn(List.of(knownDouyinAuthor()));
+		GraphicContentEntity graphic = new GraphicContentEntity();
+		graphic.setPlatform("douyin");
+		graphic.setAuthoruid("MS4-known");
+		graphic.setAuthorusername("observed-name");
+		graphic.setAuthor("Observed Author");
+
+		service.prepareGraphicAuthorForSave(graphic);
+
+		assertThat(graphic.getAuthorusername()).isEqualTo("observed-name");
+		assertThat(graphic.getUniqueid()).isEqualTo("observed-name");
+		assertThat(graphic.getAuthor()).isEqualTo("Observed Author");
+		assertThat(graphic.getAuthoravatar()).isEqualTo("https://media.example/known.jpg");
+		assertThat(graphic.getSecuid()).isEqualTo("MS4-known");
+	}
+
+	@Test
+	void workWithoutCanonicalIdentityDoesNotGuessAuthorByNickname() {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setVideoplatform("抖音");
+		video.setVideoauthor("Known Author");
+		video.setAuthoruid("numeric-id");
+
+		service.prepareVideoAuthorForSave(video);
+
+		assertThat(video.getAuthorusername()).isNull();
+		org.mockito.Mockito.verifyNoInteractions(authorProfileDao);
+	}
+
+	private AuthorProfileEntity knownDouyinAuthor() {
+		AuthorProfileEntity profile = new AuthorProfileEntity();
+		profile.setPlatform("抖音");
+		profile.setPlatformkey("douyin");
+		profile.setAuthoruid("MS4-known");
+		profile.setUsername("known-name");
+		profile.setDisplayname("Known Author");
+		profile.setAvatar("https://media.example/known.jpg");
+		profile.setSignature("bio");
+		profile.setHomepage("https://www.douyin.com/user/MS4-known");
+		return profile;
 	}
 
 	@Test
