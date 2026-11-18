@@ -1,6 +1,7 @@
 package com.flower.spirit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -86,6 +87,71 @@ class WorkRefreshServiceTest {
 		verify(editService).reapplyStoredOverrides(existing);
 		assertThat(existing.getVideotag()).isEqualTo("local-tag");
 		assertThat(existing.getFavorite()).isEqualTo("1");
+	}
+
+	@Test
+	void resolveVideoCoverOnlyParsesAndDoesNotPersistOrDownload() {
+		VideoDataEntity video = coverVideo("youtube", "locked-id", "https://youtube.com/watch?v=locked-id");
+		when(videoDataDao.findById(7)).thenReturn(Optional.of(video));
+		when(adapterRegistry.requireByPlatformKey("youtube")).thenReturn(adapter);
+		when(adapter.parse(any())).thenReturn(coverMetadata("youtube", "locked-id"));
+
+		assertThat(service.resolveVideoCover(7)).isEqualTo("https://cdn.example/cover.jpg");
+		ArgumentCaptor<WorkParseRequest> request = ArgumentCaptor.forClass(WorkParseRequest.class);
+		verify(adapter).parse(request.capture());
+		assertThat(request.getValue().isPreview()).isTrue();
+		verify(adapter, never()).download(any(), any());
+		verify(persistenceService, never()).persist(any());
+		verify(videoDataDao, never()).save(any());
+	}
+
+	@Test
+	void resolveVideoCoverRejectsDifferentWork() {
+		when(videoDataDao.findById(7)).thenReturn(Optional.of(coverVideo("youtube", "locked-id", "https://youtube.com/watch?v=locked-id")));
+		when(adapterRegistry.requireByPlatformKey("youtube")).thenReturn(adapter);
+		when(adapter.parse(any())).thenReturn(coverMetadata("youtube", "other-id"));
+
+		assertThatThrownBy(() -> service.resolveVideoCover(7)).hasMessageContaining("identity does not match");
+		verify(persistenceService, never()).persist(any());
+	}
+
+	@Test
+	void resolveVideoCoverRejectsDifferentPlatform() {
+		when(videoDataDao.findById(7)).thenReturn(Optional.of(coverVideo("youtube", "locked-id", "https://youtube.com/watch?v=locked-id")));
+		when(adapterRegistry.requireByPlatformKey("youtube")).thenReturn(adapter);
+		when(adapter.parse(any())).thenReturn(coverMetadata("douyin", "locked-id"));
+
+		assertThatThrownBy(() -> service.resolveVideoCover(7)).hasMessageContaining("identity does not match");
+	}
+
+	@Test
+	void resolveVideoCoverBuildsDouyinSourceForOlderRows() {
+		when(videoDataDao.findById(7)).thenReturn(Optional.of(coverVideo("douyin", "7298556660748913954", null)));
+		when(adapterRegistry.requireByPlatformKey("douyin")).thenReturn(adapter);
+		when(adapter.parse(any())).thenReturn(coverMetadata("douyin", "7298556660748913954"));
+
+		service.resolveVideoCover(7);
+		ArgumentCaptor<WorkParseRequest> request = ArgumentCaptor.forClass(WorkParseRequest.class);
+		verify(adapter).parse(request.capture());
+		assertThat(request.getValue().getUrl()).isEqualTo("https://www.douyin.com/video/7298556660748913954");
+	}
+
+	private VideoDataEntity coverVideo(String platform, String workId, String source) {
+		VideoDataEntity video = new VideoDataEntity();
+		video.setId(7);
+		video.setPlatformkey(platform);
+		video.setVideoid(workId);
+		video.setSourceurl(source);
+		return video;
+	}
+
+	private WorkMetadata coverMetadata(String platform, String workId) {
+		return WorkMetadata.builder().platform(PlatformCatalog.requireByKey(platform))
+				.workId(workId).contentType(WorkContentType.VIDEO).title("video")
+				.coverUrl("https://cdn.example/cover.jpg")
+				.mediaResources(List.of(new WorkMediaResource(0, WorkMediaResource.Type.VIDEO,
+						"https://cdn.example/video.mp4", null, "mp4", Map.of())))
+				.build();
 	}
 
 	private WorkMetadata latestMetadata() {

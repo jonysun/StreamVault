@@ -38,7 +38,7 @@ docker compose -f docker-compose.yaml up -d --no-deps stream-vault
 
 ## 批量补齐视频缩略图
 
-最新镜像内置 `streamvault-backfill-thumbnails` 命令。它先复用或下载数据库中的远程封面 URL，失败后才用 ffmpeg 从视频抽帧，并把本地封面路径写回 `videocover`：
+最新镜像内置 `streamvault-backfill-thumbnails` 命令。它依次复用本地封面、尝试 `videocover` / 保存 JSON 中的远程封面 URL、请求作品详情获取新封面 URL，全部失败后才用 ffmpeg 从视频抽帧。只有封面成功落盘后才把本地路径写回 `videocover`：
 
 ```sh
 docker exec my-stream-vault streamvault-backfill-thumbnails
@@ -50,7 +50,11 @@ docker exec my-stream-vault streamvault-backfill-thumbnails
 docker exec my-stream-vault streamvault-backfill-thumbnails --dry-run
 ```
 
-分批执行可加 `--limit 100`。命令只处理 `biz_video` 中已有本地视频文件的记录，不会重新下载视频。
+预览只检查本地文件和数据库，不访问网络、运行 ffmpeg 或写数据。`would_reuse` 是可复用的本地封面，`would_download` 是存在未脱敏远程地址的记录，`would_refresh` 是需要先刷新详情的记录，`would_generate` 是没有可用来源、只能尝试抽帧的记录。统计表示首选步骤；旧 URL 是否过期、刷新是否成功，要在正式运行时确认。
+
+分批执行可加 `--limit 100`，上限只计待处理记录，已补齐的记录会跳过。每条成功即提交，支持中断后继续运行。正式运行每 50 条输出进度，`reused` / `downloaded` / `generated` 分别统计本地复用、远程封面下载和视频抽帧，`refreshed` 表示通过新详情 URL 下载成功的数量（也是 downloaded 的子集）。命令只处理 `biz_video` 中已有本地视频文件的记录，不会重新下载视频。
+
+详情刷新需要同容器的应用已启动，命令自动读取数据库里的应用 token，经回环接口调用应用现有的平台适配器，沿用 F2/DTK、Cookie、风控和节点配置，不批量刷新作品其他元数据。默认连接 `http://127.0.0.1:28081`，遵循容器 `SERVER_PORT`，自定义端口可设置 `STREAMVAULT_APP_URL`（仅支持回环 HTTP 地址）。不要使用宿主机映射端口。详情请求串行且间隔至少 0.75 秒，客户端等待上限 90 秒；远程封面连接/读取超时 60 秒，下载有时间和 16 MiB 大小限制；单次 ffmpeg 上限 120 秒。无法恢复远程封面时仍会回退抽帧；平台作品下架、鉴权失败等不会保证取回原始封面。
 
 ## 验证
 

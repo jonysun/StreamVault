@@ -55,6 +55,32 @@ public class WorkRefreshService {
 		return result;
 	}
 
+	/** Resolve a fresh cover without persisting metadata or downloading media. */
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public String resolveVideoCover(Integer id) {
+		if (id == null || id <= 0) throw new WorkMetadataValidationException("positive work id is required");
+		VideoDataEntity video = videoDataDao.findById(id)
+				.orElseThrow(() -> new WorkMetadataValidationException("video work not found"));
+		String key = platformKey(video.getPlatformkey(), video.getVideoplatform());
+		String url = firstText(video.getSourceurl(), video.getOriginaladdress());
+		if (url == null && "douyin".equals(key) && video.getVideoid() != null
+				&& video.getVideoid().matches("[0-9]+")) {
+			url = "https://www.douyin.com/video/" + video.getVideoid();
+		}
+		if (url == null) throw new WorkMetadataValidationException("work has no source URL");
+		PlatformWorkAdapter adapter = adapterRegistry.requireByPlatformKey(key);
+		WorkMetadata latest = normalizer.normalize(adapter.parse(new WorkParseRequest(url, url, true)));
+		if (!key.equals(latest.getPlatformKey()) || !java.util.Objects.equals(video.getVideoid(), latest.getWorkId())
+				|| latest.getContentType() != WorkContentType.VIDEO) {
+			throw new WorkMetadataValidationException("refreshed cover work identity does not match stored video");
+		}
+		String cover = firstText(latest.getCoverUrl(), null);
+		if (cover == null || !(cover.startsWith("https://") || cover.startsWith("http://"))) {
+			throw new WorkMetadataValidationException("refreshed work has no remote cover URL");
+		}
+		return cover;
+	}
+
 	public PreparedWork prepare(WorkOperationRequest request, boolean preview) {
 		validateRequest(request);
 		if ("video".equals(normalizeType(request.getWorkType()))) {
