@@ -87,7 +87,11 @@ public class DownloadCenterService {
 		return result;
 	}
 
-	public Map<String, Object> items(String view, String source, String state, String keyword, int page,
+	public Map<String, Object> items(String view, String source, String state, String keyword, int page, int pageSize) {
+		return items(view, source, state, keyword, null, page, pageSize);
+	}
+
+	public Map<String, Object> items(String view, String source, String state, String keyword, String errorCode, int page,
 			int pageSize) {
 		boolean active = !"history".equalsIgnoreCase(view);
 		String normalizedSource = normalizeSource(source);
@@ -97,10 +101,10 @@ public class DownloadCenterService {
 		List<Object> args = new ArrayList<>();
 		List<String> branches = new ArrayList<>();
 		if ("ALL".equals(normalizedSource) || "COLLECT".equals(normalizedSource)) {
-			branches.add(collectBranch(active, normalizedState, keyword, args));
+			branches.add(collectBranch(active, normalizedState, keyword, errorCode, args));
 		}
 		if (!"COLLECT".equals(normalizedSource)) {
-			branches.add(directBranch(active, normalizedSource, normalizedState, keyword, args));
+			branches.add(directBranch(active, normalizedSource, normalizedState, keyword, errorCode, args));
 		}
 		String union = String.join(" UNION ALL ", branches);
 		long total = countUnion(union, args);
@@ -293,7 +297,12 @@ public class DownloadCenterService {
 	}
 
 	public Map<String, Object> transition(List<String> recordKeys, String action) {
-		return transition(recordKeys, action, false, List.of(), null, null, null, null);
+		return transition(recordKeys, action, false, List.of(), null, null, null, null, null);
+	}
+
+	public Map<String, Object> transition(List<String> recordKeys, String action, boolean allMatching,
+			List<String> excludedKeys, String view, String source, String state, String keyword) {
+		return transition(recordKeys, action, allMatching, excludedKeys, view, source, state, keyword, null);
 	}
 
 	/**
@@ -301,15 +310,23 @@ public class DownloadCenterService {
 	 * download-center filters. The latter is used by the UI's cross-page select-all.
 	 */
 	public Map<String, Object> transition(List<String> recordKeys, String action, boolean allMatching,
-			List<String> excludedKeys, String view, String source, String state, String keyword) {
+			List<String> excludedKeys, String view, String source, String state, String keyword, String errorCode) {
+		String normalized = action == null ? "" : action.trim().toUpperCase(Locale.ROOT);
+		boolean hideHistory = "HIDE_HISTORY".equals(normalized);
+		if (hideHistory && allMatching && !"history".equalsIgnoreCase(view)) {
+			throw new IllegalArgumentException("请在下载历史中清除记录");
+		}
 		List<String> resolvedKeys = allMatching
-				? matchingRecordKeys(view, source, state, keyword)
+				? matchingRecordKeys(view, source, state, keyword, errorCode)
 				: normalizeRecordKeys(recordKeys);
 		Set<String> excluded = excludedKeys == null ? Set.of() : Set.copyOf(excludedKeys);
 		if (allMatching && !excluded.isEmpty()) resolvedKeys = resolvedKeys.stream()
 				.filter(key -> !excluded.contains(key)).toList();
 		if (resolvedKeys.isEmpty()) return Map.of("changed", 0, "skipped", 0, "selected", 0);
-		String normalized = action == null ? "" : action.trim().toUpperCase(Locale.ROOT);
+		if (hideHistory) {
+			int hidden = hideResolvedHistory(resolvedKeys);
+			return Map.of("changed", hidden, "skipped", resolvedKeys.size() - hidden, "selected", resolvedKeys.size());
+		}
 		List<Long> collect = new ArrayList<>(), direct = new ArrayList<>();
 		int skipped = 0;
 		for (String value : resolvedKeys) {
@@ -381,16 +398,16 @@ public class DownloadCenterService {
 		return recordKeys.stream().filter(java.util.Objects::nonNull).distinct().limit(MAX_EXPLICIT_BATCH).toList();
 	}
 
-	public List<String> matchingRecordKeys(String view, String source, String state, String keyword) {
+	public List<String> matchingRecordKeys(String view, String source, String state, String keyword, String errorCode) {
 		boolean active = !"history".equalsIgnoreCase(view);
 		String normalizedSource = normalizeSource(source);
 		String normalizedState = normalizeState(state, active);
 		List<Object> args = new ArrayList<>();
 		List<String> branches = new ArrayList<>();
 		if ("ALL".equals(normalizedSource) || "COLLECT".equals(normalizedSource))
-			branches.add(collectBranch(active, normalizedState, keyword, args));
+			branches.add(collectBranch(active, normalizedState, keyword, errorCode, args));
 		if (!"COLLECT".equals(normalizedSource))
-			branches.add(directBranch(active, normalizedSource, normalizedState, keyword, args));
+			branches.add(directBranch(active, normalizedSource, normalizedState, keyword, errorCode, args));
 		if (branches.isEmpty()) return List.of();
 		return jdbcTemplate.queryForList("SELECT record_key FROM (" + String.join(" UNION ALL ", branches)
 				+ ") download_items", String.class, args.toArray());
@@ -442,12 +459,15 @@ public class DownloadCenterService {
 	}
 
 	public int hideHistory(List<String> recordKeys) {
-		if (recordKeys == null) return 0;
+		return hideResolvedHistory(normalizeRecordKeys(recordKeys));
+	}
+
+	private int hideResolvedHistory(List<String> recordKeys) {
+		if (recordKeys.isEmpty()) return 0;
 		return databaseWriteExecutor.execute("download-history-hide", () -> {
 			int hidden = 0;
-			for (String value : recordKeys.stream().distinct().limit(200).toList()) {
+			for (String value : recordKeys) {
 				RecordKey key = parseKey(value);
-				if (!Set.of("DIRECT", "COLLECT").contains(key.source())) continue;
 				if (!isTerminal(key)) continue;
 				hidden += jdbcTemplate.update("INSERT INTO biz_download_history_hidden "
 						+ "(record_key, source_type, source_id, hidden_at) VALUES (?, ?, ?, ?) "
@@ -472,7 +492,7 @@ public class DownloadCenterService {
 		return count != null && count > 0;
 	}
 
-	private String collectBranch(boolean active, String state, String keyword, List<Object> args) {
+	private String collectBranch(boolean active, String state, String keyword, String errorCode, List<Object> args) {
 		StringBuilder sql = new StringBuilder("SELECT 'COLLECT:' || CAST(i.id AS VARCHAR) AS record_key, "
 				+ "'COLLECT' AS source_kind, i.id AS raw_id, COALESCE(t.taskname,'') AS task_name, "
 				+ "COALESCE(i.title_snapshot,'') AS title, COALESCE(i.nickname_snapshot,'') AS author, "
@@ -493,10 +513,11 @@ public class DownloadCenterService {
 					+ "COALESCE(i.nickname_snapshot,'') || ' ' || COALESCE(i.work_id,'')) LIKE ?");
 			args.add("%" + keyword.trim().toLowerCase(Locale.ROOT) + "%");
 		}
+		appendErrorCode(sql, "i.error_code", "i.error_message", errorCode, args);
 		return sql.toString();
 	}
 
-	private String directBranch(boolean active, String source, String state, String keyword, List<Object> args) {
+	private String directBranch(boolean active, String source, String state, String keyword, String errorCode, List<Object> args) {
 		StringBuilder sql = new StringBuilder("SELECT 'DIRECT:' || CAST(q.id AS VARCHAR) AS record_key, "
 				+ "'DIRECT' AS source_kind, q.id AS raw_id, '' AS task_name, '' AS title, '' AS author, "
 				+ "'' AS platform, '' AS work_id, '' AS source_url, q.state AS state, "
@@ -516,7 +537,23 @@ public class DownloadCenterService {
 			sql.append(" AND LOWER(q.payload) LIKE ?");
 			args.add("%" + keyword.trim().toLowerCase(Locale.ROOT) + "%");
 		}
+		appendErrorCode(sql, "q.last_error_code", "q.last_error_message", errorCode, args);
 		return sql.toString();
+	}
+
+	private void appendErrorCode(StringBuilder sql, String codeColumn, String messageColumn, String errorCode,
+			List<Object> args) {
+		if (errorCode == null) return;
+		String normalized = errorCode.trim().toUpperCase(Locale.ROOT);
+		if (normalized.isEmpty() || "ALL".equals(normalized)) return;
+		for (DownloadErrorType type : DownloadErrorType.values()) {
+			if (type.name().equals(normalized)) {
+				sql.append(" AND ").append(type.sql(codeColumn, messageColumn));
+				return;
+			}
+		}
+		sql.append(" AND ").append(codeColumn).append("=?");
+		args.add(normalized);
 	}
 
 	private void appendState(StringBuilder sql, String column, boolean active, String state, List<Object> args) {

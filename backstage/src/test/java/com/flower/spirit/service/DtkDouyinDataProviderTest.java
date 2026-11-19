@@ -90,6 +90,22 @@ class DtkDouyinDataProviderTest {
 				.containsEntry("avatar_thumb", "https://media.example/avatar.jpg");
 	}
 
+	@Test
+	void detail404IsMappedToPermanentWorkNotFound() {
+		server.removeContext("/api/v1/douyin/video");
+		server.createContext("/api/v1/douyin/video", exchange -> {
+			byte[] body = "{\"success\":false,\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"作品不存在\"}}"
+					.getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(404, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
+
+		assertThatThrownBy(() -> new DtkDouyinDataProvider().fetchWorkData("missing-work"))
+				.isInstanceOf(CollectFetchException.class)
+				.hasFieldOrPropertyWithValue("errorCode", "DTK_WORK_NOT_FOUND")
+				.hasMessageContaining("作品详情不存在");
+	}
+
 	private void serveAuthorWork(String detail) {
 		server.removeContext("/api/v1/douyin/video");
 		server.createContext("/api/v1/douyin/video", exchange -> {

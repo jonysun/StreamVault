@@ -25,6 +25,7 @@
         .download-tab.active { color:#147d64; border-bottom-color:#147d64; font-weight:600; }
         .filter-row { display:grid; grid-template-columns:180px 160px minmax(220px,1fr) auto; gap:10px; padding:14px 16px; border-bottom:1px solid #edf0f2; }
         .filter-row .form-control { height:36px; }
+        @media(min-width:1001px) { .queue-filters { grid-template-columns:180px 160px minmax(150px,auto) minmax(180px,1fr) auto; align-items:end; } }
         .table-wrap { overflow-x:auto; }
         .download-table { margin:0; min-width:1060px; table-layout:fixed; }
         .download-table th { background:#f7f8f9; color:#59636d; font-size:12px; font-weight:600; border-bottom:1px solid #dde2e6 !important; }
@@ -90,7 +91,7 @@
                         <button type="button" class="download-tab" data-view="history">历史记录</button>
                         <button type="button" class="download-tab" data-view="authors">收藏作者</button>
                     </div>
-                    <div class="filter-row">
+                    <div class="filter-row queue-filters">
                         <select class="form-control" id="sourceFilter" title="下载来源">
                             <option value="ALL">全部来源</option>
                             <option value="COLLECT">收藏下载</option>
@@ -98,11 +99,20 @@
                             <option value="YOUTUBE_COLLECTION">YouTube 合辑</option>
                         </select>
                         <select class="form-control" id="stateFilter" title="任务状态"></select>
+                        <div>
+                            <label for="errorCodeFilter">错误类型</label>
+                            <select class="form-control" id="errorCodeFilter">
+                                <option value="ALL">全部错误类型</option>
+                                <option value="DOWNLOAD_TARGET_EXISTS">目标已存在</option>
+                                <option value="COOLDOWN">DTK / 抖音冷却</option>
+                                <option value="REMOTE_UNAVAILABLE">远端不可用（含 DTK 404）</option>
+                            </select>
+                        </div>
                         <input class="form-control" id="keywordFilter" type="search" placeholder="搜索标题、作者、任务名或作品 ID">
                         <button class="btn btn-primary" type="button" id="searchButton"><i class="mdi mdi-magnify"></i> 查询</button>
                     </div>
                     <div class="download-actions" style="padding:10px 16px;border-bottom:1px solid #edf0f2;">
-                        <button class="btn btn-sm btn-outline-primary" type="button" id="retrySelected" disabled><i class="mdi mdi-replay"></i> 重试所选失败任务</button>
+                        <button class="btn btn-sm btn-outline-primary" type="button" id="retrySelected" disabled><i class="mdi mdi-replay"></i> 重试所选任务</button>
                         <button class="btn btn-sm btn-outline-warning" type="button" id="waitSelected" disabled><i class="mdi mdi-clock-outline"></i> 移入等待重试</button>
                         <button class="btn btn-sm btn-outline-danger" type="button" id="failSelected" disabled><i class="mdi mdi-alert-outline"></i> 标记失败</button>
                         <button class="btn btn-sm btn-outline-secondary" type="button" id="cancelSelected" disabled><i class="mdi mdi-close-circle-outline"></i> 取消队列</button>
@@ -114,7 +124,7 @@
                     <div class="table-wrap">
                         <table class="table download-table">
                             <thead><tr>
-                                <th style="width:42px;"><input type="checkbox" id="selectAll"></th>
+                                <th style="width:42px;"><input type="checkbox" id="selectAll" title="全选当前筛选结果（包含其他页）" aria-label="全选当前筛选结果（包含其他页）"></th>
                                 <th style="width:70px;">序号</th>
                                 <th style="width:300px;">任务</th>
                                 <th style="width:105px;">来源</th>
@@ -192,6 +202,9 @@
             SKIPPED_EXISTING_ACTIVE_DOWNLOAD:'活动任务已存在'
         };
         const sourceLabels = { COLLECT:'收藏下载', SINGLE_LINK:'单链接', YOUTUBE_COLLECTION:'YouTube 合辑' };
+        let itemRequest = 0;
+        let displayedQuery = null;
+        let searchKeyword = '';
 
         $(function() {
             renderStateFilter();
@@ -214,11 +227,17 @@
                 renderStateFilter();
                 loadItems();
             });
-            $('#searchButton').on('click', function() { clearSelection(); state.page = 0; loadItems(); });
-            $('#keywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { event.preventDefault(); clearSelection(); state.page=0; loadItems(); } });
-            $('#sourceFilter,#stateFilter').on('change', function() { clearSelection(); state.page=0; loadItems(); });
-            $('#previousPage').on('click', function() { if (state.page > 0) { clearSelection(); state.page--; loadItems(); } });
-            $('#nextPage').on('click', function() { if (state.page + 1 < state.totalPages) { clearSelection(); state.page++; loadItems(); } });
+            function applyFilters() {
+                searchKeyword = $('#keywordFilter').val();
+                clearSelection();
+                state.page = 0;
+                loadItems();
+            }
+            $('#searchButton').on('click', applyFilters);
+            $('#keywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { event.preventDefault(); applyFilters(); } });
+            $('#sourceFilter,#stateFilter,#errorCodeFilter').on('change', applyFilters);
+            $('#previousPage').on('click', function() { if (state.page > 0) { if (!state.allMatching) clearSelection(); state.page--; loadItems(); } });
+            $('#nextPage').on('click', function() { if (state.page + 1 < state.totalPages) { if (!state.allMatching) clearSelection(); state.page++; loadItems(); } });
             $('#authorSearchButton').on('click', function() { state.authorPage=0; loadAuthors(); });
             $('#authorKeywordFilter').on('keydown', function(event) { if (event.key === 'Enter') { state.authorPage=0; loadAuthors(); } });
             $('#collectAuthorPrev').on('click', function() { if (state.authorPage > 0) { state.authorPage--; loadAuthors(); } });
@@ -250,9 +269,9 @@
                 syncSelectAll();
                 updateBulkButtons();
             });
-            $('#downloadRows').on('click', '.retry-item', function() { retryKeys([$(this).data('key')]); });
+            $('#downloadRows').on('click', '.retry-item', function() { transitionKeys([$(this).data('key')], 'RETRY', false); });
             $('#downloadRows').on('click', '.show-detail', function() { showDetail($(this).data('key')); });
-            $('#retrySelected').on('click', function() { retryKeys(selectedKeys(true)); });
+            $('#retrySelected').on('click', function() { transitionSelected('RETRY'); });
             $('#waitSelected').on('click', function() { transitionSelected('RETRY_WAIT'); });
             $('#failSelected').on('click', function() { transitionSelected('FAILED'); });
             $('#cancelSelected').on('click', function() { transitionSelected('CANCEL'); });
@@ -332,22 +351,41 @@
             }).fail(markStale);
         }
         function loadItems() {
-            $.getJSON('/admin/api/download-center/items', {
-                view:state.view, source:$('#sourceFilter').val(), state:$('#stateFilter').val(),
-                keyword:$('#keywordFilter').val(), page:state.page, pageSize:state.pageSize
-            }).done(function(response) {
+            const query = { view:state.view, source:$('#sourceFilter').val(), state:$('#stateFilter').val(),
+                keyword:searchKeyword, errorCode:$('#errorCodeFilter').val(), page:state.page, pageSize:state.pageSize };
+            const request = ++itemRequest;
+            if (JSON.stringify(query) !== JSON.stringify(displayedQuery)) {
+                displayedQuery = null;
+                state.rows = [];
+                $('#downloadRows').empty();
+                $('#selectAll,#previousPage,#nextPage').prop('disabled', true);
+                updateBulkButtons();
+            }
+            $.getJSON('/admin/api/download-center/items', query).done(function(response) {
+                if (request !== itemRequest || state.view !== query.view) return;
                 if (!response || response.resCode !== '000001') return markStale();
+                displayedQuery = query;
                 const data = response.record || {};
                 state.rows = Array.isArray(data.content) ? data.content : [];
                 state.totalPages = number(data.totalPages);
                 state.totalElements = number(data.totalElements);
+                if (state.page > 0 && state.page >= state.totalPages) {
+                    state.page = Math.max(0, state.totalPages - 1);
+                    loadItems();
+                    return;
+                }
+                $('#selectAll').prop('disabled', !state.rows.length);
                 renderRows();
                 $('#pageSummary').text('共 ' + number(data.totalElements) + ' 条');
                 $('#pageText').text('第 ' + (state.page + 1) + ' / ' + Math.max(1,state.totalPages) + ' 页');
                 $('#previousPage').prop('disabled', state.page === 0);
                 $('#nextPage').prop('disabled', state.page + 1 >= state.totalPages);
                 $('#staleNote').hide();
-            }).fail(markStale).always(scheduleRefresh);
+            }).fail(function(xhr) {
+                if (request === itemRequest && state.view === query.view) markStale(xhr);
+            }).always(function() {
+                if (request === itemRequest && state.view === query.view) scheduleRefresh();
+            });
         }
 
         function renderRows() {
@@ -393,41 +431,57 @@
                 .fail(function(){ layer.msg('操作失败'); }).always(function(){ $('#pauseButton').prop('disabled', false); });
         }
         function selectedKeys(failedOnly) {
+            const canRetry = function(status) { return status === 'FAILED'
+                || ($('#errorCodeFilter').val() === 'COOLDOWN' && ['QUEUED','RETRY_WAIT'].includes(status)); };
             if (state.allMatching) return state.rows.filter(function(item) {
-                return !state.excludedKeys.has(String(item.record_key || '')) && (!failedOnly || item.state === 'FAILED');
+                return !state.excludedKeys.has(String(item.record_key || '')) && (!failedOnly || canRetry(item.state));
             }).map(function(item) { return item.record_key; });
-            // Keep explicit selections across pages and refreshes. Server-side transitions
-            // re-check the current state, so a stale/non-failed key is safely skipped.
+            if (failedOnly) return state.rows.filter(item => canRetry(item.state)
+                && state.selectedKeys.has(String(item.record_key))).map(item => item.record_key);
             return Array.from(state.selectedKeys);
         }
         function remoteMissingKeys() {
             return state.rows.filter(function(item) {
-                return state.selectedKeys.has(String(item.record_key || ''))
+                return (state.allMatching ? !state.excludedKeys.has(String(item.record_key || ''))
+                    : state.selectedKeys.has(String(item.record_key || '')))
                     && item.source_kind === 'COLLECT'
                     && ['QUEUED','RETRY_WAIT'].indexOf(item.state) >= 0
                     && item.error_code === 'LIST_SNAPSHOT_PENDING';
             }).map(function(item) { return item.record_key; });
         }
+        function selectedCount() {
+            return state.allMatching ? Math.max(0, state.totalElements - state.excludedKeys.size) : state.selectedKeys.size;
+        }
         function updateBulkButtons() {
-            const selectedCount = state.allMatching ? state.totalElements - state.excludedKeys.size : selectedKeys(false).length;
-            const retryAllowed = state.allMatching
-                ? (state.view === 'history' && ['ALL','FAILED'].indexOf($('#stateFilter').val()) >= 0)
-                : selectedKeys(false).length > 0;
-            $('#retrySelected').prop('disabled', !retryAllowed || selectedCount <= 0);
-            $('#waitSelected,#failSelected,#cancelSelected').prop('disabled', state.view !== 'active' || selectedCount <= 0);
-            const refreshEligible = state.allMatching
-                ? (state.view === 'active' && $('#sourceFilter').val() === 'COLLECT'
-                    && ['ALL','QUEUED','RETRY_WAIT'].indexOf($('#stateFilter').val()) >= 0)
-                : (remoteMissingKeys().length > 0 || (selectedKeys(false).length > 0 && $('#sourceFilter').val() === 'COLLECT'));
-            $('#remoteMissingSelected').prop('disabled', state.view !== 'active' || !refreshEligible);
-            $('#refreshAuthorSelected').prop('disabled', state.view !== 'active' || !refreshEligible);
-            $('#blockSelected').prop('disabled', state.view !== 'active' || selectedCount <= 0);
-            $('#hideSelected').prop('disabled', selectedCount <= 0);
+            const hasSelection = !!displayedQuery && selectedCount() > 0;
+            const history = state.view === 'history';
+            const active = state.view === 'active';
+            const mayIncludeFailures = history && ['ALL','FAILED'].includes($('#stateFilter').val());
+            const retryActiveCooldown = active && $('#errorCodeFilter').val() === 'COOLDOWN'
+                && ['ALL','QUEUED','RETRY_WAIT'].includes($('#stateFilter').val());
+            const retryAllowed = state.allMatching ? (mayIncludeFailures || retryActiveCooldown)
+                : selectedKeys(true).length > 0;
+            $('#retrySelected').prop('disabled', !hasSelection || !retryAllowed);
+            $('#waitSelected,#failSelected,#cancelSelected').prop('disabled', !active || !hasSelection);
+            const canRefreshAll = active && $('#sourceFilter').val() === 'COLLECT'
+                && ['ALL','LIST_SNAPSHOT_PENDING'].includes($('#errorCodeFilter').val())
+                && ['ALL','QUEUED','RETRY_WAIT'].includes($('#stateFilter').val());
+            const pendingSnapshot = active && remoteMissingKeys().length > 0;
+            const canMark = active ? (pendingSnapshot || (state.allMatching && canRefreshAll))
+                : mayIncludeFailures && $('#sourceFilter').val() === 'COLLECT'
+                    && $('#errorCodeFilter').val() === 'REMOTE_UNAVAILABLE';
+            const refreshEligible = state.allMatching ? canRefreshAll : active
+                && $('#errorCodeFilter').val() === 'ALL'
+                && (pendingSnapshot || $('#sourceFilter').val() === 'COLLECT');
+            $('#remoteMissingSelected').prop('disabled', !hasSelection || !canMark);
+            $('#refreshAuthorSelected').prop('disabled', !hasSelection || !refreshEligible);
+            $('#blockSelected').prop('disabled', !active || !hasSelection);
+            $('#hideSelected').prop('disabled', !history || !hasSelection);
         }
         function syncSelectAll() {
             const boxes = $('.row-select:not(:disabled)');
             const checked = boxes.filter(':checked').length;
-            $('#selectAll').prop('checked', state.allMatching || (boxes.length > 0 && checked === boxes.length))
+            $('#selectAll').prop('checked', state.allMatching)
                 .prop('indeterminate', state.allMatching ? state.excludedKeys.size > 0 : checked > 0 && checked < boxes.length);
         }
         function clearSelection() {
@@ -437,39 +491,46 @@
             $('#selectAll').prop('checked', false).prop('indeterminate', false);
             updateBulkButtons();
         }
-        function retryKeys(keys) {
-            if (!keys.length && !state.allMatching) return;
-            transitionKeys(keys, 'RETRY');
+        function transitionSelected(action) { transitionKeys(selectedKeys(action === 'RETRY'), action); }
+        function transitionPayload(keys, action, allMatching = state.allMatching) {
+            if (!displayedQuery || (!allMatching && !keys.length)) return null;
+            const { view, source, state:status, keyword, errorCode } = displayedQuery;
+            return { recordKeys:allMatching ? [] : keys, excludedKeys:allMatching ? Array.from(state.excludedKeys) : [],
+                allMatching:allMatching, view:view, source:source, state:status, keyword:keyword, errorCode:errorCode, action:action };
         }
-        function transitionSelected(action) { transitionKeys(selectedKeys(false), action); }
-        function transitionKeys(keys, action) {
-            const allMatching = state.allMatching;
-            if (!allMatching && !keys.length) return;
-            const payload = { recordKeys:allMatching ? [] : keys, excludedKeys:Array.from(state.excludedKeys), allMatching:allMatching,
-                view:state.view, source:$('#sourceFilter').val(), state:$('#stateFilter').val(), keyword:$('#keywordFilter').val(), action:action };
+        function transitionKeys(keys, action, allMatching) {
+            const payload = transitionPayload(keys, action, allMatching);
+            if (payload) submitTransition(payload);
+        }
+        function submitTransition(payload) {
             $.ajax({ url:'/admin/api/download-center/transition', type:'POST', contentType:'application/json', data:JSON.stringify(payload) })
-                .done(function(response){ clearSelection(); layer.msg(response.message || '下载队列已更新'); refreshAll(); })
-                .fail(apiFailure);
+                .done(function(response) {
+                    if (!response || response.resCode !== '000001') {
+                        layer.msg((response && response.message) || '操作失败');
+                        return;
+                    }
+                    const changed = number((response.record || {}).changed);
+                    clearSelection();
+                    layer.msg('已处理 ' + changed + ' 条记录');
+                    refreshAll();
+                }).fail(apiFailure);
         }
         function markRemoteMissingSelected() {
-            const keys = remoteMissingKeys();
-            if (!keys.length) return;
-            layer.confirm('确认将选中的 ' + keys.length + ' 个待刷新作者列表作品标记为“远端已删除”并移入历史记录吗？<br>'
-                + '<span style="color:#a72f2f;">这是人工确认，不是系统自动检测结论；不会删除本地媒体文件。</span>', function(index) {
-                $.ajax({ url:'/admin/api/download-center/transition', type:'POST', contentType:'application/json',
-                    data:JSON.stringify({recordKeys:keys,action:'MARK_REMOTE_MISSING'}) })
-                    .done(function(response){ clearSelection(); layer.msg(response.message || '已标记远端已删除'); refreshAll(); })
-                    .fail(apiFailure);
+            const keys = state.view === 'active' ? remoteMissingKeys() : selectedKeys(false);
+            const payload = transitionPayload(keys, 'MARK_REMOTE_MISSING');
+            if (!payload) return;
+            layer.confirm('将所选记录中符合条件的收藏作品标记为“远端已删除”？<br>'
+                + '请先确认作品情况。本地媒体文件会保留。', function(index) {
+                submitTransition(payload);
                 layer.close(index);
             });
         }
         function hideSelectedHistory() {
-            const keys = selectedKeys(false);
-            if (!keys.length) return;
-            layer.confirm('只清除下载中心中的历史显示，不会删除媒体文件。是否继续？', function(index) {
-                $.ajax({ url:'/admin/api/download-center/history/hide', type:'POST', contentType:'application/json', data:JSON.stringify({recordKeys:keys}) })
-                    .done(function(response){ clearSelection(); layer.msg(response.message || '记录已清除'); loadItems(); })
-                    .fail(function(){ layer.msg('清除失败'); });
+            const payload = transitionPayload(selectedKeys(false), 'HIDE_HISTORY');
+            if (!payload) return;
+            const count = selectedCount();
+            layer.confirm('从下载中心隐藏所选的 ' + count + ' 条历史记录？本地媒体文件会保留。', function(index) {
+                submitTransition(payload);
                 layer.close(index);
             });
         }

@@ -313,6 +313,11 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 			}
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
 				String upstreamCode = structuredErrorCode(body);
+				if (response.statusCode() == 404 || "NOT_FOUND".equalsIgnoreCase(upstreamCode)) {
+					throw new CollectFetchException("DTK_WORK_NOT_FOUND", "DTK 作品详情不存在 status="
+							+ response.statusCode() + ", endpoint=" + path + ", body="
+							+ diagnosticPreview(body, 1000));
+				}
 				if ("UPSTREAM_RISK_CONTROL".equalsIgnoreCase(upstreamCode)) {
 					Long retryAfterSeconds = parseRetryAfterSeconds(response, body);
 					long cooldownSeconds = Math.max(60L, retryAfterSeconds == null ? 0L : retryAfterSeconds);
@@ -348,6 +353,10 @@ public class DtkDouyinDataProvider implements DouyinDataProvider {
 				String message = error == null ? parsed.getString("message") : error.getString("message");
 				String normalizedCode = errorCode == null ? "UPSTREAM_ERROR" : errorCode.toUpperCase(java.util.Locale.ROOT);
 				Long retryAfterSeconds = parseRetryAfterSeconds(parsed, message);
+				if ("NOT_FOUND".equals(normalizedCode)) {
+					throw new CollectFetchException("DTK_WORK_NOT_FOUND",
+							blank(message) ? "DTK 作品详情不存在" : message);
+				}
 				String mappedCode = "DTK_" + normalizedCode;
 				if ("DTK_UPSTREAM_RISK_CONTROL".equals(mappedCode)) {
 					long cooldownSeconds = Math.max(60L, retryAfterSeconds == null ? 0L : retryAfterSeconds);

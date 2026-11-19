@@ -909,10 +909,11 @@ public class AdminController {
 			@RequestParam(defaultValue = "ALL") String source,
 			@RequestParam(required = false) String state,
 			@RequestParam(required = false) String keyword,
+			@RequestParam(required = false) String errorCode,
 			@RequestParam(defaultValue = "0") int page,
 			@RequestParam(defaultValue = "25") int pageSize) {
 		return new AjaxEntity(Global.ajax_success, "Download records loaded",
-				downloadCenterService.items(view, source, state, keyword, page, pageSize));
+				downloadCenterService.items(view, source, state, keyword, errorCode, page, pageSize));
 	}
 
 	@GetMapping("/download-center/collect-authors")
@@ -984,8 +985,9 @@ public class AdminController {
 			String source = request.get("source") == null ? null : String.valueOf(request.get("source"));
 			String state = request.get("state") == null ? null : String.valueOf(request.get("state"));
 			String keyword = request.get("keyword") == null ? null : String.valueOf(request.get("keyword"));
+			String errorCode = request.get("errorCode") == null ? null : String.valueOf(request.get("errorCode"));
 			return new AjaxEntity(Global.ajax_success, "下载队列已更新",
-					downloadCenterService.transition(keys, action, allMatching, excludedKeys, view, source, state, keyword));
+					downloadCenterService.transition(keys, action, allMatching, excludedKeys, view, source, state, keyword, errorCode));
 		} catch (RuntimeException error) {
 			return new AjaxEntity(Global.ajax_uri_error, error.getMessage(), null);
 		}

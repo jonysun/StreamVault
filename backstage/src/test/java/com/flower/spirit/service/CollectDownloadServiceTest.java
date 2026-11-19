@@ -160,6 +160,52 @@ class CollectDownloadServiceTest {
 	}
 
 	@Test
+	void dtkNodeCooldownInsideAdapterWrapperDefersWithoutConsumingRetryBudget() {
+		var nodeCooldown = new CollectFetchException("DTK_NODE_COOLDOWN", "DTK 节点仍在冷却", 44L);
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
+				.thenThrow(new WorkMetadataValidationException("Douyin DTK parsing failed", nodeCooldown));
+
+		service.process(claim, NOW);
+
+		verify(transaction).deferForCooldown(eq(claim), eq(NOW.plusSeconds(44)),
+				eq("DTK 节点仍在冷却"), eq(NOW));
+		verify(transaction, never()).retryOrFail(any(), anyString(), anyString(), anyString(), any());
+		verify(transaction, never()).fail(any(), anyString(), anyString(), anyString(), any());
+	}
+
+	@Test
+	void dtkNotFoundIsRecordedAsPermanentUnavailableWork() {
+		var notFound = new CollectFetchException("DTK_WORK_NOT_FOUND", "DTK 作品详情不存在 status=404");
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
+				.thenThrow(new WorkMetadataValidationException("Douyin DTK parsing failed", notFound));
+
+		service.process(claim, NOW);
+
+		verify(transaction).fail(eq(claim), eq("DTK_WORK_NOT_FOUND"),
+				org.mockito.ArgumentMatchers.contains("作品详情不存在"), anyString(), eq(NOW));
+		verify(transaction, never()).retryOrFail(any(), anyString(), anyString(), anyString(), any());
+	}
+
+	@Test
+	void existingDownloadTargetGetsOneRetryThenAllowsAtomicReplacement() {
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(false), isNull(), eq(claim.metadataSnapshot())))
+				.thenThrow(new WorkMetadataValidationException("download target already exists: /app/resources/work-a"));
+		service.process(claim, NOW);
+		verify(transaction).retryOrFail(eq(claim), eq("DOWNLOAD_TARGET_EXISTS"), anyString(), anyString(), eq(NOW));
+
+		CollectDownloadClaim retry = new CollectDownloadClaim(claim.id(), claim.runId(), claim.taskId(),
+				claim.taskName(), claim.platformKey(), claim.workId(), claim.mediaType(), "RETRY", claim.ordinal(),
+				2, claim.maxAttempts(), claim.lockToken(), claim.metadataSnapshot());
+		IngestResult result = completed(true);
+		when(ingestService.ingest(anyString(), anyDirectory(), eq(true), isNull(), eq(retry.metadataSnapshot())))
+				.thenReturn(result);
+		service.process(retry, NOW);
+		verify(ingestService).ingest(eq("https://www.douyin.com/video/work-a"), anyDirectory(), eq(true), isNull(),
+				eq(retry.metadataSnapshot()));
+		verify(transaction).complete(retry, result, NOW);
+	}
+
+	@Test
 	void upstreamFailureThatOpenedCooldownStillConsumesOnlyItsOwnRetryAttempt() {
 		Instant retryAt = Instant.parse("2026-08-03T01:00:05Z");
 		var f2 = new DouyinWorkFetchException("F2_UPSTREAM_SOFT_BLOCK", "empty detail response",

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.flower.spirit.service.CollectDownloadClaim;
+import com.flower.spirit.service.DownloadErrorType;
 import com.flower.spirit.service.WorkIngestService.IngestResult;
 import com.flower.spirit.platform.WorkContentType;
 import com.flower.spirit.platform.WorkMetadata;
@@ -362,7 +363,8 @@ public class CollectDownloadTransaction {
 					+ "available_at=NULL, locked_by=NULL, locked_at=NULL, finished_at=?, "
 					+ "error_code='REMOTE_LIST_MISSING', error_message='用户确认：作品可能已被服务器端删除', "
 					+ "metadata_snapshot=NULL, updated_at=? WHERE id=? AND queue_generation=? "
-					+ "AND error_code='LIST_SNAPSHOT_PENDING' AND process_state IN ('QUEUED','RETRY_WAIT')",
+					+ "AND ((error_code='LIST_SNAPSHOT_PENDING' AND process_state IN ('QUEUED','RETRY_WAIT')) "
+					+ "OR (process_state='FAILED' AND " + DownloadErrorType.REMOTE_UNAVAILABLE.sql("error_code", "error_message") + "))",
 				ts, ts, id, QUEUE_GENERATION);
 		}
 		return changed;

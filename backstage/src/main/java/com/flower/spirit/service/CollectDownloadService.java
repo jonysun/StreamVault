@@ -77,6 +77,14 @@ public class CollectDownloadService {
 			}
 			return;
 		} catch (RuntimeException error) {
+			CollectFetchException fetchError = findCause(error, CollectFetchException.class);
+			if (fetchError != null && "DTK_NODE_COOLDOWN".equals(fetchError.getErrorCode())) {
+				long retryAfter = fetchError.getRetryAfterSeconds() == null ? 60L
+						: Math.max(1L, fetchError.getRetryAfterSeconds());
+				deferForCooldown(claim, new DouyinGlobalCooldownException(fetchError.getMessage(),
+						now.plusSeconds(retryAfter)), now);
+				return;
+			}
 			recordFailure(claim, classify(error), error, now);
 			return;
 		}
@@ -128,7 +136,7 @@ public class CollectDownloadService {
 	}
 
 	private boolean shouldReplaceExisting(CollectDownloadClaim claim) {
-		return claim.decision() != null
+		return claim.attemptCount() > 1 || claim.decision() != null
 				&& claim.decision().toUpperCase(Locale.ROOT).contains("AUDIT_REPAIR");
 	}
 
@@ -210,6 +218,10 @@ public class CollectDownloadService {
 			return new CollectDownloadException(workFetch.errorCode(), workFetch.retryable(),
 					valueOr(message, "Douyin work metadata request failed") + "; " + workFetch.diagnostics().summary(), error);
 		}
+		CollectFetchException fetch = findCause(error, CollectFetchException.class);
+		if (fetch != null && "DTK_WORK_NOT_FOUND".equals(fetch.getErrorCode())) {
+			return new CollectDownloadException(fetch.getErrorCode(), false, fetch.getMessage(), error);
+		}
 		String root = rootCauseMessage(error);
 		String normalized = root.toLowerCase(Locale.ROOT);
 		if (hasCause(error, DataAccessException.class)) {
@@ -232,6 +244,9 @@ public class CollectDownloadService {
 		if (containsAny(normalized, "no media resources", "no downloadable visual media", "missing or empty",
 				"media is missing or empty", "empty media", "persisted graphic media paths")) {
 			return new CollectDownloadException("EMPTY_MEDIA", true, root, error);
+		}
+		if (normalized.contains("download target already exists:")) {
+			return new CollectDownloadException("DOWNLOAD_TARGET_EXISTS", true, root, error);
 		}
 		if (hasCause(error, IllegalStateException.class)) {
 			return new CollectDownloadException("INGEST_STATE_ERROR", true, root, error);

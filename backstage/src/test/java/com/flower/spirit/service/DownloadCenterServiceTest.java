@@ -134,6 +134,90 @@ class DownloadCenterServiceTest {
 				.isEqualTo("FAILED");
 	}
 
+	@Test
+	@SuppressWarnings("unchecked")
+	void errorFiltersFindLegacyAndStructuredRecordsAndLimitCrossPageRetry() throws Exception {
+		JdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id,taskname) VALUES(4,'Favorite author')");
+		jdbc.update("INSERT INTO biz_collect_run(id,collect_task_id) VALUES(9,4)");
+		insertCollectionFailure(jdbc, 91, "DOWNLOAD_EXECUTION_FAILED", "DTK 节点仍在冷却，约 44 秒后重试");
+		insertCollectionFailure(jdbc, 92, "DOUYIN_GLOBAL_COOLDOWN", null);
+		insertCollectionFailure(jdbc, 93, "INGEST_STATE_ERROR", "download target already exists: /media/work");
+		insertDirectFailure(jdbc, 20, "DTK_NODE_COOLDOWN", null);
+		CollectRunService runs = mock(CollectRunService.class);
+		DirectDownloadQueueService direct = mock(DirectDownloadQueueService.class);
+		DownloadCenterService service = new DownloadCenterService(jdbc, direct, runs,
+				mock(RuntimeControlService.class), immediateWrites());
+
+		Map<String, Object> firstPage = service.items("history", "ALL", "FAILED", "douyin", "cooldown", 0, 1);
+		assertThat(firstPage).containsEntry("totalElements", 3L).containsEntry("totalPages", 3L);
+		assertThat((List<Map<String, Object>>) firstPage.get("content")).hasSize(1);
+		assertThat(service.matchingRecordKeys("history", "ALL", "FAILED", null, "DOWNLOAD_TARGET_EXISTS"))
+				.containsExactly("COLLECT:93");
+
+		Map<String, Object> result = service.transition(List.of(), "RETRY", true, List.of("COLLECT:92"),
+				"history", "ALL", "FAILED", "douyin", "COOLDOWN");
+		assertThat(result).containsEntry("selected", 2);
+		verify(runs).manualRetryDownloads(List.of(91L));
+		verify(direct).manualRetryItems(List.of(20L));
+	}
+
+	@Test
+	void canMarkConfirmedCollectionFailuresOrHideOnlyFilteredHistory() throws Exception {
+		JdbcTemplate jdbc = jdbcTemplate();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_collect_data(id,taskname) VALUES(4,'Favorite author')");
+		jdbc.update("INSERT INTO biz_collect_run(id,collect_task_id) VALUES(9,4)");
+		insertCollectionFailure(jdbc, 91, "DOWNLOAD_EXECUTION_FAILED",
+				"DTK API HTTP status=404, endpoint=/api/v1/douyin/video, body=missing");
+		insertCollectionFailure(jdbc, 92, "DTK_WORK_NOT_FOUND", null);
+		insertCollectionFailure(jdbc, 93, "DTK_UPSTREAM_HTTP",
+				"DTK API HTTP status=404, endpoint=/api/v1/douyin/profile, body=missing");
+		insertCollectionFailure(jdbc, 94, "DOWNLOAD_TARGET_EXISTS", null);
+		insertDirectFailure(jdbc, 20, "F2_WORK_UNAVAILABLE", null);
+		DatabaseWriteExecutor writes = immediateWrites();
+		CollectRunService runs = new CollectRunService(mock(CollectQueueTransaction.class),
+				new CollectDownloadTransaction(jdbc), writes);
+		DownloadCenterService service = new DownloadCenterService(jdbc, mock(DirectDownloadQueueService.class),
+				runs, mock(RuntimeControlService.class), writes);
+
+		assertThat(service.transition(List.of("COLLECT:91", "COLLECT:93", "COLLECT:94"), "MARK_REMOTE_MISSING"))
+				.containsEntry("changed", 1).containsEntry("skipped", 2);
+		assertThat(service.items("history", "ALL", "FAILED", null, "REMOTE_UNAVAILABLE", 0, 1))
+				.containsEntry("totalElements", 2L);
+		assertThat(service.transition(List.of(), "HIDE_HISTORY", true, List.of(), "history", "ALL", "FAILED", null,
+				"REMOTE_UNAVAILABLE")).containsEntry("changed", 2);
+		assertThat(jdbc.queryForList("SELECT record_key FROM biz_download_history_hidden", String.class))
+				.containsExactlyInAnyOrder("COLLECT:92", "DIRECT:20");
+		assertThat(service.matchingRecordKeys("history", "ALL", "FAILED", null, null))
+				.containsExactlyInAnyOrder("COLLECT:93", "COLLECT:94");
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM biz_collect_run_item", Integer.class)).isEqualTo(4);
+	}
+
+	private void insertCollectionFailure(JdbcTemplate jdbc, long id, String code, String message) {
+		jdbc.update("INSERT INTO biz_collect_run_item(id,run_id,platform_key,work_id,title_snapshot,decision,"
+				+ "process_state,attempt_count,max_attempts,error_code,error_message,queue_generation,created_at,updated_at) "
+				+ "VALUES(?,9,'douyin',?,'douyin video','NEW','FAILED',1,4,?,?,'FETCH_DOWNLOAD_V1',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+				id, "work-" + id, code, message);
+	}
+
+	private void insertDirectFailure(JdbcTemplate jdbc, long id, String code, String message) {
+		jdbc.update("INSERT INTO biz_job_queue(id,job_type,dedupe_key,payload,state,priority,attempt_count,max_attempts,"
+				+ "last_error_code,last_error_message,created_at,updated_at) "
+				+ "VALUES(?,'DIRECT_DOWNLOAD',?,?,'FAILED',100,1,4,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+				id, "direct:" + id, "{\"platformName\":\"douyin\",\"sourceType\":\"SINGLE_LINK\"}", code, message);
+	}
+
+	private DatabaseWriteExecutor immediateWrites() {
+		return new DatabaseWriteExecutor() {
+			@Override
+			public <T> T execute(String operation, Supplier<T> action) {
+				return action.get();
+			}
+		};
+	}
+
 	private void createSchema(JdbcTemplate jdbc) {
 		jdbc.execute("CREATE TABLE biz_collect_data(id INTEGER PRIMARY KEY,taskname TEXT)");
 		jdbc.execute("CREATE TABLE biz_collect_run(id INTEGER PRIMARY KEY,collect_task_id INTEGER)");
