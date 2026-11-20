@@ -300,7 +300,19 @@ public class DouyinPlatformAdapter implements PlatformWorkAdapter {
 					: safeName(metadata.getWorkId()) + "-index-" + source.getOrder() + "." + extension;
 			Path target = request.getOutputDirectory().resolve(filename);
 			logResourceDiagnostic(metadata, source);
-			Path local = gateway.download(source, target, cookie);
+			Path local;
+			try {
+				local = gateway.download(source, target, cookie);
+			} catch (IOException error) {
+				if (source.getType() == WorkMediaResource.Type.AUDIO) {
+					// Background music is auxiliary: the visual media is already downloaded, so a
+					// failed audio track must not fail the whole work.
+					logger.warn("[DouyinMedia] skip optional audio resource workId={} order={} reason={}",
+							metadata.getWorkId(), source.getOrder(), error.getMessage());
+					continue;
+				}
+				throw error;
+			}
 			downloaded.add(new WorkMediaResource(source.getOrder(), source.getType(), source.getSourceUrl(),
 				local, extension, source.getRequestHeaders()));
 		}

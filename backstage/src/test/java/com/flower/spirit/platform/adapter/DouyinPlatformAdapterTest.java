@@ -262,6 +262,46 @@ class DouyinPlatformAdapterTest {
 	}
 
 	@Test
+	void keepsGraphicWorkWhenBackgroundMusicCannotBeDownloaded() throws Exception {
+		PlatformCookieService cookies = mock(PlatformCookieService.class);
+		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
+		when(cookies.currentDouyinCookie("single_work_download")).thenReturn("cookie-value");
+		int[] fetchCalls = { 0 };
+		FakeGateway gateway = new FakeGateway("{}", "https://www.douyin.com/note/7300000000000000007") {
+			@Override public String fetch(String workId, String cookie) {
+				fetchCalls[0]++;
+				return "{}";
+			}
+
+			@Override public Path download(WorkMediaResource source, Path destination, String cookie) throws IOException {
+				if (source.getType() == WorkMediaResource.Type.AUDIO) {
+					throw new IOException("media response was an upstream challenge host=sf6-cdn-tos.douyinstatic.com");
+				}
+				Files.createDirectories(destination.getParent());
+				return Files.writeString(destination, source.getType().name());
+			}
+		};
+		DouyinPlatformAdapter adapter = new DouyinPlatformAdapter(new PlatformResolver(), cookies, gateway);
+		WorkMetadata metadata = WorkMetadata.builder()
+				.platformKey("douyin")
+				.workId("7300000000000000007")
+				.contentType(WorkContentType.GRAPHIC)
+				.mediaResources(List.of(
+						new WorkMediaResource(0, WorkMediaResource.Type.IMAGE,
+								"https://media.example/image.jpg", null, "jpg", java.util.Map.of()),
+						new WorkMediaResource(1, WorkMediaResource.Type.AUDIO,
+								"https://media.example/music.mp3", null, "mp3", java.util.Map.of())))
+				.build();
+
+		DownloadResult result = adapter.download(metadata, new WorkDownloadRequest(tempDir, false));
+
+		assertThat(result.getStatus()).isEqualTo(DownloadResult.Status.COMPLETED);
+		assertThat(result.getMediaResources()).extracting(item -> item.getLocalPath().getFileName().toString())
+				.containsExactly("7300000000000000007-index-0.jpg");
+		assertThat(fetchCalls[0]).isZero();
+	}
+
+	@Test
 	void downloadsDuplicateGraphicResourceUrlOnlyOnce() throws Exception {
 		PlatformCookieService cookies = mock(PlatformCookieService.class);
 		when(cookies.hasConfiguredDouyinCookie()).thenReturn(true);
