@@ -101,8 +101,11 @@ public class MediaFeedService {
 		String nextCursor = null;
 		if (hasMore && !rows.isEmpty()) {
 			MediaFeedRow last = rows.get(rows.size() - 1);
+			// 排序键决定「缺失时间」指的是哪个时间：发布时间还是下载时间
+			boolean byDownloadTime = MediaFeedQueryDao.isDownloadTime(request.getSortBy());
+			boolean missingSortTime = byDownloadTime ? last.downloadedAt() == null : last.publishTime() == null;
 			nextCursor = feedCursorCodec.encode(new FeedCursor(Instant.ofEpochMilli(last.sortTimeMillis()),
-					last.mediaType(), last.internalId(), request.getOrder(), filterHash, last.publishTime() == null));
+					last.mediaType(), last.internalId(), request.getOrder(), filterHash, missingSortTime));
 		}
 		return new MediaFeedCursorPage(items, nextCursor, hasMore);
 	}
@@ -115,8 +118,11 @@ public class MediaFeedService {
 		MediaFeedRequest request = new MediaFeedRequest();
 		String type = source == null ? null : source.getType();
 		String order = source == null ? null : source.getOrder();
+		String sortBy = source == null ? null : source.getSortBy();
 		request.setType(normalizeMediaType(type));
 		request.setOrder("asc".equalsIgnoreCase(order) ? "asc" : "desc");
+		// 排序键：默认按作者发布时间；createtime = 按下载时间
+		request.setSortBy(MediaFeedQueryDao.isDownloadTime(sortBy) ? "createtime" : "publishtime");
 		request.setLimit(Math.min(Math.max(source == null || source.getLimit() == null ? 20 : source.getLimit(), 1), 100));
 		request.setCursor(source == null ? null : trimToNull(source.getCursor()));
 		String platformKey = source == null ? null : trimToNull(source.getPlatformKey());
@@ -140,7 +146,8 @@ public class MediaFeedService {
 	}
 
 	private String cursorFilterHash(MediaFeedRequest request) {
-		String value = String.join("|", request.getType(), request.getOrder(),
+		// 排序键也要进哈希：换了排序键，游标指向的位置就完全不同了
+		String value = String.join("|", request.getType(), request.getOrder(), request.getSortBy(),
 				String.valueOf(request.getPlatformKey()), String.valueOf(request.getAuthorUid()));
 		try {
 			return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
