@@ -105,6 +105,9 @@ final class HttpMediaDownloader {
 	}
 
 	private static boolean looksLikeChallenge(byte[] prefix, WorkMediaResource.Type expectedType) {
+		if (hasMediaSignature(prefix)) {
+			return false;
+		}
 		String text = new String(prefix, java.nio.charset.StandardCharsets.UTF_8).trim().toLowerCase(Locale.ROOT);
 		if (text.startsWith("<html") || text.startsWith("<!doctype") || text.startsWith("{")
 				|| text.startsWith("[")) return true;
@@ -124,6 +127,23 @@ final class HttpMediaDownloader {
 					|| (unsigned >= 32 && unsigned <= 126)) printable++;
 		}
 		return printable >= prefix.length * 0.98;
+	}
+
+	/**
+	 * Legitimate media can start with printable bytes: an MP3 ID3 tag is plain text, so the
+	 * mostly-printable heuristic alone misreads real background music as an upstream challenge
+	 * page. Container signatures are checked first so those files are downloaded as-is.
+	 */
+	private static boolean hasMediaSignature(byte[] prefix) {
+		if (prefix == null || prefix.length < 2) return false;
+		if (prefix.length >= 3 && prefix[0] == 'I' && prefix[1] == 'D' && prefix[2] == '3') return true;
+		if ((prefix[0] & 0xff) == 0xff && (prefix[1] & 0xe0) == 0xe0) return true;
+		if (prefix.length >= 12 && prefix[0] == 'R' && prefix[1] == 'I' && prefix[2] == 'F' && prefix[3] == 'F') return true;
+		if (prefix.length >= 8 && (prefix[0] & 0xff) == 0x89 && prefix[1] == 'P' && prefix[2] == 'N'
+				&& prefix[3] == 'G') return true;
+		if (prefix.length >= 3 && (prefix[0] & 0xff) == 0xff && (prefix[1] & 0xff) == 0xd8) return true;
+		if (prefix.length >= 12 && prefix[4] == 'f' && prefix[5] == 't' && prefix[6] == 'y' && prefix[7] == 'p') return true;
+		return false;
 	}
 
 	private static Response execute(String url, String cookie, Map<String, String> headers,

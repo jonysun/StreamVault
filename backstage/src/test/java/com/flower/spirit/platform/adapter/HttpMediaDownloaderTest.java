@@ -101,6 +101,27 @@ class HttpMediaDownloaderTest {
 		}
 	}
 
+	@Test
+	void acceptsAudioWhoseId3TagMakesThePrefixMostlyPrintable() throws Exception {
+		byte[] body = new byte[4096];
+		java.util.Arrays.fill(body, (byte) 'A');
+		body[0] = 'I';
+		body[1] = 'D';
+		body[2] = '3';
+		HttpServer server = server(exchange -> {
+			exchange.sendResponseHeaders(200, body.length);
+			try (var output = exchange.getResponseBody()) { output.write(body); }
+		});
+
+		try {
+			Path result = HttpMediaDownloader.download(url(server), tempDir.resolve("music.mp3"), null, Map.of(),
+					com.flower.spirit.platform.WorkMediaResource.Type.AUDIO);
+			assertThat(Files.size(result)).isEqualTo(body.length);
+		} finally {
+			server.stop(0);
+		}
+	}
+
 	private HttpServer server(com.sun.net.httpserver.HttpHandler handler) throws IOException {
 		HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/media", handler);
