@@ -35,17 +35,24 @@ public class MediaFeedQueryDao {
 
 	public List<MediaFeedRow> find(MediaFeedRequest request, FeedCursor cursor, int limitPlusOne) {
 		List<MediaFeedRow> rows = new ArrayList<>(limitPlusOne * 2);
+		boolean byDownloadTime = isDownloadTime(request.getSortBy());
 		if (!"graphic".equals(request.getType())) {
-			rows.addAll(findVideoRows(request, cursor, limitPlusOne));
+			rows.addAll(findVideoRows(request, cursor, limitPlusOne, byDownloadTime));
 		}
 		if (!"video".equals(request.getType())) {
-			rows.addAll(findGraphicRows(request, cursor, limitPlusOne));
+			rows.addAll(findGraphicRows(request, cursor, limitPlusOne, byDownloadTime));
 		}
-		rows.sort(feedComparator(request.getOrder()));
+		rows.sort(feedComparator(request.getOrder(), byDownloadTime));
 		return rows.size() <= limitPlusOne ? rows : new ArrayList<>(rows.subList(0, limitPlusOne));
 	}
 
-	private List<MediaFeedRow> findVideoRows(MediaFeedRequest request, FeedCursor cursor, int limit) {
+	/** 排序键是不是「下载时间」。{@code publishtime}（作者发布时间）是默认值。 */
+	public static boolean isDownloadTime(String sortBy) {
+		return "createtime".equalsIgnoreCase(sortBy);
+	}
+
+	private List<MediaFeedRow> findVideoRows(MediaFeedRequest request, FeedCursor cursor, int limit,
+			boolean byDownloadTime) {
 		StringBuilder sql = new StringBuilder("SELECT publishtime AS sort_time_text, ")
 				.append("'video' AS media_type, id AS internal_id, platformkey AS platform_key, ")
 				.append("videoplatform AS platform_display_name, videoid AS work_id, ")
@@ -57,10 +64,11 @@ public class MediaFeedQueryDao {
 				.append("originaladdress AS original_address, favorite, videoprivacy AS privacy, ")
 				.append("contenttype AS content_type, authorhomepage AS author_homepage, NULL AS slides_json, ")
 				.append("videoaddr AS local_path, NULL AS graphic_media_root FROM biz_video");
-		return queryBranch(sql, request, cursor, "video", limit);
+		return queryBranch(sql, request, cursor, "video", limit, byDownloadTime);
 	}
 
-	private List<MediaFeedRow> findGraphicRows(MediaFeedRequest request, FeedCursor cursor, int limit) {
+	private List<MediaFeedRow> findGraphicRows(MediaFeedRequest request, FeedCursor cursor, int limit,
+			boolean byDownloadTime) {
 		StringBuilder sql = new StringBuilder("SELECT publishtime AS sort_time_text, ")
 				.append("'graphic' AS media_type, id AS internal_id, platformkey AS platform_key, ")
 				.append("platform AS platform_display_name, videoid AS work_id, ")
@@ -71,19 +79,25 @@ public class MediaFeedQueryDao {
 				.append("NULL AS fallback_url, sourceurl AS source_url, originaladdress AS original_address, ")
 				.append("favorite, privacy, contenttype AS content_type, authorhomepage AS author_homepage, ")
 				.append("images AS slides_json, NULL AS local_path, markroute AS graphic_media_root FROM biz_graphic_content");
-		return queryBranch(sql, request, cursor, "graphic", limit);
+		return queryBranch(sql, request, cursor, "graphic", limit, byDownloadTime);
 	}
 
 	private List<MediaFeedRow> queryBranch(StringBuilder sql, MediaFeedRequest request, FeedCursor cursor,
-			String mediaType, int limit) {
+			String mediaType, int limit, boolean byDownloadTime) {
 		List<Object> parameters = new ArrayList<>();
 		appendAuthorWhere(sql, parameters, request);
-		appendCursor(sql, parameters, cursor, request.getOrder(), mediaType);
+		appendCursor(sql, parameters, cursor, request.getOrder(), mediaType, byDownloadTime);
 		boolean ascending = "asc".equals(request.getOrder());
-		sql.append(" ORDER BY publishtime ").append(ascending ? "ASC NULLS LAST" : "DESC NULLS LAST")
-				.append(", id ").append(ascending ? "ASC" : "DESC").append(" LIMIT ?");
+		if (byDownloadTime) {
+			sql.append(" ORDER BY createtime ").append(ascending ? "ASC NULLS LAST" : "DESC NULLS LAST")
+					.append(", id ").append(ascending ? "ASC" : "DESC").append(" LIMIT ?");
+		} else {
+			sql.append(" ORDER BY publishtime ").append(ascending ? "ASC NULLS LAST" : "DESC NULLS LAST")
+					.append(", id ").append(ascending ? "ASC" : "DESC").append(" LIMIT ?");
+		}
 		parameters.add(limit);
-		return jdbcTemplate.query(sql.toString(), this::mapRow, parameters.toArray());
+		return jdbcTemplate.query(sql.toString(), (row, index) -> mapRow(row, index, byDownloadTime),
+				parameters.toArray());
 	}
 
 	private void appendAuthorWhere(StringBuilder sql, List<Object> parameters, MediaFeedRequest request) {
@@ -100,14 +114,19 @@ public class MediaFeedQueryDao {
 	}
 
 	private void appendCursor(StringBuilder sql, List<Object> parameters, FeedCursor cursor, String order,
-			String mediaType) {
+			String mediaType, boolean byDownloadTime) {
 		if (cursor == null) return;
 		boolean ascending = "asc".equals(order);
 		String timeOperator = ascending ? ">" : "<";
 		String idOperator = ascending ? ">" : "<";
-		String cursorTime = LOCAL_TIME.format(LocalDateTime.ofInstant(cursor.sortTime(), ZoneId.systemDefault()));
 		String prefix = sql.indexOf(" WHERE ") >= 0 ? " AND " : " WHERE ";
 		int mediaComparison = mediaType.compareTo(cursor.mediaType());
+		if (byDownloadTime) {
+			appendDownloadTimeCursor(sql, parameters, cursor, mediaType, mediaComparison, timeOperator,
+					idOperator, prefix);
+			return;
+		}
+		String cursorTime = LOCAL_TIME.format(LocalDateTime.ofInstant(cursor.sortTime(), ZoneId.systemDefault()));
 		if (cursor.nullTime()) {
 			// Missing publish times form the final bucket in either direction.
 			if (mediaComparison > 0) {
@@ -138,13 +157,54 @@ public class MediaFeedQueryDao {
 		}
 	}
 
-	private Comparator<MediaFeedRow> feedComparator(String order) {
+	/**
+	 * 按下载时间（createtime）续页。
+	 *
+	 * 跟发布时间那套一模一样的结构，只是比较的列换成了 createtime：
+	 * - `createtime` 是**时间戳列**（SQLite 存 epoch 毫秒整数，Postgres 存 timestamp），
+	 *   所以游标参数绑 {@link java.sql.Timestamp} 就行 —— sqlite-jdbc 的 setTimestamp
+	 *   本来就存成整数毫秒，两边都能直接比（见 {@code SqliteCreatetimeStorageTest}）。
+	 * - 缺失的 createtime 跟缺失的发布时间一样，排最后。
+	 */
+	private void appendDownloadTimeCursor(StringBuilder sql, List<Object> parameters, FeedCursor cursor,
+			String mediaType, int mediaComparison, String timeOperator, String idOperator, String prefix) {
+		java.sql.Timestamp cursorTime = java.sql.Timestamp.from(cursor.sortTime());
+		if (cursor.nullTime()) {
+			if (mediaComparison > 0) {
+				sql.append(prefix).append("(createtime IS NULL)");
+			} else if (mediaComparison == 0) {
+				sql.append(prefix).append("(createtime IS NULL AND id ").append(idOperator).append(" ?)");
+				parameters.add(cursor.internalId());
+			} else {
+				sql.append(prefix).append("1 = 0");
+			}
+		} else if (mediaComparison > 0) {
+			sql.append(prefix).append("(createtime ").append(timeOperator)
+					.append(" ? OR createtime = ? OR createtime IS NULL)");
+			parameters.add(cursorTime);
+			parameters.add(cursorTime);
+		} else if (mediaComparison < 0) {
+			sql.append(prefix).append("(createtime ").append(timeOperator)
+					.append(" ? OR createtime IS NULL)");
+			parameters.add(cursorTime);
+		} else {
+			sql.append(prefix).append("(createtime ").append(timeOperator)
+					.append(" ? OR createtime IS NULL OR (createtime = ? AND id ").append(idOperator).append(" ?))");
+			parameters.add(cursorTime);
+			parameters.add(cursorTime);
+			parameters.add(cursor.internalId());
+		}
+	}
+
+	private Comparator<MediaFeedRow> feedComparator(String order, boolean byDownloadTime) {
 		boolean ascending = "asc".equals(order);
 		Comparator<MediaFeedRow> time = (left, right) -> {
-			if (left.publishTime() == null && right.publishTime() == null) return 0;
-			if (left.publishTime() == null) return 1;
-			if (right.publishTime() == null) return -1;
-			int result = left.publishTime().compareTo(right.publishTime());
+			Instant leftTime = byDownloadTime ? left.downloadedAt() : left.publishTime();
+			Instant rightTime = byDownloadTime ? right.downloadedAt() : right.publishTime();
+			if (leftTime == null && rightTime == null) return 0;
+			if (leftTime == null) return 1;
+			if (rightTime == null) return -1;
+			int result = leftTime.compareTo(rightTime);
 			return ascending ? result : -result;
 		};
 		Comparator<Integer> id = Comparator.naturalOrder();
@@ -154,19 +214,21 @@ public class MediaFeedQueryDao {
 		return time.thenComparing(MediaFeedRow::mediaType).thenComparing(MediaFeedRow::internalId, id);
 	}
 
-	private MediaFeedRow mapRow(ResultSet row, int index) throws SQLException {
+	private MediaFeedRow mapRow(ResultSet row, int index, boolean byDownloadTime) throws SQLException {
 		String mediaType = row.getString("media_type");
 		int internalId = row.getInt("internal_id");
 		List<MediaSlideRow> slides = parseSlides(row.getString("slides_json"));
 		String cover = row.getString("cover_url");
 		if ((cover == null || cover.isBlank()) && !slides.isEmpty()) cover = slides.get(0).url();
 		Instant publishTime = parseInstant(row.getObject("publish_time"));
-		long sortTime = publishTime == null ? 0 : publishTime.toEpochMilli();
+		Instant downloadedAt = parseInstant(row.getObject("downloaded_at"));
+		Instant sortInstant = byDownloadTime ? downloadedAt : publishTime;
+		long sortTime = sortInstant == null ? 0 : sortInstant.toEpochMilli();
 		return new MediaFeedRow(mediaType + ":" + internalId, mediaType, internalId,
 				row.getString("platform_key"), row.getString("platform_display_name"), row.getString("work_id"),
 				row.getString("author_uid"), row.getString("author_username"),
 				row.getString("author_display_name"), row.getString("author_avatar"), row.getString("title"),
-				row.getString("summary"), publishTime, parseInstant(row.getObject("downloaded_at")), cover,
+				row.getString("summary"), publishTime, downloadedAt, cover,
 				row.getString("fallback_url"), row.getString("source_url"), row.getString("original_address"),
 				row.getString("favorite"), row.getString("privacy"), row.getString("content_type"),
 				row.getString("author_homepage"), slides, row.getString("local_path"),

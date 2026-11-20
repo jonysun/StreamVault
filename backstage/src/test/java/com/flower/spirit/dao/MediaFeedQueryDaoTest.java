@@ -94,8 +94,57 @@ class MediaFeedQueryDaoTest {
 	}
 
 	@Test
-	void authorScopeRequiresBothCanonicalPlatformAndUidInSql() throws Exception {
+	void downloadTimeOrderingUsesCreatetimeAndCursorContinuesWithoutRepeats() throws Exception {
 		CapturingJdbcTemplate jdbc = database();
+		createSchema(jdbc);
+		// 发布时间跟下载时间**故意反过来**：老作品但刚下载的，应该排在最前面
+		jdbc.update("INSERT INTO biz_video(id, videoid, publishtime, createtime) VALUES "
+				+ "(1, 'video-1', '2026-07-25 10:00:00', 1760000001000), "
+				+ "(2, 'video-2', '2026-07-25 09:00:00', 1760000002000)");
+		jdbc.update("INSERT INTO biz_graphic_content(id, videoid, publishtime, createtime, images) VALUES "
+				+ "(3, 'graphic-3', '2026-07-25 11:00:00', 1760000000000, '[\"/g3.jpg\"]')");
+		MediaFeedQueryDao dao = new MediaFeedQueryDao(jdbc);
+
+		MediaFeedRequest byPublishTime = request("mixed", "desc");
+		assertThat(dao.find(byPublishTime, null, 10)).extracting(MediaFeedRow::mediaKey)
+				.containsExactly("graphic:3", "video:1", "video:2");
+
+		MediaFeedRequest byDownloadTime = request("mixed", "desc");
+		byDownloadTime.setSortBy("createtime");
+		List<MediaFeedRow> first = dao.find(byDownloadTime, null, 2);
+		assertThat(first).extracting(MediaFeedRow::mediaKey).containsExactly("video:2", "video:1");
+
+		MediaFeedRow last = first.get(first.size() - 1);
+		FeedCursor cursor = new FeedCursor(Instant.ofEpochMilli(last.sortTimeMillis()), last.mediaType(),
+				last.internalId(), "desc", "hash", last.downloadedAt() == null);
+		assertThat(dao.find(byDownloadTime, cursor, 2)).extracting(MediaFeedRow::mediaKey)
+				.containsExactly("graphic:3");
+	}
+
+	@Test
+	void downloadTimeOrderingPutsMissingDownloadTimesLast() throws Exception {
+		CapturingJdbcTemplate jdbc = database();
+		createSchema(jdbc);
+		jdbc.update("INSERT INTO biz_video(id, videoid, publishtime, createtime) VALUES "
+				+ "(1, 'video-1', '2026-07-25 10:00:00', 1760000001000), "
+				+ "(2, 'video-2', '2026-07-25 09:00:00', NULL)");
+		jdbc.update("INSERT INTO biz_graphic_content(id, videoid, publishtime, createtime, images) VALUES "
+				+ "(3, 'graphic-3', '2026-07-25 11:00:00', 1760000000000, '[\"/g3.jpg\"]')");
+		MediaFeedQueryDao dao = new MediaFeedQueryDao(jdbc);
+		MediaFeedRequest request = request("mixed", "desc");
+		request.setSortBy("createtime");
+
+		List<MediaFeedRow> first = dao.find(request, null, 2);
+		assertThat(first).extracting(MediaFeedRow::mediaKey).containsExactly("video:1", "graphic:3");
+
+		MediaFeedRow last = first.get(first.size() - 1);
+		FeedCursor cursor = new FeedCursor(Instant.ofEpochMilli(last.sortTimeMillis()), last.mediaType(),
+				last.internalId(), "desc", "hash", last.downloadedAt() == null);
+		assertThat(dao.find(request, cursor, 2)).extracting(MediaFeedRow::mediaKey).containsExactly("video:2");
+	}
+
+	@Test
+	void authorScopeRequiresBothCanonicalPlatformAndUidInSql() throws Exception {		CapturingJdbcTemplate jdbc = database();
 		createSchema(jdbc);
 		jdbc.update("INSERT INTO biz_video(id, videoid, platformkey, videoplatform, secuid, authoruid, publishtime) "
 				+ "VALUES (1, 'wanted', 'douyin', 'douyin', 'MS4wanted', 'MS4wanted', '2026-07-25 10:00:00'), "
@@ -158,9 +207,12 @@ class MediaFeedQueryDaoTest {
 		jdbc.execute("CREATE TABLE biz_graphic_content (id INTEGER PRIMARY KEY, videoid TEXT, platformkey TEXT, platform TEXT, "
 				+ "secuid TEXT, authoruid TEXT, authorusername TEXT, uniqueid TEXT, author TEXT, authoravatar TEXT, "
 				+ "title TEXT, content TEXT, publishtime TEXT, createtime, images TEXT, sourceurl TEXT, originaladdress TEXT, "
-				+ "favorite TEXT, privacy TEXT, contenttype TEXT, authorhomepage TEXT, jsonData TEXT, metadataoverrides TEXT)");
+				+ "favorite TEXT, privacy TEXT, contenttype TEXT, authorhomepage TEXT, markroute TEXT, "
+				+ "jsonData TEXT, metadataoverrides TEXT)");
 		jdbc.execute("CREATE INDEX idx_biz_video_publishtime_id ON biz_video(publishtime, id)");
 		jdbc.execute("CREATE INDEX idx_graphic_content_publishtime_id ON biz_graphic_content(publishtime, id)");
+		jdbc.execute("CREATE INDEX idx_biz_video_createtime_id ON biz_video(createtime, id)");
+		jdbc.execute("CREATE INDEX idx_graphic_content_createtime_id ON biz_graphic_content(createtime, id)");
 		jdbc.execute("CREATE INDEX idx_biz_video_author_feed "
 				+ "ON biz_video(platformkey, COALESCE(NULLIF(secuid,''), authoruid), publishtime, id)");
 		jdbc.execute("CREATE INDEX idx_graphic_content_author_feed "
