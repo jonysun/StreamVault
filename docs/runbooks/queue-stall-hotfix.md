@@ -15,12 +15,21 @@ DTK 的 `dtkTimeoutMs` 默认为 15000 毫秒，最小有效值为 1000 毫秒�
 
 ## 标准发布流程
 
-先把修复提交并推送到 `main`，再运行 `.github/workflows/docker-image.yml` 中的 `Build latest`。该工作流目前没有 `push` 触发器，需要手动触发：
+先把修复提交并推送到 `main`，再运行 `.github/workflows/docker-image.yml` 中的 `Build Docker image`。该工作流目前没有 `push` 触发器，需要手动触发：
 
 ```sh
 gh workflow run docker-image.yml --repo jonysun/StreamVault --ref main \
   -f image_tag=latest -f create_release=false
 ```
+
+正式发布版本时，指定版本号并设置 `create_release=true`，同一次多架构构建会同时推送版本标签和 `latest`：
+
+```sh
+gh workflow run docker-image.yml --repo jonysun/StreamVault --ref main \
+  -f image_tag=4.1.3 -f release_tag=4.1.3 -f create_release=true
+```
+
+`create_release=false` 的 `test`、`nightly` 等构建只更新指定标签。若版本镜像已发布但遗漏 `latest`，使用 `.github/workflows/docker-promote-latest.yml` 的 `Promote image to latest`，传入现有版本号及其镜像索引 digest。它会检查版本 digest 和 amd64/arm64 架构，将同一个索引标记为 `latest`，并验证两个标签的 digest 完全一致，无需重新构建。
 
 跟进对应提交的 Actions 运行，确认 `Build and Push with Input Tag` 成功发布 `linux/amd64` 和 `linux/arm64` 镜像，再更新 NAS。
 

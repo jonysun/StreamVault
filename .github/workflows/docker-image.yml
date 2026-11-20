@@ -1,4 +1,4 @@
-name: Build latest
+name: Build Docker image
 
 on:
   workflow_dispatch:
@@ -86,10 +86,17 @@ jobs:
           fi
 
       - name: Build and Push with Input Tag
+        env:
+          IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
+          CREATE_RELEASE: ${{ steps.params.outputs.create_release }}
         run: |
+          tags=(-t "jonysun/stream-vault:${IMAGE_TAG}")
+          if [ "${CREATE_RELEASE}" = "true" ] && [ "${IMAGE_TAG}" != "latest" ]; then
+            tags+=(-t jonysun/stream-vault:latest)
+          fi
           docker buildx build \
             --platform linux/arm64,linux/amd64 \
-            -t jonysun/stream-vault:${{ steps.params.outputs.image_tag }} \
+            "${tags[@]}" \
             --push \
             -f ./backstage/src/main/docker/buildx/Dockerfile \
             ./backstage/src/main/docker/buildx
